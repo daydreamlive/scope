@@ -59,12 +59,14 @@ interface DiscoverTabProps {
   onInstall: (packageSpec: string) => void;
   installedRepoUrls: string[];
   isInstalling?: boolean;
+  disabled?: boolean;
 }
 
 export function DiscoverTab({
   onInstall,
   installedRepoUrls,
   isInstalling = false,
+  disabled = false,
 }: DiscoverTabProps) {
   const [plugins, setPlugins] = useState<DaydreamPlugin[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -245,7 +247,7 @@ export function DiscoverTab({
                       size="icon"
                       className="h-8 w-8"
                       title={`Install ${plugin.name}`}
-                      disabled={isInstalling}
+                      disabled={disabled || isInstalling}
                       onClick={() => onInstall(`git+${plugin.repositoryUrl}`)}
                     >
                       <Download className="h-4 w-4" />

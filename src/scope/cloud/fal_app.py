@@ -384,7 +384,6 @@ class ScopeApp(fal.App, keep_alive=300):
         scope_env["UV_CACHE_DIR"] = "/tmp/uv-cache"
 
         # Start the scope server in a background thread
-        # TODO disable plugin install while stream running?
 
         def start_server():
             print("Starting Scope server...")

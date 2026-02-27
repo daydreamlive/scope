@@ -19,6 +19,8 @@ interface PluginsDialogProps {
   open: boolean;
   onClose: () => void;
   initialPluginPath?: string;
+  disabled?: boolean;
+  cloudConnected?: boolean;
 }
 
 const isLocalPath = (spec: string): boolean => {
@@ -38,6 +40,8 @@ export function PluginsDialog({
   open,
   onClose,
   initialPluginPath = "",
+  disabled = false,
+  cloudConnected = false,
 }: PluginsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
   const [pluginInstallPath, setPluginInstallPath] = useState(initialPluginPath);
@@ -100,6 +104,7 @@ export function PluginsDialog({
   const handleInstallPlugin = async (packageSpec: string) => {
     setIsInstalling(true);
     isModifyingPluginsRef.current = true;
+    const toastId = toast.loading("Installing plugin...");
     try {
       const response = await installPlugin({
         package: packageSpec,
@@ -107,7 +112,9 @@ export function PluginsDialog({
       });
       if (response.success) {
         const pluginName = response.plugin?.name || packageSpec;
-        toast.success(`Installed ${pluginName}. Restarting server...`);
+        toast.loading(`Installed ${pluginName}. Restarting server...`, {
+          id: toastId,
+        });
         setPluginInstallPath("");
 
         if (response.plugin) {
@@ -129,17 +136,18 @@ export function PluginsDialog({
 
         const oldStartTime = await restartServer();
         await waitForServer(oldStartTime);
-        toast.success("Server restarted");
+        toast.success("Server restarted", { id: toastId });
 
         await fetchPlugins();
         await refetchPipelines();
       } else {
-        toast.error(response.message);
+        toast.error(response.message, { id: toastId });
       }
     } catch (error) {
       console.error("Failed to install plugin:", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to install plugin"
+        error instanceof Error ? error.message : "Failed to install plugin",
+        { id: toastId }
       );
     } finally {
       setIsInstalling(false);
@@ -153,13 +161,16 @@ export function PluginsDialog({
   ) => {
     setIsInstalling(true);
     isModifyingPluginsRef.current = true;
+    const toastId = toast.loading(`Updating ${pluginName}...`);
     try {
       const response = await installPlugin({
         package: packageSpec,
         upgrade: true,
       });
       if (response.success) {
-        toast.success(`Updated ${pluginName}. Restarting server...`);
+        toast.loading(`Updated ${pluginName}. Restarting server...`, {
+          id: toastId,
+        });
 
         if (response.plugin) {
           setPlugins(prev =>
@@ -183,17 +194,18 @@ export function PluginsDialog({
 
         const oldStartTime = await restartServer();
         await waitForServer(oldStartTime);
-        toast.success("Server restarted");
+        toast.success("Server restarted", { id: toastId });
 
         await fetchPlugins();
         await refetchPipelines();
       } else {
-        toast.error(response.message);
+        toast.error(response.message, { id: toastId });
       }
     } catch (error) {
       console.error("Failed to update plugin:", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to update plugin"
+        error instanceof Error ? error.message : "Failed to update plugin",
+        { id: toastId }
       );
     } finally {
       setIsInstalling(false);
@@ -203,10 +215,13 @@ export function PluginsDialog({
 
   const handleDeletePlugin = async (pluginName: string) => {
     isModifyingPluginsRef.current = true;
+    const toastId = toast.loading(`Uninstalling ${pluginName}...`);
     try {
       const response = await uninstallPlugin(pluginName);
       if (response.success) {
-        toast.success(`Uninstalled ${pluginName}. Restarting server...`);
+        toast.loading(`Uninstalled ${pluginName}. Restarting server...`, {
+          id: toastId,
+        });
 
         setPlugins(prev => prev.filter(p => p.name !== pluginName));
         setFailedPlugins(prev =>
@@ -215,17 +230,18 @@ export function PluginsDialog({
 
         const oldStartTime = await restartServer();
         await waitForServer(oldStartTime);
-        toast.success("Server restarted");
+        toast.success("Server restarted", { id: toastId });
 
         await fetchPlugins();
         await refetchPipelines();
       } else {
-        toast.error(response.message);
+        toast.error(response.message, { id: toastId });
       }
     } catch (error) {
       console.error("Failed to uninstall plugin:", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to uninstall plugin"
+        error instanceof Error ? error.message : "Failed to uninstall plugin",
+        { id: toastId }
       );
     } finally {
       isModifyingPluginsRef.current = false;
@@ -288,6 +304,8 @@ export function PluginsDialog({
                 onReload={handleReloadPlugin}
                 isLoading={isLoadingPlugins}
                 isInstalling={isInstalling}
+                disabled={disabled}
+                hideInstall={cloudConnected}
               />
             </TabsContent>
             <TabsContent value="discover" className="mt-0">
@@ -297,6 +315,7 @@ export function PluginsDialog({
                   .map(p => p.package_spec)
                   .filter((s): s is string => !!s)}
                 isInstalling={isInstalling}
+                disabled={disabled}
               />
             </TabsContent>
           </div>
