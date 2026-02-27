@@ -148,6 +148,17 @@ if os.getenv("VERBOSE_LOGGING"):
     logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
 
+# Set INFO for the cloud log re-emitter so [CLOUD] lines reach console and file
+logging.getLogger("scope.cloud").setLevel(logging.INFO)
+
+# Allow suppressing noisy loggers via env var (comma-separated logger names)
+# e.g. SCOPE_LOG_QUIET_LOGGERS=scope.server.frame_processor,scope.core.pipelines.longlive
+_quiet_loggers = os.getenv("SCOPE_LOG_QUIET_LOGGERS", "")
+for _logger_name in _quiet_loggers.split(","):
+    _logger_name = _logger_name.strip()
+    if _logger_name:
+        logging.getLogger(_logger_name).setLevel(logging.WARNING)
+
 # Select pipeline depending on the "PIPELINE" environment variable
 PIPELINE = os.getenv("PIPELINE", None)
 
@@ -1785,6 +1796,36 @@ async def get_current_logs():
     except Exception as e:
         logger.error(f"Error retrieving log file: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/logs/tail")
+async def tail_logs(
+    lines: int = Query(default=200, ge=1, le=1000),
+    since_offset: int = Query(default=0, ge=0),
+):
+    """Get recent log lines, optionally only new content since a byte offset.
+
+    Returns JSON with "lines" (list of strings) and "offset" (byte offset for next poll).
+    """
+    log_file_path = get_most_recent_log_file()
+    if log_file_path is None or not log_file_path.exists():
+        return {"lines": [], "offset": 0}
+
+    file_size = log_file_path.stat().st_size
+
+    if since_offset > 0 and since_offset < file_size:
+        # Read only new content since last offset
+        with open(log_file_path, encoding="utf-8", errors="replace") as f:
+            f.seek(since_offset)
+            new_content = f.read()
+            new_lines = [ln for ln in new_content.splitlines() if ln.strip()]
+            return {"lines": new_lines[-lines:], "offset": file_size}
+
+    # No offset or offset beyond file: return last N lines
+    with open(log_file_path, encoding="utf-8", errors="replace") as f:
+        all_lines = f.readlines()
+        tail = [ln.rstrip() for ln in all_lines[-lines:] if ln.strip()]
+        return {"lines": tail, "offset": file_size}
 
 
 # Plugin Management API Endpoints

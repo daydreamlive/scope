@@ -6,6 +6,7 @@
   const logLevels = [
     { marker: '[ERROR]', className: 'error' },
     { marker: '[WARN]', className: 'warn' },
+    { marker: '[CLOUD]', className: 'cloud' },
     { marker: '[INFO]', className: 'info' },
     { marker: '[SERVER]', className: 'server' },
   ];
