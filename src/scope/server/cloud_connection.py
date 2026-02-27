@@ -289,24 +289,30 @@ class CloudConnectionManager:
                     # Get close code and reason from the WebSocket
                     close_code = self.ws.close_code if self.ws else None
                     # Try to get close reason from message data or ws object
-                    close_reason = None
+                    close_frame_reason = None
                     if msg.data:
-                        close_reason = str(msg.data)
+                        close_frame_reason = str(msg.data)
                     elif msg.extra:
-                        close_reason = str(msg.extra)
+                        close_frame_reason = str(msg.extra)
 
-                    # Store for status reporting to frontend
+                    # Store close code
                     self._last_close_code = close_code
-                    self._last_close_reason = close_reason
+                    # Only update reason if we don't already have one from an error message
+                    # (error messages sent before close are more reliable than close frame reason)
+                    if close_frame_reason and not self._last_close_reason:
+                        self._last_close_reason = close_frame_reason
+
+                    # Use the captured reason (from error message or close frame)
+                    effective_reason = self._last_close_reason
 
                     logger.warning(
-                        f"Cloud WebSocket closed (code={close_code}, reason={close_reason})"
+                        f"Cloud WebSocket closed (code={close_code}, reason={effective_reason})"
                     )
 
                     # Publish error if this was an unexpected close
                     if not self._stop_event.is_set():
                         self._publish_cloud_error(
-                            f"Cloud WebSocket closed unexpectedly (code={close_code}, reason={close_reason})",
+                            f"Cloud WebSocket closed unexpectedly (code={close_code}, reason={effective_reason})",
                             "CloudWebSocketClosed",
                             error_type="cloud_websocket_closed",
                             extra_error_fields={"close_code": close_code},
