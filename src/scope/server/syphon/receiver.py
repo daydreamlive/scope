@@ -30,8 +30,8 @@ logger = logging.getLogger(__name__)
 # uvicorn server the main thread runs an asyncio event-loop, so we must
 # explicitly pump the NSRunLoop on the main thread for server announcements to
 # be received.  ensure_directory_initialized() creates the ObjC singleton
-# (registering its notification observers) and pump_run_loop() must be called
-# periodically on the main thread to keep the server list up-to-date.
+# (registering its notification observers) and drain_notifications() must be called
+# on the main thread to keep the server list up-to-date.
 _directory_initialized = False
 _directory_lock = threading.Lock()
 _SyphonServerDirectoryObjC = objc.lookUpClass("SyphonServerDirectory")
@@ -44,7 +44,7 @@ def ensure_directory_initialized():
     observers on NSDistributedNotificationCenter which delivers to the main
     thread regardless of which thread creates the singleton.
 
-    After calling this, ``pump_run_loop()`` must be called on the **main
+    After calling this, `drain_notifications()` must be called on the **main
     thread** at least once for server announcements to be received.
     """
     global _directory_initialized
@@ -58,8 +58,8 @@ def ensure_directory_initialized():
         logger.debug("Syphon shared directory singleton created")
 
 
-def pump_run_loop(duration_s: float = 0.1):
-    """Pump the current thread's NSRunLoop to receive Syphon notifications.
+def drain_notifications(duration_s: float = 0.1):
+    """Drain pending Syphon server notifications from the NSRunLoop.
 
     **Must be called on the main thread** — Syphon server announcements are
     delivered via NSDistributedNotificationCenter which only fires on the

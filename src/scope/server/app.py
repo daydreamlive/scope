@@ -318,10 +318,10 @@ async def lifespan(app: FastAPI):
     # Subsequent refreshes pump on demand in the list_input_sources endpoint.
     if sys.platform == "darwin":
         try:
-            from .syphon.receiver import ensure_directory_initialized, pump_run_loop
+            from .syphon.receiver import ensure_directory_initialized, drain_notifications
 
             ensure_directory_initialized()
-            pump_run_loop(0.1)
+            drain_notifications(0.1)
             logger.info("Syphon directory initialized")
         except Exception:
             logger.debug("Syphon not available, skipping directory init")
@@ -1455,13 +1455,13 @@ async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
     # async handlers run on the event-loop (main) thread, so pump here.
     if source_type == "syphon" and sys.platform == "darwin":
         try:
-            from .syphon.receiver import pump_run_loop
+            from .syphon.receiver import drain_notifications
 
-            pump_run_loop(0.1)
+            drain_notifications(0.1)
         except Exception:
             logger.debug("Failed to pump Syphon run loop", exc_info=True)
 
-    loop = asyncio.get_event_loop()
+    event_loop = asyncio.get_event_loop()
 
     def _discover():
         instance = source_class()
@@ -1479,7 +1479,7 @@ async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
             instance.close()
 
     try:
-        sources = await loop.run_in_executor(None, _discover)
+        sources = await event_loop.run_in_executor(None, _discover)
         _source_discovery_cache[source_type] = (time.monotonic(), sources)
         return {"source_type": source_type, "sources": sources}
     except HTTPException:
