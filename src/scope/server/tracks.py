@@ -114,6 +114,7 @@ class VideoProcessingTrack(MediaStreamTrack):
                 connection_id=self.connection_id,
                 connection_info=self.connection_info,
             )
+            self.frame_processor.set_event_loop(asyncio.get_running_loop())
             self.frame_processor.start()
 
     def initialize_input_processing(self, track: MediaStreamTrack):
@@ -158,8 +159,8 @@ class VideoProcessingTrack(MediaStreamTrack):
                     self._last_frame = frame
                     return frame
 
-                # No frame available, wait a bit before trying again
-                await asyncio.sleep(0.01)
+                # Wait for a frame to be produced
+                await self.frame_processor.wait_for_output()
 
             except Exception as e:
                 logger.error(f"Error getting processed frame: {e}")

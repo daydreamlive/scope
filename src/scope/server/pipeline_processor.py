@@ -108,10 +108,17 @@ class PipelineProcessor:
         # Set when reset_cache flushes queues, cleared after successful pipeline call
         self._pending_cache_init = False
 
+        # Callback to signal that output frames are available (set by FrameProcessor)
+        self._output_ready_callback: callable | None = None
+
         # Throttler for controlling processing rate in chained pipelines
         # Throttling is applied when this pipeline produces frames faster than
         # the next pipeline in the chain can consume them
         self.throttler = PipelineThrottler()
+
+    def set_output_ready_callback(self, callback: callable):
+        """Set callback to invoke when frames are placed in the output queue."""
+        self._output_ready_callback = callback
 
     def _resize_output_queue(self, target_size: int):
         """Resize the output queue to the target size, transferring existing frames.
@@ -492,7 +499,6 @@ class PipelineProcessor:
                 self.throttler.record_output_batch(num_frames, processing_time)
 
             # Normalize to [0, 255] and convert to uint8
-            # Keep frames on GPU - frame_processor handles CPU transfer for streaming
             output = (
                 (output * 255.0)
                 .clamp(0, 255)
@@ -500,6 +506,11 @@ class PipelineProcessor:
                 .contiguous()
                 .detach()
             )
+
+            # Move to CPU in the worker thread for the last processor in the chain.
+            # Intermediate processors keep frames on GPU for the next pipeline.
+            if self.next_processor is None:
+                output = output.cpu()
 
             # Resize output queue to meet target max size
             target_output_queue_max_size = num_frames * OUTPUT_QUEUE_MAX_SIZE_FACTOR
@@ -509,17 +520,22 @@ class PipelineProcessor:
             # For intermediate pipelines, output goes to next pipeline's input
             # For last pipeline, output goes to frame_processor's output_queue
             # Output frames are [H, W, C], convert to [1, H, W, C] for consistency
+            frames_queued = False
             for frame in output:
                 frame = frame.unsqueeze(0)
                 # Track when a frame is ready (production rate)
                 self._track_output_frame()
                 try:
                     self.output_queue.put_nowait(frame)
+                    frames_queued = True
                 except queue.Full:
                     logger.debug(
                         f"Output queue full for {self.pipeline_id}, dropping processed frame"
                     )
                     continue
+
+            if frames_queued and self._output_ready_callback is not None:
+                self._output_ready_callback()
 
             # Apply throttling if this pipeline is producing faster than next can consume
             # Only throttle if: (1) has video input, (2) has next processor
