@@ -318,7 +318,10 @@ async def lifespan(app: FastAPI):
     # Subsequent refreshes pump on demand in the list_input_sources endpoint.
     if sys.platform == "darwin":
         try:
-            from .syphon.receiver import ensure_directory_initialized, drain_notifications
+            from .syphon.receiver import (
+                drain_notifications,
+                ensure_directory_initialized,
+            )
 
             ensure_directory_initialized()
             drain_notifications(0.1)
