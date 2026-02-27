@@ -414,6 +414,7 @@ export function useStreamState() {
   // Derive output sink availability from hardware info
   const spoutAvailable = hardwareInfo?.spout_available ?? false;
   const ndiOutputAvailable = hardwareInfo?.ndi_available ?? false;
+  const syphonOutputAvailable = hardwareInfo?.syphon_available ?? false;
   const oscEnabled = hardwareInfo?.osc_enabled ?? false;
   const oscPort = hardwareInfo?.osc_port ?? 9000;
 
@@ -432,6 +433,7 @@ export function useStreamState() {
     supportsNoiseControls,
     spoutAvailable,
     ndiOutputAvailable,
+    syphonOutputAvailable,
     oscEnabled,
     oscPort,
     availableInputSources,

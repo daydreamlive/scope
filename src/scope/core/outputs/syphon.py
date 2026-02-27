@@ -1,6 +1,7 @@
-"""Spout output sink implementation (Windows)."""
+"""Syphon output sink implementation (macOS)."""
 
 import logging
+import sys
 from typing import ClassVar
 
 import numpy as np
@@ -11,16 +12,13 @@ from .interface import OutputSink
 logger = logging.getLogger(__name__)
 
 
-class SpoutOutputSink(OutputSink):
-    """Output sink that sends video frames via Spout on Windows.
+class SyphonOutputSink(OutputSink):
+    """Output sink that sends video frames via Syphon on macOS."""
 
-    Wraps the existing SpoutSender from scope.server.spout.
-    """
-
-    source_id: ClassVar[str] = "spout"
-    source_name: ClassVar[str] = "Spout"
+    source_id: ClassVar[str] = "syphon"
+    source_name: ClassVar[str] = "Syphon"
     source_description: ClassVar[str] = (
-        "Send video frames to Spout receivers on Windows "
+        "Send video frames to Syphon receivers on macOS "
         "like TouchDesigner, Resolume, OBS, etc."
     )
 
@@ -32,9 +30,10 @@ class SpoutOutputSink(OutputSink):
 
     @classmethod
     def is_available(cls) -> bool:
-        """Check if SpoutGL is installed."""
+        if sys.platform != "darwin":
+            return False
         try:
-            import SpoutGL  # noqa: F401
+            import syphon  # noqa: F401
 
             return True
         except ImportError:
@@ -53,55 +52,55 @@ class SpoutOutputSink(OutputSink):
         return self._height
 
     def create(self, name: str, width: int, height: int) -> bool:
-        """Create the Spout sender."""
+        """Create the Syphon sender."""
         try:
-            from scope.server.spout import SpoutSender
+            from scope.server.syphon.sender import SyphonSender
 
             self.close()
 
-            self._sender = SpoutSender(name, width, height)
+            self._sender = SyphonSender(name, width, height)
             if self._sender.create():
                 self._name = name
                 self._width = width
                 self._height = height
-                logger.info(f"SpoutOutputSink created: '{name}' ({width}x{height})")
+                logger.info(f"SyphonOutputSink created: '{name}' ({width}x{height})")
                 return True
-            else:
-                logger.error("Failed to create SpoutSender")
-                self._sender = None
-                return False
+
+            logger.error("Failed to create SyphonSender")
+            self._sender = None
+            return False
         except ImportError:
-            logger.error("SpoutGL not available")
+            logger.error("syphon-python not available")
             return False
         except Exception as e:
-            logger.error(f"Error creating SpoutOutputSink: {e}")
+            logger.error(f"Error creating SyphonOutputSink: {e}")
             self._sender = None
             return False
 
     def send_frame(self, frame: np.ndarray | torch.Tensor) -> bool:
-        """Send a video frame to Spout."""
+        """Send a video frame to Syphon."""
         if self._sender is None:
             return False
         try:
             return self._sender.send(frame)
         except Exception as e:
-            logger.error(f"Error sending Spout frame: {e}")
+            logger.error(f"Error sending Syphon frame: {e}")
             return False
 
     def resize(self, width: int, height: int):
-        """Update the sender resolution."""
+        """Update sender resolution."""
         if self._sender is not None:
             self._sender.resize(width, height)
         self._width = width
         self._height = height
 
     def close(self):
-        """Release Spout sender resources."""
+        """Release Syphon sender resources."""
         if self._sender is not None:
             try:
                 self._sender.release()
             except Exception as e:
-                logger.error(f"Error releasing SpoutSender: {e}")
+                logger.error(f"Error releasing SyphonSender: {e}")
             finally:
                 self._sender = None
                 self._name = ""

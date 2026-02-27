@@ -251,6 +251,10 @@ class HardwareInfoResponse(BaseModel):
         default=False,
         description="Whether NDI SDK is available for output",
     )
+    syphon_available: bool = Field(
+        default=False,
+        description="Whether Syphon is available for output (macOS only)",
+    )
     osc_enabled: bool = Field(
         default=False,
         description="Whether the OSC server is currently running",

@@ -57,6 +57,7 @@ dependencies = [
     "triton-windows==3.5.1.post24; sys_platform == 'win32'",
     "SpoutGL>=0.1.1; sys_platform == 'win32'",
     "PyOpenGL>=3.1.10; sys_platform == 'win32'",
+    "syphon-python>=0.1.1; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]

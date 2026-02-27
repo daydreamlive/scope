@@ -26,6 +26,13 @@ def get_output_sink_classes() -> dict[str, type[OutputSink]]:
     except Exception:
         pass
 
+    try:
+        from .syphon import SyphonOutputSink
+
+        sinks[SyphonOutputSink.source_id] = SyphonOutputSink
+    except Exception:
+        pass
+
     return sinks
 
 
