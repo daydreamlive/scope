@@ -145,15 +145,6 @@ export function getDaydreamUserDisplayName(): string | null {
 }
 
 /**
- * Check if cloud mode toggle should be shown
- * (user is a cohort participant or admin)
- */
-export function shouldShowCloudMode(): boolean {
-  const authData = getAuthData();
-  return authData?.cohortParticipant === true || authData?.isAdmin === true;
-}
-
-/**
  * Save the Daydream auth credentials and profile to localStorage
  */
 export async function saveDaydreamAuth(

@@ -34,7 +34,7 @@ Scope is a tool for running and customizing real-time, interactive generative AI
 - [VACE](https://docs.daydream.live/scope/guides/vace) to use reference images and control videos to guide autoregressive video diffusion models
 - [API](https://docs.daydream.live/scope/reference/api) with WebRTC real-time streaming
 - [NDI](https://docs.daydream.live/scope/guides/ndi) real-time video sharing across local networks
-- [Spout](https://docs.daydream.live/scope/guides/spout) (Windows only) real-time video sharing with local applications
+- [Spout](https://docs.daydream.live/scope/guides/spout) (Windows only) and [Syphon](docs/syphon.md) (macOS only) real-time video sharing with local applications
 - Low latency async video processing pipelines
 - Interactive UI with timeline editor, text prompting, model parameter controls and video/camera/text input modes
 

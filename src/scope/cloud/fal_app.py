@@ -28,7 +28,6 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
     Validate that a user has access to cloud mode.
 
     Returns (is_valid, reason) tuple.
-    Access is granted if user is a cohort participant OR has @livepeer.org email.
     """
     import urllib.error
     import urllib.request
@@ -46,14 +45,8 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
 
     try:
         # Run synchronous urllib in thread pool to not block event loop
-        user = await asyncio.get_event_loop().run_in_executor(None, fetch_user)
-        email = user.get("email", "")
-        is_cohort = user.get("cohortParticipant", False)
-        is_livepeer = email.endswith("@livepeer.org")
-
-        if is_cohort or is_livepeer:
-            return True, "Access granted"
-        return False, "User is not a cohort participant"
+        await asyncio.get_event_loop().run_in_executor(None, fetch_user)
+        return True, "Access granted"
     except urllib.error.HTTPError as e:
         if e.code == 404:
             return False, "User not found"
@@ -184,6 +177,7 @@ def _get_cleanup_event() -> asyncio.Event:
         _cleanup_event.set()
     return _cleanup_event
 
+
 # Connection timeout settings
 MAX_CONNECTION_DURATION_SECONDS = (
     3600  # Close connection after 60 minutes regardless of activity
@@ -225,11 +219,11 @@ async def cleanup_installed_plugins():
     scope_url = "http://localhost:8000"
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(
-                f"{scope_url}/api/v1/plugins", timeout=10.0
-            )
+            response = await client.get(f"{scope_url}/api/v1/plugins", timeout=10.0)
             if response.status_code != 200:
-                print(f"Warning: Failed to list plugins for cleanup: {response.status_code}")
+                print(
+                    f"Warning: Failed to list plugins for cleanup: {response.status_code}"
+                )
                 return
 
             plugins = response.json().get("plugins", [])
@@ -247,7 +241,9 @@ async def cleanup_installed_plugins():
                     if resp.status_code == 200:
                         print(f"Cleanup: uninstalled plugin '{name}'")
                     else:
-                        print(f"Warning: Failed to uninstall plugin '{name}': {resp.status_code}")
+                        print(
+                            f"Warning: Failed to uninstall plugin '{name}': {resp.status_code}"
+                        )
                 except Exception as e:
                     print(f"Warning: Failed to uninstall plugin '{name}': {e}")
     except Exception as e:
@@ -280,7 +276,7 @@ def _get_git_sha() -> str:
             text=True,
             check=True,
         )
-        return result.stdout.strip() + "-cloud"
+        return result.stdout.strip()[:7] + "-cloud"
     except Exception as e:
         print(f"Warning: Could not get git SHA: {e}")
         return "unknown"
@@ -459,7 +455,6 @@ class ScopeApp(fal.App, keep_alive=300):
 
         This keeps a persistent connection to prevent fal from spawning new runners.
         """
-        import asyncio
         import json
         import uuid
 
@@ -522,9 +517,9 @@ class ScopeApp(fal.App, keep_alive=300):
                 )
                 await safe_send_json(
                     {
-                        "type": "closing",
-                        "reason": "max_duration",
-                        "elapsed_seconds": elapsed_seconds,
+                        "type": "error",
+                        "error": "Max duration exceeded",
+                        "code": "MAX_DURATION_EXCEEDED",
                     }
                 )
                 return True
@@ -689,6 +684,7 @@ class ScopeApp(fal.App, keep_alive=300):
                 def normalize_plugin_url(url: str) -> str:
                     """Normalize a plugin URL for comparison."""
                     import re
+
                     normalized = url.lower().strip()
                     # Remove URL protocols
                     normalized = re.sub(r"^git\+https?://", "", normalized)
@@ -862,10 +858,12 @@ class ScopeApp(fal.App, keep_alive=300):
                     await safe_send_json(
                         {
                             "type": "error",
-                            "error": f"Access denied: {reason}",
+                            "error": "Access denied",
                             "code": "ACCESS_DENIED",
                         }
                     )
+                    # Small delay to let error message reach client before close
+                    # (close frame often gets lost through proxies)
                     await ws.close(code=4003, reason="Access denied")
                     return None
 

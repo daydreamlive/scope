@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-export type VideoSourceMode = "video" | "camera" | "spout" | "ndi";
+export type VideoSourceMode = "video" | "camera" | "spout" | "ndi" | "syphon";
 
 interface UseVideoSourceProps {
   onStreamUpdate?: (stream: MediaStream) => Promise<boolean>;
@@ -172,8 +172,8 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       setMode(newMode);
       setError(null);
 
-      // Spout/NDI mode - no local stream needed, input comes from server-side receiver
-      if (newMode === "spout" || newMode === "ndi") {
+      // Spout/NDI/Syphon mode - no local stream needed, input comes from server-side receiver
+      if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop());
         }

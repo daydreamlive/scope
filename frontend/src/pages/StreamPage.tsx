@@ -110,14 +110,18 @@ export function StreamPage() {
     supportsNoiseControls,
     spoutAvailable,
     ndiOutputAvailable,
+    syphonOutputAvailable,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
   } = useStreamState();
 
-  // Derive NDI input availability from dynamic input sources list
+  // Derive NDI and Syphon input availability from dynamic input sources list
   const ndiAvailable = availableInputSources.some(
     s => s.source_id === "ndi" && s.available
+  );
+  const syphonAvailable = availableInputSources.some(
+    s => s.source_id === "syphon" && s.available
   );
 
   // Combined refresh function for pipeline schemas, pipelines list, and hardware info
@@ -885,6 +889,14 @@ export function StreamPage() {
           source_name: settings.inputSource?.source_name ?? "",
         },
       });
+    } else if (newMode === "syphon") {
+      updateSettings({
+        inputSource: {
+          enabled: true,
+          source_type: "syphon",
+          source_name: settings.inputSource?.source_name ?? "",
+        },
+      });
     } else {
       updateSettings({
         inputSource: { enabled: false, source_type: "", source_name: "" },
@@ -918,6 +930,33 @@ export function StreamPage() {
       });
     } catch (e) {
       console.warn("Could not probe NDI source resolution:", e);
+    }
+  };
+
+  // Handle Syphon source selection — probe resolution and update pipeline dimensions
+  const handleSyphonSourceChange = async (identifier: string) => {
+    updateSettings({
+      inputSource: {
+        enabled: true,
+        source_type: "syphon",
+        source_name: identifier,
+      },
+    });
+
+    try {
+      const { width, height } = await getInputSourceResolution(
+        "syphon",
+        identifier
+      );
+      updateSettings({
+        resolution: capResolution(
+          { width, height },
+          settings.pipelineId,
+          settings.inputMode
+        ),
+      });
+    } catch (e) {
+      console.warn("Could not probe Syphon source resolution:", e);
     }
   };
 
@@ -1246,7 +1285,9 @@ export function StreamPage() {
         mode === "spout" && settings.inputSource?.source_type === "spout";
       const isNdiMode =
         mode === "ndi" && settings.inputSource?.source_type === "ndi";
-      const isServerSideInput = isSpoutMode || isNdiMode;
+      const isSyphonMode =
+        mode === "syphon" && settings.inputSource?.source_type === "syphon";
+      const isServerSideInput = isSpoutMode || isNdiMode || isSyphonMode;
 
       // Only send video stream for pipelines that need video input (not in Spout/NDI mode)
       const streamToSend =
@@ -1440,7 +1481,7 @@ export function StreamPage() {
             canStartStream={
               settings.inputMode === "text"
                 ? !isInitializing
-                : mode === "spout" || mode === "ndi"
+                : mode === "spout" || mode === "ndi" || mode === "syphon"
                   ? !isInitializing
                   : !!localStream && !isInitializing
             }
@@ -1478,8 +1519,15 @@ export function StreamPage() {
             onInputModeChange={handleInputModeChange}
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiAvailable}
+            syphonAvailable={syphonAvailable}
             selectedNdiSource={settings.inputSource?.source_name ?? ""}
             onNdiSourceChange={handleNdiSourceChange}
+            selectedSyphonSource={
+              settings.inputSource?.source_type === "syphon"
+                ? (settings.inputSource?.source_name ?? "")
+                : ""
+            }
+            onSyphonSourceChange={handleSyphonSourceChange}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&
@@ -1724,6 +1772,7 @@ export function StreamPage() {
             onOutputSinkChange={handleOutputSinkChange}
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiOutputAvailable}
+            syphonAvailable={syphonOutputAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&

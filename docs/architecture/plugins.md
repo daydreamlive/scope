@@ -62,9 +62,21 @@ Each layer has distinct responsibilities, communicating through well-defined int
 Plugins integrate with Scope through Python's entry point mechanism:
 
 1. Plugins declare entry points in their `pyproject.toml` under `[project.entry-points."scope"]`
-2. The backend uses pluggy hooks to discover installed plugins at startup
-3. Each plugin implements a `register_pipelines` hook to register its pipeline implementations
-4. The Pipeline Registry maintains a mapping of pipeline IDs to their implementations
+2. At startup, the backend **pre-validates** all entry points before loading them (see below)
+3. Valid plugins are loaded via pluggy's setuptools entry point mechanism
+4. Each plugin implements a `register_pipelines` hook to register its pipeline implementations
+5. The Pipeline Registry maintains a mapping of pipeline IDs to their implementations
+
+#### Entry Point Pre-validation
+
+Before loading any plugins, the system runs `_prevalidate_entrypoints()` to detect broken entry points early. For each installed distribution that declares an entry point in the `"scope"` group:
+
+1. **Single entry point enforcement** — Each plugin package must declare exactly one entry point in the `"scope"` group. Packages with zero or multiple entry points are rejected.
+2. **Load test** — The entry point is tentatively loaded (imported). If loading raises any exception (e.g., `ModuleNotFoundError`, `ImportError`), the error is caught.
+3. **Failure recording** — Failed entry points are recorded as `FailedPluginInfo` objects (containing the package name, entry point name, error type, and error message).
+4. **Blocking** — Failed entry points are blocked in the pluggy plugin manager so the subsequent `load_setuptools_entrypoints()` call skips them entirely.
+
+This isolation guarantee ensures that a broken plugin can never crash the server or prevent built-in pipelines from loading. The `GET /api/v1/plugins` endpoint includes a `failed_plugins` field in its response so the frontend can display a warning banner for any plugins that failed to load.
 
 ### Plugin Sources
 
@@ -81,6 +93,36 @@ Local installations support editable mode for rapid development iteration. Git i
 ---
 
 ## Core Flows
+
+### Startup Plugin Re-sync
+
+On every server startup, `ensure_plugins_installed()` runs **before** plugin discovery to handle cases where the virtual environment has been recreated (e.g., after a `uv` upgrade that wipes `.venv`).
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                      Server Startup                              │
+│                                                                  │
+│  1. Read plugins.txt (list of installed plugin specifiers)       │
+│  2. For each plugin, check if package is installed               │
+│     └─ Uses _is_package_installed() with name normalization      │
+│  3. If all present → skip to plugin discovery                    │
+│  4. If any missing:                                              │
+│     a. Recompile plugins against current uv.lock constraints     │
+│        └─ Generates constraints.txt with floor+ceiling pins      │
+│     b. If compile fails, fall back to existing resolved.txt      │
+│     c. Sync environment from resolved.txt                        │
+│  5. Proceed to plugin discovery (pre-validation + loading)       │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Recovery manifests:**
+
+| File | Role |
+|------|------|
+| `plugins.txt` | Source of truth for what plugins the user installed |
+| `resolved.txt` | Fully resolved dependency tree (output of `uv pip compile`) |
+
+The re-sync always recompiles rather than blindly reinstalling from `resolved.txt`, because the host project's dependencies may have changed. If recompilation fails (e.g., network error), the existing `resolved.txt` is used as a fallback.
 
 ### Plugin Installation Flow
 
@@ -301,7 +343,7 @@ The `<spec>` parameter must be URL encoded. Examples:
 | Component | Responsibility |
 |-----------|----------------|
 | **Plugin Manager** | Singleton that manages plugin lifecycle (install, uninstall, update, reload) |
-| **Dependency Validator** | Pre-validates that new packages won't break existing environment |
+| **Dependency Validator** | Pre-validates that new packages won't break existing environment. Generates version constraints from `uv.lock` (see [Constraint-Based Dependency Resolution](#constraint-based-dependency-resolution)) |
 | **Venv Snapshot** | Captures and restores environment state for safe rollback |
 | **Pipeline Registry** | Maps pipeline IDs to their implementations and source plugins |
 | **REST API** | Exposes plugin operations to frontend |
@@ -325,6 +367,40 @@ The `<spec>` parameter must be URL encoded. Examples:
 | **File Browser** | Native dialog for selecting local plugin directories |
 
 > **Note:** The File Browser is a desktop convenience feature. In standalone mode, users can type local paths directly into the plugin installation input field.
+
+---
+
+## Constraint-Based Dependency Resolution
+
+When installing or recompiling plugins, the system generates version constraints from the host project's `uv.lock` file to prevent plugins from pulling in incompatible dependency versions.
+
+### How Constraints Are Generated
+
+The `_generate_constraints()` method:
+
+1. Parses `uv.lock` (TOML format) from the project root
+2. Identifies the root project package (the entry with `source.editable = "."`)
+3. Collects the root project's direct dependency names
+4. Looks up each dependency's locked version in the lock file
+5. Produces constraints in the format `name>=locked_version,<next_major`
+
+**Example:** If `uv.lock` pins `transformers` at `4.57.5`, the generated constraint is `transformers>=4.57.5,<5`.
+
+Versions with platform-specific build tags (e.g., `2.9.1+cu128`) are skipped since they cannot be expressed as standard version constraints.
+
+The constraints are written to `~/.daydream-scope/plugins/constraints.txt` and passed to `uv pip compile` via the `--constraint` flag during plugin installation and re-sync.
+
+### Package Name Resolution
+
+Plugin specifiers can be PyPI names, Git URLs, or local paths. The system resolves these to canonical package names:
+
+| Source | Resolution Method |
+|--------|-------------------|
+| **PyPI** | Name used directly |
+| **Git URL** | Looked up in `resolved.txt` (maps URL to installed package name) |
+| **Local path** | Reads `pyproject.toml` from the path to extract `project.name` |
+
+Name normalization (lowercase, hyphens/underscores unified) is applied throughout to ensure consistent matching.
 
 ---
 
@@ -385,6 +461,7 @@ Plugin state is persisted in the user's data directory:
 |------|----------|---------|
 | Plugin list | `~/.daydream-scope/plugins/plugins.txt` | Installed package specs |
 | Resolved deps | `~/.daydream-scope/plugins/resolved.txt` | Lock file for reproducibility; baseline for update detection |
+| Constraints | `~/.daydream-scope/plugins/constraints.txt` | Generated version constraints from `uv.lock` |
 | Venv backup | `~/.daydream-scope/plugins/freeze.txt` | Rollback state |
 
 ---
@@ -433,8 +510,10 @@ The plugin system uses defensive error handling at each stage:
 
 | Error Type | Detection | Recovery |
 |------------|-----------|----------|
+| **Broken entry points** | Pre-validation at startup (`_prevalidate_entrypoints`) | Plugin blocked from loading, error reported to frontend via `failed_plugins` field |
 | **Dependency conflicts** | Dry-run compilation before install | Installation blocked with clear error message |
 | **Installation failures** | Exception during uv install | Venv rolled back to pre-install state |
+| **Missing plugins** | Startup re-sync (`ensure_plugins_installed`) | Automatic recompile and reinstall from manifests |
 | **Runtime errors** | Pipeline execution failure | Pipeline unloaded without affecting others |
 | **Network errors** | Health check timeouts | Frontend retries with exponential backoff |
 

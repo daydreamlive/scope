@@ -100,10 +100,11 @@ async def get_hardware_info_from_cloud(
     cloud_manager: CloudConnectionManager,
     spout_available: bool,
     ndi_available: bool = False,
+    syphon_available: bool = False,
 ) -> HardwareInfoResponse:
     """Fetch hardware info from cloud and return with local output availability.
 
-    Spout/NDI availability is taken from the caller (local) because output
+    Spout/NDI/Syphon availability is taken from the caller (local) because output
     sink frames flow through the local backend.
     """
     logger.info("Proxying hardware info request to cloud")
@@ -132,6 +133,7 @@ async def get_hardware_info_from_cloud(
         vram_gb=data.get("vram_gb"),
         spout_available=spout_available,
         ndi_available=ndi_available,
+        syphon_available=syphon_available,
     )
 
 

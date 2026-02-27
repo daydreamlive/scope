@@ -1,6 +1,6 @@
 [project]
 name = "daydream-scope"
-version = "0.1.4"
+version = "0.1.5"
 description = "A tool for running and customizing real-time, interactive generative AI pipelines and models"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -57,6 +57,7 @@ dependencies = [
     "triton-windows==3.5.1.post24; sys_platform == 'win32'",
     "SpoutGL>=0.1.1; sys_platform == 'win32'",
     "PyOpenGL>=3.1.10; sys_platform == 'win32'",
+    "syphon-python>=0.1.1; sys_platform == 'darwin'",
 ]
 
 [project.optional-dependencies]
