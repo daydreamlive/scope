@@ -1,14 +1,28 @@
 # Modified from https://github.com/guandeh17/Self-Forcing
 import inspect
 import json
+import logging
 import os
 import types
 
+import numpy as np
 import torch
 
 from scope.core.pipelines.utils import load_state_dict
 
 from .scheduler import FlowMatchScheduler, SchedulerInterface
+
+logger = logging.getLogger(__name__)
+
+# IOBinding needs a numpy dtype for byte-size calculation.
+# bf16 uses uint16 (same 2 bytes); ORT reads the real type from the ONNX graph.
+_TORCH_TO_NP_DTYPE = {
+    torch.float32: np.float32,
+    torch.float16: np.float16,
+    torch.bfloat16: np.uint16,
+    torch.int64: np.int64,
+    torch.int32: np.int32,
+}
 
 
 def filter_causal_model_cls_config(causal_model_cls, config):
@@ -120,6 +134,13 @@ class WanDiffusionWrapper(torch.nn.Module):
         self.model.eval()
         self.model.requires_grad_(False)
 
+        # Copy model config values to generator so preprocessing doesn't
+        # need to reach into self.model (which may be ONNX-compiled).
+        self.patch_size = self.model.patch_size
+        self.text_len = self.model.text_len
+        self.num_layers = self.model.num_layers
+        self.freqs = self.model.freqs
+
         # For non-causal diffusion, all frames share the same timestep
         self.uniform_timestep = False
 
@@ -132,7 +153,149 @@ class WanDiffusionWrapper(torch.nn.Module):
         self.seq_len = (
             1560 * local_attn_size if local_attn_size > 21 else 32760
         )  # [1, 21, 16, 60, 104]
+
+        # KV cache runtime state (managed by SetupCachesBlock / RecacheFramesBlock)
+        self.fill_level = 0
+        self.cache_tokens = 0
+        self.sink_tokens = 0
+
+        self.ort_session = None
+
         self.post_init()
+
+
+    def export_onnx(self, save_dir="onnx_models"):
+        """Export self.model to ONNX using latent-space dimensions directly."""
+        import onnx
+
+        os.makedirs(save_dir, exist_ok=True)
+        onnx_path = os.path.join(save_dir, "model.onnx")
+
+        model = self.model
+        device = next(model.parameters()).device
+        original_dtype = next(model.parameters()).dtype
+
+        # ORT Conv doesn't support bf16; export in fp16 and cast inputs at runtime
+        if original_dtype == torch.bfloat16:
+            model.half()
+        dtype = torch.float16
+
+        ps = self.patch_size
+        f = 3 // ps[0]
+        h, w = 60 // ps[1], 104 // ps[2]
+        seq = f * h * w
+        cs = self.cache_tokens
+        nl, nh, hd = model.num_layers, model.num_heads, model.dim // model.num_heads
+
+        dummy = (
+            torch.randn(1, model.in_dim, 3, 60, 104, device=device, dtype=dtype),
+            torch.zeros(1, 3, device=device, dtype=torch.int64),
+            torch.randn(1, self.text_len, model.text_dim, device=device, dtype=dtype),
+            torch.randn(1, seq, 1, hd // 2, device=device, dtype=torch.float32),
+            torch.randn(1, seq, 1, hd // 2, device=device, dtype=torch.float32),
+            torch.zeros(nl, 1, cs, nh, hd, device=device, dtype=dtype),
+            torch.zeros(nl, 1, cs, nh, hd, device=device, dtype=dtype),
+            torch.zeros(1, 1, 1, cs + seq, device=device, dtype=dtype),
+        )
+
+        torch.onnx.export(
+            model,
+            dummy,
+            onnx_path,
+            export_params=True,
+            opset_version=17,
+            do_constant_folding=True,
+            input_names=[
+                "x", "t", "context", "freqs_cos", "freqs_sin",
+                "cache_ks", "cache_vs", "mask",
+            ],
+            output_names=["output", "new_ks", "new_vs"],
+            dynamo=False,
+        )
+
+        # Restore original dtype
+        if original_dtype == torch.bfloat16:
+            model.to(original_dtype)
+
+        # Re-save with external data (model weights exceed 2 GB protobuf limit)
+        onnx_model = onnx.load(onnx_path)
+        onnx.save_model(
+            onnx_model,
+            onnx_path,
+            save_as_external_data=True,
+            all_tensors_to_one_file=True,
+            location="weights.pb",
+            convert_attribute=False,
+        )
+        logger.info("ONNX model saved to %s", save_dir)
+        return onnx_path
+
+    def _ensure_onnx_session(self, x_video):
+        """Auto-export + load ONNX model on first kv_cache forward call.
+
+        Skipped when self.onnx_dir is None (ONNX mode disabled).
+        The cache path includes the latent resolution so different
+        resolutions get separate exports.
+        """
+        if self.ort_session is not None:
+            return
+
+        _, _, num_frames, lh, lw = x_video.shape
+        res_dir = os.path.join("onnx_models", f"{lh}x{lw}x{num_frames}")
+        onnx_path = os.path.join(res_dir, "model.onnx")
+
+        if not os.path.exists(onnx_path):
+            logger.info("ONNX model not found at %s, exporting...", res_dir)
+            self.export_onnx(res_dir)
+
+        self.load_onnx(res_dir)
+
+    def load_onnx(self, save_dir):
+        """Load an exported ONNX model for GPU inference via ORT.
+
+        After calling this, forward() automatically routes through ONNX
+        Runtime instead of the PyTorch model for the kv_cache path.
+        """
+        import onnxruntime as ort
+
+        onnx_path = os.path.join(save_dir, "model.onnx")
+        opts = ort.SessionOptions()
+        opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+        self.ort_session = ort.InferenceSession(
+            onnx_path,
+            sess_options=opts,
+            providers=["CUDAExecutionProvider"],
+        )
+        logger.info("ONNX Runtime session loaded from %s", save_dir)
+
+    def _run_onnx(self, x, t, context, freqs_cos, freqs_sin, cache_ks, cache_vs, mask):
+        """Run model through ONNX Runtime with GPU IOBinding (zero-copy)."""
+        io = self.ort_session.io_binding()
+        device_id = x.device.index or 0
+
+        def _cast(tensor):
+            if tensor.dtype == torch.bfloat16:
+                return tensor.half()
+            return tensor
+
+        for name, tensor in [
+            ("x", x), ("t", t), ("context", context),
+            ("freqs_cos", freqs_cos), ("freqs_sin", freqs_sin),
+            ("cache_ks", cache_ks), ("cache_vs", cache_vs), ("mask", mask),
+        ]:
+            tensor = _cast(tensor).contiguous()
+            io.bind_input(
+                name, "cuda", device_id,
+                _TORCH_TO_NP_DTYPE[tensor.dtype],
+                tuple(tensor.shape), tensor.data_ptr(),
+            )
+
+        for name in ["output", "new_ks", "new_vs"]:
+            io.bind_output(name, "cuda", device_id)
+
+        self.ort_session.run_with_iobinding(io)
+        return tuple(torch.from_dlpack(o) for o in io.get_outputs())
 
     def _convert_flow_pred_to_x0(
         self, flow_pred: torch.Tensor, xt: torch.Tensor, timestep: torch.Tensor
@@ -187,14 +350,19 @@ class WanDiffusionWrapper(torch.nn.Module):
         flow_pred = (xt - x0_pred) / sigma_t
         return flow_pred.to(original_dtype)
 
-    def _call_model(self, *args, **kwargs):
-        # HACK!
-        # __call__() and forward() accept *args, **kwargs so inspection doesn't tell us anything
-        # As a workaround we inspect the internal _forward_inference() function to determine what the accepted params are
-        # This allows us to filter out params that might not work with the underlying CausalWanModel impl
-        sig = inspect.signature(self.model._forward_inference)
+    # ------------------------------------------------------------------
+    # Model call helpers
+    # ------------------------------------------------------------------
 
-        # Check if the signature accepts **kwargs (VAR_KEYWORD), if so pass all parameters through
+    def _call_model(self, *args, **kwargs):
+        # Inspect the model's forward to determine accepted params and filter out
+        # kwargs that might not work with the underlying model implementation.
+        # Prefer _forward_inference if available (legacy models), else use forward.
+        if hasattr(self.model, "_forward_inference"):
+            sig = inspect.signature(self.model._forward_inference)
+        else:
+            sig = inspect.signature(self.model.forward)
+
         has_var_keyword = any(
             p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()
         )
@@ -205,6 +373,88 @@ class WanDiffusionWrapper(torch.nn.Module):
                 name: value for name, value in kwargs.items() if name in sig.parameters
             }
         return self.model(*args, **accepted)
+
+    def _preprocess_model_inputs(self, x, context, kv_cache, current_start):
+        """Prepare tensor inputs for the CausalWanModel tensor-only forward.
+
+        Handles RoPE precomputation (complex numbers), context padding,
+        cache tensor stacking, and attention mask construction -- all the
+        non-ONNX-friendly operations that live outside the model.
+
+        Returns:
+            (context, freqs_cos, freqs_sin, cache_ks, cache_vs, mask)
+        """
+        from scope.core.pipelines.longlive.modules.causal_model import (
+            precompute_freqs_i,
+        )
+
+        self.freqs = self.freqs.to(x.device)
+
+        f = x.shape[2] // self.patch_size[0]
+        h = x.shape[3] // self.patch_size[1]
+        w = x.shape[4] // self.patch_size[2]
+
+        start_frame = current_start // (h * w)
+        freqs_cos, freqs_sin = precompute_freqs_i(self.freqs, f, h, w, start_frame)
+
+        if context.shape[1] < self.text_len:
+            padded = torch.zeros(
+                (context.shape[0], self.text_len, context.shape[2]),
+                dtype=context.dtype,
+                device=context.device,
+            )
+            padded[:, : context.shape[1], :] = context
+            context = padded
+
+        cache_ks = torch.stack([kv_cache[i]["k"] for i in range(self.num_layers)])
+        cache_vs = torch.stack([kv_cache[i]["v"] for i in range(self.num_layers)])
+
+        cache_size = kv_cache[0]["k"].shape[1]
+        seq_len = f * h * w
+        mask = torch.zeros(1, 1, 1, cache_size + seq_len, dtype=x.dtype, device=x.device)
+        if self.fill_level < cache_size:
+            mask[:, :, :, self.fill_level:cache_size] = float("-inf")
+
+        return context, freqs_cos, freqs_sin, cache_ks, cache_vs, mask
+
+    def _update_kv_cache(self, kv_cache, new_ks, new_vs):
+        """Update KV cache dicts in-place with new keys/values from model output.
+
+        During filling: appends at fill_level.
+        Once full: rolls the non-sink portion and overwrites the tail.
+
+        Args:
+            kv_cache: List of dicts (one per layer), each with 'k' and 'v' tensors
+            new_ks: Stacked new keys [num_layers, B, seq_len, num_heads, head_dim]
+            new_vs: Stacked new values [num_layers, B, seq_len, num_heads, head_dim]
+        """
+        num_new = new_ks.shape[2]
+        can_fit = self.cache_tokens - self.sink_tokens
+        take = min(num_new, can_fit)
+
+        for i in range(new_ks.shape[0]):
+            if self.fill_level >= self.cache_tokens:
+                kv_cache[i]["k"][:, self.sink_tokens :] = torch.roll(
+                    kv_cache[i]["k"][:, self.sink_tokens :], -take, dims=1
+                )
+                kv_cache[i]["v"][:, self.sink_tokens :] = torch.roll(
+                    kv_cache[i]["v"][:, self.sink_tokens :], -take, dims=1
+                )
+                kv_cache[i]["k"][:, -take:] = new_ks[i, :, -take:]
+                kv_cache[i]["v"][:, -take:] = new_vs[i, :, -take:]
+            else:
+                kv_cache[i]["k"][
+                    :, self.fill_level : self.fill_level + take
+                ] = new_ks[i, :, -take:]
+                kv_cache[i]["v"][
+                    :, self.fill_level : self.fill_level + take
+                ] = new_vs[i, :, -take:]
+
+        self.fill_level = min(self.fill_level + num_new, self.cache_tokens)
+
+    # ------------------------------------------------------------------
+    # Forward
+    # ------------------------------------------------------------------
 
     def forward(
         self,
@@ -238,23 +488,32 @@ class WanDiffusionWrapper(torch.nn.Module):
         logits = None
         # X0 prediction
         if kv_cache is not None:
-            flow_pred = self._call_model(
-                noisy_image_or_video.permute(0, 2, 1, 3, 4),
-                t=input_timestep,
-                context=prompt_embeds,
-                seq_len=self.seq_len,
-                kv_cache=kv_cache,
-                crossattn_cache=crossattn_cache,
-                kv_bank=kv_bank,
-                update_bank=update_bank,
-                q_bank=q_bank,
-                update_cache=update_cache,
-                current_start=current_start,
-                current_end=current_end,
-                kv_cache_attention_bias=kv_cache_attention_bias,
-                vace_context=vace_context,
-                vace_context_scale=vace_context_scale,
-            ).permute(0, 2, 1, 3, 4)
+            x_video = noisy_image_or_video.permute(0, 2, 1, 3, 4)
+            self._ensure_onnx_session(x_video)
+            context, freqs_cos, freqs_sin, cache_ks, cache_vs, mask = (
+                self._preprocess_model_inputs(
+                    x_video, prompt_embeds, kv_cache, current_start
+                )
+            )
+            if self.ort_session is not None:
+                flow_pred, new_ks, new_vs = self._run_onnx(
+                    x_video, input_timestep, context,
+                    freqs_cos, freqs_sin, cache_ks, cache_vs, mask,
+                )
+            else:
+                flow_pred, new_ks, new_vs = self.model(
+                    x_video,
+                    t=input_timestep,
+                    context=context,
+                    freqs_cos=freqs_cos,
+                    freqs_sin=freqs_sin,
+                    cache_ks=cache_ks,
+                    cache_vs=cache_vs,
+                    mask=mask,
+                )
+            if update_cache:
+                self._update_kv_cache(kv_cache, new_ks, new_vs)
+            flow_pred = flow_pred.permute(0, 2, 1, 3, 4)
         else:
             if clean_x is not None:
                 # teacher forcing

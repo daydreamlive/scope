@@ -7,8 +7,6 @@ import torch.nn as nn
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.models.modeling_utils import ModelMixin
 
-from scope.core.pipelines.wan2_1.modules.attention import flash_attention
-
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
     WanLayerNorm,
@@ -221,7 +219,9 @@ class CausalWanAttentionBlock(nn.Module):
         cq = self.cross_attn.norm_q(self.cross_attn.q(cx)).view(b_ca, -1, n_ca, d_ca)
         ck = self.cross_attn.norm_k(self.cross_attn.k(context)).view(b_ca, -1, n_ca, d_ca)
         cv = self.cross_attn.v(context).view(b_ca, -1, n_ca, d_ca)
-        ca_out = flash_attention(cq, ck, cv).flatten(2)
+        ca_out = torch.nn.functional.scaled_dot_product_attention(
+            cq.transpose(1, 2), ck.transpose(1, 2), cv.transpose(1, 2),
+        ).transpose(1, 2).flatten(2)
         x = x + self.cross_attn.o(ca_out)
 
         # ffn
@@ -318,10 +318,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         # Set by SetupCachesBlock at runtime
         self.frame_seq_length = 0
-        # Tracks how many valid tokens are in the cache (0 = empty, cache_size = full)
-        self.fill_level = 0
-        self.cache_tokens = 0
-        self.sink_tokens = 0
 
         self.patch_embedding = nn.Conv3d(
             in_dim, dim, kernel_size=patch_size, stride=patch_size
@@ -366,91 +362,33 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             dim=1,
         )
 
-    def _roll_update_cache(self, kv_cache, new_kvs):
-        """Update the KV cache with new key-value pairs.
-
-        During filling: appends new KVs at fill_level.
-        Once full: rolls the non-sink portion and overwrites the tail.
-        In both cases, if the incoming KVs exceed available capacity,
-        only the last-fitting tokens are kept.
-        """
-        num_new = new_kvs[0][0].shape[1]
-        can_fit = self.cache_tokens - self.sink_tokens
-        take = min(num_new, can_fit)
-
-        for i, (new_k, new_v) in enumerate(new_kvs):
-            if self.fill_level >= self.cache_tokens:
-                kv_cache[i]["k"][:, self.sink_tokens:] = torch.roll(
-                    kv_cache[i]["k"][:, self.sink_tokens:], -take, dims=1
-                )
-                kv_cache[i]["v"][:, self.sink_tokens:] = torch.roll(
-                    kv_cache[i]["v"][:, self.sink_tokens:], -take, dims=1
-                )
-                kv_cache[i]["k"][:, -take:] = new_k[:, -take:]
-                kv_cache[i]["v"][:, -take:] = new_v[:, -take:]
-            else:
-                kv_cache[i]["k"][:, self.fill_level:self.fill_level + take] = new_k[:, -take:]
-                kv_cache[i]["v"][:, self.fill_level:self.fill_level + take] = new_v[:, -take:]
-
-        self.fill_level = min(self.fill_level + num_new, self.cache_tokens)
-
-    def _inner_forward(self, x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs, mask):
-        """Pure-tensor inner forward through all blocks. Compiled with reduce-overhead
-        when cache is full. With SDPA (no graph breaks), the entire 30-block loop
-        is captured as a single CUDA graph for maximum performance.
-        """
-        new_ks = []
-        new_vs = []
-        for block_index, block in enumerate(self.blocks):
-            x, (new_k, new_v) = block(
-                x,
-                e=e0,
-                freqs_cos=freqs_cos,
-                freqs_sin=freqs_sin,
-                context=context,
-                cache_k=cache_ks[block_index],
-                cache_v=cache_vs[block_index],
-                mask=mask,
-            )
-            new_ks.append(new_k)
-            new_vs.append(new_v)
-        return x, list(zip(new_ks, new_vs))
-
-    def _forward_inference(
-        self,
-        x,
-        t,
-        context,
-        kv_cache: list = None,
-        current_start: int = 0,
-        update_cache: bool = False,
-    ):
+    def forward(self, x, t, context, freqs_cos, freqs_sin, cache_ks, cache_vs, mask):
         r"""
-        Run the diffusion model with kv caching.
+        Pure tensor forward pass (ONNX-exportable).
+
+        All preprocessing (RoPE precomputation, context padding, cache tensor
+        extraction, mask construction) and postprocessing (cache updates) are
+        handled by the caller (WanDiffusionWrapper in generator.py).
 
         Args:
-            x (Tensor): Input video tensor with shape [B, C_in, F, H, W]
-            t (Tensor): Diffusion timesteps tensor of shape [B, F]
-            context (Tensor): Text embeddings tensor with shape [B, L, C]
-            kv_cache (list): List of cache dicts (one per block), each with 'k' and 'v'
-            current_start (int): Starting position in tokens
-            update_cache (bool): Whether to update the cache after forward pass
+            x (Tensor): Input video [B, C_in, F, H, W]
+            t (Tensor): Diffusion timesteps [B, F]
+            context (Tensor): Pre-padded text embeddings [B, text_len, text_dim]
+            freqs_cos (Tensor): Precomputed RoPE cosines [1, seq_len, 1, head_dim // 2]
+            freqs_sin (Tensor): Precomputed RoPE sines [1, seq_len, 1, head_dim // 2]
+            cache_ks (Tensor): Stacked cache keys [num_layers, B, cache_size, num_heads, head_dim]
+            cache_vs (Tensor): Stacked cache values [num_layers, B, cache_size, num_heads, head_dim]
+            mask (Tensor): Attention mask [1, 1, 1, cache_size + seq_len]
         Returns:
-            Tensor: Denoised video tensor with shape [B, C_out, F, H, W]
+            Tuple of:
+                output (Tensor): Denoised video [B, C_out, F', H', W']
+                new_ks (Tensor): New keys [num_layers, B, seq_len, num_heads, head_dim]
+                new_vs (Tensor): New values [num_layers, B, seq_len, num_heads, head_dim]
         """
-        device = self.patch_embedding.weight.device
-        self.freqs = self.freqs.to(device)
-
-        # Patch embedding
         x = self.patch_embedding(x)
         f, h, w = x.shape[2], x.shape[3], x.shape[4]
         x = x.flatten(2).transpose(1, 2)
 
-        # Precompute RoPE cos/sin (outside compiled region, avoids complex ops)
-        start_frame = current_start // (h * w)
-        freqs_cos, freqs_sin = precompute_freqs_i(self.freqs, f, h, w, start_frame)
-
-        # Time and text embeddings
         e = self.time_embedding(
             sinusoidal_embedding_1d(self.freq_dim, t.flatten()).type_as(x)
         )
@@ -459,43 +397,27 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             .unflatten(1, (6, self.dim))
             .unflatten(dim=0, sizes=t.shape)
         )
-        if context.shape[1] < self.text_len:
-            padded_context = torch.zeros(
-                (context.shape[0], self.text_len, context.shape[2]),
-                dtype=context.dtype,
-                device=context.device,
-            )
-            padded_context[:, : context.shape[1], :] = context
-            context = padded_context
         context = self.text_embedding(context)
 
-        cache_size = kv_cache[0]["k"].shape[1]
-        s = x.shape[1]
-        mask = torch.zeros(1, 1, 1, cache_size + s, dtype=x.dtype, device=x.device)
-        if self.fill_level < cache_size:
-            mask[:, :, :, self.fill_level:cache_size] = float('-inf')
-
-        cache_ks = [kv_cache[i]["k"] for i in range(len(self.blocks))]
-        cache_vs = [kv_cache[i]["v"] for i in range(len(self.blocks))]
-
-        if self.fill_level >= self.cache_tokens:
-            self._forward = self._inner_forward
-        else:
-            self._forward = self._inner_forward
-
-        x, new_kvs = self._forward(
-            x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs, mask
-        )
-
-        if update_cache:
-            self._roll_update_cache(kv_cache, new_kvs)
+        new_ks = []
+        new_vs = []
+        for i, block in enumerate(self.blocks):
+            x, (new_k, new_v) = block(
+                x,
+                e=e0,
+                freqs_cos=freqs_cos,
+                freqs_sin=freqs_sin,
+                context=context,
+                cache_k=cache_ks[i],
+                cache_v=cache_vs[i],
+                mask=mask,
+            )
+            new_ks.append(new_k)
+            new_vs.append(new_v)
 
         x = self.head(x, e.unflatten(dim=0, sizes=t.shape).unsqueeze(2))
-        x = self.unpatchify(x, f, h, w)
-        return x
-
-    def forward(self, *args, **kwargs):
-        return self._forward_inference(*args, **kwargs)
+        # x = self.unpatchify(x, f, h, w)
+        return x, torch.stack(new_ks), torch.stack(new_vs)
 
     def unpatchify(self, x, f, h, w):
         r"""
@@ -510,7 +432,10 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         """
         c = self.out_dim
         x = x.view(x.shape[0], f, h, w, *self.patch_size, c)
-        x = torch.einsum("bfhwpqrc->bcfphqwr", x)
+        # einsum "bfhwpqrc->bcfphqwr" is a pure permutation; permute
+        # exports as a clean ONNX Transpose (einsum creates a constant
+        # initializer that breaks graphsurgeon external-data round-trip)
+        x = x.permute(0, 7, 1, 4, 2, 5, 3, 6).contiguous()
         x = x.reshape(
             x.shape[0],
             c,

@@ -20,10 +20,11 @@ def sinusoidal_embedding_1d(dim, position):
     half = dim // 2
     position = position.type(torch.float64)
 
-    # calculation
-    sinusoid = torch.outer(
-        position, torch.pow(10000, -torch.arange(half).to(position).div(half))
-    )
+    # torch.outer exports as ONNX Einsum which breaks graphsurgeon
+    # external-data round-trip; unsqueeze+mul is equivalent
+    sinusoid = position.unsqueeze(-1) * torch.pow(
+        10000, -torch.arange(half).to(position).div(half)
+    ).unsqueeze(0)
     x = torch.cat([torch.cos(sinusoid), torch.sin(sinusoid)], dim=1)
     return x
 

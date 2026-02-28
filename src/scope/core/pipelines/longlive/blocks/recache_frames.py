@@ -130,7 +130,7 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             block_state.width // scale_size
         )
         num_frame_per_block = components.config.num_frame_per_block
-        sink_tokens = components.generator.model.sink_size * frame_seq_length
+        sink_tokens = components.generator.sink_tokens
 
         # Preserve the sink frames (old scene continuity) but zero non-sink portion.
         # This way chunked recache has the sink as context for smooth transitions.
@@ -140,7 +140,7 @@ class RecacheFramesBlock(ModularPipelineBlocks):
 
         # Set fill_level to sink_tokens so only the sink is valid context initially.
         # Each chunk will grow fill_level as it processes.
-        components.generator.model.fill_level = sink_tokens
+        components.generator.fill_level = sink_tokens
 
         # Get the number of frames to recache (min of what we've generated and buffer size)
         num_recache_frames = min(
