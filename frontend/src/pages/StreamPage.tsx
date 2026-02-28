@@ -5,6 +5,9 @@ import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
+import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
+import { WorkflowImportDialog } from "../components/WorkflowImportDialog";
+import type { WorkflowPromptState } from "../lib/workflowSettings";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
@@ -225,6 +228,10 @@ export function StreamPage() {
   >(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
+  // Workflow export/import dialog state
+  const [showWorkflowExport, setShowWorkflowExport] = useState(false);
+  const [showWorkflowImport, setShowWorkflowImport] = useState(false);
+
   // Ref to access timeline functions
   const timelineRef = useRef<{
     getCurrentTimelinePrompt: () => string;
@@ -233,6 +240,7 @@ export function StreamPage() {
     clearTimeline: () => void;
     resetPlayhead: () => void;
     resetTimelineCompletely: () => void;
+    loadPrompts: (prompts: TimelinePrompt[]) => void;
     getPrompts: () => TimelinePrompt[];
     getCurrentTime: () => number;
     getIsPlaying: () => boolean;
@@ -1412,6 +1420,30 @@ export function StreamPage() {
     }
   };
 
+  // Handle workflow import: load settings, timeline, and prompt state
+  const handleWorkflowLoad = useCallback(
+    (
+      importedSettings: Partial<typeof settings>,
+      importedTimeline: TimelinePrompt[],
+      promptState: WorkflowPromptState | null
+    ) => {
+      updateSettings(importedSettings);
+
+      if (importedTimeline.length > 0 && timelineRef.current) {
+        timelineRef.current.loadPrompts(importedTimeline);
+      }
+
+      // Restore active prompt state
+      if (promptState) {
+        setPromptItems(promptState.promptItems);
+        setInterpolationMethod(promptState.interpolationMethod);
+        setTransitionSteps(promptState.transitionSteps);
+        setTemporalInterpolationMethod(promptState.temporalInterpolationMethod);
+      }
+    },
+    [updateSettings]
+  );
+
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
@@ -1651,11 +1683,8 @@ export function StreamPage() {
               isCollapsed={isTimelineCollapsed}
               onCollapseToggle={setIsTimelineCollapsed}
               externalSelectedPromptId={externalSelectedPromptId}
-              settings={settings}
-              onSettingsImport={updateSettings}
               onPlayPauseRef={timelinePlayPauseRef}
               onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
-              onResetCache={handleResetCache}
               onTimelinePromptsChange={handleTimelinePromptsChange}
               onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
               onTimelinePlayingChange={handleTimelinePlayingChange}
@@ -1668,6 +1697,8 @@ export function StreamPage() {
               onSaveGeneration={handleSaveGeneration}
               isRecording={isRecording}
               onRecordingToggle={() => setIsRecording(prev => !prev)}
+              onWorkflowExport={() => setShowWorkflowExport(true)}
+              onWorkflowImport={() => setShowWorkflowImport(true)}
             />
           </div>
         </div>
@@ -1789,6 +1820,27 @@ export function StreamPage() {
           }}
         />
       )}
+
+      {/* Workflow Export Dialog */}
+      <WorkflowExportDialog
+        open={showWorkflowExport}
+        onClose={() => setShowWorkflowExport(false)}
+        settings={settings}
+        timelinePrompts={timelinePrompts}
+        promptState={{
+          promptItems,
+          interpolationMethod,
+          transitionSteps,
+          temporalInterpolationMethod,
+        }}
+      />
+
+      {/* Workflow Import Dialog */}
+      <WorkflowImportDialog
+        open={showWorkflowImport}
+        onClose={() => setShowWorkflowImport(false)}
+        onLoad={handleWorkflowLoad}
+      />
     </div>
   );
 }

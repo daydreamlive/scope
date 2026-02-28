@@ -57,6 +57,10 @@
   "files.insertFinalNewline": true,
   "files.trimFinalNewlines": true,
 
+  // Python environment - prevent auto-activation of ComfyUI venv
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/Scripts/python.exe",
+  "python.terminal.activateEnvironment": false,
+
   // Extension settings
   "ruff.importStrategy": "fromEnvironment",
   "eslint.workingDirectories": ["frontend"],

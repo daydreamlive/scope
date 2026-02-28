@@ -3,7 +3,6 @@ import React, { useState, useCallback, useEffect } from "react";
 import { PromptTimeline, type TimelinePrompt } from "./PromptTimeline";
 import { useTimelinePlayback } from "../hooks/useTimelinePlayback";
 import type { PromptItem } from "../lib/api";
-import type { SettingsState } from "../types";
 import { generateRandomColor } from "../utils/promptColors";
 import { submitTimelinePrompt } from "../utils/timelinePromptSubmission";
 
@@ -33,11 +32,8 @@ interface PromptInputWithTimelineProps {
   isCollapsed?: boolean;
   onCollapseToggle?: (collapsed: boolean) => void;
   externalSelectedPromptId?: string | null;
-  settings?: SettingsState;
-  onSettingsImport?: (settings: Partial<SettingsState>) => void;
   onPlayPauseRef?: React.RefObject<(() => Promise<void>) | null>;
   onVideoPlayingCallbackRef?: React.RefObject<(() => void) | null>;
-  onResetCache?: () => void;
   onTimelinePromptsChange?: (prompts: TimelinePrompt[]) => void;
   onTimelineCurrentTimeChange?: (currentTime: number) => void;
   onTimelinePlayingChange?: (isPlaying: boolean) => void;
@@ -50,6 +46,8 @@ interface PromptInputWithTimelineProps {
   onSaveGeneration?: () => void;
   isRecording?: boolean;
   onRecordingToggle?: () => void;
+  onWorkflowExport?: () => void;
+  onWorkflowImport?: () => void;
 }
 
 export function PromptInputWithTimeline({
@@ -72,11 +70,8 @@ export function PromptInputWithTimeline({
   isCollapsed = false,
   onCollapseToggle,
   externalSelectedPromptId = null,
-  settings,
-  onSettingsImport,
   onPlayPauseRef,
   onVideoPlayingCallbackRef,
-  onResetCache,
   onTimelinePromptsChange,
   onTimelineCurrentTimeChange,
   onTimelinePlayingChange,
@@ -89,6 +84,8 @@ export function PromptInputWithTimeline({
   onSaveGeneration,
   isRecording = false,
   onRecordingToggle,
+  onWorkflowExport,
+  onWorkflowImport,
 }: PromptInputWithTimelineProps) {
   const [isLive, setIsLive] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -112,7 +109,6 @@ export function PromptInputWithTimeline({
     updateCurrentTime,
     togglePlayback,
     resetPlayback,
-    startPlayback,
     pausePlayback,
   } = useTimelinePlayback({
     onPromptChange: onPromptSubmit,
@@ -169,29 +165,6 @@ export function PromptInputWithTimeline({
   }, [prompts, onPromptSubmit, onPromptItemsSubmit]);
 
   // Enhanced rewind handler
-  const handleRewind = useCallback(() => {
-    onResetCache?.();
-    completeLivePrompt();
-    updateCurrentTime(0);
-    resetToFirstPrompt();
-    scrollToTimeFn?.(0); // Scroll timeline back to beginning
-
-    if (isActuallyPlaying) {
-      pausePlayback();
-      updateCurrentTime(0);
-      setTimeout(() => startPlayback(), 10);
-    }
-  }, [
-    onResetCache,
-    completeLivePrompt,
-    updateCurrentTime,
-    resetToFirstPrompt,
-    scrollToTimeFn,
-    isActuallyPlaying,
-    pausePlayback,
-    startPlayback,
-  ]);
-
   // Enhanced disconnect handler
   const handleEnhancedDisconnect = useCallback(() => {
     onDisconnect?.();
@@ -540,6 +513,11 @@ export function PromptInputWithTimeline({
     clearTimeline: () => setPrompts([]),
     resetPlayhead: resetPlayback,
     resetTimelineCompletely,
+    loadPrompts: (newPrompts: TimelinePrompt[]) => {
+      resetTimelineCompletely();
+      setPrompts(newPrompts);
+      onTimelinePromptsChange?.(newPrompts);
+    },
     getPrompts: () => prompts,
     getCurrentTime: () => currentTime,
     getIsPlaying: () => isPlaying,
@@ -561,7 +539,6 @@ export function PromptInputWithTimeline({
         isPlaying={isActuallyPlaying}
         currentTime={currentTime}
         onPlayPause={handlePlayPause}
-        onTimeChange={handleRewind}
         onReset={handleEnhancedDisconnect}
         onClear={resetTimelineCompletely}
         onPromptSubmit={onPromptSubmit}
@@ -572,8 +549,6 @@ export function PromptInputWithTimeline({
         onLivePromptSubmit={onLivePromptSubmit}
         isCollapsed={isCollapsed}
         onCollapseToggle={onCollapseToggle}
-        settings={settings}
-        onSettingsImport={onSettingsImport}
         onScrollToTime={scrollFn => setScrollToTimeFn(() => scrollFn)}
         isStreaming={isStreaming}
         isLoading={isLoading}
@@ -583,6 +558,8 @@ export function PromptInputWithTimeline({
         onSaveGeneration={onSaveGeneration}
         isRecording={isRecording}
         onRecordingToggle={onRecordingToggle}
+        onWorkflowExport={onWorkflowExport}
+        onWorkflowImport={onWorkflowImport}
       />
     </div>
   );

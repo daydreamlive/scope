@@ -26,7 +26,6 @@ import {
 import { ExportDialog } from "./ExportDialog";
 
 import type { PromptItem } from "../lib/api";
-import type { SettingsState } from "../types";
 import { generateRandomColor } from "../utils/promptColors";
 
 // Timeline constants
@@ -123,22 +122,6 @@ export interface TimelinePrompt {
   temporalInterpolationMethod?: "linear" | "slerp";
 }
 
-// Timeline reset state
-const TIMELINE_RESET_STATE = {
-  prompts: [],
-  currentTime: 0,
-  isPlaying: false,
-  isLive: false,
-  isCollapsed: false,
-  selectedPromptId: null,
-  externalSelectedPromptId: null,
-  selectedTimelinePrompt: null,
-  timelineWidth: 800,
-  visibleStartTime: 0,
-  visibleEndTime: 20,
-  zoomLevel: 1,
-};
-
 interface PromptTimelineProps {
   className?: string;
   prompts: TimelinePrompt[];
@@ -147,7 +130,6 @@ interface PromptTimelineProps {
   isPlaying?: boolean;
   currentTime?: number;
   onPlayPause?: () => void;
-  onTimeChange?: (time: number) => void;
   onReset?: () => void;
   onClear?: () => void;
   onPromptSubmit?: (prompt: string) => void;
@@ -158,8 +140,6 @@ interface PromptTimelineProps {
   onLivePromptSubmit?: (prompts: PromptItem[]) => void;
   isCollapsed?: boolean;
   onCollapseToggle?: (collapsed: boolean) => void;
-  settings?: SettingsState;
-  onSettingsImport?: (settings: Partial<SettingsState>) => void;
   onScrollToTime?: (scrollFn: (time: number) => void) => void;
   isStreaming?: boolean;
   isLoading?: boolean;
@@ -169,6 +149,8 @@ interface PromptTimelineProps {
   onSaveGeneration?: () => void;
   isRecording?: boolean;
   onRecordingToggle?: () => void;
+  onWorkflowExport?: () => void;
+  onWorkflowImport?: () => void;
 }
 
 export function PromptTimeline({
@@ -179,7 +161,6 @@ export function PromptTimeline({
   isPlaying = false,
   currentTime = 0,
   onPlayPause,
-  onTimeChange,
   onReset,
   onClear,
   onPromptSubmit: _onPromptSubmit,
@@ -190,8 +171,6 @@ export function PromptTimeline({
   onLivePromptSubmit: _onLivePromptSubmit,
   isCollapsed = false,
   onCollapseToggle,
-  settings,
-  onSettingsImport,
   onScrollToTime,
   isStreaming = false,
   isLoading = false,
@@ -201,6 +180,8 @@ export function PromptTimeline({
   onSaveGeneration,
   isRecording = false,
   onRecordingToggle,
+  onWorkflowExport,
+  onWorkflowImport,
 }: PromptTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
@@ -248,15 +229,6 @@ export function PromptTimeline({
       onScrollToTime(scrollToTime);
     }
   }, [onScrollToTime, scrollToTime]);
-
-  // Reset timeline UI state to initial values
-  const resetTimelineUI = useCallback(() => {
-    // Reset UI state
-    setTimelineWidth(TIMELINE_RESET_STATE.timelineWidth);
-    setVisibleStartTime(TIMELINE_RESET_STATE.visibleStartTime);
-    setVisibleEndTime(TIMELINE_RESET_STATE.visibleEndTime);
-    setZoomLevel(TIMELINE_RESET_STATE.zoomLevel);
-  }, []);
 
   // Update visible end time when zoom level or timeline width changes
   useEffect(() => {
@@ -411,147 +383,9 @@ export function PromptTimeline({
 
   const [showExportDialog, setShowExportDialog] = useState(false);
 
-  const handleSaveTimeline = useCallback(() => {
-    // Filter out 0-length prompt boxes and only include prompts array and timing
-    const exportPrompts = prompts
-      .filter(prompt => prompt.startTime !== prompt.endTime) // Exclude 0-length prompt boxes
-      .map(prompt => {
-        const { id, text, isLive, color, ...exportPrompt } = prompt;
-
-        // Always include a prompts array - convert single text to prompts format if needed
-        if (!exportPrompt.prompts && text) {
-          exportPrompt.prompts = [{ text, weight: 100 }];
-        }
-
-        // Suppress unused variable warnings for intentionally excluded fields
-        void id;
-        void text;
-        void isLive;
-        void color;
-        return exportPrompt;
-      });
-
-    const timelineData = {
-      prompts: exportPrompts,
-      settings: settings
-        ? {
-            pipelineId: settings.pipelineId,
-            inputMode: settings.inputMode,
-            resolution: settings.resolution,
-            denoisingSteps: settings.denoisingSteps,
-            noiseScale: settings.noiseScale,
-            noiseController: settings.noiseController,
-            manageCache: settings.manageCache,
-            quantization: settings.quantization,
-            kvCacheAttentionBias: settings.kvCacheAttentionBias,
-            loras: settings.loras,
-            loraMergeStrategy: settings.loraMergeStrategy,
-            schemaFieldOverrides: settings.schemaFieldOverrides,
-            // Exclude paused state as it's runtime-specific
-          }
-        : undefined,
-      version: "2.1", // Updated version to indicate inputMode inclusion
-      exportedAt: new Date().toISOString(),
-    };
-
-    const dataStr = JSON.stringify(timelineData, null, 2);
-    const dataBlob = new Blob([dataStr], { type: "application/json" });
-    const url = URL.createObjectURL(dataBlob);
-
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `timeline-${new Date().toISOString().split("T")[0]}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
-  }, [prompts, settings]);
-
   const handleExport = useCallback(() => {
     setShowExportDialog(true);
   }, []);
-
-  const handleImport = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = e => {
-        try {
-          const content = e.target?.result as string;
-          const timelineData = JSON.parse(content);
-
-          if (timelineData.prompts && Array.isArray(timelineData.prompts)) {
-            // Reset timeline UI state to initial values before importing
-            resetTimelineUI();
-
-            // Assign default values for id, text, isLive, and color when importing
-            const importedPrompts = timelineData.prompts.map(
-              (prompt: Partial<TimelinePrompt>, index: number) => ({
-                ...prompt,
-                id: prompt.id || `imported-${Date.now()}-${index}`,
-                text:
-                  prompt.text ||
-                  (prompt.prompts && prompt.prompts.length > 0
-                    ? prompt.prompts
-                        .map((p: { text: string; weight: number }) => p.text)
-                        .join(", ")
-                    : ""),
-                isLive: prompt.isLive || false,
-                color: prompt.color || generateRandomColor(),
-              })
-            );
-            onPromptsChange(importedPrompts);
-
-            // Adjust visible timeline range to show all imported prompts
-            if (importedPrompts.length > 0) {
-              const maxEndTime = Math.max(
-                ...importedPrompts.map((p: TimelinePrompt) => p.endTime || 0)
-              );
-              // Set visible end time to show all prompts, with minimum of default visible range
-              const newVisibleEndTime = Math.max(
-                maxEndTime + 2, // Add 2 seconds buffer
-                DEFAULT_VISIBLE_END_TIME
-              );
-              setVisibleStartTime(0);
-              setVisibleEndTime(newVisibleEndTime);
-            }
-
-            // Import settings if available and callback is provided
-            if (timelineData.settings && onSettingsImport) {
-              onSettingsImport(timelineData.settings);
-            }
-
-            // Automatically move playhead to beginning after import
-            onTimeChange?.(0);
-
-            // Apply the first prompt from the imported timeline
-            if (importedPrompts.length > 0 && _onPromptSubmit) {
-              const firstPrompt = importedPrompts[0];
-              _onPromptSubmit(firstPrompt.text);
-            }
-          } else {
-            alert("Invalid timeline file format");
-          }
-        } catch (error) {
-          alert("Error reading timeline file");
-          console.error("Import error:", error);
-        }
-      };
-      reader.readAsText(file);
-
-      // Reset the input so the same file can be selected again
-      event.target.value = "";
-    },
-    [
-      onPromptsChange,
-      onSettingsImport,
-      resetTimelineUI,
-      onTimeChange,
-      _onPromptSubmit,
-    ]
-  );
 
   // Drag-to-pan state
   const isDraggingRef = useRef(false);
@@ -761,26 +595,21 @@ export function PromptTimeline({
                   onSaveGeneration();
                 }
               }}
-              onSaveTimeline={handleSaveTimeline}
+              onSaveTimeline={() => {
+                setShowExportDialog(false);
+                onWorkflowExport?.();
+              }}
               isRecording={isRecording}
             />
-            <div className="relative">
-              <input
-                type="file"
-                accept=".json"
-                onChange={handleImport}
-                className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                disabled={disabled || isStreaming || isLoading || isDownloading}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={disabled || isStreaming || isLoading || isDownloading}
-              >
-                <Download className="h-4 w-4 mr-1" />
-                Import
-              </Button>
-            </div>
+            <Button
+              onClick={() => onWorkflowImport?.()}
+              size="sm"
+              variant="outline"
+              disabled={disabled || isStreaming || isLoading || isDownloading}
+            >
+              <Download className="h-4 w-4 mr-1" />
+              Import
+            </Button>
             <Button
               onClick={() => onCollapseToggle?.(!isCollapsed)}
               size="sm"
