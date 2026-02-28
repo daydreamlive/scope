@@ -4,6 +4,8 @@ fal.ai deployment for Scope.
 This runs the Scope backend and proxies WebRTC signaling + API calls through
 a single WebSocket connection to avoid fal spawning new runners for each request.
 
+Uses fal's @realtime decorator for structured WebSocket handling with Pydantic models.
+
 Based on:
 - https://docs.fal.ai/examples/serverless/deploy-models-with-custom-containers
 - https://github.com/fal-ai-community/fal-demos/blob/main/fal_demos/video/yolo_webcam_webrtc/yolo.py
@@ -16,11 +18,193 @@ import shutil
 import subprocess as _subprocess
 import time
 import uuid
-from typing import Any
+from typing import Annotated, Any, AsyncIterator, Literal
 
 import fal
 from fal.container import ContainerImage
-from fastapi import WebSocket
+from pydantic import BaseModel, Field, RootModel
+
+
+# =============================================================================
+# Pydantic Models for WebSocket Protocol
+# =============================================================================
+
+
+class SetUserIdInput(BaseModel):
+    """Client sends this to authenticate and set their user ID."""
+
+    type: Literal["set_user_id"]
+    user_id: str
+    request_id: str | None = None
+
+
+class GetIceServersInput(BaseModel):
+    """Request ICE servers for WebRTC connection."""
+
+    type: Literal["get_ice_servers"]
+    request_id: str | None = None
+
+
+class OfferInput(BaseModel):
+    """WebRTC SDP offer from client."""
+
+    type: Literal["offer"]
+    sdp: str
+    sdp_type: str = "offer"
+    initialParameters: dict | None = None
+    user_id: str | None = None
+    request_id: str | None = None
+
+
+class IceCandidateData(BaseModel):
+    """ICE candidate data structure."""
+
+    candidate: str | None = None
+    sdpMid: str | None = None
+    sdpMLineIndex: int | None = None
+
+
+class IceCandidateInput(BaseModel):
+    """ICE candidate from client."""
+
+    type: Literal["icecandidate"]
+    candidate: IceCandidateData | None = None
+    sessionId: str | None = None
+    request_id: str | None = None
+
+
+class ApiRequestInput(BaseModel):
+    """Proxied API request."""
+
+    type: Literal["api"]
+    method: str = "GET"
+    path: str
+    body: dict | None = None
+    request_id: str | None = None
+
+
+class PingInput(BaseModel):
+    """Keepalive ping."""
+
+    type: Literal["ping"]
+    request_id: str | None = None
+
+
+# Discriminated union of all input message types
+RealtimeInputMessage = Annotated[
+    SetUserIdInput
+    | GetIceServersInput
+    | OfferInput
+    | IceCandidateInput
+    | ApiRequestInput
+    | PingInput,
+    Field(discriminator="type"),
+]
+
+
+class RealtimeInput(RootModel):
+    """Root model for incoming WebSocket messages."""
+
+    root: RealtimeInputMessage
+
+
+# Output message types
+
+
+class ReadyOutput(BaseModel):
+    """Sent immediately after connection is established."""
+
+    type: Literal["ready"]
+    connection_id: str
+
+
+class UserIdSetOutput(BaseModel):
+    """Confirms user ID was set successfully."""
+
+    type: Literal["user_id_set"]
+    user_id: str
+
+
+class IceServersOutput(BaseModel):
+    """ICE servers response."""
+
+    type: Literal["ice_servers"]
+    request_id: str | None = None
+    data: dict
+    status: int
+
+
+class AnswerOutput(BaseModel):
+    """WebRTC SDP answer."""
+
+    type: Literal["answer"]
+    request_id: str | None = None
+    sdp: str
+    sdp_type: str
+    sessionId: str | None = None
+
+
+class IceCandidateAckOutput(BaseModel):
+    """ICE candidate acknowledgment."""
+
+    type: Literal["icecandidate_ack"]
+    request_id: str | None = None
+    status: str
+
+
+class ApiResponseOutput(BaseModel):
+    """API response for proxied requests."""
+
+    type: Literal["api_response"]
+    request_id: str | None = None
+    status: int
+    data: Any | None = None
+    error: str | None = None
+    # For binary responses
+    _base64_content: str | None = Field(None, alias="_base64_content")
+    _content_type: str | None = Field(None, alias="_content_type")
+    _content_length: int | None = Field(None, alias="_content_length")
+
+
+class PongOutput(BaseModel):
+    """Keepalive pong response."""
+
+    type: Literal["pong"]
+    request_id: str | None = None
+
+
+class ErrorOutput(BaseModel):
+    """Error response."""
+
+    type: Literal["error"]
+    error: str
+    code: str | None = None
+    request_id: str | None = None
+    detail: str | None = None
+
+
+RealtimeOutputMessage = Annotated[
+    ReadyOutput
+    | UserIdSetOutput
+    | IceServersOutput
+    | AnswerOutput
+    | IceCandidateAckOutput
+    | ApiResponseOutput
+    | PongOutput
+    | ErrorOutput,
+    Field(discriminator="type"),
+]
+
+
+class RealtimeOutput(RootModel):
+    """Root model for outgoing WebSocket messages."""
+
+    root: RealtimeOutputMessage
+
+
+# =============================================================================
+# User Validation
+# =============================================================================
 
 
 async def validate_user_access(user_id: str) -> tuple[bool, str]:
@@ -53,6 +237,11 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
         return False, f"Failed to fetch user: {e.code}"
     except Exception as e:
         return False, f"Error validating user: {e}"
+
+
+# =============================================================================
+# Kafka Publisher
+# =============================================================================
 
 
 class KafkaPublisher:
@@ -163,6 +352,10 @@ class KafkaPublisher:
 kafka_publisher: KafkaPublisher | None = None
 
 
+# =============================================================================
+# Configuration
+# =============================================================================
+
 ASSETS_DIR_PATH = "~/.daydream-scope/assets"
 # Connection timeout settings
 MAX_CONNECTION_DURATION_SECONDS = (
@@ -247,12 +440,17 @@ custom_image = ContainerImage.from_dockerfile_str(
 )
 
 
+# =============================================================================
+# Main Application
+# =============================================================================
+
+
 class ScopeApp(fal.App, keep_alive=300):
     """
     Scope server on fal.ai.
 
-    This runs the Scope backend as a subprocess and exposes a WebSocket endpoint
-    that handles:
+    This runs the Scope backend as a subprocess and exposes a realtime WebSocket
+    endpoint that handles:
     1. WebRTC signaling (SDP offer/answer, ICE candidates)
     2. REST API calls (proxied through WebSocket to avoid new runner instances)
 
@@ -279,10 +477,9 @@ class ScopeApp(fal.App, keep_alive=300):
         """
         Start the Scope backend server as a background process.
         """
-        import os
         import subprocess
         import threading
-        import time
+        import time as time_module
 
         print(f"Starting Scope container setup... (version: {GIT_SHA})")
 
@@ -353,9 +550,9 @@ class ScopeApp(fal.App, keep_alive=300):
         # Wait for the server to be ready
         print("Waiting for Scope server to start...")
         max_wait = 120  # seconds
-        start_time = time.time()
+        start_time = time_module.time()
 
-        while time.time() - start_time < max_wait:
+        while time_module.time() - start_time < max_wait:
             try:
                 import requests
 
@@ -365,7 +562,7 @@ class ScopeApp(fal.App, keep_alive=300):
                     break
             except Exception:
                 pass
-            time.sleep(2)
+            time_module.sleep(2)
         else:
             print(
                 f"Scope server health check timed out after {max_wait}s, continuing anyway..."
@@ -373,25 +570,27 @@ class ScopeApp(fal.App, keep_alive=300):
 
         print("Scope container setup complete")
 
-    @fal.endpoint("/ws", is_websocket=True)
-    async def websocket_handler(self, ws: WebSocket) -> None:
+    @fal.realtime("/ws", buffering="none")
+    async def websocket_handler(
+        self, inputs: AsyncIterator[RealtimeInput]
+    ) -> AsyncIterator[RealtimeOutput]:
         """
-        Main WebSocket endpoint that handles:
+        Main WebSocket endpoint using fal's realtime decorator.
+
+        Handles:
         1. WebRTC signaling (offer/answer, ICE candidates)
         2. REST API call proxying
 
         Protocol:
-        - All messages are JSON with a "type" field
+        - All messages are JSON with a "type" field (enforced via Pydantic models)
         - WebRTC signaling types: "get_ice_servers", "offer", "icecandidate"
         - API proxy type: "api" with "method", "path", "body" fields
 
         This keeps a persistent connection to prevent fal from spawning new runners.
         """
-        import json
-        import uuid
+        import base64
 
         import httpx
-        from starlette.websockets import WebSocketDisconnect, WebSocketState
 
         SCOPE_BASE_URL = "http://localhost:8000"
 
@@ -401,12 +600,14 @@ class ScopeApp(fal.App, keep_alive=300):
             kafka_publisher = KafkaPublisher()
             await kafka_publisher.start()
 
-        await ws.accept()
-
         # Generate a unique connection ID for this WebSocket session
         connection_id = str(uuid.uuid4())[:8]  # Short ID for readability in logs
         # User ID for log correlation (set via set_user_id message)
-        user_id = None
+        user_id: str | None = None
+        # Track WebRTC session ID for ICE candidate routing
+        session_id: str | None = None
+        # Track connection start time for max duration timeout
+        connection_start_time = time.time()
 
         def log_prefix() -> str:
             """Get log prefix - uses user_id if set, otherwise connection_id."""
@@ -414,59 +615,7 @@ class ScopeApp(fal.App, keep_alive=300):
                 return f"{user_id}:{connection_id}"
             return connection_id
 
-        print(f"[{log_prefix()}] ✅ WebSocket connection accepted")
-
-        # Send ready message with connection_id
-        await ws.send_json({"type": "ready", "connection_id": connection_id})
-
-        # Track WebRTC session ID for ICE candidate routing
-        session_id = None
-
-        # Track connection start time for max duration timeout
-        connection_start_time = time.time()
-
-        async def safe_send_json(payload: dict):
-            """Send JSON, handling connection errors gracefully."""
-            try:
-                if (
-                    ws.client_state != WebSocketState.CONNECTED
-                    or ws.application_state != WebSocketState.CONNECTED
-                ):
-                    return
-                await ws.send_json(payload)
-            except (RuntimeError, WebSocketDisconnect):
-                pass
-
-        async def check_max_duration_exceeded() -> bool:
-            """Check if connection has exceeded max duration. Returns True if should close."""
-            elapsed_seconds = time.time() - connection_start_time
-            if elapsed_seconds >= MAX_CONNECTION_DURATION_SECONDS:
-                print(
-                    f"[{log_prefix()}] Closing due to max duration ({elapsed_seconds:.0f}s)"
-                )
-                await safe_send_json(
-                    {
-                        "type": "error",
-                        "error": "Max duration exceeded",
-                        "code": "MAX_DURATION_EXCEEDED",
-                    }
-                )
-                return True
-            return False
-
-        async def handle_get_ice_servers(payload: dict):
-            """Proxy GET /api/v1/webrtc/ice-servers"""
-            request_id = payload.get("request_id")
-            async with httpx.AsyncClient() as client:
-                response = await client.get(
-                    f"{SCOPE_BASE_URL}/api/v1/webrtc/ice-servers"
-                )
-                return {
-                    "type": "ice_servers",
-                    "request_id": request_id,
-                    "data": response.json(),
-                    "status": response.status_code,
-                }
+        print(f"[{log_prefix()}] ✅ WebSocket connection accepted (realtime)")
 
         # Parse fal_log_labels as JSON if possible, otherwise use raw string
         fal_log_labels_raw = os.getenv("FAL_LOG_LABELS", "unknown")
@@ -485,20 +634,40 @@ class ScopeApp(fal.App, keep_alive=300):
             "fal_log_labels": fal_log_labels,
         }
 
-        async def handle_offer(payload: dict):
+        # Send ready message immediately
+        yield RealtimeOutput(
+            root=ReadyOutput(type="ready", connection_id=connection_id)
+        )
+
+        # Helper functions for handling different message types
+
+        async def handle_get_ice_servers(
+            payload: GetIceServersInput,
+        ) -> RealtimeOutputMessage:
+            """Proxy GET /api/v1/webrtc/ice-servers"""
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    f"{SCOPE_BASE_URL}/api/v1/webrtc/ice-servers"
+                )
+                return IceServersOutput(
+                    type="ice_servers",
+                    request_id=payload.request_id,
+                    data=response.json(),
+                    status=response.status_code,
+                )
+
+        async def handle_offer(payload: OfferInput) -> RealtimeOutputMessage:
             """Proxy POST /api/v1/webrtc/offer"""
             nonlocal session_id
-            request_id = payload.get("request_id")
-
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.post(
                         f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
                         json={
-                            "sdp": payload.get("sdp"),
-                            "type": payload.get("sdp_type", "offer"),
-                            "initialParameters": payload.get("initialParameters"),
-                            "user_id": payload.get("user_id"),
+                            "sdp": payload.sdp,
+                            "type": payload.sdp_type,
+                            "initialParameters": payload.initialParameters,
+                            "user_id": payload.user_id,
                             "connection_id": connection_id,
                             "connection_info": connection_info,
                         },
@@ -508,49 +677,47 @@ class ScopeApp(fal.App, keep_alive=300):
                     if response.status_code == 200:
                         data = response.json()
                         session_id = data.get("sessionId")
-                        return {
-                            "type": "answer",
-                            "request_id": request_id,
-                            "sdp": data.get("sdp"),
-                            "sdp_type": data.get("type"),
-                            "sessionId": session_id,
-                        }
+                        return AnswerOutput(
+                            type="answer",
+                            request_id=payload.request_id,
+                            sdp=data.get("sdp", ""),
+                            sdp_type=data.get("type", "answer"),
+                            sessionId=session_id,
+                        )
                     else:
-                        return {
-                            "type": "error",
-                            "request_id": request_id,
-                            "error": f"Offer failed: {response.status_code}",
-                            "detail": response.text,
-                        }
+                        return ErrorOutput(
+                            type="error",
+                            request_id=payload.request_id,
+                            error=f"Offer failed: {response.status_code}",
+                            detail=response.text,
+                        )
             except (httpx.TimeoutException, TimeoutError):
-                return {
-                    "type": "error",
-                    "request_id": request_id,
-                    "error": "WebRTC offer timeout - Scope server may be overloaded",
-                }
+                return ErrorOutput(
+                    type="error",
+                    request_id=payload.request_id,
+                    error="WebRTC offer timeout - Scope server may be overloaded",
+                )
 
-        async def handle_icecandidate(payload: dict):
+        async def handle_icecandidate(
+            payload: IceCandidateInput,
+        ) -> RealtimeOutputMessage:
             """Proxy PATCH /api/v1/webrtc/offer/{session_id} for ICE candidates"""
-            nonlocal session_id
-            request_id = payload.get("request_id")
-
-            candidate = payload.get("candidate")
-            target_session = payload.get("sessionId") or session_id
+            target_session = payload.sessionId or session_id
 
             if not target_session:
-                return {
-                    "type": "error",
-                    "request_id": request_id,
-                    "error": "No session ID available for ICE candidate",
-                }
+                return ErrorOutput(
+                    type="error",
+                    request_id=payload.request_id,
+                    error="No session ID available for ICE candidate",
+                )
 
-            if candidate is None:
+            if payload.candidate is None:
                 # End of candidates signal
-                return {
-                    "type": "icecandidate_ack",
-                    "request_id": request_id,
-                    "status": "end_of_candidates",
-                }
+                return IceCandidateAckOutput(
+                    type="icecandidate_ack",
+                    request_id=payload.request_id,
+                    status="end_of_candidates",
+                )
 
             async with httpx.AsyncClient() as client:
                 response = await client.patch(
@@ -558,9 +725,9 @@ class ScopeApp(fal.App, keep_alive=300):
                     json={
                         "candidates": [
                             {
-                                "candidate": candidate.get("candidate"),
-                                "sdpMid": candidate.get("sdpMid"),
-                                "sdpMLineIndex": candidate.get("sdpMLineIndex"),
+                                "candidate": payload.candidate.candidate,
+                                "sdpMid": payload.candidate.sdpMid,
+                                "sdpMLineIndex": payload.candidate.sdpMLineIndex,
                             }
                         ]
                     },
@@ -568,57 +735,42 @@ class ScopeApp(fal.App, keep_alive=300):
                 )
 
                 if response.status_code == 204:
-                    return {
-                        "type": "icecandidate_ack",
-                        "request_id": request_id,
-                        "status": "ok",
-                    }
+                    return IceCandidateAckOutput(
+                        type="icecandidate_ack",
+                        request_id=payload.request_id,
+                        status="ok",
+                    )
                 else:
-                    return {
-                        "type": "error",
-                        "request_id": request_id,
-                        "error": f"ICE candidate failed: {response.status_code}",
-                        "detail": response.text,
-                    }
+                    return ErrorOutput(
+                        type="error",
+                        request_id=payload.request_id,
+                        error=f"ICE candidate failed: {response.status_code}",
+                        detail=response.text,
+                    )
 
-        async def handle_api_request(payload: dict):
+        async def handle_api_request(payload: ApiRequestInput) -> RealtimeOutputMessage:
             """
             Proxy arbitrary API requests to Scope backend.
-
-            Expected payload:
-            {
-                "type": "api",
-                "method": "GET" | "POST" | "PATCH" | "DELETE",
-                "path": "/api/v1/...",
-                "body": {...}  # optional, for POST/PATCH
-                "request_id": "..."  # optional, for correlating responses
-            }
 
             Special handling for file uploads:
             If body contains "_base64_content", it's decoded and sent as binary.
             """
-            import base64
-
-            method = payload.get("method", "GET").upper()
-            path = payload.get("path", "")
-            body = payload.get("body")
-            request_id = payload.get("request_id")
+            method = payload.method.upper()
+            path = payload.path
+            body = payload.body
 
             # Block plugin installation in cloud mode (security: prevent arbitrary code execution)
             if method == "POST" and path == "/api/v1/plugins":
-                return {
-                    "type": "api_response",
-                    "request_id": request_id,
-                    "status": 403,
-                    "error": "Plugin installation is not available in cloud mode",
-                }
+                return ApiResponseOutput(
+                    type="api_response",
+                    request_id=payload.request_id,
+                    status=403,
+                    error="Plugin installation is not available in cloud mode",
+                )
 
             # Inject connection_id into pipeline load requests for event correlation
-            if (
-                method == "POST"
-                and path == "/api/v1/pipeline/load"
-                and isinstance(body, dict)
-            ):
+            if method == "POST" and path == "/api/v1/pipeline/load" and body:
+                body = dict(body)  # Make a copy
                 body["connection_id"] = connection_id
                 body["connection_info"] = connection_info
                 body["user_id"] = user_id
@@ -626,9 +778,7 @@ class ScopeApp(fal.App, keep_alive=300):
             async with httpx.AsyncClient() as client:
                 try:
                     # Check if this is a base64-encoded file upload
-                    is_binary_upload = (
-                        body and isinstance(body, dict) and "_base64_content" in body
-                    )
+                    is_binary_upload = body and "_base64_content" in body
 
                     if method == "GET":
                         # Use longer timeout for potential binary downloads (recordings)
@@ -666,12 +816,12 @@ class ScopeApp(fal.App, keep_alive=300):
                             f"{SCOPE_BASE_URL}{path}", timeout=30.0
                         )
                     else:
-                        return {
-                            "type": "api_response",
-                            "request_id": request_id,
-                            "status": 400,
-                            "error": f"Unsupported method: {method}",
-                        }
+                        return ApiResponseOutput(
+                            type="api_response",
+                            request_id=payload.request_id,
+                            status=400,
+                            error=f"Unsupported method: {method}",
+                        )
 
                     # Check if response is binary (e.g., video/mp4 download)
                     content_type = response.headers.get("content-type", "")
@@ -689,14 +839,17 @@ class ScopeApp(fal.App, keep_alive=300):
                         # Base64 encode binary content for JSON transport
                         binary_content = response.content
                         encoded = base64.b64encode(binary_content).decode("utf-8")
-                        return {
-                            "type": "api_response",
-                            "request_id": request_id,
-                            "status": response.status_code,
-                            "_base64_content": encoded,
-                            "_content_type": content_type,
-                            "_content_length": len(binary_content),
-                        }
+                        # Return as dict to preserve underscore-prefixed fields
+                        return ApiResponseOutput(
+                            type="api_response",
+                            request_id=payload.request_id,
+                            status=response.status_code,
+                            data={
+                                "_base64_content": encoded,
+                                "_content_type": content_type,
+                                "_content_length": len(binary_content),
+                            },
+                        )
 
                     # Try to parse JSON response
                     try:
@@ -704,127 +857,126 @@ class ScopeApp(fal.App, keep_alive=300):
                     except Exception:
                         data = response.text
 
-                    return {
-                        "type": "api_response",
-                        "request_id": request_id,
-                        "status": response.status_code,
-                        "data": data,
-                    }
+                    return ApiResponseOutput(
+                        type="api_response",
+                        request_id=payload.request_id,
+                        status=response.status_code,
+                        data=data,
+                    )
 
                 except httpx.TimeoutException:
-                    return {
-                        "type": "api_response",
-                        "request_id": request_id,
-                        "status": 504,
-                        "error": "Request timeout",
-                    }
+                    return ApiResponseOutput(
+                        type="api_response",
+                        request_id=payload.request_id,
+                        status=504,
+                        error="Request timeout",
+                    )
                 except Exception as e:
-                    return {
-                        "type": "api_response",
-                        "request_id": request_id,
-                        "status": 500,
-                        "error": str(e),
-                    }
-
-        async def handle_message(payload: dict) -> dict | None:
-            """Route message to appropriate handler based on type."""
-            nonlocal user_id
-            msg_type = payload.get("type")
-            request_id = payload.get("request_id")
-
-            # Reject all messages until user_id is set (except set_user_id itself)
-            if user_id is None and msg_type != "set_user_id":
-                print(
-                    f"[{connection_id}] Rejecting message type '{msg_type}' - user_id not set yet"
-                )
-                return None
-
-            if msg_type == "set_user_id":
-                requested_user_id = payload.get("user_id")
-
-                # Validate user has access to cloud mode
-                is_valid, reason = await validate_user_access(requested_user_id)
-                if not is_valid:
-                    print(f"[{log_prefix()}] Access denied: {reason}")
-                    await safe_send_json(
-                        {
-                            "type": "error",
-                            "error": "Access denied",
-                            "code": "ACCESS_DENIED",
-                        }
+                    return ApiResponseOutput(
+                        type="api_response",
+                        request_id=payload.request_id,
+                        status=500,
+                        error=str(e),
                     )
-                    # Small delay to let error message reach client before close
-                    # (close frame often gets lost through proxies)
-                    await ws.close(code=4003, reason="Access denied")
-                    return None
 
-                user_id = requested_user_id
-                print(f"[{log_prefix()}] User ID set, access granted")
-                # Publish websocket connected event with user_id
-                if kafka_publisher and kafka_publisher.is_running:
-                    await kafka_publisher.publish(
-                        "websocket_connected",
-                        {
-                            "user_id": user_id,
-                            "connection_id": connection_id,
-                            "connection_info": connection_info,
-                        },
-                    )
-                return {"type": "user_id_set", "user_id": user_id}
-            elif msg_type == "get_ice_servers":
-                return await handle_get_ice_servers(payload)
-            elif msg_type == "offer":
-                return await handle_offer(payload)
-            elif msg_type == "icecandidate":
-                return await handle_icecandidate(payload)
-            elif msg_type == "api":
-                return await handle_api_request(payload)
-            elif msg_type == "ping":
-                return {"type": "pong", "request_id": request_id}
-            else:
-                return {
-                    "type": "error",
-                    "request_id": request_id,
-                    "error": f"Unknown message type: {msg_type}",
-                }
-
-        # Main message loop
+        # Main message processing loop
         try:
-            while True:
-                try:
-                    # Use timeout on receive to periodically check connection duration
-                    message = await asyncio.wait_for(
-                        ws.receive_text(), timeout=TIMEOUT_CHECK_INTERVAL_SECONDS
+            async for input_msg in inputs:
+                # Check max duration
+                elapsed_seconds = time.time() - connection_start_time
+                if elapsed_seconds >= MAX_CONNECTION_DURATION_SECONDS:
+                    print(
+                        f"[{log_prefix()}] Closing due to max duration ({elapsed_seconds:.0f}s)"
                     )
-                except (asyncio.TimeoutError, TimeoutError):  # noqa: UP041
-                    if await check_max_duration_exceeded():
+                    yield RealtimeOutput(
+                        root=ErrorOutput(
+                            type="error",
+                            error="Max duration exceeded",
+                            code="MAX_DURATION_EXCEEDED",
+                        )
+                    )
+                    break
+
+                # Get the actual message from the RootModel
+                payload = input_msg.root
+
+                # Reject all messages until user_id is set (except set_user_id itself)
+                if user_id is None and not isinstance(payload, SetUserIdInput):
+                    print(
+                        f"[{connection_id}] Rejecting message type '{payload.type}' - user_id not set yet"
+                    )
+                    continue
+
+                # Handle message based on type
+                if isinstance(payload, SetUserIdInput):
+                    # Validate user has access to cloud mode
+                    is_valid, reason = await validate_user_access(payload.user_id)
+                    if not is_valid:
+                        print(f"[{log_prefix()}] Access denied: {reason}")
+                        yield RealtimeOutput(
+                            root=ErrorOutput(
+                                type="error",
+                                error="Access denied",
+                                code="ACCESS_DENIED",
+                            )
+                        )
+                        # Note: With @fal.realtime, we can't close with a custom code
+                        # The connection will close when we stop yielding
                         break
-                    continue
-                except RuntimeError:
-                    break
 
-                # Check duration on each message as well (in case of constant activity)
-                if await check_max_duration_exceeded():
-                    break
+                    user_id = payload.user_id
+                    print(f"[{log_prefix()}] User ID set, access granted")
 
-                try:
-                    payload = json.loads(message)
-                except json.JSONDecodeError as e:
-                    await safe_send_json(
-                        {"type": "error", "error": f"Invalid JSON: {e}"}
+                    # Publish websocket connected event with user_id
+                    if kafka_publisher and kafka_publisher.is_running:
+                        await kafka_publisher.publish(
+                            "websocket_connected",
+                            {
+                                "user_id": user_id,
+                                "connection_id": connection_id,
+                                "connection_info": connection_info,
+                            },
+                        )
+
+                    yield RealtimeOutput(
+                        root=UserIdSetOutput(type="user_id_set", user_id=user_id)
                     )
-                    continue
 
-                # Handle the message
-                response = await handle_message(payload)
-                if response:
-                    await safe_send_json(response)
+                elif isinstance(payload, GetIceServersInput):
+                    result = await handle_get_ice_servers(payload)
+                    yield RealtimeOutput(root=result)
 
-        except WebSocketDisconnect:
-            print(f"[{log_prefix()}] WebSocket disconnected")
+                elif isinstance(payload, OfferInput):
+                    result = await handle_offer(payload)
+                    yield RealtimeOutput(root=result)
+
+                elif isinstance(payload, IceCandidateInput):
+                    result = await handle_icecandidate(payload)
+                    yield RealtimeOutput(root=result)
+
+                elif isinstance(payload, ApiRequestInput):
+                    result = await handle_api_request(payload)
+                    yield RealtimeOutput(root=result)
+
+                elif isinstance(payload, PingInput):
+                    yield RealtimeOutput(
+                        root=PongOutput(type="pong", request_id=payload.request_id)
+                    )
+
+                else:
+                    yield RealtimeOutput(
+                        root=ErrorOutput(
+                            type="error",
+                            error=f"Unknown message type: {getattr(payload, 'type', 'unknown')}",
+                        )
+                    )
+
         except Exception as e:
             print(f"[{log_prefix()}] WebSocket error ({type(e).__name__}): {e}")
-            await safe_send_json({"type": "error", "error": f"{type(e).__name__}: {e}"})
+            yield RealtimeOutput(
+                root=ErrorOutput(type="error", error=f"{type(e).__name__}: {e}")
+            )
+
         finally:
             # Publish websocket disconnected event
             if kafka_publisher and kafka_publisher.is_running:
@@ -857,8 +1009,9 @@ class ScopeApp(fal.App, keep_alive=300):
 # Client usage:
 #   1. Connect to wss://<fal-url>/ws
 #   2. Wait for {"type": "ready"}
-#   3. Send {"type": "get_ice_servers"} to get ICE servers
-#   4. Send {"type": "offer", "sdp": "...", "sdp_type": "offer"} for WebRTC offer
-#   5. Receive {"type": "answer", "sdp": "...", "sessionId": "..."}
-#   6. Exchange ICE candidates via {"type": "icecandidate", "candidate": {...}}
-#   7. For API calls: {"type": "api", "method": "GET", "path": "/api/v1/pipeline/status"}
+#   3. Send {"type": "set_user_id", "user_id": "..."} to authenticate
+#   4. Send {"type": "get_ice_servers"} to get ICE servers
+#   5. Send {"type": "offer", "sdp": "...", "sdp_type": "offer"} for WebRTC offer
+#   6. Receive {"type": "answer", "sdp": "...", "sessionId": "..."}
+#   7. Exchange ICE candidates via {"type": "icecandidate", "candidate": {...}}
+#   8. For API calls: {"type": "api", "method": "GET", "path": "/api/v1/pipeline/status"}
