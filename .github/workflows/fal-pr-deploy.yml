@@ -1,0 +1,168 @@
+name: Deploy PR to fal
+
+on:
+  workflow_run:
+    workflows: ["Build and Push Docker Image"]
+    types:
+      - completed
+
+jobs:
+  deploy-pr:
+    runs-on: ubuntu-latest
+    # Only run for PRs where docker build succeeded
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+
+    outputs:
+      fal_app_id: ${{ steps.deploy.outputs.fal_app_id }}
+      fal_ws_url: ${{ steps.deploy.outputs.fal_ws_url }}
+      pr_number: ${{ steps.pr-info.outputs.pr_number }}
+
+    steps:
+      - name: Get PR info from workflow run
+        id: pr-info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Get the PR number from the workflow run
+            const { data: run } = await github.rest.actions.getWorkflowRun({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: context.payload.workflow_run.id
+            });
+            
+            // Get PR from head SHA
+            const { data: prs } = await github.rest.pulls.list({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              head: `${context.repo.owner}:${run.head_branch}`,
+              state: 'open'
+            });
+            
+            if (prs.length === 0) {
+              core.setFailed('No open PR found for this workflow run');
+              return;
+            }
+            
+            const pr = prs[0];
+            core.setOutput('pr_number', pr.number);
+            core.setOutput('head_sha', run.head_sha);
+            core.setOutput('head_branch', run.head_branch);
+            
+            console.log(`Found PR #${pr.number} (${run.head_branch}) at ${run.head_sha}`);
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.pr-info.outputs.head_sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install fal
+        run: pip install fal
+
+      - name: Deploy to fal (PR environment)
+        id: deploy
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+        run: |
+          PR_NUMBER="${{ steps.pr-info.outputs.pr_number }}"
+          SHORT_SHA=$(echo "${{ steps.pr-info.outputs.head_sha }}" | cut -c1-7)
+          
+          # Create unique app name for this PR
+          APP_NAME="scope-pr-${PR_NUMBER}"
+          
+          echo "Deploying PR #${PR_NUMBER} to fal as ${APP_NAME} with tag ${SHORT_SHA}"
+          
+          # Deploy with PR-specific app name
+          SCOPE_DEPLOY_TAG=$SHORT_SHA fal deploy \
+            --app-name "$APP_NAME" \
+            --auth public \
+            src/scope/cloud/fal_app.py 2>&1 | tee deploy_output.txt
+          
+          # Extract the app ID from deploy output
+          # fal deploy outputs something like: "Deployed to: username/app-name"
+          FAL_APP_ID=$(grep -oP 'Deployed to: \K[^\s]+' deploy_output.txt || echo "")
+          
+          if [ -z "$FAL_APP_ID" ]; then
+            # Fallback: construct from username in FAL_KEY and app name
+            # The FAL_KEY format is typically: <key_id>:<secret>
+            FAL_APP_ID="livepeer/${APP_NAME}"
+          fi
+          
+          FAL_WS_URL="wss://fal.run/${FAL_APP_ID}/ws"
+          
+          echo "fal_app_id=${FAL_APP_ID}" >> $GITHUB_OUTPUT
+          echo "fal_ws_url=${FAL_WS_URL}" >> $GITHUB_OUTPUT
+          
+          echo "✅ Deployed to: ${FAL_APP_ID}"
+          echo "📡 WebSocket URL: ${FAL_WS_URL}"
+
+      - name: Comment on PR with deployment info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ steps.pr-info.outputs.pr_number }};
+            const falAppId = '${{ steps.deploy.outputs.fal_app_id }}';
+            const falWsUrl = '${{ steps.deploy.outputs.fal_ws_url }}';
+            const shortSha = '${{ steps.pr-info.outputs.head_sha }}'.substring(0, 7);
+            
+            const body = `## 🚀 fal.ai Preview Deployment
+            
+            | | |
+            |---|---|
+            | **App ID** | \`${falAppId}\` |
+            | **WebSocket** | \`${falWsUrl}\` |
+            | **Commit** | \`${shortSha}\` |
+            
+            ### Testing
+            Connect to this preview deployment by setting the fal endpoint in your client:
+            \`\`\`
+            FAL_WS_URL=${falWsUrl}
+            \`\`\`
+            
+            🧪 E2E tests will run automatically against this deployment.
+            `;
+            
+            // Check if we already have a deployment comment
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+            
+            const existingComment = comments.find(c => 
+              c.user.type === 'Bot' && 
+              c.body.includes('fal.ai Preview Deployment')
+            );
+            
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body
+              });
+            }
+
+  cleanup-on-merge:
+    runs-on: ubuntu-latest
+    # This job cleans up PR deployments when PRs are closed
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    steps:
+      - name: Note
+        run: |
+          echo "PR deployment cleanup would happen here"
+          echo "fal doesn't have a programmatic delete API yet, so manual cleanup may be needed"
+          echo "Alternatively, PR apps will be replaced on next PR update"
