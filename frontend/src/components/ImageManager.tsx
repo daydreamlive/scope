@@ -77,7 +77,7 @@ export function ImageManager({
 
         {images.map((imagePath, index) => (
           <div
-            key={index}
+            key={imagePath || `image-${index}`}
             className="aspect-square border rounded-lg overflow-hidden relative group"
           >
             <img

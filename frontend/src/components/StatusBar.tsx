@@ -4,16 +4,14 @@ interface StatusBarProps {
   bitrate?: number;
 }
 
-export function StatusBar({ className = "", fps, bitrate }: StatusBarProps) {
-  const MetricItem = ({
-    label,
-    value,
-    unit = "",
-  }: {
-    label: string;
-    value: number | string;
-    unit?: string;
-  }) => (
+interface MetricItemProps {
+  label: string;
+  value: number | string;
+  unit?: string;
+}
+
+function MetricItem({ label, value, unit = "" }: MetricItemProps) {
+  return (
     <div className="flex items-center gap-1 text-xs">
       <span className="font-medium">{label}:</span>
       <span className="font-mono">
@@ -22,7 +20,9 @@ export function StatusBar({ className = "", fps, bitrate }: StatusBarProps) {
       </span>
     </div>
   );
+}
 
+export function StatusBar({ className = "", fps, bitrate }: StatusBarProps) {
   const formatBitrate = (bps?: number): string => {
     if (bps === undefined || bps === 0) return "N/A";
 

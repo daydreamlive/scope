@@ -30,13 +30,12 @@ export function DebouncedSlider({
   className = "",
   debounceMs = 100,
 }: DebouncedSliderProps) {
-  const [localValue, setLocalValue] = useState<number[]>(value);
   const commitTimeoutRef = useRef<number | null>(null);
+  const [localValue, setLocalValue] = useState<number[]>(value);
+  const [isInteracting, setIsInteracting] = useState(false);
 
-  // Sync with external value changes
-  useEffect(() => {
-    setLocalValue(value);
-  }, [value]);
+  // Sync with external value changes only when not actively interacting
+  const displayValue = isInteracting ? localValue : value;
 
   // Cleanup timeout on unmount
   useEffect(() => {
@@ -48,6 +47,7 @@ export function DebouncedSlider({
   }, []);
 
   const handleValueChange = (newValue: number[]) => {
+    setIsInteracting(true);
     setLocalValue(newValue);
     onValueChange(newValue);
 
@@ -59,13 +59,22 @@ export function DebouncedSlider({
 
       commitTimeoutRef.current = setTimeout(() => {
         onValueCommit(newValue);
+        setIsInteracting(false);
+      }, debounceMs);
+    } else {
+      // No commit callback, reset interaction state after debounce
+      if (commitTimeoutRef.current) {
+        clearTimeout(commitTimeoutRef.current);
+      }
+      commitTimeoutRef.current = setTimeout(() => {
+        setIsInteracting(false);
       }, debounceMs);
     }
   };
 
   return (
     <Slider
-      value={localValue}
+      value={displayValue}
       onValueChange={handleValueChange}
       min={min}
       max={max}
