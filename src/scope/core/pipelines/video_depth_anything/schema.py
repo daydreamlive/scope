@@ -20,7 +20,7 @@ class VideoDepthAnythingConfig(BasePipelineConfig):
     estimated_vram_gb = 1.0
     artifacts = [
         HuggingfaceRepoArtifact(
-            repo_id="depth-anything/Video-Depth-Anything-Small",
+            repo_id="daydreamlive/Video-Depth-Anything-Small",
             files=["video_depth_anything_vits.pth"],
         ),
     ]

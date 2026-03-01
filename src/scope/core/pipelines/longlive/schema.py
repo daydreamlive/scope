@@ -34,7 +34,7 @@ class LongLiveConfig(BasePipelineConfig):
         TAE_ARTIFACT,
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
-            repo_id="Efficient-Large-Model/LongLive-1.3B",
+            repo_id="daydreamlive/LongLive-1.3B",
             files=["models/longlive_base.pt", "models/lora.pt"],
         ),
     ]

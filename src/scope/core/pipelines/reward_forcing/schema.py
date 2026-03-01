@@ -33,7 +33,7 @@ class RewardForcingConfig(BasePipelineConfig):
         TAE_ARTIFACT,
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
-            repo_id="JaydenLu666/Reward-Forcing-T2V-1.3B",
+            repo_id="daydreamlive/Reward-Forcing-T2V-1.3B",
             files=["rewardforcing.pt"],
         ),
     ]

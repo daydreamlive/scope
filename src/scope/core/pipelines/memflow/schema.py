@@ -34,7 +34,7 @@ class MemFlowConfig(BasePipelineConfig):
         TAE_ARTIFACT,
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
-            repo_id="KlingTeam/MemFlow",
+            repo_id="daydreamlive/MemFlow",
             files=["base.pt", "lora.pt"],
         ),
     ]
