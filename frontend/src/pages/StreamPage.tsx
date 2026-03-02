@@ -10,6 +10,7 @@ import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { LogPanel } from "../components/LogPanel";
 import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
+import { useTempoSync } from "../hooks/useTempoSync";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
@@ -264,6 +265,19 @@ export function StreamPage() {
     pipelineInfo,
   } = usePipeline();
 
+  // Tempo sync
+  const {
+    tempoState,
+    sources: tempoSources,
+    loading: tempoLoading,
+    error: tempoError,
+    enable: enableTempoSync,
+    disable: disableTempoSync,
+    setSessionTempo: setTempoSessionBpm,
+    fetchSources: refreshTempoSources,
+    updateFromNotification: updateTempoFromNotification,
+  } = useTempoSync();
+
   // WebRTC for streaming (unified hook works in both local and cloud modes)
   const {
     remoteStream,
@@ -275,7 +289,9 @@ export function StreamPage() {
     updateVideoTrack,
     sendParameterUpdate,
     sessionId,
-  } = useUnifiedWebRTC();
+  } = useUnifiedWebRTC({
+    onTempoUpdate: updateTempoFromNotification,
+  });
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
   const isLoading =
@@ -1833,6 +1849,14 @@ export function StreamPage() {
             }}
             isCloudMode={isCloudMode}
             onOpenLoRAsSettings={() => setOpenSettingsTab("loras")}
+            tempoState={tempoState}
+            tempoSources={tempoSources}
+            tempoLoading={tempoLoading}
+            tempoError={tempoError}
+            onTempoEnable={enableTempoSync}
+            onTempoDisable={disableTempoSync}
+            onTempoSetBpm={setTempoSessionBpm}
+            onTempoRefreshSources={refreshTempoSources}
           />
         </div>
       </div>

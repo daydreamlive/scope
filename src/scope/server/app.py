@@ -96,6 +96,10 @@ from .schema import (
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
+    TempoEnableRequest,
+    TempoSetTempoRequest,
+    TempoSourcesResponse,
+    TempoStatusResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
@@ -259,6 +263,8 @@ server_start_time = time.time()
 cloud_connection_manager = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
 kafka_publisher = None
+# Global tempo sync manager instance
+tempo_sync = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -280,10 +286,16 @@ async def lifespan(app: FastAPI):
 
     from .cloud_connection import CloudConnectionManager
     from .pipeline_manager import PipelineManager
+    from .tempo_sync import TempoSync
     from .webrtc import WebRTCManager
 
     # Startup
-    global webrtc_manager, pipeline_manager, cloud_connection_manager, kafka_publisher
+    global \
+        webrtc_manager, \
+        pipeline_manager, \
+        cloud_connection_manager, \
+        kafka_publisher, \
+        tempo_sync
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -320,6 +332,9 @@ async def lifespan(app: FastAPI):
 
     webrtc_manager = WebRTCManager()
     logger.info("WebRTC manager initialized")
+
+    tempo_sync = TempoSync()
+    logger.info("Tempo sync manager initialized")
 
     cloud_connection_manager = CloudConnectionManager()
     logger.info("Cloud connection manager initialized")
@@ -367,6 +382,11 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down cloud connection...")
         await cloud_connection_manager.disconnect()
         logger.info("Cloud connection shutdown complete")
+
+    if tempo_sync:
+        logger.info("Shutting down tempo sync...")
+        await tempo_sync.stop()
+        logger.info("Tempo sync shutdown complete")
 
     if kafka_publisher:
         logger.info("Shutting down Kafka publisher...")
@@ -692,7 +712,9 @@ async def handle_webrtc_offer(
                 detail="Pipeline not loaded. Please load pipeline first.",
             )
 
-        return await webrtc_manager.handle_offer(request, pipeline_manager)
+        return await webrtc_manager.handle_offer(
+            request, pipeline_manager, tempo_sync=tempo_sync
+        )
 
     except HTTPException:
         raise
@@ -2203,6 +2225,84 @@ async def reload_plugin(
             status_code=500,
             detail=f"Failed to reload {name}. Check server logs for details.",
         ) from e
+
+
+# =============================================================================
+# Tempo Sync Endpoints
+# =============================================================================
+
+
+def get_tempo_sync():
+    """Dependency to get TempoSync manager instance."""
+    return tempo_sync
+
+
+@app.get("/api/v1/tempo/status", response_model=TempoStatusResponse)
+async def get_tempo_status():
+    """Get current tempo sync status including beat state."""
+    if tempo_sync is None:
+        return TempoStatusResponse(enabled=False, beats_per_bar=4)
+    status = tempo_sync.get_status()
+    return TempoStatusResponse(**status)
+
+
+@app.post("/api/v1/tempo/enable", response_model=TempoStatusResponse)
+async def enable_tempo(request: TempoEnableRequest):
+    """Enable tempo synchronization with the specified source."""
+    if tempo_sync is None:
+        raise HTTPException(status_code=500, detail="Tempo sync not initialized")
+
+    try:
+        await tempo_sync.enable(
+            source_type=request.source,
+            bpm=request.bpm,
+            midi_device=request.midi_device,
+            beats_per_bar=request.beats_per_bar,
+        )
+    except ImportError as e:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Required dependency not installed: {e}",
+        ) from e
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+
+    status = tempo_sync.get_status()
+    return TempoStatusResponse(**status)
+
+
+@app.post("/api/v1/tempo/disable", response_model=TempoStatusResponse)
+async def disable_tempo():
+    """Disable tempo synchronization."""
+    if tempo_sync is None:
+        raise HTTPException(status_code=500, detail="Tempo sync not initialized")
+
+    await tempo_sync.disable()
+    status = tempo_sync.get_status()
+    return TempoStatusResponse(**status)
+
+
+@app.post("/api/v1/tempo/set_tempo", response_model=TempoStatusResponse)
+async def set_tempo(request: TempoSetTempoRequest):
+    """Set the session tempo (BPM). Only supported by some sources (e.g. Link)."""
+    if tempo_sync is None:
+        raise HTTPException(status_code=500, detail="Tempo sync not initialized")
+    if not tempo_sync.enabled:
+        raise HTTPException(status_code=400, detail="Tempo sync is not enabled")
+    try:
+        tempo_sync.set_tempo(request.bpm)
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    status = tempo_sync.get_status()
+    return TempoStatusResponse(**status)
+
+
+@app.get("/api/v1/tempo/sources", response_model=TempoSourcesResponse)
+async def get_tempo_sources():
+    """Get available tempo sources and their capabilities."""
+    if tempo_sync is None:
+        return TempoSourcesResponse(sources={})
+    return TempoSourcesResponse(sources=tempo_sync.get_available_sources())
 
 
 # =============================================================================

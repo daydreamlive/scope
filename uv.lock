@@ -12,6 +12,28 @@ resolution-markers = [
 overrides = [{ name = "nvidia-cudnn-cu12", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = ">=9.15" }]
 
 [[package]]
+name = "aalink"
+version = "0.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3b/f5/f3679b57ea4f6f81248aba731fdbc619ec2004d2f426c175d3bb75c3376a/aalink-0.1.1.tar.gz", hash = "sha256:95ff76e2a771a6c3f8547be0306cb83a4e5829cacba5e25465a3860603e32e2d", size = 5563688, upload-time = "2025-07-11T17:51:48.817Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/3e/18/98d8f9c39ca7ecb008baed87155b42125d6734da36e21e1356d5477f313c/aalink-0.1.1-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:45c2dff2b72704f7dace2b91cf51e87c7d8e01baf575ec5f6d3e10b3fd4b2e0a", size = 188932, upload-time = "2025-07-11T17:51:07.939Z" },
+    { url = "https://files.pythonhosted.org/packages/26/cc/39bf3ca4ee3268fbce123dfcae6c4edff67af11ed7ba06f8f52c70cc0d40/aalink-0.1.1-cp312-cp312-macosx_11_0_x86_64.whl", hash = "sha256:664e97fe483616c281ab57c806fe78f8668cbd4cddcfaafc872c21e47b4a410d", size = 201525, upload-time = "2025-07-11T17:51:09.446Z" },
+    { url = "https://files.pythonhosted.org/packages/1b/5a/32db40f48544136eb680bed7875c678d1271837de3c8a2f72d16ed3d6a2e/aalink-0.1.1-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:0c1d673ccfa729b5ee040f2d8899693734dba63007c2dcf2ad41454aac5580c0", size = 242206, upload-time = "2025-07-11T17:51:10.79Z" },
+    { url = "https://files.pythonhosted.org/packages/fa/60/63146ca4a0bf368d007163aeb74d378b3be4935448836b568c6716c900a3/aalink-0.1.1-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:71e73d1e2180b955020b35bbdea15bcbeefee3a1d5fc71b30b22bcd7114d8e0b", size = 250442, upload-time = "2025-07-11T17:51:12.194Z" },
+    { url = "https://files.pythonhosted.org/packages/93/83/7ac5c75430b4426694f14a23718ee3adf8038462f02edded45e5c50c5f12/aalink-0.1.1-cp312-cp312-musllinux_1_2_aarch64.whl", hash = "sha256:980c358a347b337869fb19f6014d1a814b1c528b73fbde7544f7be94f858649b", size = 1183018, upload-time = "2025-07-11T17:51:14.396Z" },
+    { url = "https://files.pythonhosted.org/packages/cd/33/e81c9dffcb00e01ac2a42f35ada3d8eb76b650ad7274b4a5e82d44171089/aalink-0.1.1-cp312-cp312-musllinux_1_2_x86_64.whl", hash = "sha256:fb0396eb8f5a78f21d26a43917a866b76fc015223da38da9edcd294b500b2442", size = 1244609, upload-time = "2025-07-11T17:51:16.583Z" },
+    { url = "https://files.pythonhosted.org/packages/2c/df/6ff581e94f3b13c1ea3abc3a3c51c7acf40717cca97222310555bd01b4c0/aalink-0.1.1-cp312-cp312-win_amd64.whl", hash = "sha256:62601fba676ab18031866baccebc9e4bb01d7d2ddd0c021092d1b425ba2902c8", size = 186016, upload-time = "2025-07-11T17:51:18.754Z" },
+    { url = "https://files.pythonhosted.org/packages/a2/29/0859345f16aa01cec82c04816f2c9c18b85bc6d3e697a300ee2cba84e3bf/aalink-0.1.1-cp313-cp313-macosx_11_0_arm64.whl", hash = "sha256:c2481a669206b78a484ba6d1c97337818fea079ea59b015b9010b2c8b8681dde", size = 189009, upload-time = "2025-07-11T17:51:19.992Z" },
+    { url = "https://files.pythonhosted.org/packages/bb/34/41558c4e32a583dcdbb294cfc560d3a804690d0288aae687a420318ec5af/aalink-0.1.1-cp313-cp313-macosx_11_0_x86_64.whl", hash = "sha256:0d70051590a179561be8e3fd36c4ff1912ff62db11e46688821da5c1dcfbafb8", size = 201650, upload-time = "2025-07-11T17:51:21.121Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/3c/5faa8f0790c8b56bfdc17382f82f7e2e11d71fce7b9f741e65fab50a8aeb/aalink-0.1.1-cp313-cp313-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:9ada970f4d9660222f495ff90297a1d94ea75a2f5b957ff3f5942b959fb88269", size = 242275, upload-time = "2025-07-11T17:51:22.583Z" },
+    { url = "https://files.pythonhosted.org/packages/3e/8c/1c46251e50678c3c864c0bc776a72834ad5100958d1f4c9697a5374240d0/aalink-0.1.1-cp313-cp313-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:6df58518f5ae550a94ccb1d582a30e7ba02aeb17037540e31ebc6e5ed38879da", size = 250273, upload-time = "2025-07-11T17:51:23.74Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/d4/757d010afbca3127d9d6d9fc8d6e2921c19d5e5825bc1911736aad89a48e/aalink-0.1.1-cp313-cp313-musllinux_1_2_aarch64.whl", hash = "sha256:83a69c2ee393b9c6f401faf101a14e9bc092f3a76d37980451ea7388092385bd", size = 1183244, upload-time = "2025-07-11T17:51:25.735Z" },
+    { url = "https://files.pythonhosted.org/packages/c0/96/5e83fa60b64ca6281e19c24580d1b7d43a106612c443fc57b5e3a54e1c2d/aalink-0.1.1-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:43ce2566210ca2e5911b0eda2e97a6edcff554c90e12a1c5577afd4b7d656a65", size = 1244466, upload-time = "2025-07-11T17:51:27.456Z" },
+    { url = "https://files.pythonhosted.org/packages/5f/0d/b8a6ad951df0e9600ebd9d643ef291d141d5eb9a0741ca911bbe60c4b2a1/aalink-0.1.1-cp313-cp313-win_amd64.whl", hash = "sha256:ef27169fd1121196da7519966d5405e589e32e631ca9bdb7e27db03c11ae5bb6", size = 185987, upload-time = "2025-07-11T17:51:28.692Z" },
+]
+
+[[package]]
 name = "accelerate"
 version = "1.12.0"
 source = { registry = "https://pypi.org/simple" }
@@ -564,6 +586,13 @@ dependencies = [
 kafka = [
     { name = "aiokafka" },
 ]
+link = [
+    { name = "aalink" },
+]
+midi = [
+    { name = "mido" },
+    { name = "python-rtmidi" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -578,6 +607,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "aalink", marker = "extra == 'link'", specifier = ">=0.1.1" },
     { name = "accelerate", specifier = ">=1.1.1" },
     { name = "aiohttp", specifier = ">=3.9.0" },
     { name = "aiokafka", marker = "extra == 'kafka'", specifier = ">=0.10.0" },
@@ -594,10 +624,12 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.25.0" },
     { name = "kernels", specifier = ">=0.10.4" },
     { name = "lmdb", specifier = ">=1.7.3" },
+    { name = "mido", marker = "extra == 'midi'", specifier = ">=1.3.0" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "peft", specifier = ">=0.17.1" },
     { name = "pluggy", specifier = ">=1.5.0" },
     { name = "pyopengl", marker = "sys_platform == 'win32'", specifier = ">=3.1.10" },
+    { name = "python-rtmidi", marker = "extra == 'midi'", specifier = ">=1.5.0" },
     { name = "safetensors", specifier = ">=0.6.2" },
     { name = "sageattention", marker = "sys_platform == 'linux'", url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl" },
     { name = "sageattention", marker = "sys_platform == 'win32'", url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl" },
@@ -614,7 +646,7 @@ requires-dist = [
     { name = "twilio", specifier = ">=9.8.0" },
     { name = "uvicorn", specifier = ">=0.35.0" },
 ]
-provides-extras = ["kafka"]
+provides-extras = ["kafka", "link", "midi"]
 
 [package.metadata.requires-dev]
 dev = [
@@ -1276,6 +1308,18 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/d6/54/cfe61301667036ec958cb99bd3efefba235e65cdeb9c84d24a8293ba1d90/mdurl-0.1.2.tar.gz", hash = "sha256:bb413d29f5eea38f31dd4754dd7377d4465116fb207585f97bf925588687c1ba", size = 8729, upload-time = "2022-08-14T12:40:10.846Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/b3/38/89ba8ad64ae25be8de66a6d463314cf1eb366222074cfda9ee839c56a4b4/mdurl-0.1.2-py3-none-any.whl", hash = "sha256:84008a41e51615a49fc9966191ff91509e3c40b939176e643fd50a5c2196b8f8", size = 9979, upload-time = "2022-08-14T12:40:09.779Z" },
+]
+
+[[package]]
+name = "mido"
+version = "1.3.3"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "packaging" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/23/14/cfda3fe61ce4c0f50a9f707ae02b46cb53211732b2cd4522bf06272848f4/mido-1.3.3.tar.gz", hash = "sha256:1aecb30b7f282404f17e43768cbf74a6a31bf22b3b783bdd117a1ce9d22cb74c", size = 124288, upload-time = "2024-10-25T15:05:21.847Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fd/28/45deb15c11859d2f10702b32e71de9328a9fa494f989626916db39a9617f/mido-1.3.3-py3-none-any.whl", hash = "sha256:01033c9b10b049e4436fca2762194ca839b09a4334091dd3c34e7f4ae674fd8a", size = 54614, upload-time = "2024-10-25T15:05:20.349Z" },
 ]
 
 [[package]]
@@ -2154,6 +2198,19 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/66/c0/0c8b6ad9f17a802ee498c46e004a0eb49bc148f2fd230864601a86dcf6db/python-dateutil-2.9.0.post0.tar.gz", hash = "sha256:37dd54208da7e1cd875388217d5e00ebd4179249f90fb72437e91a35459a0ad3", size = 342432, upload-time = "2024-03-01T18:36:20.211Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/ec/57/56b9bcc3c9c6a792fcbaf139543cee77261f3651ca9da0c93f5c1221264b/python_dateutil-2.9.0.post0-py2.py3-none-any.whl", hash = "sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427", size = 229892, upload-time = "2024-03-01T18:36:18.57Z" },
+]
+
+[[package]]
+name = "python-rtmidi"
+version = "1.5.8"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/dd/ee/0f91965dcc471714c69df21e5ca3d94dc81411b7dee2d31ff1184bea07c9/python_rtmidi-1.5.8.tar.gz", hash = "sha256:7f9ade68b068ae09000ecb562ae9521da3a234361ad5449e83fc734544d004fa", size = 368130, upload-time = "2023-11-20T21:55:02.192Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/51/27/887b0378e0a907489a07bdeb808fa5ed349675245c6ee14d9f6d00304f96/python_rtmidi-1.5.8-cp312-cp312-macosx_10_9_x86_64.whl", hash = "sha256:5443634597eb340cdec0734f76267a827c2d366f00a6f9195141c78828016ac2", size = 158861, upload-time = "2023-11-20T21:54:39.549Z" },
+    { url = "https://files.pythonhosted.org/packages/4d/ec/57cecde253daab896ce53778520cd41eb062641862ebdb0ee6f97511b1d9/python_rtmidi-1.5.8-cp312-cp312-macosx_11_0_arm64.whl", hash = "sha256:29d9c9d9f82ce679fecad7bb4cb79f3a24574ea84600e377194b4cc1baacec0e", size = 153416, upload-time = "2023-11-20T21:54:40.835Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/5b/dc19c53d9d512b74dc2cca3725591cc612b9465645695a0696352a8c8b54/python_rtmidi-1.5.8-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:25f5a5db7be98911c41ca5bebb262fcf9a7c89600b88fd3c207ceafd3101e721", size = 305696, upload-time = "2023-11-20T21:54:42.037Z" },
+    { url = "https://files.pythonhosted.org/packages/f6/92/5a60f56dfb2740e644e932233928947423cd2101895319b331f84527eb31/python_rtmidi-1.5.8-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:cec30924e305f55284594ccf35a71dee7216fd308dfa2dec1b3ed03e6f243803", size = 315579, upload-time = "2023-11-20T21:54:43.339Z" },
+    { url = "https://files.pythonhosted.org/packages/93/46/6af077d262f521ea2bf1ab60b8aad72f34fe6dd55af739176605369d449c/python_rtmidi-1.5.8-cp312-cp312-win_amd64.whl", hash = "sha256:052c89933cae4fca354012d8ca7248f4f9e1e3f062471409d48415a7f7d7e59e", size = 129755, upload-time = "2023-11-20T21:54:44.935Z" },
 ]
 
 [[package]]

@@ -39,6 +39,14 @@ interface InitialParameters {
 interface UseUnifiedWebRTCOptions {
   /** Callback function called when the stream stops on the backend */
   onStreamStop?: () => void;
+  /** Callback for tempo sync updates from the backend */
+  onTempoUpdate?: (data: {
+    bpm: number;
+    beat_phase: number;
+    bar_position: number;
+    beat_count: number;
+    is_playing: boolean;
+  }) => void;
 }
 
 /**
@@ -178,6 +186,10 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
               }
 
               options?.onStreamStop?.();
+            }
+
+            if (data.type === "tempo_update") {
+              options?.onTempoUpdate?.(data);
             }
           } catch (error) {
             console.error(
