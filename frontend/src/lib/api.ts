@@ -905,107 +905,93 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   URL.revokeObjectURL(url);
 };
 
-// ---------------------------------------------------------------------------
-// Workflow
-// ---------------------------------------------------------------------------
+// =============================================================================
+// Tempo Sync API
+// =============================================================================
 
-export const resolveWorkflow = async (
-  workflow: ScopeWorkflow
-): Promise<WorkflowResolutionPlan> => {
-  const response = await fetch("/api/v1/workflow/resolve", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(workflow),
-  });
+export interface TempoStatusResponse {
+  enabled: boolean;
+  source: { type: string; num_peers?: number } | null;
+  beats_per_bar: number;
+  beat_state: {
+    bpm: number;
+    beat_phase: number;
+    bar_position: number;
+    beat_count: number;
+    is_playing: boolean;
+    source: string;
+  } | null;
+}
+
+export interface TempoSourcesResponse {
+  sources: Record<
+    string,
+    {
+      available: boolean;
+      name: string;
+      devices?: string[];
+      install_hint?: string;
+    }
+  >;
+}
+
+export interface TempoEnableRequest {
+  source: "link" | "midi_clock";
+  midi_device?: string;
+  bpm?: number;
+  beats_per_bar?: number;
+}
+
+export const getTempoStatus = async (): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/status");
   if (!response.ok) {
-    const detail = await extractErrorDetail(response);
-    throw new Error(detail);
+    throw new Error(`Failed to get tempo status: ${response.statusText}`);
   }
   return response.json();
 };
 
-export const downloadLoRA = async (
-  request: LoRADownloadRequest
-): Promise<LoRADownloadResult> => {
-  const response = await fetch("/api/v1/lora/download", {
+export const enableTempo = async (
+  request: TempoEnableRequest
+): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/enable", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request),
   });
   if (!response.ok) {
-    const detail = await extractErrorDetail(response);
-    throw new Error(detail);
+    const errorText = await response.text();
+    throw new Error(`Failed to enable tempo: ${errorText}`);
   }
   return response.json();
 };
 
-// ---------------------------------------------------------------------------
-// OSC settings
-// ---------------------------------------------------------------------------
-
-export interface OscSettingsRequest {
-  log_all_messages: boolean;
-}
-
-export interface OscStatusResponse {
-  enabled: boolean;
-  listening: boolean;
-  port: number | null;
-  host: string | null;
-  log_all_messages: boolean;
-}
-
-export const updateOscSettings = async (
-  settings: OscSettingsRequest
-): Promise<OscStatusResponse> => {
-  const response = await fetch("/api/v1/osc/settings", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(settings),
+export const disableTempo = async (): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/disable", {
+    method: "POST",
   });
+  if (!response.ok) {
+    throw new Error(`Failed to disable tempo: ${response.statusText}`);
+  }
+  return response.json();
+};
 
+export const setTempo = async (bpm: number): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/set_tempo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bpm }),
+  });
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(
-      `Update OSC settings failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
+    throw new Error(`Failed to set tempo: ${errorText}`);
   }
-
   return response.json();
 };
 
-// ---------------------------------------------------------------------------
-// Daydream API – workflow import from community hub
-// ---------------------------------------------------------------------------
-
-const DAYDREAM_API_BASE =
-  (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
-  "https://api.daydream.live";
-
-export const fetchDaydreamWorkflow = async (
-  workflowId: string
-): Promise<ScopeWorkflow> => {
-  const response = await fetch(
-    `${DAYDREAM_API_BASE}/v1/workflows/${encodeURIComponent(workflowId)}`
-  );
+export const getTempoSources = async (): Promise<TempoSourcesResponse> => {
+  const response = await fetch("/api/v1/tempo/sources");
   if (!response.ok) {
-    const detail = await extractErrorDetail(response);
-    throw new Error(`Failed to fetch workflow: ${detail}`);
+    throw new Error(`Failed to get tempo sources: ${response.statusText}`);
   }
-  const data = await response.json();
-
-  const workflow: ScopeWorkflow | undefined = data.workflowData;
-  if (
-    !workflow ||
-    workflow.format !== "scope-workflow" ||
-    !workflow.metadata?.name ||
-    !Array.isArray(workflow.pipelines) ||
-    workflow.pipelines.length === 0
-  ) {
-    throw new Error(
-      "The fetched workflow is missing required data (workflowData, metadata, or pipelines)."
-    );
-  }
-
-  return workflow;
+  return response.json();
 };
