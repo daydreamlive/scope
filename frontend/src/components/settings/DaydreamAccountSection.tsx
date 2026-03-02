@@ -209,6 +209,8 @@ export function DaydreamAccountSection({
             <span className="text-sm font-medium">Remote Inference</span>
           </div>
           <Switch
+            data-testid="cloud-toggle"
+            aria-label="Remote Inference"
             checked={status.connected || status.connecting}
             onCheckedChange={handleToggle}
             disabled={disabled || !isSignedIn || isDisconnecting}
