@@ -161,17 +161,13 @@ jobs:
 
           echo "Deploying PR #${PR_NUMBER} to fal as ${APP_NAME} with tag ${SHORT_SHA}"
 
+          set -o pipefail
           SCOPE_DEPLOY_TAG=$SHORT_SHA fal deploy \
             --app-name "$APP_NAME" \
             --auth public \
             src/scope/cloud/fal_app.py 2>&1 | tee deploy_output.txt
 
-          FAL_APP_ID=$(grep -oP 'Deployed to: \K[^\s]+' deploy_output.txt || echo "")
-
-          if [ -z "$FAL_APP_ID" ]; then
-            FAL_APP_ID="daydream/${APP_NAME}"
-          fi
-
+          FAL_APP_ID="daydream/${APP_NAME}"
           FAL_WS_URL="wss://fal.run/${FAL_APP_ID}/ws"
 
           echo "fal_app_id=${FAL_APP_ID}" >> $GITHUB_OUTPUT
@@ -283,7 +279,7 @@ jobs:
           SCOPE_CLOUD_APP_ID: ${{ needs.deploy-pr.outputs.fal_app_id }}
         run: |
           echo "Starting Scope with cloud app ID: $SCOPE_CLOUD_APP_ID"
-          uv run daydream-scope &
+          uv run daydream-scope > /tmp/scope-app.log 2>&1 &
 
           echo "Waiting for localhost:8000 to be ready..."
           MAX_ATTEMPTS=60
@@ -322,6 +318,14 @@ jobs:
         with:
           name: test-artifacts-pr-${{ needs.build-and-push.outputs.pr_number }}
           path: e2e/test-results/
+          retention-days: 30
+
+      - name: Upload Scope app logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scope-app-logs-pr-${{ needs.build-and-push.outputs.pr_number }}
+          path: /tmp/scope-app.log
           retention-days: 30
 
       - name: Comment test results on PR

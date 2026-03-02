@@ -8,7 +8,7 @@ the cloud response; otherwise it runs the wrapped handler (local logic).
 Handlers that need custom cloud behavior (e.g. WebRTC relay, ICE servers)
 should not use this decorator and keep explicit if cloud_manager.is_connected
 branches. Recording download is supported via a path callable and
-_base64_content response handling.
+base64_content response handling.
 """
 
 from __future__ import annotations
@@ -73,8 +73,8 @@ async def _proxy_to_cloud(
         )
 
     # Binary response: cloud returned base64-encoded content (e.g. recording download)
-    if "_base64_content" in response:
-        content = base64.b64decode(response["_base64_content"])
+    if "base64_content" in response:
+        content = base64.b64decode(response["base64_content"])
         media_type = response.get("media_type", "video/mp4")
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = response.get("filename", f"recording-{timestamp}.mp4")
@@ -164,8 +164,8 @@ async def upload_asset_to_cloud(
         method="POST",
         path=f"/api/v1/assets?filename={filename}",
         body={
-            "_base64_content": base64_content,
-            "_content_type": content_type,
+            "base64_content": base64_content,
+            "binary_content_type": content_type,
         },
         timeout=60.0,
     )
