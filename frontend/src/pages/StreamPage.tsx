@@ -3,6 +3,7 @@ import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
+import { OutputsPanel } from "../components/OutputsPanel";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
@@ -1721,9 +1722,20 @@ export function StreamPage() {
         </div>
 
         {/* Right Panel - Settings */}
-        <div className="w-1/5 flex flex-col gap-3">
+        <div className="w-1/5 flex flex-col gap-3 min-h-0">
+          {(spoutAvailable || ndiOutputAvailable || syphonOutputAvailable) && (
+            <OutputsPanel
+              className="flex-shrink-0"
+              outputSinks={settings.outputSinks}
+              onOutputSinkChange={handleOutputSinkChange}
+              spoutAvailable={spoutAvailable}
+              ndiAvailable={ndiOutputAvailable}
+              syphonAvailable={syphonOutputAvailable}
+              isStreaming={isStreaming}
+            />
+          )}
           <SettingsPanel
-            className="flex-1 min-h-0 overflow-auto"
+            className="flex-1 min-h-0"
             pipelines={pipelines}
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
@@ -1768,11 +1780,6 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-            outputSinks={settings.outputSinks}
-            onOutputSinkChange={handleOutputSinkChange}
-            spoutAvailable={spoutAvailable}
-            ndiAvailable={ndiOutputAvailable}
-            syphonAvailable={syphonOutputAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&
