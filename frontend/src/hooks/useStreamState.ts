@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type {
   SystemMetrics,
   StreamStatus,
@@ -212,11 +212,16 @@ export function useStreamState() {
         ) {
           const firstPipelineId = availablePipelines[0] as PipelineId;
           const firstPipelineSchema = schemas.pipelines[firstPipelineId];
+          const nextMode =
+            prev.inputMode &&
+            firstPipelineSchema.supported_modes.includes(prev.inputMode)
+              ? prev.inputMode
+              : firstPipelineSchema.default_mode;
 
           return {
             ...prev,
             pipelineId: firstPipelineId,
-            inputMode: firstPipelineSchema.default_mode,
+            inputMode: nextMode,
           };
         }
         return prev;
@@ -278,7 +283,11 @@ export function useStreamState() {
             setSettings(prev => ({
               ...prev,
               pipelineId: firstPipelineId,
-              inputMode: firstPipelineSchema.default_mode,
+              inputMode:
+                prev.inputMode &&
+                firstPipelineSchema.supported_modes.includes(prev.inputMode)
+                  ? prev.inputMode
+                  : firstPipelineSchema.default_mode,
             }));
           }
         } else {
@@ -319,25 +328,35 @@ export function useStreamState() {
     getInputSources,
   ]);
 
-  // Track previous pipelineId so we only reset inputMode when the pipeline actually changes
-  const prevPipelineIdRef = useRef<string | null>(null);
-
-  // Update inputMode when schemas first load or pipeline changes
+  // Keep input mode stable across pipeline/schema changes.
+  // Only normalize to schema default when the current mode is missing or unsupported.
   useEffect(() => {
-    if (pipelineSchemas) {
-      const schema = pipelineSchemas.pipelines[settings.pipelineId];
-      if (
-        schema?.default_mode &&
-        prevPipelineIdRef.current !== settings.pipelineId
-      ) {
-        setSettings(prev => ({
+    if (!pipelineSchemas) return;
+    const schema = pipelineSchemas.pipelines[settings.pipelineId];
+    if (!schema) return;
+
+    const currentMode = settings.inputMode;
+    const currentModeIsValid =
+      currentMode !== undefined && schema.supported_modes.includes(currentMode);
+
+    if (!currentModeIsValid) {
+      setSettings(prev => {
+        const currentSchema = pipelineSchemas.pipelines[prev.pipelineId];
+        if (!currentSchema) return prev;
+
+        const prevMode = prev.inputMode;
+        const prevModeIsValid =
+          prevMode !== undefined &&
+          currentSchema.supported_modes.includes(prevMode);
+
+        if (prevModeIsValid) return prev;
+        return {
           ...prev,
-          inputMode: schema.default_mode,
-        }));
-      }
-      prevPipelineIdRef.current = settings.pipelineId;
+          inputMode: currentSchema.default_mode,
+        };
+      });
     }
-  }, [pipelineSchemas, settings.pipelineId]);
+  }, [pipelineSchemas, settings.pipelineId, settings.inputMode]);
 
   // Set recommended quantization based on pipeline schema and available VRAM
   useEffect(() => {

@@ -406,8 +406,10 @@ export function StreamPage() {
     }
 
     const newPipeline = pipelines?.[pipelineId];
-    const modeToUse = newPipeline?.defaultMode || "text";
     const currentMode = settings.inputMode || "text";
+    const modeToUse = newPipeline?.supportedModes?.includes(currentMode)
+      ? currentMode
+      : (newPipeline?.defaultMode ?? "text");
 
     // Trigger video reinitialization if switching to video mode
     if (modeToUse === "video" && currentMode !== "video") {
@@ -440,6 +442,14 @@ export function StreamPage() {
         ? capResolution(customVideoResolution, pipelineId, modeToUse)
         : { height: defaults.height, width: defaults.width };
 
+    // Clear pre/postprocessors that don't support the selected mode
+    const preprocessorStillValid = settings.preprocessorIds?.every(id =>
+      pipelines?.[id]?.supportedModes?.includes(modeToUse)
+    );
+    const postprocessorStillValid = settings.postprocessorIds?.every(id =>
+      pipelines?.[id]?.supportedModes?.includes(modeToUse)
+    );
+
     // Update the pipeline in settings with the appropriate mode and defaults
     updateSettings({
       pipelineId,
@@ -449,8 +459,12 @@ export function StreamPage() {
       noiseScale: defaults.noiseScale,
       noiseController: defaults.noiseController,
       loras: [], // Clear LoRA controls when switching pipelines
-      preprocessorSchemaFieldOverrides: {},
-      postprocessorSchemaFieldOverrides: {},
+      ...(preprocessorStillValid
+        ? {}
+        : { preprocessorIds: [], preprocessorSchemaFieldOverrides: {} }),
+      ...(postprocessorStillValid
+        ? {}
+        : { postprocessorIds: [], postprocessorSchemaFieldOverrides: {} }),
     });
   };
 
