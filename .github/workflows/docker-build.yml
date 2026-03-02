@@ -167,13 +167,7 @@ jobs:
             --auth public \
             src/scope/cloud/fal_app.py 2>&1 | tee deploy_output.txt
 
-          FAL_APP_ID=$(grep -oP 'Deployed to: \K[^\s]+' deploy_output.txt || true)
-
-          if [ -z "$FAL_APP_ID" ]; then
-            echo "::error::Failed to extract app ID from fal deploy output"
-            exit 1
-          fi
-
+          FAL_APP_ID="daydream/${APP_NAME}"
           FAL_WS_URL="wss://fal.run/${FAL_APP_ID}/ws"
 
           echo "fal_app_id=${FAL_APP_ID}" >> $GITHUB_OUTPUT
