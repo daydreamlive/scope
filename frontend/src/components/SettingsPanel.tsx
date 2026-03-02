@@ -1238,6 +1238,156 @@ export function SettingsPanel({
           );
         })()}
 
+        {/* Spout Output */}
+        {spoutAvailable && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label="Spout Output"
+                tooltip="Send video to Spout-compatible apps (Windows) like TouchDesigner, Resolume, OBS."
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={outputSinks?.spout?.enabled ?? false}
+                onPressedChange={enabled => {
+                  onOutputSinkChange?.("spout", {
+                    enabled,
+                    name: outputSinks?.spout?.name ?? "ScopeOut",
+                  });
+                }}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {outputSinks?.spout?.enabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {outputSinks?.spout?.enabled && (
+              <div className="flex items-center gap-3">
+                <LabelWithTooltip
+                  label="Sender Name"
+                  tooltip="The name visible to Spout receivers."
+                  className="text-xs text-muted-foreground whitespace-nowrap"
+                />
+                <Input
+                  type="text"
+                  value={outputSinks?.spout?.name ?? "ScopeOut"}
+                  onChange={e => {
+                    onOutputSinkChange?.("spout", {
+                      enabled: outputSinks?.spout?.enabled ?? false,
+                      name: e.target.value,
+                    });
+                  }}
+                  disabled={isStreaming}
+                  className="h-8 text-sm flex-1"
+                  placeholder="ScopeOut"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* NDI Output */}
+        {ndiAvailable && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.ndiSender.label}
+                tooltip={PARAMETER_METADATA.ndiSender.tooltip}
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={outputSinks?.ndi?.enabled ?? false}
+                onPressedChange={enabled => {
+                  onOutputSinkChange?.("ndi", {
+                    enabled,
+                    name: outputSinks?.ndi?.name ?? "Scope",
+                  });
+                }}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {outputSinks?.ndi?.enabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {outputSinks?.ndi?.enabled && (
+              <div className="flex items-center gap-3">
+                <LabelWithTooltip
+                  label="Sender Name"
+                  tooltip="The name visible to NDI receivers on the network."
+                  className="text-xs text-muted-foreground whitespace-nowrap"
+                />
+                <Input
+                  type="text"
+                  value={outputSinks?.ndi?.name ?? "Scope"}
+                  onChange={e => {
+                    onOutputSinkChange?.("ndi", {
+                      enabled: outputSinks?.ndi?.enabled ?? false,
+                      name: e.target.value,
+                    });
+                  }}
+                  disabled={isStreaming}
+                  className="h-8 text-sm flex-1"
+                  placeholder="Scope"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Syphon Output */}
+        {syphonAvailable && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.syphonSender.label}
+                tooltip={PARAMETER_METADATA.syphonSender.tooltip}
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={outputSinks?.syphon?.enabled ?? false}
+                onPressedChange={enabled => {
+                  onOutputSinkChange?.("syphon", {
+                    enabled,
+                    name: outputSinks?.syphon?.name ?? "Scope",
+                  });
+                }}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {outputSinks?.syphon?.enabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {outputSinks?.syphon?.enabled && (
+              <div className="flex items-center gap-3">
+                <LabelWithTooltip
+                  label="Sender Name"
+                  tooltip="The name visible to Syphon receivers on this Mac."
+                  className="text-xs text-muted-foreground whitespace-nowrap"
+                />
+                <Input
+                  type="text"
+                  value={outputSinks?.syphon?.name ?? "Scope"}
+                  onChange={e => {
+                    onOutputSinkChange?.("syphon", {
+                      enabled: outputSinks?.syphon?.enabled ?? false,
+                      name: e.target.value,
+                    });
+                  }}
+                  disabled={isStreaming}
+                  className="h-8 text-sm flex-1"
+                  placeholder="Scope"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Tempo Sync */}
         {tempoState && onTempoEnable && onTempoDisable && (
           <TempoSyncSection

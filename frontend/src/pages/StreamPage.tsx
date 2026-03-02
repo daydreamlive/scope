@@ -447,65 +447,6 @@ export function StreamPage() {
     onTempoUpdate: updateTempoFromNotification,
   });
 
-  // Wrapper for sendParameterUpdate that also syncs frontend state
-  const sendParameterUpdate = useCallback(
-    (params: Record<string, unknown>) => {
-      // Send to backend via WebRTC
-      sendParameterUpdateWebRTC(params);
-
-      // Also update frontend state for known parameters
-      const settingsUpdate: Partial<SettingsState> = {};
-
-      if (params.noise_scale !== undefined) {
-        settingsUpdate.noiseScale = params.noise_scale as number;
-      }
-      if (params.noise_controller !== undefined) {
-        settingsUpdate.noiseController = params.noise_controller as boolean;
-      }
-      if (params.manage_cache !== undefined) {
-        settingsUpdate.manageCache = params.manage_cache as boolean;
-      }
-      if (params.kv_cache_attention_bias !== undefined) {
-        settingsUpdate.kvCacheAttentionBias =
-          params.kv_cache_attention_bias as number;
-      }
-      if (params.vace_context_scale !== undefined) {
-        settingsUpdate.vaceContextScale = params.vace_context_scale as number;
-      }
-
-      // Sync any remaining params to schemaFieldOverrides (for plugin parameters)
-      const knownKeys = new Set([
-        "noise_scale",
-        "noise_controller",
-        "manage_cache",
-        "kv_cache_attention_bias",
-        "vace_context_scale",
-        "denoising_step_list",
-        "reset_cache",
-        "paused",
-        "prompts",
-      ]);
-      const overrideUpdates: Record<string, unknown> = {};
-      for (const [k, v] of Object.entries(params)) {
-        if (!knownKeys.has(k)) {
-          overrideUpdates[k] = v;
-        }
-      }
-      if (Object.keys(overrideUpdates).length > 0) {
-        settingsUpdate.schemaFieldOverrides = {
-          ...(settings.schemaFieldOverrides ?? {}),
-          ...overrideUpdates,
-        };
-      }
-
-      // Update settings if any mappings were found
-      if (Object.keys(settingsUpdate).length > 0) {
-        updateSettings(settingsUpdate);
-      }
-    },
-    [sendParameterUpdateWebRTC, updateSettings, settings]
-  );
-
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
   const isLoading =
     isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
