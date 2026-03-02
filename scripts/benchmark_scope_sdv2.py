@@ -19,13 +19,25 @@ from scope.core.config import get_model_file_path, get_models_dir
 from scope.core.pipelines.streamdiffusionv2.pipeline import StreamDiffusionV2Pipeline
 from scope.core.pipelines.video import load_video
 
+# Resolve repo root from scripts/ directory
+REPO_ROOT = Path(__file__).resolve().parent.parent
+SDV2_DIR = REPO_ROOT / "src" / "scope" / "core" / "pipelines" / "streamdiffusionv2"
+DEFAULT_VIDEO = SDV2_DIR / "assets" / "original.mp4"
+MODEL_YAML = SDV2_DIR / "model.yaml"
+
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--height", type=int, default=480)
     parser.add_argument("--width", type=int, default=832)
     parser.add_argument("--warmup", type=int, default=3)
+    parser.add_argument("--video", type=str, default=None, help="Path to input video")
     args = parser.parse_args()
+
+    video_path = Path(args.video) if args.video else DEFAULT_VIDEO
+    if not video_path.exists():
+        print(f"Video not found: {video_path}")
+        return
 
     torch.set_grad_enabled(False)
 
@@ -43,10 +55,7 @@ def main():
             "tokenizer_path": str(
                 get_model_file_path("Wan2.1-T2V-1.3B/google/umt5-xxl")
             ),
-            "model_config": OmegaConf.load(
-                Path(__file__).parent
-                / "../src/scope/core/pipelines/streamdiffusionv2/model.yaml"
-            ),
+            "model_config": OmegaConf.load(str(MODEL_YAML)),
             "height": args.height,
             "width": args.width,
         }
@@ -59,9 +68,8 @@ def main():
     print(f"Loaded in {time.perf_counter() - t0:.1f}s")
 
     # Load video
-    video_path = "C:/_dev/StreamDiffusionV2/examples/original.mp4"
     input_video = (
-        load_video(video_path, resize_hw=(args.height, args.width))
+        load_video(str(video_path), resize_hw=(args.height, args.width))
         .unsqueeze(0)
         .to("cuda", torch.bfloat16)
     )
