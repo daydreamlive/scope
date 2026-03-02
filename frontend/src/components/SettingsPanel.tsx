@@ -323,6 +323,7 @@ interface SettingsPanelProps {
   ) => void;
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
+  syphonAvailable?: boolean;
   // VACE settings
   vaceEnabled?: boolean;
   onVaceEnabledChange?: (enabled: boolean) => void;
@@ -394,6 +395,7 @@ export function SettingsPanel({
   onOutputSinkChange,
   spoutAvailable = false,
   ndiAvailable = false,
+  syphonAvailable = false,
   vaceEnabled = true,
   onVaceEnabledChange,
   vaceUseInputVideo = true,
@@ -1287,6 +1289,56 @@ export function SettingsPanel({
                   onChange={e => {
                     onOutputSinkChange?.("ndi", {
                       enabled: outputSinks?.ndi?.enabled ?? false,
+                      name: e.target.value,
+                    });
+                  }}
+                  disabled={isStreaming}
+                  className="h-8 text-sm flex-1"
+                  placeholder="Scope"
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Syphon Output */}
+        {syphonAvailable && (
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.syphonSender.label}
+                tooltip={PARAMETER_METADATA.syphonSender.tooltip}
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={outputSinks?.syphon?.enabled ?? false}
+                onPressedChange={enabled => {
+                  onOutputSinkChange?.("syphon", {
+                    enabled,
+                    name: outputSinks?.syphon?.name ?? "Scope",
+                  });
+                }}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {outputSinks?.syphon?.enabled ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+
+            {outputSinks?.syphon?.enabled && (
+              <div className="flex items-center gap-3">
+                <LabelWithTooltip
+                  label="Sender Name"
+                  tooltip="The name visible to Syphon receivers on this Mac."
+                  className="text-xs text-muted-foreground whitespace-nowrap"
+                />
+                <Input
+                  type="text"
+                  value={outputSinks?.syphon?.name ?? "Scope"}
+                  onChange={e => {
+                    onOutputSinkChange?.("syphon", {
+                      enabled: outputSinks?.syphon?.enabled ?? false,
                       name: e.target.value,
                     });
                   }}

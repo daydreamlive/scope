@@ -22,6 +22,9 @@ jobs:
     permissions:
       contents: read
       packages: write
+    outputs:
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      pr_number: ${{ steps.meta.outputs.pr_number }}
 
     steps:
       - name: Checkout code
@@ -58,6 +61,17 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set build metadata
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "short_sha=$(echo '${{ github.event.pull_request.head.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
+            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "short_sha=$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
+            echo "pr_number=" >> $GITHUB_OUTPUT
+          fi
 
       - name: Set image tag
         id: tag
@@ -107,3 +121,256 @@ jobs:
             org.opencontainers.image.licenses=MIT
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy-pr:
+    needs: build-and-push
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    outputs:
+      fal_app_id: ${{ steps.deploy.outputs.fal_app_id }}
+      fal_ws_url: ${{ steps.deploy.outputs.fal_ws_url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install fal
+        run: pip install fal
+
+      - name: Deploy to fal (PR environment)
+        id: deploy
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+        run: |
+          PR_NUMBER="${{ needs.build-and-push.outputs.pr_number }}"
+          SHORT_SHA="${{ needs.build-and-push.outputs.short_sha }}"
+
+          APP_NAME="scope-pr-${PR_NUMBER}"
+
+          echo "Deploying PR #${PR_NUMBER} to fal as ${APP_NAME} with tag ${SHORT_SHA}"
+
+          SCOPE_DEPLOY_TAG=$SHORT_SHA fal deploy \
+            --app-name "$APP_NAME" \
+            --auth public \
+            src/scope/cloud/fal_app.py 2>&1 | tee deploy_output.txt
+
+          FAL_APP_ID=$(grep -oP 'Deployed to: \K[^\s]+' deploy_output.txt || echo "")
+
+          if [ -z "$FAL_APP_ID" ]; then
+            FAL_APP_ID="daydream/${APP_NAME}"
+          fi
+
+          FAL_WS_URL="wss://fal.run/${FAL_APP_ID}/ws"
+
+          echo "fal_app_id=${FAL_APP_ID}" >> $GITHUB_OUTPUT
+          echo "fal_ws_url=${FAL_WS_URL}" >> $GITHUB_OUTPUT
+
+          echo "Deployed to: ${FAL_APP_ID}"
+          echo "WebSocket URL: ${FAL_WS_URL}"
+
+      - name: Comment on PR with deployment info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ github.event.pull_request.number }};
+            const falAppId = '${{ steps.deploy.outputs.fal_app_id }}';
+            const falWsUrl = '${{ steps.deploy.outputs.fal_ws_url }}';
+            const shortSha = '${{ needs.build-and-push.outputs.short_sha }}';
+
+            const body = `## 🚀 fal.ai Preview Deployment
+
+            | | |
+            |---|---|
+            | **App ID** | \`${falAppId}\` |
+            | **WebSocket** | \`${falWsUrl}\` |
+            | **Commit** | \`${shortSha}\` |
+
+            ### Testing
+            Connect to this preview deployment by setting the fal endpoint in your client:
+            \`\`\`
+            FAL_WS_URL=${falWsUrl}
+            \`\`\`
+
+            🧪 E2E tests will run automatically against this deployment.
+            `;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+
+            const existingComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('fal.ai Preview Deployment')
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body
+              });
+            }
+
+  e2e-test:
+    needs: deploy-pr
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install E2E test dependencies
+        working-directory: e2e
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Build Scope app
+        env:
+          VITE_DAYDREAM_API_KEY: ${{ secrets.DAYDREAM_API_KEY }}
+        run: |
+          echo "Building Scope with API key auth..."
+          uv run build
+
+      - name: Start Scope app
+        env:
+          SCOPE_CLOUD_APP_ID: ${{ needs.deploy-pr.outputs.fal_app_id }}
+        run: |
+          echo "Starting Scope with cloud app ID: $SCOPE_CLOUD_APP_ID"
+          uv run daydream-scope &
+
+          echo "Waiting for localhost:8000 to be ready..."
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            if curl -s http://localhost:8000 > /dev/null 2>&1; then
+              echo "App is ready at localhost:8000"
+              break
+            fi
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS - waiting..."
+            sleep 2
+          done
+
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "App did not start in time"
+            exit 1
+          fi
+
+      - name: Run Playwright tests
+        working-directory: e2e
+        run: npx playwright test
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-pr-${{ needs.build-and-push.outputs.pr_number }}
+          path: e2e/playwright-report/
+          retention-days: 30
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-artifacts-pr-${{ needs.build-and-push.outputs.pr_number }}
+          path: e2e/test-results/
+          retention-days: 30
+
+      - name: Comment test results on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ github.event.pull_request.number }};
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const conclusion = '${{ job.status }}';
+
+            const statusEmoji = conclusion === 'success' ? '✅' : '❌';
+            const statusText = conclusion === 'success' ? 'passed' : 'failed';
+
+            const body = `## ${statusEmoji} E2E Tests ${statusText}
+
+            | | |
+            |---|---|
+            | **Status** | ${statusText} |
+            | **fal App** | \`${{ needs.deploy-pr.outputs.fal_app_id }}\` |
+            | **Run** | [View logs](${runUrl}) |
+
+            ### Test Artifacts
+            Check the workflow run for screenshots${conclusion !== 'success' ? ', traces, and failure details' : ''}.
+            `;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+
+            const existingComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('E2E Tests')
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body
+              });
+            }

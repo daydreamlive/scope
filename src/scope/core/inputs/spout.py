@@ -1,4 +1,4 @@
-"""Spout/Syphon input source implementation."""
+"""Spout input source implementation (Windows)."""
 
 import logging
 from typing import ClassVar
@@ -11,16 +11,16 @@ logger = logging.getLogger(__name__)
 
 
 class SpoutInputSource(InputSource):
-    """Input source that receives video frames via Spout (Windows) or Syphon (macOS).
+    """Input source that receives video frames via Spout on Windows.
 
     Wraps the existing SpoutReceiver from scope.server.spout.
     Requires SpoutGL to be installed (pip install SpoutGL pyopengl).
     """
 
     source_id: ClassVar[str] = "spout"
-    source_name: ClassVar[str] = "Spout/Syphon"
+    source_name: ClassVar[str] = "Spout"
     source_description: ClassVar[str] = (
-        "Receive video frames from Spout (Windows) or Syphon (macOS) senders "
+        "Receive video frames from Spout senders on Windows "
         "like TouchDesigner, Resolume, OBS, etc."
     )
 

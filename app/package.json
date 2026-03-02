@@ -1,7 +1,7 @@
 {
   "name": "daydream-scope-desktop",
   "productName": "Daydream Scope",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "Daydream Scope",
   "main": ".vite/build/main.js",
   "scripts": {
@@ -37,6 +37,7 @@
     "url": "https://github.com/daydreamlive/scope.git"
   },
   "devDependencies": {
+    "@electron/notarize": "^2.5.0",
     "@testing-library/react": "^16.1.0",
     "@types/node": "^22.10.2",
     "@types/react": "^19.1.10",

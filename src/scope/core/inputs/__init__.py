@@ -34,6 +34,13 @@ def get_input_source_classes() -> dict[str, type[InputSource]]:
     except Exception:
         pass
 
+    try:
+        from .syphon import SyphonInputSource
+
+        sources[SyphonInputSource.source_id] = SyphonInputSource
+    except Exception:
+        pass
+
     return sources
 
 

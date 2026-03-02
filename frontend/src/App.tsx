@@ -5,7 +5,11 @@ import { PipelinesProvider } from "./contexts/PipelinesContext";
 import { LoRAsProvider } from "./contexts/LoRAsContext";
 import { CloudProvider } from "./lib/cloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
-import { handleOAuthCallback, initElectronAuthListener } from "./lib/auth";
+import {
+  handleOAuthCallback,
+  initElectronAuthListener,
+  initEnvKeyAuth,
+} from "./lib/auth";
 import { toast } from "sonner";
 import "./index.css";
 
@@ -41,15 +45,18 @@ function App() {
       }
     );
 
-    // Handle OAuth callback on mount (for browser flow)
+    // Handle OAuth callback on mount (for browser flow), then try env key auth
     handleOAuthCallback()
-      .then(handled => {
+      .then(async handled => {
         if (handled) {
           setAuthResult({ type: "success" });
+          return;
         }
+        // No OAuth callback — bootstrap auth from env API key if set
+        await initEnvKeyAuth();
       })
       .catch(error => {
-        console.error("OAuth callback error:", error);
+        console.error("Auth initialization error:", error);
         setAuthResult({
           type: "error",
           message: error instanceof Error ? error.message : "Please try again.",
