@@ -24,17 +24,30 @@ export function sendLoRAScaleUpdates(
   loadedAdapters: LoadedAdapter[] | undefined,
   sendUpdate: (params: { lora_scales: LoRAScaleData[] }) => void
 ): void {
-  if (!loras || !loadedAdapters) {
+  if (!loras) {
     return;
   }
 
-  // Build set of loaded paths for efficient lookup
-  const loadedPaths = new Set(loadedAdapters.map(adapter => adapter.path));
-
-  // Filter to only include LoRAs that are actually loaded
-  const lora_scales = loras
-    .filter(lora => loadedPaths.has(lora.path))
+  // Build path->scale updates from configured LoRAs (ignore incomplete entries).
+  const configuredScales = loras
+    .filter(lora => Boolean(lora.path))
     .map(lora => ({ path: lora.path, scale: lora.scale }));
+
+  if (configuredScales.length === 0) {
+    return;
+  }
+
+  // Prefer filtering by backend-reported loaded adapters when available.
+  // If this metadata is missing/stale (common immediately after load),
+  // fall back to sending configured scales so updates are not silently dropped.
+  let lora_scales = configuredScales;
+  if (loadedAdapters && loadedAdapters.length > 0) {
+    const loadedPaths = new Set(loadedAdapters.map(adapter => adapter.path));
+    const filtered = configuredScales.filter(lora => loadedPaths.has(lora.path));
+    if (filtered.length > 0) {
+      lora_scales = filtered;
+    }
+  }
 
   if (lora_scales.length > 0) {
     sendUpdate({ lora_scales });
