@@ -1,13 +1,14 @@
 /**
- * TypeScript types and API wrappers for the workflow export/import/validate/apply
- * endpoints, plus the LoRA download endpoint.
+ * TypeScript types and API wrappers for the workflow validate/apply endpoints,
+ * plus the LoRA download endpoint.
  *
  * Types mirror the backend Pydantic models in:
  *   - scope.core.workflows.schema
  *   - scope.core.workflows.resolve
  *   - scope.core.workflows.apply
  *   - scope.server.lora_downloader
- *   - scope.server.app (request models)
+ *
+ * Export is handled entirely client-side (see workflowSettings.ts).
  */
 
 // ---------------------------------------------------------------------------
@@ -118,29 +119,6 @@ export interface ApplyResult {
 }
 
 // ---------------------------------------------------------------------------
-// Export request types (scope.server.app)
-// ---------------------------------------------------------------------------
-
-export interface ExportLoRAInput {
-  path: string;
-  scale: number;
-  merge_mode?: string | null;
-}
-
-export interface ExportPipelineInput {
-  pipeline_id: string;
-  params: Record<string, unknown>;
-  loras: ExportLoRAInput[];
-}
-
-export interface WorkflowExportRequest {
-  name: string;
-  pipelines: ExportPipelineInput[];
-  lora_merge_mode: string;
-  timeline?: WorkflowTimeline | null;
-}
-
-// ---------------------------------------------------------------------------
 // Apply request type (scope.server.app)
 // ---------------------------------------------------------------------------
 
@@ -196,12 +174,6 @@ async function postJson<T>(
 // ---------------------------------------------------------------------------
 // API functions
 // ---------------------------------------------------------------------------
-
-export function exportWorkflow(
-  request: WorkflowExportRequest
-): Promise<ScopeWorkflow> {
-  return postJson("/api/v1/workflow/export", request, "Export");
-}
 
 export function validateWorkflow(
   workflow: ScopeWorkflow

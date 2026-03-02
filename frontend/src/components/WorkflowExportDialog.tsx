@@ -14,14 +14,11 @@ import { toast } from "sonner";
 import type { SettingsState } from "../types";
 import type { TimelinePrompt } from "./PromptTimeline";
 import type { WorkflowPromptState } from "../lib/workflowSettings";
-import {
-  buildExportPipelines,
-  getExportMergeMode,
-  buildWorkflowTimeline,
-  annotateWorkflowRoles,
-  annotateWorkflowPromptState,
-} from "../lib/workflowSettings";
-import { exportWorkflow } from "../lib/workflowApi";
+import { buildScopeWorkflow } from "../lib/workflowSettings";
+import { listPlugins, getServerInfo } from "../lib/api";
+import type { PluginInfo } from "../lib/api";
+import { usePipelinesContext } from "../contexts/PipelinesContext";
+import { useLoRAsContext } from "../contexts/LoRAsContext";
 
 interface WorkflowExportDialogProps {
   open: boolean;
@@ -40,23 +37,32 @@ export function WorkflowExportDialog({
 }: WorkflowExportDialogProps) {
   const [name, setName] = useState("Untitled Workflow");
   const [exporting, setExporting] = useState(false);
+  const { pipelines } = usePipelinesContext();
+  const { loraFiles } = useLoRAsContext();
 
   const handleExport = async () => {
     setExporting(true);
     try {
-      const pipelines = buildExportPipelines(settings);
-      const loraMergeMode = getExportMergeMode(settings);
-      const timeline = buildWorkflowTimeline(timelinePrompts);
+      // Fetch plugin info and scope version on demand
+      const [pluginResponse, serverInfo] = await Promise.all([
+        listPlugins(),
+        getServerInfo(),
+      ]);
 
-      const workflow = await exportWorkflow({
+      const pluginInfoMap = new Map<string, PluginInfo>(
+        pluginResponse.plugins.map(p => [p.name, p])
+      );
+
+      const workflow = buildScopeWorkflow({
         name,
-        pipelines,
-        lora_merge_mode: loraMergeMode,
-        timeline,
+        settings,
+        timelinePrompts,
+        promptState,
+        pipelineInfoMap: pipelines ?? {},
+        loraFiles,
+        pluginInfoMap,
+        scopeVersion: serverInfo.version,
       });
-
-      annotateWorkflowRoles(workflow, settings);
-      annotateWorkflowPromptState(workflow, promptState);
 
       // Download as JSON file
       const blob = new Blob([JSON.stringify(workflow, null, 2)], {

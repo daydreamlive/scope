@@ -340,11 +340,22 @@ export const fetchCurrentLogs = async (): Promise<string> => {
   return logsText;
 };
 
+export interface LoRAProvenance {
+  source: "huggingface" | "civitai" | "url" | "local";
+  repo_id?: string | null;
+  hf_filename?: string | null;
+  model_id?: string | null;
+  version_id?: string | null;
+  url?: string | null;
+}
+
 export interface LoRAFileInfo {
   name: string;
   path: string;
   size_mb: number;
   folder?: string | null;
+  sha256?: string | null;
+  provenance?: LoRAProvenance | null;
 }
 
 export interface LoRAFilesResponse {

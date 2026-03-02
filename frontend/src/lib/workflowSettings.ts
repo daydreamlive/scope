@@ -1,20 +1,26 @@
 /**
  * Bidirectional mapping between the frontend SettingsState and the
- * workflow export/import API types.
+ * ScopeWorkflow schema.
  *
- * Export direction: SettingsState -> ExportPipelineInput[] + WorkflowTimeline
+ * Export direction: SettingsState -> ScopeWorkflow (built entirely client-side)
  * Import direction: ScopeWorkflow -> partial SettingsState + TimelinePrompt[]
  */
 
-import type { SettingsState, LoRAConfig, LoraMergeStrategy } from "../types";
-import type { TimelinePrompt } from "../components/PromptTimeline";
-import type { PromptItem } from "./api";
 import type {
-  ExportPipelineInput,
-  ExportLoRAInput,
+  SettingsState,
+  LoRAConfig,
+  LoraMergeStrategy,
+  PipelineInfo,
+} from "../types";
+import type { TimelinePrompt } from "../components/PromptTimeline";
+import type { PromptItem, LoRAFileInfo, PluginInfo } from "./api";
+import type {
+  WorkflowPipeline,
+  WorkflowPipelineSource,
+  WorkflowLoRA,
+  WorkflowLoRAProvenance,
   WorkflowTimeline,
   WorkflowTimelineEntry,
-  WorkflowPipeline,
   ScopeWorkflow,
 } from "./workflowApi";
 
@@ -78,34 +84,87 @@ const KNOWN_PARAMS = new Set([
 ]);
 
 // ---------------------------------------------------------------------------
-// Export: SettingsState -> ExportPipelineInput[]
+// Export helpers (private)
 // ---------------------------------------------------------------------------
 
-/**
- * Build the list of ExportPipelineInput objects from the current settings.
- *
- * Produces the full pipeline chain: preprocessors, then the main pipeline,
- * then postprocessors. The backend's `build_workflow` will filter params
- * against each pipeline's config schema.
- */
-export function buildExportPipelines(
-  settings: SettingsState
-): ExportPipelineInput[] {
-  const result: ExportPipelineInput[] = [];
+/** Extract just the filename from a full file path. */
+function extractFilename(path: string): string {
+  const parts = path.split(/[/\\]/);
+  return parts[parts.length - 1] || path;
+}
 
-  // --- Preprocessors ---
-  for (const id of settings.preprocessorIds ?? []) {
-    result.push({
-      pipeline_id: id,
-      params: { ...(settings.preprocessorSchemaFieldOverrides?.[id] ?? {}) },
-      loras: [],
-    });
+/** Determine the pipeline source (builtin vs plugin). */
+function buildPipelineSource(
+  pipelineId: string,
+  pipelineInfoMap: Record<string, PipelineInfo>,
+  pluginInfoMap: Map<string, PluginInfo>
+): WorkflowPipelineSource {
+  const info = pipelineInfoMap[pipelineId];
+  if (!info?.pluginName) {
+    return { type: "builtin" };
   }
 
-  // --- Main pipeline ---
+  const plugin = pluginInfoMap.get(info.pluginName);
+  if (!plugin) {
+    return { type: "builtin" };
+  }
+
+  return {
+    type: plugin.source,
+    plugin_name: plugin.name,
+    plugin_version: plugin.version ?? null,
+    package_spec: plugin.package_spec ?? null,
+  };
+}
+
+/** Convert LoRAConfig[] to WorkflowLoRA[] with sha256/provenance enrichment. */
+function buildWorkflowLoRAs(
+  loraConfigs: LoRAConfig[],
+  loraFiles: LoRAFileInfo[],
+  mergeStrategy: string
+): WorkflowLoRA[] {
+  return loraConfigs.map(lora => {
+    // Try to find the matching LoRA file for enrichment.
+    // Match on full path first, then fall back to stem name comparison.
+    const filename = extractFilename(lora.path);
+    const matched =
+      loraFiles.find(f => f.path === lora.path) ??
+      loraFiles.find(
+        f => extractFilename(f.path).toLowerCase() === filename.toLowerCase()
+      );
+
+    const result: WorkflowLoRA = {
+      id: lora.id,
+      filename,
+      weight: lora.scale,
+      merge_mode: lora.mergeMode ?? mergeStrategy,
+    };
+
+    if (matched?.sha256) {
+      result.sha256 = matched.sha256;
+    }
+    if (matched?.provenance) {
+      const p = matched.provenance;
+      const prov: WorkflowLoRAProvenance = { source: p.source };
+      if (p.repo_id != null) prov.repo_id = p.repo_id;
+      if (p.hf_filename != null) prov.hf_filename = p.hf_filename;
+      if (p.model_id != null) prov.model_id = p.model_id;
+      if (p.version_id != null) prov.version_id = p.version_id;
+      if (p.url != null) prov.url = p.url;
+      result.provenance = prov;
+    }
+
+    return result;
+  });
+}
+
+/** Extract main pipeline params from SettingsState using PARAM_MAPPINGS. */
+function buildMainPipelineParams(
+  settings: SettingsState
+): Record<string, unknown> {
   const params: Record<string, unknown> = {};
 
-  // Resolution (compound mapping, handled separately)
+  // Resolution (compound mapping)
   if (settings.resolution) {
     params.height = settings.resolution.height;
     params.width = settings.resolution.width;
@@ -124,36 +183,110 @@ export function buildExportPipelines(
     Object.assign(params, settings.schemaFieldOverrides);
   }
 
-  // LoRAs
-  const loras: ExportLoRAInput[] = (settings.loras ?? []).map(l => ({
-    path: l.path,
-    scale: l.scale,
-    ...(l.mergeMode ? { merge_mode: l.mergeMode } : {}),
-  }));
+  return params;
+}
 
-  result.push({
-    pipeline_id: settings.pipelineId,
-    params,
-    loras,
-  });
+// ---------------------------------------------------------------------------
+// Export: Build the complete ScopeWorkflow client-side
+// ---------------------------------------------------------------------------
 
-  // --- Postprocessors ---
-  for (const id of settings.postprocessorIds ?? []) {
-    result.push({
-      pipeline_id: id,
-      params: { ...(settings.postprocessorSchemaFieldOverrides?.[id] ?? {}) },
-      loras: [],
-    });
-  }
-
-  return result;
+export interface BuildScopeWorkflowInput {
+  name: string;
+  settings: SettingsState;
+  timelinePrompts: TimelinePrompt[];
+  promptState: WorkflowPromptState;
+  pipelineInfoMap: Record<string, PipelineInfo>;
+  loraFiles: LoRAFileInfo[];
+  pluginInfoMap: Map<string, PluginInfo>;
+  scopeVersion: string;
 }
 
 /**
- * Get the LoRA merge mode string for the export request.
+ * Assemble the full ScopeWorkflow entirely client-side.
+ *
+ * Enrichment data comes from:
+ * - pipelineInfoMap: cached PipelinesContext (version, pluginName)
+ * - loraFiles: cached LoRAsContext (sha256, provenance)
+ * - pluginInfoMap: fetched on-demand via listPlugins()
+ * - scopeVersion: fetched on-demand via getServerInfo()
  */
-export function getExportMergeMode(settings: SettingsState): string {
-  return settings.loraMergeStrategy ?? "permanent_merge";
+export function buildScopeWorkflow(
+  input: BuildScopeWorkflowInput
+): ScopeWorkflow {
+  const {
+    name,
+    settings,
+    timelinePrompts,
+    promptState,
+    pipelineInfoMap,
+    loraFiles,
+    pluginInfoMap,
+    scopeVersion,
+  } = input;
+
+  const mergeStrategy = settings.loraMergeStrategy ?? "permanent_merge";
+
+  // --- Build pipeline list ---
+  const pipelines: WorkflowPipeline[] = [];
+
+  // Preprocessors
+  for (const id of settings.preprocessorIds ?? []) {
+    pipelines.push({
+      pipeline_id: id,
+      pipeline_version: pipelineInfoMap[id]?.version ?? null,
+      source: buildPipelineSource(id, pipelineInfoMap, pluginInfoMap),
+      loras: [],
+      params: { ...(settings.preprocessorSchemaFieldOverrides?.[id] ?? {}) },
+      role: "preprocessor",
+    });
+  }
+
+  // Main pipeline
+  pipelines.push({
+    pipeline_id: settings.pipelineId,
+    pipeline_version: pipelineInfoMap[settings.pipelineId]?.version ?? null,
+    source: buildPipelineSource(
+      settings.pipelineId,
+      pipelineInfoMap,
+      pluginInfoMap
+    ),
+    loras: buildWorkflowLoRAs(settings.loras ?? [], loraFiles, mergeStrategy),
+    params: buildMainPipelineParams(settings),
+    role: "main",
+  });
+
+  // Postprocessors
+  for (const id of settings.postprocessorIds ?? []) {
+    pipelines.push({
+      pipeline_id: id,
+      pipeline_version: pipelineInfoMap[id]?.version ?? null,
+      source: buildPipelineSource(id, pipelineInfoMap, pluginInfoMap),
+      loras: [],
+      params: { ...(settings.postprocessorSchemaFieldOverrides?.[id] ?? {}) },
+      role: "postprocessor",
+    });
+  }
+
+  // --- Build timeline ---
+  const timeline = buildWorkflowTimeline(timelinePrompts);
+
+  // --- Assemble workflow ---
+  const workflow: ScopeWorkflow = {
+    format: "scope-workflow",
+    format_version: "1.0",
+    metadata: {
+      name,
+      created_at: new Date().toISOString(),
+      scope_version: scopeVersion,
+    },
+    pipelines,
+    timeline,
+  };
+
+  // Annotate prompt state
+  annotateWorkflowPromptState(workflow, promptState);
+
+  return workflow;
 }
 
 // ---------------------------------------------------------------------------

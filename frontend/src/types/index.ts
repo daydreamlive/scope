@@ -110,6 +110,7 @@ export interface PipelineInfo {
   about: string;
   projectUrl?: string;
   docsUrl?: string;
+  version?: string;
   modified?: boolean;
   defaultPrompt?: string;
   estimatedVram?: number;
