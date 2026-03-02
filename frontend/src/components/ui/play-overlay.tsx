@@ -6,6 +6,8 @@ interface PlayOverlayProps {
   size?: "sm" | "md" | "lg";
   className?: string;
   variant?: "default" | "themed";
+  "data-testid"?: string;
+  "aria-label"?: string;
 }
 
 const sizeClasses = {
@@ -32,14 +34,22 @@ export function PlayOverlay({
   size = "lg",
   className = "",
   variant = "default",
+  "data-testid": dataTestId,
+  "aria-label": ariaLabel,
 }: PlayOverlayProps) {
   const sizes = sizeClasses[size];
+  const a11yProps = {
+    role: onClick ? ("button" as const) : undefined,
+    "aria-label": ariaLabel ?? (isPlaying ? "Pause" : "Play"),
+    "data-testid": dataTestId,
+  };
 
   if (variant === "themed") {
     return (
       <div
         className={`${sizes.circle} rounded-full border-2 border-input bg-background hover:bg-accent transition-colors flex items-center justify-center cursor-pointer shadow-lg ${className}`}
         onClick={onClick}
+        {...a11yProps}
       >
         {isPlaying ? (
           <Pause className={`${sizes.icon} text-foreground`} />
@@ -55,6 +65,7 @@ export function PlayOverlay({
     <div
       className={`bg-black/50 rounded-full ${sizes.padding} transition-colors hover:bg-black/60 cursor-pointer ${className}`}
       onClick={onClick}
+      {...a11yProps}
     >
       {isPlaying ? (
         <Pause className={`${sizes.icon} text-white`} />

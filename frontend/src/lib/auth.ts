@@ -202,6 +202,40 @@ export function isAuthenticated(): boolean {
 }
 
 /**
+ * Initialize auth from the VITE_DAYDREAM_API_KEY environment variable.
+ * Fetches the user profile and saves full auth data to localStorage so
+ * the rest of the app (isAuthenticated, getDaydreamUserId, etc.) works
+ * the same as after an OAuth login.
+ *
+ * No-ops if the env var is not set or auth data already matches.
+ */
+export async function initEnvKeyAuth(): Promise<boolean> {
+  const envKey = import.meta.env.VITE_DAYDREAM_API_KEY as string | undefined;
+  if (!envKey) return false;
+
+  const existing = getAuthData();
+  if (existing?.apiKey === envKey) return true;
+
+  const response = await fetch(`${DAYDREAM_API_BASE}/users/profile`, {
+    headers: { Authorization: `Bearer ${envKey}` },
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch profile with env API key: ${response.status}`
+    );
+  }
+  const profile = await response.json();
+  setAuthData({
+    apiKey: envKey,
+    userId: profile.id || profile.userId || profile.user_id || null,
+    displayName: profile.email || profile.name || profile.username || null,
+    cohortParticipant: profile.cohortParticipant === true,
+    isAdmin: profile.isAdmin === true,
+  });
+  return true;
+}
+
+/**
  * Redirect to Daydream sign-in page
  * - In Electron: opens in system browser via IPC
  * - In browser: navigates directly
