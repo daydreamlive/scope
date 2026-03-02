@@ -25,21 +25,27 @@ from syphon.utils.numpy import copy_mtl_texture_to_image
 
 logger = logging.getLogger(__name__)
 
-# Syphon's SyphonServerDirectory relies on NSRunLoop notifications that only
-# arrive on the main thread. We initialise a shared directory once on the main
-# thread (via ensure_directory_initialized()) so that worker threads can read
-# the already-populated ObjC singleton.
+# Syphon server discovery uses NSDistributedNotificationCenter which delivers
+# notifications exclusively to the main thread's NSRunLoop.  In a FastAPI /
+# uvicorn server the main thread runs an asyncio event-loop, so we must
+# explicitly pump the NSRunLoop on the main thread for server announcements to
+# be received.  ensure_directory_initialized() creates the ObjC singleton
+# (registering its notification observers) and drain_notifications() must be called
+# on the main thread to keep the server list up-to-date.
 _directory_initialized = False
 _directory_lock = threading.Lock()
 _SyphonServerDirectoryObjC = objc.lookUpClass("SyphonServerDirectory")
 
 
 def ensure_directory_initialized():
-    """Ensure the Syphon shared directory singleton has been populated.
+    """Create the SyphonServerDirectory ObjC singleton.
 
-    Must be called at least once from the main thread (e.g. during
-    is_available() at server startup) so that background threads can
-    subsequently read discovered servers.
+    Safe to call from any thread.  The singleton registers its notification
+    observers on NSDistributedNotificationCenter which delivers to the main
+    thread regardless of which thread creates the singleton.
+
+    After calling this, `drain_notifications()` must be called on the **main
+    thread** at least once for server announcements to be received.
     """
     global _directory_initialized
     if _directory_initialized:
@@ -47,10 +53,24 @@ def ensure_directory_initialized():
     with _directory_lock:
         if _directory_initialized:
             return
-        d = syphon.SyphonServerDirectory()
-        _ = d.servers  # pumps NSRunLoop, populates the shared singleton
+        _SyphonServerDirectoryObjC.sharedDirectory()
         _directory_initialized = True
-        logger.debug("Syphon shared directory initialized")
+        logger.debug("Syphon shared directory singleton created")
+
+
+def drain_notifications(duration_s: float = 0.1):
+    """Drain pending Syphon server notifications from the NSRunLoop.
+
+    **Must be called on the main thread** — Syphon server announcements are
+    delivered via NSDistributedNotificationCenter which only fires on the
+    main thread's run-loop.
+    """
+    from Cocoa import NSDate, NSDefaultRunLoopMode, NSRunLoop
+
+    NSRunLoop.currentRunLoop().runMode_beforeDate_(
+        NSDefaultRunLoopMode,
+        NSDate.dateWithTimeIntervalSinceNow_(duration_s),
+    )
 
 
 def _get_raw_servers() -> list:

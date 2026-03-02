@@ -201,7 +201,6 @@ jobs:
         uses: softprops/action-gh-release@v1
         with:
           files: |
-            app/dist/DaydreamScope-x64.dmg
             app/dist/DaydreamScope-arm64.dmg
             app/dist/*.zip
             app/dist/latest-mac.yml

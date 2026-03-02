@@ -77,6 +77,11 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
     tooltip:
       "Send video over the network via NDI to any NDI-compatible receiver on the local network.",
   },
+  syphonSender: {
+    label: "Syphon Output",
+    tooltip:
+      "Send video frames via Syphon to macOS-compatible receivers like TouchDesigner, Resolume, and OBS.",
+  },
   preprocessor: {
     label: "Preprocessor",
     tooltip: "Select a preprocessor to apply before the main pipeline.",

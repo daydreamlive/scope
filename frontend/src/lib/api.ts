@@ -207,6 +207,7 @@ export interface HardwareInfoResponse {
   vram_gb: number | null;
   spout_available: boolean;
   ndi_available: boolean;
+  syphon_available: boolean;
 }
 
 export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {

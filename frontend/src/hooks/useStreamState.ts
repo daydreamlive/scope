@@ -414,6 +414,7 @@ export function useStreamState() {
   // Derive output sink availability from hardware info
   const spoutAvailable = hardwareInfo?.spout_available ?? false;
   const ndiOutputAvailable = hardwareInfo?.ndi_available ?? false;
+  const syphonOutputAvailable = hardwareInfo?.syphon_available ?? false;
 
   return {
     systemMetrics,
@@ -430,6 +431,7 @@ export function useStreamState() {
     supportsNoiseControls,
     spoutAvailable,
     ndiOutputAvailable,
+    syphonOutputAvailable,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,

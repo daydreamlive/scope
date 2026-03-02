@@ -36,12 +36,21 @@ export function Header({
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
 
+  // Only show "connection lost" after we've seen a successful connection this session
+  const hasBeenConnectedRef = useRef(false);
+
   // Track previous connection state to detect transitions for pipeline refresh
   const prevConnectedRef = useRef(false);
 
   // Detect unexpected disconnection and show toast
   useEffect(() => {
+    if (isConnected) {
+      hasBeenConnectedRef.current = true;
+      lastNotifiedCloseCodeRef.current = null;
+    }
+
     if (
+      hasBeenConnectedRef.current &&
       lastCloseCode !== null &&
       lastCloseCode !== lastNotifiedCloseCodeRef.current
     ) {
@@ -49,15 +58,10 @@ export function Header({
         `[Header] Cloud WebSocket closed unexpectedly (code=${lastCloseCode}, reason=${lastCloseReason})`
       );
       toast.error("Cloud connection lost", {
-        description: `WebSocket closed (code: ${lastCloseCode}${lastCloseReason ? `, reason: ${lastCloseReason}` : ""})`,
+        description: `WebSocket closed ${lastCloseReason ? `(${lastCloseReason})` : ""}`,
         duration: 10000,
       });
       lastNotifiedCloseCodeRef.current = lastCloseCode;
-    }
-
-    // Reset the notified close code when connected (so we can show it again if it disconnects later)
-    if (isConnected) {
-      lastNotifiedCloseCodeRef.current = null;
     }
   }, [lastCloseCode, lastCloseReason, isConnected]);
 

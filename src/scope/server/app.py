@@ -31,6 +31,15 @@ if TYPE_CHECKING:
     from .schema import PluginInfo
     from .webrtc import WebRTCManager
 
+from scope.core.lora.manifest import (
+    LoRAManifestEntry,
+    LoRAProvenance,
+    add_manifest_entry,
+    compute_sha256,
+    load_manifest,
+    save_manifest,
+)
+
 from .cloud_proxy import (
     cloud_proxy,
     get_hardware_info_from_cloud,
@@ -57,6 +66,7 @@ from .logs_config import (
     get_logs_dir,
     get_most_recent_log_file,
 )
+from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
 from .models_config import (
     ensure_models_dir,
     get_assets_dir,
@@ -312,6 +322,22 @@ async def lifespan(app: FastAPI):
         else:
             kafka_publisher = None
             logger.warning("Kafka publisher failed to start")
+
+    # Syphon server discovery (macOS only): create the ObjC singleton and do
+    # an initial NSRunLoop pump so servers are available when the UI first loads.
+    # Subsequent refreshes pump on demand in the list_input_sources endpoint.
+    if sys.platform == "darwin":
+        try:
+            from .syphon.receiver import (
+                drain_notifications,
+                ensure_directory_initialized,
+            )
+
+            ensure_directory_initialized()
+            drain_notifications(0.1)
+            logger.info("Syphon directory initialized")
+        except Exception:
+            logger.debug("Syphon not available, skipping directory init")
 
     yield
 
@@ -784,6 +810,8 @@ class LoRAFileInfo(BaseModel):
     path: str
     size_mb: float
     folder: str | None = None
+    sha256: str | None = None
+    provenance: LoRAProvenance | None = None
 
 
 class LoRAFilesResponse(BaseModel):
@@ -803,26 +831,33 @@ async def list_lora_files(
     When cloud mode is active, lists LoRA files from the cloud server instead.
     """
 
-    def process_lora_file(file_path: Path, lora_dir: Path) -> LoRAFileInfo:
+    def process_lora_file(
+        file_path: Path, lora_dir: Path, manifest_entries: dict
+    ) -> LoRAFileInfo:
         """Extract LoRA file metadata."""
         size_mb = file_path.stat().st_size / (1024 * 1024)
         relative_path = file_path.relative_to(lora_dir)
         folder = (
             str(relative_path.parent) if relative_path.parent != Path(".") else None
         )
+        rel_key = relative_path.as_posix()
+        entry = manifest_entries.get(rel_key)
         return LoRAFileInfo(
             name=file_path.stem,
             path=str(file_path),
             size_mb=round(size_mb, 2),
             folder=folder,
+            sha256=entry.sha256 if entry else None,
+            provenance=entry.provenance if entry else None,
         )
 
     try:
         lora_dir = get_lora_dir()
+        manifest = load_manifest(lora_dir)
         lora_files: list[LoRAFileInfo] = []
 
         for file_path in iter_files(lora_dir, LORA_EXTENSIONS):
-            lora_files.append(process_lora_file(file_path, lora_dir))
+            lora_files.append(process_lora_file(file_path, lora_dir, manifest.entries))
 
         lora_files.sort(key=lambda x: (x.folder or "", x.name))
         return LoRAFilesResponse(lora_files=lora_files)
@@ -873,13 +908,6 @@ async def install_lora_file(
             if stored_token:
                 separator = "&" if parsed.query else "?"
                 url = f"{url}{separator}token={stored_token}"
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="CivitAI requires an API token for programmatic downloads. "
-                    "Add your CivitAI API key in Settings > API Keys. "
-                    "Get your API key at https://civitai.com/user/account",
-                )
 
     # If connected to cloud, proxy with the (potentially modified) URL
     if cloud_manager.is_connected:
@@ -935,6 +963,30 @@ async def install_lora_file(
         filename = request.filename
         if not filename:
             filename = unquote(parsed.path.split("/")[-1])
+
+        # For CivitAI URLs, resolve filename via API if path doesn't have one
+        if is_civitai and (not filename or "." not in filename):
+            # Extract version ID: check query param first, then path
+            query_params = parse_qs(parsed.query)
+            version_id = None
+            if "modelVersionId" in query_params:
+                version_id = query_params["modelVersionId"][0]
+            else:
+                # Fall back to last path segment (e.g. /api/download/models/<version_id>)
+                path_parts = parsed.path.rstrip("/").split("/")
+                version_id = path_parts[-1] if path_parts else None
+            if version_id and version_id.isdigit():
+                try:
+                    from .lora_downloader import resolve_civitai_metadata
+
+                    dl_url, civitai_filename = resolve_civitai_metadata(version_id)
+                    if civitai_filename:
+                        filename = civitai_filename
+                    if dl_url:
+                        url = dl_url
+                except Exception as e:
+                    logger.warning(f"Failed to resolve CivitAI metadata: {e}")
+
         # If still no filename (or it doesn't look like a file), try Content-Disposition
         if not filename or "." not in filename:
             # Use streaming GET instead of HEAD (some servers return 403 for HEAD)
@@ -989,15 +1041,49 @@ async def install_lora_file(
             )
 
         # Install in a thread to avoid blocking the event loop
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, http_get, url, dest_path)
 
-        size_mb = dest_path.stat().st_size / (1024 * 1024)
+        # Update manifest with provenance
+        sha256 = await loop.run_in_executor(None, compute_sha256, dest_path)
+        size_bytes = dest_path.stat().st_size
+        relative_key = dest_path.relative_to(lora_dir).as_posix()
+
+        source: str
+        if is_civitai:
+            source = "civitai"
+        elif hostname == "huggingface.co" or hostname.endswith(".huggingface.co"):
+            source = "huggingface"
+        else:
+            source = "url"
+
+        # Strip sensitive query params (e.g. CivitAI API token) before persisting
+        from urllib.parse import urlencode, urlunparse
+        from urllib.parse import urlparse as _urlparse
+
+        _parsed = _urlparse(url)
+        clean_params = {
+            k: v for k, v in parse_qs(_parsed.query).items() if k.lower() != "token"
+        }
+        clean_url = urlunparse(
+            _parsed._replace(
+                query=urlencode(clean_params, doseq=True) if clean_params else ""
+            )
+        )
+
+        provenance = LoRAProvenance(source=source, url=clean_url)
+        entry = add_manifest_entry(
+            lora_dir, relative_key, provenance, sha256, size_bytes
+        )
+
+        size_mb = size_bytes / (1024 * 1024)
         file_info = LoRAFileInfo(
             name=dest_path.stem,
             path=str(dest_path),
             size_mb=round(size_mb, 2),
             folder=None,
+            sha256=sha256,
+            provenance=entry.provenance,
         )
 
         return LoRAInstallResponse(
@@ -1058,6 +1144,13 @@ async def delete_lora_file(
         found_path.unlink()
         logger.info(f"Deleted LoRA file: {found_path}")
 
+        # Remove from manifest if present
+        manifest = load_manifest(lora_dir)
+        relative_key = found_path.relative_to(lora_dir).as_posix()
+        if relative_key in manifest.entries:
+            del manifest.entries[relative_key]
+            save_manifest(lora_dir, manifest)
+
         return LoRADeleteResponse(
             success=True,
             message=f"Successfully deleted '{name}'",
@@ -1068,6 +1161,42 @@ async def delete_lora_file(
     except Exception as e:
         logger.error(f"delete_lora_file: Error deleting LoRA: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/lora/download")
+async def download_lora_endpoint(
+    request: LoRADownloadRequest,
+) -> LoRADownloadResult:
+    """Download a LoRA from HuggingFace, CivitAI, or a direct URL."""
+    from .lora_downloader import download_lora
+
+    lora_dir = get_lora_dir()
+    try:
+        return await download_lora(request, lora_dir)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"download_lora: Error downloading LoRA: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.put("/api/v1/lora/{filename:path}/provenance")
+async def tag_lora_provenance(
+    filename: str,
+    provenance: LoRAProvenance,
+) -> LoRAManifestEntry:
+    """Retroactively tag a local LoRA with provenance info."""
+    lora_dir = get_lora_dir()
+    file_path = (lora_dir / filename).resolve()
+    if not file_path.is_relative_to(lora_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"LoRA file '{filename}' not found")
+
+    sha256 = compute_sha256(file_path)
+    size_bytes = file_path.stat().st_size
+
+    return add_manifest_entry(lora_dir, filename, provenance, sha256, size_bytes)
 
 
 @app.get("/api/v1/assets", response_model=AssetsResponse)
@@ -1383,6 +1512,18 @@ def is_ndi_output_available() -> bool:
     return is_available()
 
 
+def is_syphon_output_available() -> bool:
+    """Check if Syphon is available for output."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        import syphon  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 _source_discovery_cache: dict[str, tuple[float, list]] = {}
 _SOURCE_DISCOVERY_TTL = 10  # seconds
 
@@ -1427,7 +1568,7 @@ async def list_input_source_types():
 
 
 @app.get("/api/v1/input-sources/{source_type}/sources")
-def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
+async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
     """List discovered sources for a given input source type."""
     source_class = _resolve_input_source_class(source_type)
 
@@ -1438,11 +1579,23 @@ def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
         if time.monotonic() - ts < _SOURCE_DISCOVERY_TTL:
             return {"source_type": source_type, "sources": sources}
 
-    try:
+    # Syphon discovery requires pumping NSRunLoop on the main thread.
+    # async handlers run on the event-loop (main) thread, so pump here.
+    if source_type == "syphon" and sys.platform == "darwin":
+        try:
+            from .syphon.receiver import drain_notifications
+
+            drain_notifications(0.1)
+        except Exception:
+            logger.debug("Failed to pump Syphon run loop", exc_info=True)
+
+    event_loop = asyncio.get_event_loop()
+
+    def _discover():
         instance = source_class()
         try:
             discovered = instance.list_sources(timeout_ms=timeout_ms)
-            sources = [
+            return [
                 {
                     "name": s.name,
                     "identifier": s.identifier,
@@ -1450,10 +1603,13 @@ def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
                 }
                 for s in discovered
             ]
-            _source_discovery_cache[source_type] = (time.monotonic(), sources)
-            return {"source_type": source_type, "sources": sources}
         finally:
             instance.close()
+
+    try:
+        sources = await event_loop.run_in_executor(None, _discover)
+        _source_discovery_cache[source_type] = (time.monotonic(), sources)
+        return {"source_type": source_type, "sources": sources}
     except HTTPException:
         raise
     except Exception as e:
@@ -1569,6 +1725,7 @@ async def get_hardware_info(
                 cloud_manager,
                 is_spout_available(),
                 is_ndi_output_available(),
+                is_syphon_output_available(),
             )
 
         # Local mode: get local hardware info
@@ -1585,6 +1742,7 @@ async def get_hardware_info(
             vram_gb=vram_gb,
             spout_available=is_spout_available(),
             ndi_available=is_ndi_output_available(),
+            syphon_available=is_syphon_output_available(),
         )
     except HTTPException:
         raise
@@ -2212,6 +2370,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
             port=port,
             reload=reload,
             log_config=None,  # Use our logging config, don't override it
+            timeout_graceful_shutdown=1,
         )
         server = uvicorn.Server(config)
 
@@ -2239,6 +2398,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
             port=port,
             reload=reload,
             log_config=None,  # Use our logging config, don't override it
+            timeout_graceful_shutdown=1,
         )
 
 

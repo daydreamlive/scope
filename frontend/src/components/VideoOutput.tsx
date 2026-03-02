@@ -226,6 +226,8 @@ export function VideoOutput({
               onClick={onStartStream}
               size="lg"
               variant="themed"
+              data-testid="start-stream-button"
+              aria-label="Start stream"
             />
           </div>
         )}
