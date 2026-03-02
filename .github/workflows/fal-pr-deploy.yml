@@ -5,11 +5,14 @@ on:
     types: [closed]
 
 jobs:
-  cleanup-on-merge:
+  cleanup-on-close:
     runs-on: ubuntu-latest
     steps:
-      - name: Note
+      - name: Delete fal PR app
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
-          echo "PR deployment cleanup would happen here"
-          echo "fal doesn't have a programmatic delete API yet, so manual cleanup may be needed"
-          echo "Alternatively, PR apps will be replaced on next PR update"
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          echo "Deleting fal app scope-pr-${PR_NUMBER}..."
+          pip install fal
+          fal apps delete scope-pr-${PR_NUMBER}
