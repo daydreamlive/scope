@@ -876,3 +876,94 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 };
+
+// =============================================================================
+// Tempo Sync API
+// =============================================================================
+
+export interface TempoStatusResponse {
+  enabled: boolean;
+  source: { type: string; num_peers?: number } | null;
+  beats_per_bar: number;
+  beat_state: {
+    bpm: number;
+    beat_phase: number;
+    bar_position: number;
+    beat_count: number;
+    is_playing: boolean;
+    source: string;
+  } | null;
+}
+
+export interface TempoSourcesResponse {
+  sources: Record<
+    string,
+    {
+      available: boolean;
+      name: string;
+      devices?: string[];
+      install_hint?: string;
+    }
+  >;
+}
+
+export interface TempoEnableRequest {
+  source: "link" | "midi_clock";
+  midi_device?: string;
+  bpm?: number;
+  beats_per_bar?: number;
+}
+
+export const getTempoStatus = async (): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/status");
+  if (!response.ok) {
+    throw new Error(`Failed to get tempo status: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const enableTempo = async (
+  request: TempoEnableRequest
+): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/enable", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to enable tempo: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const disableTempo = async (): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/disable", {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to disable tempo: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const setTempo = async (bpm: number): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/set_tempo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bpm }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to set tempo: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const getTempoSources = async (): Promise<TempoSourcesResponse> => {
+  const response = await fetch("/api/v1/tempo/sources");
+  if (!response.ok) {
+    throw new Error(`Failed to get tempo sources: ${response.statusText}`);
+  }
+  return response.json();
+};

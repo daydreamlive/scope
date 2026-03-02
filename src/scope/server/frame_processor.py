@@ -53,9 +53,11 @@ class FrameProcessor:
         connection_id: str | None = None,  # Connection ID for event correlation
         connection_info: dict
         | None = None,  # Connection metadata (gpu_type, region, etc.)
+        tempo_sync: Any | None = None,
     ):
         self.pipeline_manager = pipeline_manager
         self.cloud_manager = cloud_manager
+        self.tempo_sync = tempo_sync
 
         # Session ID for Kafka event tracking
         self.session_id = session_id or str(uuid.uuid4())
@@ -610,6 +612,12 @@ class FrameProcessor:
             input_source_config = parameters.pop("input_source")
             self._update_input_source(input_source_config)
 
+        # Intercept client-forwarded beat state and route to TempoSync
+        # (beat state is injected into call_params by PipelineProcessor,
+        # not through the regular parameter queue)
+        if self.tempo_sync is not None:
+            parameters = self.tempo_sync.update_client_beat_state(parameters)
+
         # Update parameters for all pipeline processors
         for processor in self.pipeline_processors:
             processor.update_parameters(parameters)
@@ -940,6 +948,7 @@ class FrameProcessor:
                 user_id=self.user_id,
                 connection_id=self.connection_id,
                 connection_info=self.connection_info,
+                tempo_sync=self.tempo_sync,
             )
 
             self.pipeline_processors.append(processor)

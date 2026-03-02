@@ -70,10 +70,17 @@ class Session:
         self.user_id = user_id
         self.connection_id = connection_id
         self.connection_info = connection_info
+        self.notification_sender = None
+        self.tempo_sync = None
 
     async def close(self):
         """Close this session and cleanup resources."""
         try:
+            if self.tempo_sync is not None and self.notification_sender is not None:
+                self.tempo_sync.unregister_notification_session(
+                    self.notification_sender
+                )
+
             # Stop video track first to properly cleanup FrameProcessor
             if self.video_track is not None:
                 await self.video_track.stop()
@@ -191,7 +198,10 @@ class WebRTCManager:
         self.is_first_track = True
 
     async def handle_offer(
-        self, request: WebRTCOfferRequest, pipeline_manager: PipelineManager
+        self,
+        request: WebRTCOfferRequest,
+        pipeline_manager: PipelineManager,
+        tempo_sync=None,
     ) -> dict[str, Any]:
         """
         Handle an incoming WebRTC offer and return an answer.
@@ -199,6 +209,7 @@ class WebRTCManager:
         Args:
             offer_data: Dictionary containing SDP offer
             pipeline_manager: The pipeline manager instance
+            tempo_sync: Optional TempoSync instance for beat state injection
 
         Returns:
             Dictionary containing SDP answer
@@ -234,8 +245,14 @@ class WebRTCManager:
                 user_id=request.user_id,
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
+                tempo_sync=tempo_sync,
             )
             session.video_track = video_track
+
+            session.notification_sender = notification_sender
+            session.tempo_sync = tempo_sync
+            if tempo_sync is not None:
+                tempo_sync.register_notification_session(notification_sender)
 
             # Create a MediaRelay to allow multiple consumers (WebRTC and recording)
             relay = MediaRelay()

@@ -57,6 +57,9 @@ import {
   type SchemaComplexFieldContext,
 } from "./ComplexFields";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
+import { TempoSyncSection } from "./settings/TempoSyncSection";
+import type { TempoState } from "../hooks/useTempoSync";
+import type { TempoSourcesResponse, TempoEnableRequest } from "../lib/api";
 
 // Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
 const DEFAULT_MIN_DIMENSION = 1;
@@ -361,6 +364,15 @@ interface SettingsPanelProps {
   ) => void;
   isCloudMode?: boolean;
   onOpenLoRAsSettings?: () => void;
+  // Tempo sync
+  tempoState?: TempoState;
+  tempoSources?: TempoSourcesResponse | null;
+  tempoLoading?: boolean;
+  tempoError?: string | null;
+  onTempoEnable?: (request: TempoEnableRequest) => void;
+  onTempoDisable?: () => void;
+  onTempoSetBpm?: (bpm: number) => void;
+  onTempoRefreshSources?: () => void;
 }
 
 export function SettingsPanel({
@@ -414,6 +426,14 @@ export function SettingsPanel({
   onPostprocessorSchemaFieldOverrideChange,
   isCloudMode = false,
   onOpenLoRAsSettings,
+  tempoState,
+  tempoSources,
+  tempoLoading = false,
+  tempoError = null,
+  onTempoEnable,
+  onTempoDisable,
+  onTempoSetBpm,
+  onTempoRefreshSources,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -1349,6 +1369,20 @@ export function SettingsPanel({
               </div>
             )}
           </div>
+        )}
+
+        {/* Tempo Sync */}
+        {tempoState && onTempoEnable && onTempoDisable && (
+          <TempoSyncSection
+            tempoState={tempoState}
+            sources={tempoSources ?? null}
+            loading={tempoLoading}
+            error={tempoError}
+            onEnable={onTempoEnable}
+            onDisable={onTempoDisable}
+            onSetBpm={onTempoSetBpm}
+            onRefreshSources={onTempoRefreshSources ?? (() => {})}
+          />
         )}
       </CardContent>
     </Card>
