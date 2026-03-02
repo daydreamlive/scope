@@ -161,9 +161,9 @@ class ApiResponseOutput(BaseModel):
     data: Any | None = None
     error: str | None = None
     # For binary responses
-    _base64_content: str | None = Field(None, alias="_base64_content")
-    _content_type: str | None = Field(None, alias="_content_type")
-    _content_length: int | None = Field(None, alias="_content_length")
+    base64_content: str | None = None
+    binary_content_type: str | None = None
+    binary_content_length: int | None = None
 
 
 class PongOutput(BaseModel):
@@ -753,7 +753,7 @@ class ScopeApp(fal.App, keep_alive=300):
             Proxy arbitrary API requests to Scope backend.
 
             Special handling for file uploads:
-            If body contains "_base64_content", it's decoded and sent as binary.
+            If body contains "base64_content", it's decoded and sent as binary.
             """
             method = payload.method.upper()
             path = payload.path
@@ -778,7 +778,7 @@ class ScopeApp(fal.App, keep_alive=300):
             async with httpx.AsyncClient() as client:
                 try:
                     # Check if this is a base64-encoded file upload
-                    is_binary_upload = body and "_base64_content" in body
+                    is_binary_upload = body and "base64_content" in body
 
                     if method == "GET":
                         # Use longer timeout for potential binary downloads (recordings)
@@ -789,9 +789,9 @@ class ScopeApp(fal.App, keep_alive=300):
                     elif method == "POST":
                         if is_binary_upload:
                             # Decode base64 and send as binary
-                            binary_content = base64.b64decode(body["_base64_content"])
+                            binary_content = base64.b64decode(body["base64_content"])
                             content_type = body.get(
-                                "_content_type", "application/octet-stream"
+                                "binary_content_type", "application/octet-stream"
                             )
                             response = await client.post(
                                 f"{SCOPE_BASE_URL}{path}",
@@ -839,16 +839,13 @@ class ScopeApp(fal.App, keep_alive=300):
                         # Base64 encode binary content for JSON transport
                         binary_content = response.content
                         encoded = base64.b64encode(binary_content).decode("utf-8")
-                        # Return as dict to preserve underscore-prefixed fields
                         return ApiResponseOutput(
                             type="api_response",
                             request_id=payload.request_id,
                             status=response.status_code,
-                            data={
-                                "_base64_content": encoded,
-                                "_content_type": content_type,
-                                "_content_length": len(binary_content),
-                            },
+                            base64_content=encoded,
+                            binary_content_type=content_type,
+                            binary_content_length=len(binary_content),
                         )
 
                     # Try to parse JSON response
