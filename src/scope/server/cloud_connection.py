@@ -26,6 +26,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
+import msgpack
 import numpy as np
 from av import VideoFrame
 
@@ -37,6 +38,32 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 TOKEN_EXPIRATION_SECONDS = 120
+
+
+def _decode_ws_message(data: str | bytes) -> dict:
+    """Decode WebSocket message from JSON or msgpack.
+
+    fal.realtime may send msgpack even when content_type is set to JSON,
+    especially for initial handshake messages. This handles both formats.
+    """
+    if isinstance(data, str):
+        return json.loads(data)
+
+    # Binary data - try msgpack first (fal default), then JSON
+    try:
+        return msgpack.unpackb(data, raw=False)
+    except (msgpack.UnpackException, ValueError):
+        # Fall back to JSON
+        return json.loads(data.decode("utf-8"))
+
+
+def _encode_ws_message(data: dict) -> bytes:
+    """Encode WebSocket message as msgpack.
+
+    fal.realtime uses msgpack by default, so we send msgpack to ensure
+    compatibility.
+    """
+    return msgpack.packb(data)
 
 
 class CloudConnectionManager:
@@ -165,10 +192,7 @@ class CloudConnectionManager:
         try:
             msg = await asyncio.wait_for(self.ws.receive(), timeout=180.0)
             if msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
-                raw = (
-                    msg.data if isinstance(msg.data, str) else msg.data.decode("utf-8")
-                )
-                data = json.loads(raw)
+                data = _decode_ws_message(msg.data)
                 if data.get("type") != "ready":
                     raise RuntimeError(f"Expected 'ready' message, got: {data}")
                 # Extract connection_id for log correlation
@@ -208,7 +232,7 @@ class CloudConnectionManager:
 
         # Send user_id to cloud for log correlation
         if self._user_id:
-            await self.ws.send_json({"type": "set_user_id", "user_id": self._user_id})
+            await self.ws.send_bytes(_encode_ws_message({"type": "set_user_id", "user_id": self._user_id}))
             logger.info(f"Sent user_id to cloud: {self._user_id}")
 
         # Reset stats on new connection
@@ -284,15 +308,10 @@ class CloudConnectionManager:
 
                 if msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
                     try:
-                        raw = (
-                            msg.data
-                            if isinstance(msg.data, str)
-                            else msg.data.decode("utf-8")
-                        )
-                        data = json.loads(raw)
+                        data = _decode_ws_message(msg.data)
                         await self._handle_message(data)
-                    except (json.JSONDecodeError, UnicodeDecodeError):
-                        logger.warning(f"Non-JSON message from cloud: {msg.data!r}")
+                    except (json.JSONDecodeError, msgpack.UnpackException, ValueError) as e:
+                        logger.warning(f"Failed to decode message from cloud: {e}")
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
                     # Get close code and reason from the WebSocket
                     close_code = self.ws.close_code if self.ws else None
@@ -397,8 +416,8 @@ class CloudConnectionManager:
         self._pending_requests[request_id] = future
 
         try:
-            # Send message
-            await self.ws.send_json(message)
+            # Send message as msgpack (fal.realtime default format)
+            await self.ws.send_bytes(_encode_ws_message(message))
 
             # Wait for response
             return await asyncio.wait_for(future, timeout=timeout)
