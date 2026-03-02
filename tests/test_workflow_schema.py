@@ -6,6 +6,8 @@ from scope.core.workflows.schema import (
     WORKFLOW_FORMAT_VERSION,
     ScopeWorkflow,
     WorkflowLoRA,
+    WorkflowMetadata,
+    WorkflowPipeline,
     WorkflowPipelineSource,
 )
 

@@ -140,7 +140,7 @@ class TestMinScopeVersion:
 
             plan = resolve_workflow(wf, pm, MagicMock())
 
-        assert any("99.0.0" in w for w in plan.settings_warnings)
+        assert any("99.0.0" in w for w in plan.warnings)
 
     def test_resolve_no_warning_when_version_ok(self):
         from scope.core.workflows.resolve import resolve_workflow
@@ -158,61 +158,7 @@ class TestMinScopeVersion:
         # No warnings about min_scope_version (0.0.1 is very old)
         version_warnings = [
             w
-            for w in plan.settings_warnings
+            for w in plan.warnings
             if "min_scope_version" in w.lower() or "Scope >=" in w
         ]
         assert len(version_warnings) == 0
-
-
-class TestBuildWorkflowWithTimeline:
-    """build_workflow passes timeline through."""
-
-    def test_timeline_included_in_export(self):
-        from scope.core.workflows.export import build_workflow
-
-        timeline = WorkflowTimeline(
-            entries=[
-                WorkflowTimelineEntry(start_time=0, end_time=5, prompts=[]),
-            ]
-        )
-
-        pm = MagicMock()
-        pm.get_load_snapshot.return_value = {}
-        plm = MagicMock()
-        plm.list_plugins_sync.return_value = []
-
-        with patch("scope.core.workflows.export.importlib.metadata") as mock_meta:
-            mock_meta.version.return_value = "0.1.0"
-            wf = build_workflow(
-                name="test",
-                description="",
-                author="",
-                pipeline_manager=pm,
-                plugin_manager=plm,
-                lora_dir=MagicMock(),
-                timeline=timeline,
-            )
-
-        assert wf.timeline is not None
-        assert len(wf.timeline.entries) == 1
-
-    def test_no_timeline_by_default(self):
-        from scope.core.workflows.export import build_workflow
-
-        pm = MagicMock()
-        pm.get_load_snapshot.return_value = {}
-        plm = MagicMock()
-        plm.list_plugins_sync.return_value = []
-
-        with patch("scope.core.workflows.export.importlib.metadata") as mock_meta:
-            mock_meta.version.return_value = "0.1.0"
-            wf = build_workflow(
-                name="test",
-                description="",
-                author="",
-                pipeline_manager=pm,
-                plugin_manager=plm,
-                lora_dir=MagicMock(),
-            )
-
-        assert wf.timeline is None
