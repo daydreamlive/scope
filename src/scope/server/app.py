@@ -1200,45 +1200,42 @@ async def tag_lora_provenance(
 
 
 # ---------------------------------------------------------------------------
-# Workflow export
+# Workflow schema & validation
 # ---------------------------------------------------------------------------
 
 
-class ExportLoRAInput(BaseModel):
-    path: str
-    scale: float = 1.0
-    merge_mode: str | None = None
+@app.get("/api/v1/workflow/schema")
+def get_workflow_schema():
+    """Return the JSON Schema for .scope-workflow.json documents."""
+    from scope.core.workflows.schema import ScopeWorkflow
+
+    return ScopeWorkflow.model_json_schema()
 
 
-class ExportPipelineInput(BaseModel):
-    pipeline_id: str
-    params: dict = {}
-    loras: list[ExportLoRAInput] = []
+@app.post("/api/v1/workflow/validate")
+async def validate_workflow(request: Request):
+    """Validate a raw JSON body against the ScopeWorkflow schema.
 
+    Returns 200 with the normalized document on success, or 422 with
+    validation errors on failure.
+    """
+    import json
 
-class WorkflowExportRequest(BaseModel):
-    name: str = "Untitled Workflow"
-    pipelines: list[ExportPipelineInput]
-    lora_merge_mode: str = "permanent_merge"
+    from pydantic import ValidationError
 
+    from scope.core.workflows.schema import ScopeWorkflow
 
-@app.post("/api/v1/workflow/export")
-def export_workflow(request: WorkflowExportRequest):
-    """Export the current session as a shareable .scope-workflow.json."""
-    from scope.core.plugins import get_plugin_manager
-    from scope.core.workflows.export import build_workflow
-    from scope.server.models_config import get_models_dir
+    body = await request.body()
+    try:
+        payload = json.loads(body)
+    except (json.JSONDecodeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    lora_dir = get_models_dir() / "lora"
-    plugin_manager = get_plugin_manager()
+    try:
+        workflow = ScopeWorkflow.model_validate(payload)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
 
-    workflow = build_workflow(
-        name=request.name,
-        pipelines_input=[p.model_dump() for p in request.pipelines],
-        plugin_manager=plugin_manager,
-        lora_dir=lora_dir,
-        lora_merge_mode=request.lora_merge_mode,
-    )
     return workflow.model_dump(mode="json", exclude_none=True)
 
 
