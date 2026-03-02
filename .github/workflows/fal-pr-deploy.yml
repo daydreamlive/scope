@@ -14,5 +14,5 @@ jobs:
         run: |
           PR_NUMBER=${{ github.event.pull_request.number }}
           echo "Deleting fal app scope-pr-${PR_NUMBER}..."
-          pip install fal-client
+          pip install fal
           fal apps delete scope-pr-${PR_NUMBER}
