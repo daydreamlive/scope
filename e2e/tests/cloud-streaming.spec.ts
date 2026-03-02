@@ -3,117 +3,64 @@ import { test, expect, Page } from "@playwright/test";
 /**
  * E2E tests for Scope cloud streaming via fal.ai.
  *
+ * The app is started with:
+ *   VITE_DAYDREAM_API_KEY=... → handles auth (shows as logged in)
+ *   SCOPE_CLOUD_APP_ID=scope-pr-<N> → configures cloud endpoint
+ *
  * These tests verify the full flow:
- * 1. Login to Daydream
- * 2. Connect to cloud mode (fal deployment)
+ * 1. App loads (already logged in via API key)
+ * 2. Enable cloud mode
  * 3. Start a stream with the passthrough model
  * 4. Verify frames are being processed
- *
- * Environment variables:
- * - FAL_WS_URL: WebSocket URL for the fal deployment (required)
- * - FAL_APP_ID: The fal app ID (optional, for logging)
  */
 
-const FAL_WS_URL = process.env.FAL_WS_URL;
-const FAL_APP_ID = process.env.FAL_APP_ID || "unknown";
-
 test.describe("Cloud Streaming", () => {
-  test.beforeAll(() => {
-    if (!FAL_WS_URL) {
-      throw new Error("FAL_WS_URL environment variable is required");
-    }
-    console.log(`Testing fal deployment: ${FAL_APP_ID}`);
-    console.log(`WebSocket URL: ${FAL_WS_URL}`);
-  });
-
   test("connects to cloud and runs passthrough stream", async ({ page }) => {
     // Increase timeout for this test
     test.setTimeout(180000); // 3 minutes
 
-    // Navigate to Daydream app
+    // Navigate to the app (running at localhost:8000)
     await page.goto("/");
     await page.waitForLoadState("networkidle");
 
-    // Look for the stream/create button
+    // Take screenshot after initial load
+    await page.screenshot({ path: "test-results/01-initial-load.png" });
+
+    // The app should show as logged in (via VITE_DAYDREAM_API_KEY)
+    // Look for the stream/create button or streaming interface
     const createButton = page.getByRole("button", {
-      name: /create|new stream|start/i,
+      name: /create|new stream|start|stream/i,
     });
-    await expect(createButton).toBeVisible({ timeout: 10000 });
+    
+    // Wait for UI to be ready
+    await expect(createButton).toBeVisible({ timeout: 30000 });
     await createButton.click();
 
     // Wait for the streaming interface to load
     await page.waitForLoadState("networkidle");
+    await page.screenshot({ path: "test-results/02-streaming-interface.png" });
 
-    // Step 1: Configure cloud mode with our PR deployment
-    await configureCloudEndpoint(page, FAL_WS_URL!);
-
-    // Step 2: Enable cloud mode
+    // Step 1: Enable cloud mode (endpoint is pre-configured via SCOPE_CLOUD_APP_ID)
     await enableCloudMode(page);
 
-    // Step 3: Wait for cloud connection
+    // Step 2: Wait for cloud connection
     await waitForCloudConnection(page);
 
-    // Step 4: Select passthrough model
+    // Step 3: Select passthrough model
     await selectPassthroughModel(page);
 
-    // Step 5: Start streaming
+    // Step 4: Start streaming
     await startStream(page);
 
-    // Step 6: Verify frames are being processed
+    // Step 5: Verify frames are being processed
     await verifyStreamProcessing(page);
 
-    // Step 7: Stop stream
+    // Step 6: Stop stream
     await stopStream(page);
 
     console.log("✅ Cloud streaming test passed");
   });
 });
-
-/**
- * Configure the cloud endpoint to use our PR deployment.
- */
-async function configureCloudEndpoint(page: Page, wsUrl: string) {
-  console.log(`Configuring cloud endpoint: ${wsUrl}`);
-
-  // Look for settings/config button
-  const settingsButton = page
-    .getByRole("button", { name: /settings|config|gear/i })
-    .or(page.locator('[data-testid="settings-button"]'))
-    .or(page.locator(".settings-icon"))
-    .or(page.locator('[aria-label="Settings"]'));
-
-  if (await settingsButton.isVisible({ timeout: 5000 }).catch(() => false)) {
-    await settingsButton.click();
-
-    // Look for cloud/fal endpoint input
-    const endpointInput = page
-      .getByRole("textbox", { name: /endpoint|fal|cloud url/i })
-      .or(page.locator('[data-testid="fal-endpoint-input"]'))
-      .or(page.locator('input[placeholder*="fal"]'));
-
-    if (await endpointInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await endpointInput.fill(wsUrl);
-      console.log("✅ Cloud endpoint configured");
-    } else {
-      console.log(
-        "⚠️ No endpoint input found, the app may use environment-based config"
-      );
-    }
-
-    // Close settings
-    const closeButton = page.getByRole("button", { name: /close|done|save/i });
-    if (await closeButton.isVisible().catch(() => false)) {
-      await closeButton.click();
-    } else {
-      await page.keyboard.press("Escape");
-    }
-  } else {
-    // The app might configure endpoint via URL params or env
-    console.log(
-      "⚠️ No settings button found, assuming endpoint is pre-configured"
-    );
-  }
-}
 
 /**
  * Enable cloud mode in the app.
@@ -123,8 +70,8 @@ async function enableCloudMode(page: Page) {
 
   // Look for cloud toggle/button
   const cloudToggle = page
-    .getByRole("switch", { name: /cloud/i })
-    .or(page.getByRole("button", { name: /cloud|gpu/i }))
+    .getByRole("switch", { name: /cloud|remote/i })
+    .or(page.getByRole("button", { name: /cloud|gpu|remote/i }))
     .or(page.locator('[data-testid="cloud-toggle"]'))
     .or(page.locator(".cloud-mode-toggle"));
 
@@ -136,6 +83,7 @@ async function enableCloudMode(page: Page) {
     await cloudToggle.click();
   }
 
+  await page.screenshot({ path: "test-results/03-cloud-enabled.png" });
   console.log("✅ Cloud mode enabled");
 }
 
@@ -156,6 +104,7 @@ async function waitForCloudConnection(page: Page) {
     timeout: 120000,
   });
 
+  await page.screenshot({ path: "test-results/04-cloud-connected.png" });
   console.log("✅ Cloud connection established");
 }
 
@@ -167,7 +116,7 @@ async function selectPassthroughModel(page: Page) {
 
   // Look for model/pipeline selector
   const modelSelector = page
-    .getByRole("combobox", { name: /model|pipeline/i })
+    .getByRole("combobox", { name: /model|pipeline|workflow/i })
     .or(page.locator('[data-testid="model-selector"]'))
     .or(page.locator(".model-dropdown"));
 
@@ -194,6 +143,8 @@ async function selectPassthroughModel(page: Page) {
       console.log("⚠️ Could not find model selector, using default model");
     }
   }
+
+  await page.screenshot({ path: "test-results/05-model-selected.png" });
 }
 
 /**
@@ -216,6 +167,7 @@ async function startStream(page: Page) {
   // Wait for stream to start
   await page.waitForTimeout(3000);
 
+  await page.screenshot({ path: "test-results/06-stream-started.png" });
   console.log("✅ Stream started");
 }
 
@@ -245,7 +197,7 @@ async function verifyStreamProcessing(page: Page) {
   await page.waitForTimeout(5000);
 
   // Take a screenshot for debugging
-  await page.screenshot({ path: "test-results/stream-running.png" });
+  await page.screenshot({ path: "test-results/07-stream-running.png" });
 
   // Look for any indication of active streaming
   const isStreaming = await Promise.race([
@@ -288,6 +240,7 @@ async function stopStream(page: Page) {
   if (await stopButton.isVisible({ timeout: 5000 }).catch(() => false)) {
     await stopButton.click();
     await page.waitForTimeout(1000);
+    await page.screenshot({ path: "test-results/08-stream-stopped.png" });
     console.log("✅ Stream stopped");
   } else {
     console.log("⚠️ Stop button not found, stream may auto-stop");

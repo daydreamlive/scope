@@ -25,26 +25,7 @@ jobs:
               run_id: context.payload.workflow_run.id
             });
             
-            // Get the jobs from that run to extract outputs
-            const { data: jobs } = await github.rest.actions.listJobsForWorkflowRun({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              run_id: context.payload.workflow_run.id
-            });
-            
-            // Find the deploy job and get its outputs
-            const deployJob = jobs.jobs.find(j => j.name === 'deploy-pr');
-            
-            if (!deployJob) {
-              core.setFailed('Could not find deploy-pr job');
-              return;
-            }
-            
-            // We need to get outputs from the run itself
-            // Unfortunately, workflow_run events don't directly expose job outputs
-            // So we'll reconstruct the values
-            
-            // Get the PR number from the head branch
+            // Get PR from head branch
             const { data: prs } = await github.rest.pulls.list({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -58,23 +39,27 @@ jobs:
             }
             
             const prNumber = prs[0].number;
-            const shortSha = triggeringRun.head_sha.substring(0, 7);
-            const falAppId = `livepeer/scope-pr-${prNumber}`;
-            const falWsUrl = `wss://fal.run/${falAppId}/ws`;
+            const falAppId = `scope-pr-${prNumber}`;
             
             core.setOutput('pr_number', prNumber);
             core.setOutput('head_sha', triggeringRun.head_sha);
             core.setOutput('fal_app_id', falAppId);
-            core.setOutput('fal_ws_url', falWsUrl);
             
             console.log(`PR: #${prNumber}`);
-            console.log(`fal App: ${falAppId}`);
-            console.log(`WebSocket: ${falWsUrl}`);
+            console.log(`fal App ID: ${falAppId}`);
 
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           ref: ${{ steps.deployment.outputs.head_sha }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install uv
+        run: pip install uv
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -83,7 +68,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: e2e/package-lock.json
 
-      - name: Install dependencies
+      - name: Install E2E test dependencies
         working-directory: e2e
         run: npm ci
 
@@ -91,61 +76,43 @@ jobs:
         working-directory: e2e
         run: npx playwright install --with-deps chromium
 
-      - name: Wait for fal deployment to be ready
+      - name: Build Scope app
         env:
-          FAL_WS_URL: ${{ steps.deployment.outputs.fal_ws_url }}
+          VITE_DAYDREAM_API_KEY: ${{ secrets.DAYDREAM_API_KEY }}
         run: |
-          echo "Waiting for fal deployment to be ready..."
-          echo "Endpoint: $FAL_WS_URL"
+          echo "Building Scope with API key auth..."
+          uv run build
+
+      - name: Start Scope app
+        env:
+          SCOPE_CLOUD_APP_ID: ${{ steps.deployment.outputs.fal_app_id }}
+        run: |
+          echo "Starting Scope with cloud app ID: $SCOPE_CLOUD_APP_ID"
+          uv run daydream-scope &
           
-          # Wait up to 5 minutes for the deployment to be ready
-          MAX_ATTEMPTS=30
+          # Wait for the app to be ready
+          echo "Waiting for localhost:8000 to be ready..."
+          MAX_ATTEMPTS=60
           ATTEMPT=0
           
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
-            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS..."
-            
-            # Try to connect with a simple WebSocket check
-            # We'll use a Node.js one-liner for this
-            if node -e "
-              const ws = require('ws');
-              const socket = new ws('${FAL_WS_URL}');
-              socket.on('open', () => { 
-                console.log('Connected!');
-                socket.close();
-                process.exit(0);
-              });
-              socket.on('error', (e) => {
-                console.error('Error:', e.message);
-                process.exit(1);
-              });
-              setTimeout(() => {
-                console.error('Timeout');
-                process.exit(1);
-              }, 10000);
-            " 2>&1; then
-              echo "✅ Deployment is ready!"
-              exit 0
+            if curl -s http://localhost:8000 > /dev/null 2>&1; then
+              echo "✅ App is ready at localhost:8000"
+              break
             fi
-            
-            echo "Deployment not ready yet, waiting 10s..."
-            sleep 10
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS - waiting..."
+            sleep 2
           done
           
-          echo "❌ Deployment did not become ready in time"
-          exit 1
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "❌ App did not start in time"
+            exit 1
+          fi
 
       - name: Run Playwright tests
         working-directory: e2e
-        env:
-          FAL_WS_URL: ${{ steps.deployment.outputs.fal_ws_url }}
-          FAL_APP_ID: ${{ steps.deployment.outputs.fal_app_id }}
-          DAYDREAM_TEST_EMAIL: ${{ secrets.DAYDREAM_TEST_EMAIL }}
-          DAYDREAM_TEST_PASSWORD: ${{ secrets.DAYDREAM_TEST_PASSWORD }}
-          DAYDREAM_BASE_URL: ${{ secrets.DAYDREAM_BASE_URL || 'https://app.daydream.live' }}
-        run: |
-          npx playwright test
+        run: npx playwright test
 
       - name: Upload test results
         uses: actions/upload-artifact@v4
@@ -160,8 +127,7 @@ jobs:
         if: always()
         with:
           name: test-artifacts-pr-${{ steps.deployment.outputs.pr_number }}
-          path: |
-            e2e/test-results/
+          path: e2e/test-results/
           retention-days: 30
 
       - name: Comment test results on PR
@@ -181,7 +147,7 @@ jobs:
             | | |
             |---|---|
             | **Status** | ${statusText} |
-            | **fal Endpoint** | \`${{ steps.deployment.outputs.fal_app_id }}\` |
+            | **fal App** | \`${{ steps.deployment.outputs.fal_app_id }}\` |
             | **Run** | [View logs](${runUrl}) |
             
             ### Test Artifacts

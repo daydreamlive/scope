@@ -3,15 +3,16 @@ import { defineConfig, devices } from "@playwright/test";
 /**
  * Playwright configuration for Scope E2E tests.
  *
- * Environment variables:
- * - DAYDREAM_BASE_URL: Base URL for the Daydream web app (default: https://app.daydream.live)
- * - FAL_WS_URL: WebSocket URL for the fal deployment to test
- * - DAYDREAM_TEST_EMAIL: Test user email
- * - DAYDREAM_TEST_PASSWORD: Test user password
+ * The app is started locally with:
+ *   VITE_DAYDREAM_API_KEY=... uv run build
+ *   SCOPE_CLOUD_APP_ID=scope-pr-<N> uv run daydream-scope
+ *
+ * This runs the app at localhost:8000 with the API key handling auth
+ * and SCOPE_CLOUD_APP_ID pointing to the fal deployment.
  */
 export default defineConfig({
   testDir: "./tests",
-  fullyParallel: false, // Run tests serially for now (shared auth state)
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
   workers: 1,
@@ -21,7 +22,7 @@ export default defineConfig({
     ...(process.env.CI ? [["github" as const]] : []),
   ],
   use: {
-    baseURL: process.env.DAYDREAM_BASE_URL || "https://app.daydream.live",
+    baseURL: "http://localhost:8000",
     trace: "on-first-retry",
     screenshot: "on",
     video: "retain-on-failure",
@@ -35,20 +36,11 @@ export default defineConfig({
     timeout: 30000,
   },
   projects: [
-    // Setup project for authentication
-    {
-      name: "setup",
-      testMatch: /.*\.setup\.ts/,
-    },
-    // Main test project
     {
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
-        // Use saved auth state
-        storageState: "playwright/.auth/user.json",
       },
-      dependencies: ["setup"],
     },
   ],
   // Output directory for test artifacts
