@@ -439,6 +439,27 @@ class TestProvenanceSubclass:
 # ---------------------------------------------------------------------------
 
 
+class TestNegativeValidation:
+    """Verify that invalid inputs raise ValidationError."""
+
+    def test_invalid_source_type(self):
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            WorkflowPipelineSource(type="invalid")
+
+    def test_metadata_missing_name(self):
+        import pytest
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            WorkflowMetadata(
+                created_at="2025-01-01T00:00:00Z",
+                scope_version="0.1.0",
+            )
+
+
 class TestWorkflowEndpoints:
     """Tests for the /api/v1/workflow/schema and /api/v1/workflow/validate endpoints."""
 

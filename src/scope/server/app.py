@@ -39,6 +39,7 @@ from scope.core.lora.manifest import (
     load_manifest,
     save_manifest,
 )
+from scope.core.workflows.schema import ScopeWorkflow
 
 from .cloud_proxy import (
     cloud_proxy,
@@ -1213,29 +1214,12 @@ def get_workflow_schema():
 
 
 @app.post("/api/v1/workflow/validate")
-async def validate_workflow(request: Request):
-    """Validate a raw JSON body against the ScopeWorkflow schema.
+def validate_workflow(workflow: ScopeWorkflow):
+    """Validate a JSON body against the ScopeWorkflow schema.
 
     Returns 200 with the normalized document on success, or 422 with
-    validation errors on failure.
+    validation errors on failure (handled automatically by FastAPI).
     """
-    import json
-
-    from pydantic import ValidationError
-
-    from scope.core.workflows.schema import ScopeWorkflow
-
-    body = await request.body()
-    try:
-        payload = json.loads(body)
-    except (json.JSONDecodeError, ValueError) as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    try:
-        workflow = ScopeWorkflow.model_validate(payload)
-    except ValidationError as exc:
-        raise HTTPException(status_code=422, detail=exc.errors()) from exc
-
     return workflow.model_dump(mode="json", exclude_none=True)
 
 
