@@ -1185,7 +1185,6 @@ export function SettingsPanel({
             </>
           );
         })()}
-
       </CardContent>
     </Card>
   );
