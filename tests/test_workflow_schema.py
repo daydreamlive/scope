@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
-
 from scope.core.workflows.schema import (
     WORKFLOW_FORMAT_VERSION,
     ScopeWorkflow,
@@ -14,6 +12,7 @@ from scope.core.workflows.schema import (
 )
 
 from .workflow_helpers import make_workflow as _make_workflow
+
 
 def _full_workflow_dict() -> dict:
     """A complete workflow dict used as a baseline for mutation tests."""
@@ -455,7 +454,7 @@ class TestWorkflowEndpoints:
         assert "$defs" in data or "definitions" in data or "properties" in data
 
     def test_workflow_validate_valid(self):
-        """POST /api/v1/workflow/validate returns 200 for a valid document."""
+        """POST /api/v1/workflow/validate returns 200 with a resolution plan."""
         from fastapi.testclient import TestClient
 
         from scope.server.app import app
@@ -465,8 +464,9 @@ class TestWorkflowEndpoints:
         resp = client.post("/api/v1/workflow/validate", json=doc)
         assert resp.status_code == 200
         body = resp.json()
-        assert body["format"] == "scope-workflow"
-        assert body["metadata"]["name"] == "test"
+        assert "can_apply" in body
+        assert "items" in body
+        assert isinstance(body["items"], list)
 
     def test_workflow_validate_invalid(self):
         """POST /api/v1/workflow/validate returns 422 for a bad document."""

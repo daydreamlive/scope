@@ -1201,7 +1201,7 @@ async def tag_lora_provenance(
 
 
 # ---------------------------------------------------------------------------
-# Workflow schema & validation
+# Workflow schema, validate & apply
 # ---------------------------------------------------------------------------
 
 
@@ -1211,21 +1211,6 @@ def get_workflow_schema():
     from scope.core.workflows.schema import ScopeWorkflow
 
     return ScopeWorkflow.model_json_schema()
-
-
-@app.post("/api/v1/workflow/validate")
-def validate_workflow(workflow: ScopeWorkflow):
-    """Validate a JSON body against the ScopeWorkflow schema.
-
-    Returns 200 with the normalized document on success, or 422 with
-    validation errors on failure (handled automatically by FastAPI).
-    """
-    return workflow.model_dump(mode="json", exclude_none=True)
-
-
-# ---------------------------------------------------------------------------
-# Workflow validate / apply
-# ---------------------------------------------------------------------------
 
 
 class WorkflowApplyRequest(BaseModel):
