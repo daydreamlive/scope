@@ -157,12 +157,12 @@ jobs:
 
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4
-        if: failure()
+        if: always()
         with:
           name: test-artifacts-pr-${{ steps.deployment.outputs.pr_number }}
           path: |
             e2e/test-results/
-          retention-days: 7
+          retention-days: 30
 
       - name: Comment test results on PR
         if: always()
@@ -184,7 +184,8 @@ jobs:
             | **fal Endpoint** | \`${{ steps.deployment.outputs.fal_app_id }}\` |
             | **Run** | [View logs](${runUrl}) |
             
-            ${conclusion !== 'success' ? '### Test Artifacts\nCheck the workflow run for screenshots and traces.' : ''}
+            ### Test Artifacts
+            Check the workflow run for screenshots${conclusion !== 'success' ? ', traces, and failure details' : ''}.
             `;
             
             // Find and update existing comment or create new one

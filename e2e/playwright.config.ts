@@ -23,7 +23,7 @@ export default defineConfig({
   use: {
     baseURL: process.env.DAYDREAM_BASE_URL || "https://app.daydream.live",
     trace: "on-first-retry",
-    screenshot: "only-on-failure",
+    screenshot: "on",
     video: "retain-on-failure",
     // Longer timeout for cloud operations
     actionTimeout: 30000,
