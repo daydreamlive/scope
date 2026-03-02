@@ -43,6 +43,11 @@ def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
     for i, (f, h, w) in enumerate(grid_sizes.tolist()):
         seq_len = f * h * w
 
+        # Guard: if any grid dimension is zero, skip rope and pass through
+        if seq_len == 0:
+            output.append(x[i])
+            continue
+
         # precompute multipliers
         x_i = torch.view_as_complex(
             x[i, :seq_len].to(torch.float64).reshape(seq_len, n, -1, 2)
