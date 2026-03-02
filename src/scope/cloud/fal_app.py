@@ -18,12 +18,12 @@ import shutil
 import subprocess as _subprocess
 import time
 import uuid
-from typing import Annotated, Any, AsyncIterator, Literal
+from collections.abc import AsyncIterator
+from typing import Annotated, Any, Literal
 
 import fal
 from fal.container import ContainerImage
 from pydantic import BaseModel, Field, RootModel
-
 
 # =============================================================================
 # Pydantic Models for WebSocket Protocol
@@ -570,7 +570,7 @@ class ScopeApp(fal.App, keep_alive=300):
 
         print("Scope container setup complete")
 
-    @fal.realtime("/ws", buffering="none")
+    @fal.realtime("/ws", buffering=None)
     async def websocket_handler(
         self, inputs: AsyncIterator[RealtimeInput]
     ) -> AsyncIterator[RealtimeOutput]:

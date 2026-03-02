@@ -164,8 +164,11 @@ class CloudConnectionManager:
         # Wait for "ready" message
         try:
             msg = await asyncio.wait_for(self.ws.receive(), timeout=180.0)
-            if msg.type == aiohttp.WSMsgType.TEXT:
-                data = json.loads(msg.data)
+            if msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
+                raw = (
+                    msg.data if isinstance(msg.data, str) else msg.data.decode("utf-8")
+                )
+                data = json.loads(raw)
                 if data.get("type") != "ready":
                     raise RuntimeError(f"Expected 'ready' message, got: {data}")
                 # Extract connection_id for log correlation
@@ -279,12 +282,17 @@ class CloudConnectionManager:
                 except TimeoutError:
                     continue
 
-                if msg.type == aiohttp.WSMsgType.TEXT:
+                if msg.type in (aiohttp.WSMsgType.TEXT, aiohttp.WSMsgType.BINARY):
                     try:
-                        data = json.loads(msg.data)
+                        raw = (
+                            msg.data
+                            if isinstance(msg.data, str)
+                            else msg.data.decode("utf-8")
+                        )
+                        data = json.loads(raw)
                         await self._handle_message(data)
-                    except json.JSONDecodeError:
-                        logger.warning(f"Non-JSON message from cloud: {msg.data}")
+                    except (json.JSONDecodeError, UnicodeDecodeError):
+                        logger.warning(f"Non-JSON message from cloud: {msg.data!r}")
                 elif msg.type == aiohttp.WSMsgType.CLOSED:
                     # Get close code and reason from the WebSocket
                     close_code = self.ws.close_code if self.ws else None
