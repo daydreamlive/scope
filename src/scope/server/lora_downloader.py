@@ -160,7 +160,9 @@ async def download_lora(
         dest_dir = lora_dir / request.subfolder
     else:
         dest_dir = lora_dir
-    dest_path = dest_dir / filename
+    dest_path = (dest_dir / filename).resolve()
+    if not dest_path.is_relative_to(lora_dir.resolve()):
+        raise ValueError("Invalid destination path")
 
     # Download
     await loop.run_in_executor(None, http_get, url, dest_path)

@@ -1187,7 +1187,9 @@ async def tag_lora_provenance(
 ) -> LoRAManifestEntry:
     """Retroactively tag a local LoRA with provenance info."""
     lora_dir = get_lora_dir()
-    file_path = lora_dir / filename
+    file_path = (lora_dir / filename).resolve()
+    if not file_path.is_relative_to(lora_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename")
     if not file_path.exists():
         raise HTTPException(status_code=404, detail=f"LoRA file '{filename}' not found")
 
