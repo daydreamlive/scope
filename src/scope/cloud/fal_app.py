@@ -203,6 +203,25 @@ class RealtimeOutput(RootModel):
 
 
 # =============================================================================
+# JSON encoding/decoding for fal.realtime (default is msgpack)
+# =============================================================================
+
+
+def json_decode_message(message: bytes) -> Any:
+    """Decode a JSON message from bytes."""
+    return json.loads(message.decode("utf-8"))
+
+
+def json_encode_message(message: Any) -> bytes:
+    """Encode a message to JSON bytes."""
+    if hasattr(message, "model_dump"):
+        return json.dumps(message.model_dump()).encode("utf-8")
+    if isinstance(message, dict):
+        return json.dumps(message).encode("utf-8")
+    raise TypeError(f"Cannot encode message of type {type(message)}")
+
+
+# =============================================================================
 # User Validation
 # =============================================================================
 
@@ -570,7 +589,13 @@ class ScopeApp(fal.App, keep_alive=300):
 
         print("Scope container setup complete")
 
-    @fal.realtime("/ws", buffering=None)
+    @fal.realtime(
+        "/ws",
+        buffering=None,
+        content_type="application/json",
+        encode_message=json_encode_message,
+        decode_message=json_decode_message,
+    )
     async def websocket_handler(
         self, inputs: AsyncIterator[RealtimeInput]
     ) -> AsyncIterator[RealtimeOutput]:
