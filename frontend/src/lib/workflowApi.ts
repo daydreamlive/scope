@@ -1,18 +1,16 @@
 /**
- * TypeScript types and API wrappers for the workflow validate/apply endpoints,
+ * TypeScript types and API wrappers for the workflow resolve endpoint,
  * plus the LoRA download endpoint.
  *
  * Types mirror the backend Pydantic models in:
- *   - scope.core.workflows.schema
  *   - scope.core.workflows.resolve
- *   - scope.core.workflows.apply
  *   - scope.server.lora_downloader
  *
  * Export is handled entirely client-side (see workflowSettings.ts).
  */
 
 // ---------------------------------------------------------------------------
-// Schema types (scope.core.workflows.schema)
+// Schema types (frontend-owned — the backend ignores extra fields)
 // ---------------------------------------------------------------------------
 
 export interface WorkflowLoRAProvenance {
@@ -106,29 +104,6 @@ export interface WorkflowResolutionPlan {
 }
 
 // ---------------------------------------------------------------------------
-// Apply types (scope.core.workflows.apply)
-// ---------------------------------------------------------------------------
-
-export interface ApplyResult {
-  applied: boolean;
-  pipeline_ids: string[];
-  skipped_loras: string[];
-  runtime_params: Record<string, unknown>;
-  restart_required: boolean;
-  message: string;
-}
-
-// ---------------------------------------------------------------------------
-// Apply request type (scope.server.app)
-// ---------------------------------------------------------------------------
-
-export interface WorkflowApplyRequest {
-  workflow: ScopeWorkflow;
-  install_missing_plugins: boolean;
-  skip_missing_loras: boolean;
-}
-
-// ---------------------------------------------------------------------------
 // LoRA download types (scope.server.lora_downloader)
 // ---------------------------------------------------------------------------
 
@@ -175,16 +150,10 @@ async function postJson<T>(
 // API functions
 // ---------------------------------------------------------------------------
 
-export function validateWorkflow(
+export function resolveWorkflow(
   workflow: ScopeWorkflow
 ): Promise<WorkflowResolutionPlan> {
-  return postJson("/api/v1/workflow/validate", workflow, "Validation");
-}
-
-export function applyWorkflow(
-  request: WorkflowApplyRequest
-): Promise<ApplyResult> {
-  return postJson("/api/v1/workflow/apply", request, "Apply");
+  return postJson("/api/v1/workflow/resolve", workflow, "Resolution");
 }
 
 export function downloadLoRA(

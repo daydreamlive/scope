@@ -1,6 +1,6 @@
 """Dependency resolution for imported workflows.
 
-Given a :class:`ScopeWorkflow`, check which pipelines, plugins, and LoRAs
+Given a :class:`WorkflowRequest`, check which pipelines, plugins, and LoRAs
 are available locally and produce a :class:`WorkflowResolutionPlan` that the
 frontend can display in a trust-gate dialog before any side-effects occur.
 """
@@ -16,9 +16,52 @@ from pydantic import BaseModel
 
 from scope.core.pipelines.registry import PipelineRegistry
 
-from .schema import ScopeWorkflow
-
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Minimal request models — only the fields the backend actually accesses.
+# All models use extra="ignore" so the frontend can send the full workflow
+# JSON and the backend silently drops fields it doesn't care about.
+# ---------------------------------------------------------------------------
+
+
+class WorkflowLoRAProvenance(BaseModel, extra="ignore"):
+    source: str
+    repo_id: str | None = None
+    hf_filename: str | None = None
+    model_id: str | None = None
+    version_id: str | None = None
+    url: str | None = None
+
+
+class WorkflowLoRA(BaseModel, extra="ignore"):
+    filename: str
+    provenance: WorkflowLoRAProvenance | None = None
+
+
+class WorkflowPipelineSource(BaseModel, extra="ignore"):
+    type: Literal["builtin", "pypi", "git", "local"]
+    plugin_name: str | None = None
+    plugin_version: str | None = None
+    package_spec: str | None = None
+
+
+class WorkflowPipeline(BaseModel, extra="ignore"):
+    pipeline_id: str
+    source: WorkflowPipelineSource
+    loras: list[WorkflowLoRA] = []
+    params: dict[str, Any] = {}
+
+
+class WorkflowRequest(BaseModel, extra="ignore"):
+    pipelines: list[WorkflowPipeline]
+    min_scope_version: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Resolution models
+# ---------------------------------------------------------------------------
 
 
 class ResolutionItem(BaseModel):
@@ -89,7 +132,7 @@ def _check_min_scope_version(
 
 
 def resolve_workflow(
-    workflow: ScopeWorkflow,
+    workflow: WorkflowRequest,
     plugin_manager: Any,
     models_dir: Path,
 ) -> WorkflowResolutionPlan:
@@ -100,7 +143,7 @@ def resolve_workflow(
     Parameters
     ----------
     workflow:
-        The parsed workflow to resolve.
+        The parsed workflow request to resolve.
     plugin_manager:
         The running ``PluginManager`` instance (used for plugin checks).
     models_dir:

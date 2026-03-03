@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
-from scope.core.workflows.resolve import is_load_param, resolve_workflow
-from scope.core.workflows.schema import (
+from scope.core.workflows.resolve import (
     WorkflowLoRA,
     WorkflowLoRAProvenance,
     WorkflowPipeline,
     WorkflowPipelineSource,
+    is_load_param,
+    resolve_workflow,
 )
 
 from .workflow_helpers import FakeConfig, make_workflow, mock_plugin_manager
@@ -72,7 +73,6 @@ class TestResolvePlugin:
             pipelines=[
                 WorkflowPipeline(
                     pipeline_id="face-swap",
-                    pipeline_version="0.1.0",
                     source=WorkflowPipelineSource(
                         type="pypi",
                         plugin_name="scope-deeplivecam",
@@ -100,7 +100,6 @@ class TestResolvePlugin:
             pipelines=[
                 WorkflowPipeline(
                     pipeline_id="face-swap",
-                    pipeline_version="0.1.0",
                     source=WorkflowPipelineSource(
                         type="pypi",
                         plugin_name="scope-deeplivecam",
@@ -126,7 +125,6 @@ class TestResolvePlugin:
             pipelines=[
                 WorkflowPipeline(
                     pipeline_id="face-swap",
-                    pipeline_version="0.1.0",
                     source=WorkflowPipelineSource(
                         type="pypi",
                         plugin_name="scope-deeplivecam",
@@ -158,7 +156,6 @@ class TestResolveLoRA:
             pipelines=[
                 WorkflowPipeline(
                     pipeline_id="test_pipe",
-                    pipeline_version="1.0.0",
                     source=WorkflowPipelineSource(type="builtin"),
                     loras=[WorkflowLoRA(filename="test.safetensors")],
                 )
@@ -180,7 +177,6 @@ class TestResolveLoRA:
             pipelines=[
                 WorkflowPipeline(
                     pipeline_id="test_pipe",
-                    pipeline_version="1.0.0",
                     source=WorkflowPipelineSource(type="builtin"),
                     loras=[WorkflowLoRA(filename="missing.safetensors")],
                 )
@@ -205,7 +201,6 @@ class TestResolveLoRA:
             pipelines=[
                 WorkflowPipeline(
                     pipeline_id="test_pipe",
-                    pipeline_version="1.0.0",
                     source=WorkflowPipelineSource(type="builtin"),
                     loras=[
                         WorkflowLoRA(
@@ -552,3 +547,161 @@ class TestResolveMultiplePipelines:
         pipeline_items = [i for i in plan.items if i.kind == "pipeline"]
         assert len(pipeline_items) == 2
         assert all(i.status == "ok" for i in pipeline_items)
+
+
+# ---------------------------------------------------------------------------
+# Extra fields ignored (forward compatibility)
+# ---------------------------------------------------------------------------
+
+
+class TestExtraFieldsIgnored:
+    """WorkflowRequest uses extra='ignore' so the frontend can send the
+    full workflow JSON (with metadata, timeline, etc.) and the backend
+    silently drops fields it doesn't need."""
+
+    def test_full_workflow_json_accepted(self):
+        """A complete .scope-workflow.json document parses into WorkflowRequest."""
+        from scope.core.workflows.resolve import WorkflowRequest
+
+        data = {
+            "format": "scope-workflow",
+            "format_version": "1.0",
+            "metadata": {
+                "name": "compat test",
+                "created_at": "2025-01-01T00:00:00Z",
+                "scope_version": "0.1.0",
+            },
+            "pipelines": [
+                {
+                    "pipeline_id": "longlive",
+                    "pipeline_version": "1.0.0",
+                    "source": {"type": "builtin"},
+                    "loras": [
+                        {
+                            "filename": "my.safetensors",
+                            "weight": 0.8,
+                            "provenance": {
+                                "source": "huggingface",
+                                "repo_id": "user/repo",
+                            },
+                            "sha256": "deadbeef",
+                        }
+                    ],
+                    "params": {"height": 480},
+                }
+            ],
+            "timeline": {"entries": [{"start_time": 0, "end_time": 10, "prompts": []}]},
+            "min_scope_version": "0.5.0",
+        }
+        wf = WorkflowRequest.model_validate(data)
+        assert wf.pipelines[0].pipeline_id == "longlive"
+        assert wf.min_scope_version == "0.5.0"
+
+    def test_unknown_top_level_fields_ignored(self):
+        from scope.core.workflows.resolve import WorkflowRequest
+
+        data = {
+            "pipelines": [{"pipeline_id": "p", "source": {"type": "builtin"}}],
+            "future_field": "should be dropped",
+        }
+        wf = WorkflowRequest.model_validate(data)
+        assert wf.pipelines[0].pipeline_id == "p"
+        assert not hasattr(wf, "future_field")
+
+
+# ---------------------------------------------------------------------------
+# Endpoint tests (moved from test_workflow_schema.py)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkflowEndpoints:
+    """Tests for the /api/v1/workflow/resolve endpoint."""
+
+    def test_workflow_resolve_valid(self):
+        """POST /api/v1/workflow/resolve returns 200 with a resolution plan."""
+        from fastapi.testclient import TestClient
+
+        from scope.server.app import app
+
+        client = TestClient(app, raise_server_exceptions=False)
+        doc = {
+            "format": "scope-workflow",
+            "format_version": "1.0",
+            "metadata": {
+                "name": "test",
+                "created_at": "2025-01-01T00:00:00Z",
+                "scope_version": "0.1.0",
+            },
+            "pipelines": [
+                {
+                    "pipeline_id": "test_pipe",
+                    "source": {"type": "builtin"},
+                    "params": {"height": 480, "width": 640},
+                }
+            ],
+        }
+        resp = client.post("/api/v1/workflow/resolve", json=doc)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "can_apply" in body
+        assert "items" in body
+        assert isinstance(body["items"], list)
+
+    def test_workflow_resolve_invalid(self):
+        """POST /api/v1/workflow/resolve returns 422 for a bad document."""
+        from fastapi.testclient import TestClient
+
+        from scope.server.app import app
+
+        client = TestClient(app, raise_server_exceptions=False)
+        resp = client.post("/api/v1/workflow/resolve", json={"bad": "data"})
+        assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# min_scope_version tests (moved from test_workflow_timeline.py)
+# ---------------------------------------------------------------------------
+
+
+class TestMinScopeVersion:
+    """WorkflowRequest.min_scope_version field."""
+
+    def test_default_is_none(self):
+        wf = make_workflow()
+        assert wf.min_scope_version is None
+
+    def test_round_trip(self):
+        from scope.core.workflows.resolve import WorkflowRequest
+
+        wf = make_workflow(min_scope_version="0.5.0")
+        data = wf.model_dump()
+        restored = WorkflowRequest.model_validate(data)
+        assert restored.min_scope_version == "0.5.0"
+
+    def test_resolve_warns_when_current_is_older(self):
+        """min_scope_version check produces a warning on resolve."""
+        wf = make_workflow(min_scope_version="99.0.0")
+        pm = mock_plugin_manager()
+
+        with patch("scope.core.workflows.resolve.PipelineRegistry") as mock_reg:
+            mock_reg.is_registered.return_value = True
+            mock_reg.get_config_class.return_value = None
+            plan = resolve_workflow(wf, pm, MagicMock())
+
+        assert any("99.0.0" in w for w in plan.warnings)
+
+    def test_resolve_no_warning_when_version_ok(self):
+        wf = make_workflow(min_scope_version="0.0.1")
+        pm = mock_plugin_manager()
+
+        with patch("scope.core.workflows.resolve.PipelineRegistry") as mock_reg:
+            mock_reg.is_registered.return_value = True
+            mock_reg.get_config_class.return_value = None
+            plan = resolve_workflow(wf, pm, MagicMock())
+
+        version_warnings = [
+            w
+            for w in plan.warnings
+            if "min_scope_version" in w.lower() or "Scope >=" in w
+        ]
+        assert len(version_warnings) == 0

@@ -2,40 +2,33 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
 from unittest.mock import AsyncMock, MagicMock
 
 from pydantic import BaseModel, Field
 
 from scope.core.pipelines.base_schema import ui_field_config
-from scope.core.workflows.resolve import ResolutionItem, WorkflowResolutionPlan
-from scope.core.workflows.schema import (
-    ScopeWorkflow,
-    WorkflowMetadata,
+from scope.core.workflows.resolve import (
+    ResolutionItem,
     WorkflowPipeline,
     WorkflowPipelineSource,
+    WorkflowRequest,
+    WorkflowResolutionPlan,
 )
 
 
-def make_workflow(**overrides) -> ScopeWorkflow:
-    """Build a minimal valid :class:`ScopeWorkflow` for tests."""
+def make_workflow(**overrides) -> WorkflowRequest:
+    """Build a minimal valid :class:`WorkflowRequest` for tests."""
     defaults = {
-        "metadata": WorkflowMetadata(
-            name="test",
-            created_at=datetime(2025, 1, 1, tzinfo=UTC),
-            scope_version="0.1.0",
-        ),
         "pipelines": [
             WorkflowPipeline(
                 pipeline_id="test_pipe",
-                pipeline_version="1.0.0",
                 source=WorkflowPipelineSource(type="builtin"),
                 params={"height": 480, "width": 640},
             )
         ],
     }
     defaults.update(overrides)
-    return ScopeWorkflow(**defaults)
+    return WorkflowRequest(**defaults)
 
 
 class FakeConfig(BaseModel):

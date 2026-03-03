@@ -1,35 +1,17 @@
-"""Shareable workflow schema and helpers."""
+"""Shareable workflow resolution helpers."""
 
-from .apply import ApplyResult
-from .migrate import migrate_workflow
-from .resolve import ResolutionItem, WorkflowResolutionPlan, is_load_param
-from .schema import (
-    WORKFLOW_FORMAT_VERSION,
-    ScopeWorkflow,
-    WorkflowLoRA,
-    WorkflowLoRAProvenance,
-    WorkflowMetadata,
-    WorkflowPipeline,
-    WorkflowPipelineSource,
-    WorkflowPrompt,
-    WorkflowTimeline,
-    WorkflowTimelineEntry,
+from .resolve import (
+    ResolutionItem,
+    WorkflowRequest,
+    WorkflowResolutionPlan,
+    is_load_param,
+    resolve_workflow,
 )
 
 __all__ = [
-    "WORKFLOW_FORMAT_VERSION",
-    "ApplyResult",
     "ResolutionItem",
-    "ScopeWorkflow",
-    "WorkflowLoRA",
-    "WorkflowLoRAProvenance",
-    "WorkflowMetadata",
-    "WorkflowPipeline",
-    "WorkflowPipelineSource",
-    "WorkflowPrompt",
+    "WorkflowRequest",
     "WorkflowResolutionPlan",
-    "WorkflowTimeline",
-    "WorkflowTimelineEntry",
     "is_load_param",
-    "migrate_workflow",
+    "resolve_workflow",
 ]

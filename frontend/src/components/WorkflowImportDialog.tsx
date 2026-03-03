@@ -26,7 +26,7 @@ import type {
   WorkflowLoRA,
   LoRADownloadRequest,
 } from "../lib/workflowApi";
-import { validateWorkflow, downloadLoRA } from "../lib/workflowApi";
+import { resolveWorkflow, downloadLoRA } from "../lib/workflowApi";
 import { installPlugin, restartServer, waitForServer } from "../lib/api";
 import type { SettingsState } from "../types";
 import type { TimelinePrompt } from "./PromptTimeline";
@@ -231,7 +231,7 @@ export function WorkflowImportDialog({
 
       setWorkflow(parsed);
 
-      const resolution = await validateWorkflow(parsed);
+      const resolution = await resolveWorkflow(parsed);
       setPlan(resolution);
 
       // Initialize LoRA download states
