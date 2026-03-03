@@ -48,6 +48,7 @@ dependencies = [
     "onnx>=1.16.0",
     "onnx-graphsurgeon>=0.5.2",
     "onnxruntime-gpu>=1.17.0; sys_platform == 'linux' or sys_platform == 'win32'",
+    "tensorrt>=10.0.0; sys_platform == 'linux'",
     "safetensors>=0.6.2",
     "huggingface_hub>=0.25.0",
     "pluggy>=1.5.0",
@@ -79,11 +80,8 @@ override-dependencies = [
     "nvidia-cudnn-cu12>=9.15; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 
-# Note: extra-build-dependencies is not a valid uv field, removed to avoid warnings
-# flash-attn build dependencies are handled automatically by uv
-
-[tool.uv.extra-build-variables]
-flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
+# Note: extra-build-dependencies and extra-build-variables are not valid uv fields
+# flash-attn build is handled via prebuilt wheels (see tool.uv.sources below)
 
 [tool.uv.sources]
 torch = [
