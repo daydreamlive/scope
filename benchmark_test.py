@@ -308,6 +308,8 @@ def make_ort_session(onnx_path):
     opts = ort.SessionOptions()
     # opts.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
     opts.log_severity_level = 3
+    opts.inter_op_num_threads = 1
+    opts.intra_op_num_threads = 8
     return ort.InferenceSession(
         onnx_path,
         sess_options=opts,
