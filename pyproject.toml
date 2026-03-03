@@ -46,6 +46,7 @@ dependencies = [
     "flash-attn==2.8.3; sys_platform == 'linux' or sys_platform == 'win32'",
     "sageattention==2.2.0; sys_platform == 'linux' or sys_platform == 'win32'",
     "onnx>=1.16.0",
+    "onnx-graphsurgeon>=0.5.2",
     "onnxruntime-gpu>=1.17.0; sys_platform == 'linux' or sys_platform == 'win32'",
     "safetensors>=0.6.2",
     "huggingface_hub>=0.25.0",
@@ -78,8 +79,8 @@ override-dependencies = [
     "nvidia-cudnn-cu12>=9.15; sys_platform == 'linux' or sys_platform == 'win32'",
 ]
 
-[tool.uv.extra-build-dependencies]
-flash-attn = [{ requirement = "torch", match-runtime = true, marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
+# Note: extra-build-dependencies is not a valid uv field, removed to avoid warnings
+# flash-attn build dependencies are handled automatically by uv
 
 [tool.uv.extra-build-variables]
 flash-attn = { FLASH_ATTENTION_SKIP_CUDA_BUILD = "TRUE" }
