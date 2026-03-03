@@ -102,7 +102,6 @@ async def get_hardware_info_from_cloud(
     ndi_available: bool = False,
     syphon_available: bool = False,
     osc_enabled: bool = False,
-    osc_port: int = 9000,
 ) -> HardwareInfoResponse:
     """Fetch hardware info from cloud and return with local output availability.
 
@@ -137,7 +136,6 @@ async def get_hardware_info_from_cloud(
         ndi_available=ndi_available,
         syphon_available=syphon_available,
         osc_enabled=osc_enabled,
-        osc_port=osc_port,
     )
 
 

@@ -259,10 +259,6 @@ class HardwareInfoResponse(BaseModel):
         default=False,
         description="Whether the OSC server is currently running",
     )
-    osc_port: int = Field(
-        default=9000,
-        description="UDP port the OSC server is listening on",
-    )
 
 
 class PipelineStatusEnum(str, Enum):
@@ -836,7 +832,6 @@ class ApiKeyDeleteResponse(BaseModel):
 class OSCStatusResponse(BaseModel):
     """Response containing OSC server status."""
 
-    available: bool = Field(..., description="Whether python-osc is installed")
     enabled: bool = Field(
         ..., description="Whether the OSC server is currently running"
     )
@@ -850,9 +845,3 @@ class OSCConfigRequest(BaseModel):
     """Request to configure the OSC server."""
 
     enabled: bool = Field(..., description="Enable or disable the OSC server")
-    port: int | None = Field(
-        default=None,
-        description="UDP port to listen on (only used when enabling)",
-        ge=1024,
-        le=65535,
-    )

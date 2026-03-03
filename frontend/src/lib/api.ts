@@ -209,11 +209,9 @@ export interface HardwareInfoResponse {
   ndi_available: boolean;
   syphon_available: boolean;
   osc_enabled: boolean;
-  osc_port: number;
 }
 
 export interface OSCStatusResponse {
-  available: boolean;
   enabled: boolean;
   port: number;
   listening: boolean;
@@ -229,13 +227,12 @@ export const getOSCStatus = async (): Promise<OSCStatusResponse> => {
 };
 
 export const configureOSC = async (
-  enabled: boolean,
-  port?: number
+  enabled: boolean
 ): Promise<OSCStatusResponse> => {
   const response = await fetch("/api/v1/osc/config", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ enabled, ...(port !== undefined && { port }) }),
+    body: JSON.stringify({ enabled }),
   });
   if (!response.ok) throw new Error("Failed to configure OSC");
   return response.json();

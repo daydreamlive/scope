@@ -542,6 +542,7 @@ dependencies = [
     { name = "peft" },
     { name = "pluggy" },
     { name = "pyopengl", marker = "sys_platform == 'win32'" },
+    { name = "python-osc" },
     { name = "safetensors" },
     { name = "sageattention", version = "2.2.0", source = { url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl" }, marker = "sys_platform == 'linux'" },
     { name = "sageattention", version = "2.2.0+cu128torch2.9.0andhigher.post4", source = { url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl" }, marker = "sys_platform == 'win32'" },
@@ -563,9 +564,6 @@ dependencies = [
 [package.optional-dependencies]
 kafka = [
     { name = "aiokafka" },
-]
-osc = [
-    { name = "python-osc" },
 ]
 
 [package.dev-dependencies]
@@ -601,7 +599,7 @@ requires-dist = [
     { name = "peft", specifier = ">=0.17.1" },
     { name = "pluggy", specifier = ">=1.5.0" },
     { name = "pyopengl", marker = "sys_platform == 'win32'", specifier = ">=3.1.10" },
-    { name = "python-osc", marker = "extra == 'osc'", specifier = ">=1.9.0" },
+    { name = "python-osc", specifier = ">=1.9.0" },
     { name = "safetensors", specifier = ">=0.6.2" },
     { name = "sageattention", marker = "sys_platform == 'linux'", url = "https://huggingface.co/Kijai/PrecompiledWheels/resolve/main/sageattention-2.2.0-cp312-cp312-linux_x86_64.whl" },
     { name = "sageattention", marker = "sys_platform == 'win32'", url = "https://github.com/woct0rdho/SageAttention/releases/download/v2.2.0-windows.post4/sageattention-2.2.0+cu128torch2.9.0andhigher.post4-cp39-abi3-win_amd64.whl" },
@@ -618,7 +616,7 @@ requires-dist = [
     { name = "twilio", specifier = ">=9.8.0" },
     { name = "uvicorn", specifier = ">=0.35.0" },
 ]
-provides-extras = ["kafka", "osc"]
+provides-extras = ["kafka"]
 
 [package.metadata.requires-dev]
 dev = [

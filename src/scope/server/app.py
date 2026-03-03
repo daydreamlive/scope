@@ -73,13 +73,7 @@ from .models_config import (
     get_lora_dir,
     models_are_downloaded,
 )
-from .osc import (
-    DEFAULT_OSC_PORT,
-    OSCManager,
-    get_osc_port,
-    is_osc_available,
-    is_osc_enabled,
-)
+from .osc import OSCManager
 from .pipeline_manager import PipelineManager
 from .recording import (
     cleanup_recording_files,
@@ -257,8 +251,11 @@ server_start_time = time.time()
 cloud_connection_manager = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
 kafka_publisher = None
-# Global OSC manager instance (optional, enabled via --osc or DAYDREAM_SCOPE_OSC=1)
+# Global OSC manager instance (optional, enabled at runtime via POST /api/v1/osc/config)
 osc_manager: OSCManager | None = None
+# Server host/port stored at startup so the OSC server can reuse them
+server_host: str = "0.0.0.0"
+server_port: int = 8000
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -338,20 +335,6 @@ async def lifespan(app: FastAPI):
         else:
             kafka_publisher = None
             logger.warning("Kafka publisher failed to start")
-
-    # Initialize OSC server if enabled
-    if is_osc_enabled() and is_osc_available():
-        osc_manager = OSCManager(port=get_osc_port())
-        if await osc_manager.start(webrtc_manager):
-            logger.info(f"OSC server initialized on port {osc_manager.port}")
-        else:
-            osc_manager = None
-            logger.warning("OSC server failed to start")
-    elif is_osc_enabled() and not is_osc_available():
-        logger.warning(
-            "OSC enabled but python-osc is not installed. "
-            "Install with: uv pip install python-osc"
-        )
 
     # Syphon server discovery (macOS only): create the ObjC singleton and do
     # an initial NSRunLoop pump so servers are available when the UI first loads.
@@ -1763,7 +1746,6 @@ async def get_hardware_info(
                 is_ndi_output_available(),
                 is_syphon_output_available(),
                 osc_enabled=osc_manager is not None and osc_manager.listening,
-                osc_port=osc_manager.port if osc_manager else get_osc_port(),
             )
 
         # Local mode: get local hardware info
@@ -1782,7 +1764,6 @@ async def get_hardware_info(
             ndi_available=is_ndi_output_available(),
             syphon_available=is_syphon_output_available(),
             osc_enabled=osc_manager is not None and osc_manager.listening,
-            osc_port=osc_manager.port if osc_manager else get_osc_port(),
         )
     except HTTPException:
         raise
@@ -1798,46 +1779,33 @@ async def get_hardware_info(
 async def get_osc_status():
     """Get the current status of the OSC server."""
     return OSCStatusResponse(
-        available=is_osc_available(),
         enabled=osc_manager is not None and osc_manager.listening,
-        port=osc_manager.port if osc_manager else get_osc_port(),
+        port=osc_manager.port if osc_manager else server_port,
         listening=osc_manager.listening if osc_manager else False,
     )
 
 
 @app.post("/api/v1/osc/config", response_model=OSCStatusResponse)
 async def configure_osc(request: OSCConfigRequest):
-    """Start, stop, or reconfigure the OSC server at runtime."""
+    """Start or stop the OSC server at runtime."""
     global osc_manager
 
-    if not is_osc_available():
-        raise HTTPException(
-            status_code=400,
-            detail="python-osc is not installed. Install with: uv pip install python-osc",
-        )
-
-    port = request.port or (osc_manager.port if osc_manager else get_osc_port())
-
     if request.enabled:
-        # Stop existing server if port changed
         if osc_manager and osc_manager.listening:
-            if osc_manager.port == port:
-                return OSCStatusResponse(
-                    available=True,
-                    enabled=True,
-                    port=osc_manager.port,
-                    listening=True,
-                )
-            osc_manager.stop()
+            return OSCStatusResponse(
+                enabled=True,
+                port=osc_manager.port,
+                listening=True,
+            )
 
-        osc_manager = OSCManager(port=port)
+        osc_manager = OSCManager(host=server_host, port=server_port)
         if not await osc_manager.start(webrtc_manager):
             osc_manager = None
             raise HTTPException(
                 status_code=500,
-                detail=f"Failed to start OSC server on port {port}",
+                detail=f"Failed to start OSC server on {server_host}:{server_port}",
             )
-        logger.info(f"OSC server started on port {port} via API")
+        logger.info(f"OSC server started on {server_host}:{server_port} via API")
     else:
         if osc_manager:
             osc_manager.stop()
@@ -1845,9 +1813,8 @@ async def configure_osc(request: OSCConfigRequest):
             logger.info("OSC server stopped via API")
 
     return OSCStatusResponse(
-        available=True,
         enabled=osc_manager is not None and osc_manager.listening,
-        port=port,
+        port=server_port,
         listening=osc_manager.listening if osc_manager else False,
     )
 
@@ -2451,6 +2418,9 @@ def open_browser_when_ready(host: str, port: int, server):
 
 def run_server(reload: bool, host: str, port: int, no_browser: bool):
     """Run the Daydream Scope server."""
+    global server_host, server_port
+    server_host = host
+    server_port = port
 
     from scope.core.pipelines.registry import (
         PipelineRegistry,  # noqa: F401 - imported for side effects (registry initialization)
@@ -2528,19 +2498,6 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     envvar="SCOPE_CLOUD_API_KEY",
     help="Cloud API key for cloud mode",
 )
-@click.option(
-    "--osc",
-    is_flag=True,
-    envvar="DAYDREAM_SCOPE_OSC",
-    help="Enable OSC (Open Sound Control) server for external parameter control",
-)
-@click.option(
-    "--osc-port",
-    default=None,
-    type=int,
-    envvar="DAYDREAM_SCOPE_OSC_PORT",
-    help=f"UDP port for OSC server (default: {DEFAULT_OSC_PORT})",
-)
 @click.pass_context
 def main(
     ctx,
@@ -2551,8 +2508,6 @@ def main(
     no_browser: bool,
     cloud_app_id: str | None,
     cloud_api_key: str | None,
-    osc: bool,
-    osc_port: int | None,
 ):
     # Handle version flag
     if version:
@@ -2564,12 +2519,6 @@ def main(
         os.environ["SCOPE_CLOUD_APP_ID"] = cloud_app_id
     if cloud_api_key:
         os.environ["SCOPE_CLOUD_API_KEY"] = cloud_api_key
-
-    # Store OSC settings in environment for lifespan access
-    if osc:
-        os.environ["DAYDREAM_SCOPE_OSC"] = "1"
-    if osc_port is not None:
-        os.environ["DAYDREAM_SCOPE_OSC_PORT"] = str(osc_port)
 
     # If no subcommand was invoked, run the server
     if ctx.invoked_subcommand is None:

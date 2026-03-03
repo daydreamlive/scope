@@ -112,7 +112,6 @@ export function StreamPage() {
     ndiOutputAvailable,
     syphonOutputAvailable,
     oscEnabled,
-    oscPort,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
@@ -1776,7 +1775,6 @@ export function StreamPage() {
             ndiAvailable={ndiOutputAvailable}
             syphonAvailable={syphonOutputAvailable}
             oscEnabled={oscEnabled}
-            oscPort={oscPort}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&

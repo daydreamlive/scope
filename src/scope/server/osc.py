@@ -3,62 +3,40 @@
 Allows external applications (TouchDesigner, Resolume, Max/MSP, MIDI controllers,
 etc.) to control Scope's pipeline parameters over UDP using the OSC protocol.
 
-Environment Variables:
-    DAYDREAM_SCOPE_OSC: Set to "1" to enable OSC server (default: disabled)
-    DAYDREAM_SCOPE_OSC_PORT: UDP port for OSC server (default: 9000)
+The OSC server is started/stopped at runtime via the HTTP API
+(POST /api/v1/osc/config) and binds to the same host/port as the main HTTP server
+(UDP and TCP can share a port number).
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from typing import TYPE_CHECKING, Any
+
+from pythonosc.dispatcher import Dispatcher
+from pythonosc.osc_server import AsyncIOOSCUDPServer
 
 if TYPE_CHECKING:
     from .webrtc import WebRTCManager
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_OSC_PORT = 9000
-
-
-def is_osc_available() -> bool:
-    """Check if python-osc is installed."""
-    try:
-        import pythonosc  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
-
-
-def is_osc_enabled() -> bool:
-    """Check if OSC is enabled via environment variable or CLI flag."""
-    return os.getenv("DAYDREAM_SCOPE_OSC", "").strip() in ("1", "true", "yes")
-
-
-def get_osc_port() -> int:
-    """Get the configured OSC port from environment or default."""
-    try:
-        return int(os.getenv("DAYDREAM_SCOPE_OSC_PORT", str(DEFAULT_OSC_PORT)))
-    except ValueError:
-        return DEFAULT_OSC_PORT
-
 
 class OSCManager:
     """Manages an async OSC UDP server that maps OSC messages to pipeline parameter updates.
 
-    The server listens on a configurable UDP port and dispatches incoming OSC
-    messages to handler methods that translate them into Scope parameter updates,
-    which are then pushed to all active WebRTC sessions' frame processors.
+    The server listens on a UDP port and dispatches incoming OSC messages to a
+    generic handler that translates them into Scope parameter updates, which are
+    then pushed to all active WebRTC sessions' frame processors.
     """
 
-    def __init__(self, port: int = DEFAULT_OSC_PORT):
+    def __init__(self, host: str, port: int):
+        self.host = host
         self.port = port
         self._webrtc_manager: WebRTCManager | None = None
-        self._server: Any = None
-        self._transport: Any = None
+        self._server: AsyncIOOSCUDPServer | None = None
+        self._transport: asyncio.BaseTransport | None = None
         self._listening = False
 
     @property
@@ -93,130 +71,32 @@ class OSCManager:
             except Exception as e:
                 logger.error(f"Error pushing OSC parameter update: {e}")
 
-    def _setup_dispatcher(self):
-        """Configure the OSC dispatcher with address handlers."""
-        from pythonosc.dispatcher import Dispatcher
-
+    def _setup_dispatcher(self) -> Dispatcher:
+        """Configure the OSC dispatcher with a single generic handler."""
         dispatcher = Dispatcher()
-
-        dispatcher.map("/scope/prompt", self._handle_prompt)
-        dispatcher.map("/scope/prompt/weight", self._handle_prompt_weight)
-        dispatcher.map("/scope/noise", self._handle_noise)
-        dispatcher.map("/scope/denoise", self._handle_denoise)
-        dispatcher.map("/scope/cache/reset", self._handle_cache_reset)
-        dispatcher.map("/scope/cache/bias", self._handle_cache_bias)
-        dispatcher.map("/scope/output/*/enable", self._handle_output_enable)
-        dispatcher.map("/scope/output/*/disable", self._handle_output_disable)
-        dispatcher.map("/scope/param/*", self._handle_generic_param)
-
-        dispatcher.set_default_handler(self._handle_unknown)
-
+        dispatcher.set_default_handler(self._handle_message)
         return dispatcher
 
-    # --- OSC Address Handlers ---
+    def _handle_message(self, address: str, *args) -> None:
+        """Handle any OSC message by forwarding address/value as a parameter update.
 
-    def _handle_prompt(self, address: str, *args) -> None:
-        """Handle /scope/prompt <string> -- set the first prompt text."""
-        if not args or not isinstance(args[0], str):
-            logger.warning(f"OSC {address}: expected string argument, got {args}")
+        Messages under the /scope/ namespace have their address path (minus the
+        leading /scope/) used as the parameter key. Messages outside the namespace
+        are ignored.
+        """
+        parts = address.strip("/").split("/")
+        if len(parts) < 2 or parts[0] != "scope":
+            logger.debug(f"OSC ignoring address outside /scope/ namespace: {address}")
             return
 
-        prompt_text = args[0]
-        logger.info(f"OSC prompt: {prompt_text[:80]}...")
-        self._push_parameters({"prompts": [{"text": prompt_text, "weight": 100}]})
-
-    def _handle_prompt_weight(self, address: str, *args) -> None:
-        """Handle /scope/prompt/weight <float> -- set first prompt weight."""
-        if not args:
-            return
-        try:
-            weight = float(args[0])
-            weight = max(0.0, min(100.0, weight))
-            logger.info(f"OSC prompt weight: {weight}")
-            self._push_parameters({"prompts": [{"text": "", "weight": weight}]})
-        except (ValueError, TypeError):
-            logger.warning(f"OSC {address}: invalid weight value: {args[0]}")
-
-    def _handle_noise(self, address: str, *args) -> None:
-        """Handle /scope/noise <float 0.0-1.0> -- set noise scale."""
-        if not args:
-            return
-        try:
-            noise = float(args[0])
-            noise = max(0.0, min(1.0, noise))
-            logger.info(f"OSC noise scale: {noise}")
-            self._push_parameters({"noise_scale": noise})
-        except (ValueError, TypeError):
-            logger.warning(f"OSC {address}: invalid noise value: {args[0]}")
-
-    def _handle_denoise(self, address: str, *args) -> None:
-        """Handle /scope/denoise <int> [<int>...] -- set denoising step list."""
-        if not args:
-            return
-        try:
-            steps = [int(a) for a in args]
-            logger.info(f"OSC denoising steps: {steps}")
-            self._push_parameters({"denoising_step_list": steps})
-        except (ValueError, TypeError):
-            logger.warning(f"OSC {address}: invalid step values: {args}")
-
-    def _handle_cache_reset(self, address: str, *args) -> None:
-        """Handle /scope/cache/reset -- trigger cache reset."""
-        logger.info("OSC cache reset")
-        self._push_parameters({"reset_cache": True})
-
-    def _handle_cache_bias(self, address: str, *args) -> None:
-        """Handle /scope/cache/bias <float 0.01-1.0> -- set KV cache attention bias."""
-        if not args:
-            return
-        try:
-            bias = float(args[0])
-            bias = max(0.01, min(1.0, bias))
-            logger.info(f"OSC cache bias: {bias}")
-            self._push_parameters({"kv_cache_attention_bias": bias})
-        except (ValueError, TypeError):
-            logger.warning(f"OSC {address}: invalid bias value: {args[0]}")
-
-    def _handle_output_enable(self, address: str, *args) -> None:
-        """Handle /scope/output/<sink_type>/enable -- enable an output sink."""
-        parts = address.split("/")
-        if len(parts) < 5:
-            return
-        sink_type = parts[3]
-        name = args[0] if args and isinstance(args[0], str) else "ScopeOSC"
-        logger.info(f"OSC enable output: {sink_type} (name={name})")
-        self._push_parameters(
-            {"output_sinks": {sink_type: {"enabled": True, "name": name}}}
-        )
-
-    def _handle_output_disable(self, address: str, *args) -> None:
-        """Handle /scope/output/<sink_type>/disable -- disable an output sink."""
-        parts = address.split("/")
-        if len(parts) < 5:
-            return
-        sink_type = parts[3]
-        logger.info(f"OSC disable output: {sink_type}")
-        self._push_parameters(
-            {"output_sinks": {sink_type: {"enabled": False, "name": ""}}}
-        )
-
-    def _handle_generic_param(self, address: str, *args) -> None:
-        """Handle /scope/param/<key> <value> -- generic parameter passthrough."""
-        parts = address.split("/")
-        if len(parts) < 4:
-            return
-        key = parts[3]
+        key = "/".join(parts[1:])
         if not args:
             logger.warning(f"OSC {address}: no value provided")
             return
 
         value = args[0] if len(args) == 1 else list(args)
-        logger.info(f"OSC param: {key} = {value}")
+        logger.info(f"OSC: {key} = {value}")
         self._push_parameters({key: value})
-
-    def _handle_unknown(self, address: str, *args) -> None:
-        """Log unrecognized OSC addresses for debugging."""
-        logger.debug(f"OSC unknown address: {address} args={args}")
 
     # --- Lifecycle ---
 
@@ -225,27 +105,21 @@ class OSCManager:
 
         Returns True if started successfully, False otherwise.
         """
-        if not is_osc_available():
-            logger.warning("python-osc is not installed, OSC server cannot start")
-            return False
-
         self._webrtc_manager = webrtc_manager
 
         try:
-            from pythonosc.osc_server import AsyncIOOSCUDPServer
-
             dispatcher = self._setup_dispatcher()
             self._server = AsyncIOOSCUDPServer(
-                ("0.0.0.0", self.port),
+                (self.host, self.port),
                 dispatcher,
-                asyncio.get_event_loop(),
+                asyncio.get_running_loop(),
             )
             self._transport, _ = await self._server.create_serve_endpoint()
             self._listening = True
-            logger.info(f"OSC server listening on UDP port {self.port}")
+            logger.info(f"OSC server listening on UDP {self.host}:{self.port}")
             return True
         except OSError as e:
-            logger.error(f"Failed to start OSC server on port {self.port}: {e}")
+            logger.error(f"Failed to start OSC server on {self.host}:{self.port}: {e}")
             return False
         except Exception as e:
             logger.error(f"Unexpected error starting OSC server: {e}")

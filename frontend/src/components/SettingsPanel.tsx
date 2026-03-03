@@ -326,7 +326,6 @@ interface SettingsPanelProps {
   syphonAvailable?: boolean;
   // OSC
   oscEnabled?: boolean;
-  oscPort?: number;
   // VACE settings
   vaceEnabled?: boolean;
   onVaceEnabledChange?: (enabled: boolean) => void;
@@ -400,7 +399,6 @@ export function SettingsPanel({
   ndiAvailable = false,
   syphonAvailable = false,
   oscEnabled = false,
-  oscPort = 9000,
   vaceEnabled = true,
   onVaceEnabledChange,
   vaceUseInputVideo = true,
@@ -1370,7 +1368,6 @@ export function SettingsPanel({
                 Listening
               </span>
             </div>
-            <p className="text-xs text-muted-foreground">UDP port {oscPort}</p>
           </div>
         )}
       </CardContent>
