@@ -65,6 +65,7 @@ export function StatusBar({
             title="Toggle log panel"
           >
             <Terminal className="h-3.5 w-3.5" />
+            <span>Logs</span>
             {logUnreadCount > 0 && !isLogOpen && (
               <span className="bg-blue-500 text-white text-[10px] px-1 rounded-full min-w-[16px] text-center leading-4">
                 {logUnreadCount > 99 ? "99+" : logUnreadCount}

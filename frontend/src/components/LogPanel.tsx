@@ -131,7 +131,7 @@ export function LogPanel({ logs, isOpen, onClose, onClear }: LogPanelProps) {
           filteredLogs.map((log, i) => (
             <div
               key={i}
-              className={`${levelColor[log.level]} whitespace-pre-wrap leading-5`}
+              className={`${levelColor[log.level]} whitespace-pre-wrap leading-5${log.isCloud ? " border-l-2 border-blue-500/50 bg-blue-950/20 pl-2" : ""}`}
             >
               {log.isCloud && (
                 <span className="bg-blue-900/40 text-blue-300 text-[10px] px-1 rounded mr-1 inline-block">

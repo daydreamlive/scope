@@ -378,7 +378,7 @@ class CloudConnectionManager:
                 level = logging.WARNING
             elif " - DEBUG - " in line:
                 level = logging.DEBUG
-            cloud_logger.log(level, "[CLOUD] %s", line)
+            cloud_logger.log(level, "%s", line)
 
     async def send_and_wait(
         self,

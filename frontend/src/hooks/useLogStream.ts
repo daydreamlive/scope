@@ -13,7 +13,7 @@ export interface LogLine {
 }
 
 function parseLogLine(raw: string): LogLine {
-  const isCloud = raw.includes("[CLOUD]");
+  const isCloud = raw.includes("- scope.cloud -");
   let level: LogLevel = "UNKNOWN";
   if (raw.includes(" - ERROR - ")) level = "ERROR";
   else if (raw.includes(" - WARNING - ")) level = "WARNING";
