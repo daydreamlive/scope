@@ -9,27 +9,10 @@ from scope.core.workflows.resolve import (
     WorkflowLoRAProvenance,
     WorkflowPipeline,
     WorkflowPipelineSource,
-    is_load_param,
     resolve_workflow,
 )
 
-from .workflow_helpers import FakeConfig, make_workflow, mock_plugin_manager
-
-# ---------------------------------------------------------------------------
-# is_load_param tests
-# ---------------------------------------------------------------------------
-
-
-class TestIsLoadParam:
-    def test_load_param_true(self):
-        assert is_load_param(FakeConfig, "height") is True
-
-    def test_load_param_false(self):
-        assert is_load_param(FakeConfig, "noise_scale") is False
-
-    def test_unknown_field(self):
-        assert is_load_param(FakeConfig, "nonexistent") is False
-
+from .workflow_helpers import make_workflow, mock_plugin_manager
 
 # ---------------------------------------------------------------------------
 # resolve_workflow tests
@@ -40,7 +23,6 @@ class TestResolveBuiltinPipeline:
     @patch("scope.core.workflows.resolve.PipelineRegistry")
     def test_all_ok(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
 
         wf = make_workflow()
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
@@ -94,7 +76,6 @@ class TestResolvePlugin:
     @patch("scope.core.workflows.resolve.PipelineRegistry")
     def test_plugin_installed_ok(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
 
         wf = make_workflow(
             pipelines=[
@@ -119,7 +100,6 @@ class TestResolvePlugin:
     @patch("scope.core.workflows.resolve.PipelineRegistry")
     def test_plugin_version_mismatch(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
 
         wf = make_workflow(
             pipelines=[
@@ -146,7 +126,6 @@ class TestResolveLoRA:
     @patch("scope.core.workflows.resolve.PipelineRegistry")
     def test_lora_present(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
 
         lora_dir = tmp_path / "lora"
         lora_dir.mkdir()
@@ -169,7 +148,6 @@ class TestResolveLoRA:
     @patch("scope.core.workflows.resolve.PipelineRegistry")
     def test_lora_missing_no_provenance(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
 
         (tmp_path / "lora").mkdir()
 
@@ -193,7 +171,6 @@ class TestResolveLoRA:
     @patch("scope.core.workflows.resolve.PipelineRegistry")
     def test_lora_missing_with_provenance(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
 
         (tmp_path / "lora").mkdir()
 
@@ -221,27 +198,6 @@ class TestResolveLoRA:
         assert lora_items[0].status == "missing"
         assert lora_items[0].can_auto_resolve is True
         assert "HuggingFace" in lora_items[0].action
-
-
-# ---------------------------------------------------------------------------
-# is_load_param edge cases
-# ---------------------------------------------------------------------------
-
-
-class TestIsLoadParamEdgeCases:
-    def test_callable_json_schema_extra(self):
-        """When json_schema_extra is a callable, is_load_param returns False."""
-        from pydantic import BaseModel, Field
-
-        class CallableExtraConfig(BaseModel):
-            x: int = Field(
-                default=1,
-                json_schema_extra=lambda schema: schema.update(
-                    {"ui": {"is_load_param": True}}
-                ),
-            )
-
-        assert is_load_param(CallableExtraConfig, "x") is False
 
 
 # ---------------------------------------------------------------------------
@@ -303,7 +259,6 @@ class TestResolvePluginEdgeCases:
     def test_invalid_version_treated_as_ok(self, mock_registry, tmp_path):
         """Unparseable version strings don't block; treated as ok with detail."""
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
 
         wf = make_workflow(
             pipelines=[
@@ -331,7 +286,6 @@ class TestResolvePluginEdgeCases:
     def test_plugin_no_version_info(self, mock_registry, tmp_path):
         """Plugin installed with no version on either side is ok."""
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
 
         wf = make_workflow(
             pipelines=[
@@ -364,7 +318,7 @@ class TestResolveLoRAProvenance:
     def test_missing_lora_civitai_provenance(self, mock_registry, tmp_path):
         """CivitAI provenance generates correct action string."""
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
+
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
@@ -397,7 +351,7 @@ class TestResolveLoRAProvenance:
     def test_missing_lora_url_provenance_with_url(self, mock_registry, tmp_path):
         """URL provenance with a url field uses that URL in the action."""
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
+
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
@@ -428,7 +382,7 @@ class TestResolveLoRAProvenance:
     def test_missing_lora_url_provenance_without_url(self, mock_registry, tmp_path):
         """URL provenance without a url field falls back to generic action."""
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
+
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
@@ -458,7 +412,7 @@ class TestResolveLoRAProvenance:
     ):
         """Local provenance is treated as no provenance (not auto-resolvable)."""
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
+
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
@@ -494,7 +448,6 @@ class TestResolveMultiplePipelines:
     def test_mixed_builtin_ok_and_plugin_missing(self, mock_registry, tmp_path):
         """One ok builtin + one missing plugin: can_apply is False, both items present."""
         mock_registry.is_registered.side_effect = lambda pid: pid == "test_pipe"
-        mock_registry.get_config_class.return_value = FakeConfig
 
         wf = make_workflow(
             pipelines=[
@@ -526,7 +479,6 @@ class TestResolveMultiplePipelines:
     def test_multiple_pipelines_all_ok(self, mock_registry, tmp_path):
         """Multiple builtin pipelines all registered: can_apply is True."""
         mock_registry.is_registered.return_value = True
-        mock_registry.get_config_class.return_value = FakeConfig
 
         wf = make_workflow(
             pipelines=[

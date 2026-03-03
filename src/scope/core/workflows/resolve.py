@@ -51,7 +51,6 @@ class WorkflowPipeline(BaseModel, extra="ignore"):
     pipeline_id: str
     source: WorkflowPipelineSource
     loras: list[WorkflowLoRA] = []
-    params: dict[str, Any] = {}
 
 
 class WorkflowRequest(BaseModel, extra="ignore"):
@@ -83,18 +82,124 @@ class WorkflowResolutionPlan(BaseModel):
     warnings: list[str] = []
 
 
-def is_load_param(config_class: type, field_name: str) -> bool:
-    """Check whether *field_name* is a load param on *config_class*."""
-    field_info = config_class.model_fields.get(field_name)
-    if field_info is None:
-        return False
-    extra = field_info.json_schema_extra
-    if callable(extra):
-        return False
-    if isinstance(extra, dict):
-        ui = extra.get("ui", {})
-        return ui.get("is_load_param", False)
-    return False
+# ---------------------------------------------------------------------------
+# Resolution helpers
+# ---------------------------------------------------------------------------
+
+
+def _resolve_builtin(pipeline_id: str) -> ResolutionItem:
+    if PipelineRegistry.is_registered(pipeline_id):
+        return ResolutionItem(kind="pipeline", name=pipeline_id, status="ok")
+    return ResolutionItem(
+        kind="pipeline",
+        name=pipeline_id,
+        status="missing",
+        detail=f"Built-in pipeline '{pipeline_id}' not found",
+    )
+
+
+def _resolve_plugin(
+    wp: WorkflowPipeline,
+    plugins: list[dict],
+) -> ResolutionItem:
+    plugin_name = wp.source.plugin_name
+    if plugin_name is None:
+        return ResolutionItem(
+            kind="plugin",
+            name=wp.pipeline_id,
+            status="missing",
+            detail="No plugin name specified in workflow",
+        )
+
+    installed = next((p for p in plugins if p.get("name") == plugin_name), None)
+    if installed is None:
+        return _missing_plugin_item(wp.source, plugin_name)
+
+    return _check_plugin_version(
+        plugin_name,
+        installed.get("version"),
+        wp.source.plugin_version,
+    )
+
+
+def _missing_plugin_item(
+    source: WorkflowPipelineSource,
+    plugin_name: str,
+) -> ResolutionItem:
+    if source.type == "git" and source.package_spec:
+        action = f"Install from git: {source.package_spec}"
+    else:
+        spec = plugin_name
+        if source.plugin_version:
+            spec += f">={source.plugin_version}"
+        action = f"Install {spec} from PyPI"
+
+    return ResolutionItem(
+        kind="plugin",
+        name=plugin_name,
+        status="missing",
+        detail=f"Plugin '{plugin_name}' is not installed",
+        action=action,
+        can_auto_resolve=True,
+    )
+
+
+def _check_plugin_version(
+    plugin_name: str,
+    installed_version: str | None,
+    workflow_version: str | None,
+) -> ResolutionItem:
+    if not workflow_version or not installed_version:
+        return ResolutionItem(kind="plugin", name=plugin_name, status="ok")
+    try:
+        if Version(installed_version) < Version(workflow_version):
+            return ResolutionItem(
+                kind="plugin",
+                name=plugin_name,
+                status="version_mismatch",
+                detail=(
+                    f"Installed {installed_version},"
+                    f" workflow expects {workflow_version}"
+                ),
+                action=f"Upgrade {plugin_name} to >={workflow_version}",
+                can_auto_resolve=True,
+            )
+        return ResolutionItem(kind="plugin", name=plugin_name, status="ok")
+    except InvalidVersion:
+        return ResolutionItem(
+            kind="plugin",
+            name=plugin_name,
+            status="ok",
+            detail=f"Could not compare versions (installed={installed_version})",
+        )
+
+
+def _resolve_lora(lora: WorkflowLoRA, lora_dir: Path) -> ResolutionItem:
+    if (lora_dir / lora.filename).exists():
+        return ResolutionItem(kind="lora", name=lora.filename, status="ok")
+
+    prov = lora.provenance
+    has_provenance = prov is not None and prov.source != "local"
+
+    action = None
+    if has_provenance:
+        if prov.source == "huggingface":
+            action = f"Download from HuggingFace: {prov.repo_id}"
+        elif prov.source == "civitai":
+            action = f"Download from CivitAI (model {prov.model_id})"
+        elif prov.url:
+            action = f"Download from {prov.url}"
+        else:
+            action = "Download from source"
+
+    return ResolutionItem(
+        kind="lora",
+        name=lora.filename,
+        status="missing",
+        detail=f"LoRA '{lora.filename}' not found locally",
+        action=action,
+        can_auto_resolve=has_provenance,
+    )
 
 
 def _check_min_scope_version(
@@ -105,15 +210,20 @@ def _check_min_scope_version(
     import importlib.metadata
 
     try:
-        current_version = Version(importlib.metadata.version("daydream-scope"))
-        min_version = Version(min_version_str)
-        if current_version < min_version:
+        current = Version(importlib.metadata.version("daydream-scope"))
+        required = Version(min_version_str)
+        if current < required:
             warnings.append(
                 f"This workflow requires Scope >= {min_version_str} "
-                f"(installed: {current_version})"
+                f"(installed: {current})"
             )
     except (InvalidVersion, importlib.metadata.PackageNotFoundError):
         warnings.append(f"Could not verify min_scope_version '{min_version_str}'")
+
+
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
 
 
 def resolve_workflow(
@@ -124,177 +234,27 @@ def resolve_workflow(
     """Resolve all dependencies for *workflow*.
 
     This is a **read-only** operation — no downloads, no installs.
-
-    Parameters
-    ----------
-    workflow:
-        The parsed workflow request to resolve.
-    plugin_manager:
-        The running ``PluginManager`` instance (used for plugin checks).
-    models_dir:
-        Root models directory (LoRAs live under ``models_dir / "lora"``).
     """
-
     items: list[ResolutionItem] = []
     warnings: list[str] = []
     all_pipelines_ok = True
 
     plugins = plugin_manager.list_plugins_sync()
-
     lora_dir = models_dir / "lora"
 
     for wp in workflow.pipelines:
-        # --- Pipeline / plugin resolution ---
         if wp.source.type == "builtin":
-            if PipelineRegistry.is_registered(wp.pipeline_id):
-                items.append(
-                    ResolutionItem(
-                        kind="pipeline",
-                        name=wp.pipeline_id,
-                        status="ok",
-                    )
-                )
-            else:
-                items.append(
-                    ResolutionItem(
-                        kind="pipeline",
-                        name=wp.pipeline_id,
-                        status="missing",
-                        detail=f"Built-in pipeline '{wp.pipeline_id}' not found",
-                    )
-                )
-                all_pipelines_ok = False
+            item = _resolve_builtin(wp.pipeline_id)
         else:
-            # Plugin-provided pipeline
-            plugin_name = wp.source.plugin_name
-            if plugin_name is None:
-                items.append(
-                    ResolutionItem(
-                        kind="plugin",
-                        name=wp.pipeline_id,
-                        status="missing",
-                        detail="No plugin name specified in workflow",
-                    )
-                )
-                all_pipelines_ok = False
-                continue
+            item = _resolve_plugin(wp, plugins)
 
-            # Find the plugin in installed list
-            installed_info = next(
-                (p for p in plugins if p.get("name") == plugin_name), None
-            )
+        items.append(item)
+        if item.status == "missing":
+            all_pipelines_ok = False
 
-            if installed_info is None:
-                # Build install action
-                if wp.source.type == "git" and wp.source.package_spec:
-                    action = f"Install from git: {wp.source.package_spec}"
-                else:
-                    spec = plugin_name
-                    if wp.source.plugin_version:
-                        spec += f">={wp.source.plugin_version}"
-                    action = f"Install {spec} from PyPI"
-
-                items.append(
-                    ResolutionItem(
-                        kind="plugin",
-                        name=plugin_name,
-                        status="missing",
-                        detail=f"Plugin '{plugin_name}' is not installed",
-                        action=action,
-                        can_auto_resolve=True,
-                    )
-                )
-                all_pipelines_ok = False
-            else:
-                # Plugin installed — check version if workflow specifies one
-                installed_version = installed_info.get("version")
-                workflow_version = wp.source.plugin_version
-
-                if workflow_version and installed_version:
-                    try:
-                        iv = Version(installed_version)
-                        wv = Version(workflow_version)
-                        if iv < wv:
-                            items.append(
-                                ResolutionItem(
-                                    kind="plugin",
-                                    name=plugin_name,
-                                    status="version_mismatch",
-                                    detail=f"Installed {installed_version}, workflow expects {workflow_version}",
-                                    action=f"Upgrade {plugin_name} to >={workflow_version}",
-                                    can_auto_resolve=True,
-                                )
-                            )
-                            # Version mismatch doesn't block — pipeline might still work
-                        else:
-                            items.append(
-                                ResolutionItem(
-                                    kind="plugin",
-                                    name=plugin_name,
-                                    status="ok",
-                                )
-                            )
-                    except InvalidVersion:
-                        # Can't parse version — treat as ok with a warning
-                        items.append(
-                            ResolutionItem(
-                                kind="plugin",
-                                name=plugin_name,
-                                status="ok",
-                                detail=f"Could not compare versions (installed={installed_version})",
-                            )
-                        )
-                else:
-                    items.append(
-                        ResolutionItem(
-                            kind="plugin",
-                            name=plugin_name,
-                            status="ok",
-                        )
-                    )
-
-        # --- LoRA resolution ---
         for lora in wp.loras:
-            lora_path = lora_dir / lora.filename
-            if lora_path.exists():
-                items.append(
-                    ResolutionItem(
-                        kind="lora",
-                        name=lora.filename,
-                        status="ok",
-                    )
-                )
-            else:
-                has_provenance = (
-                    lora.provenance is not None and lora.provenance.source != "local"
-                )
-                if has_provenance:
-                    prov = lora.provenance
-                    if prov.source == "huggingface":
-                        action = f"Download from HuggingFace: {prov.repo_id}"
-                    elif prov.source == "civitai":
-                        action = f"Download from CivitAI (model {prov.model_id})"
-                    else:
-                        action = (
-                            f"Download from {prov.url}"
-                            if prov.url
-                            else "Download from source"
-                        )
-                else:
-                    action = None
+            items.append(_resolve_lora(lora, lora_dir))
 
-                items.append(
-                    ResolutionItem(
-                        kind="lora",
-                        name=lora.filename,
-                        status="missing",
-                        detail=f"LoRA '{lora.filename}' not found locally",
-                        action=action,
-                        can_auto_resolve=has_provenance,
-                    )
-                )
-
-    # --- min_scope_version check ---
     if workflow.min_scope_version:
         _check_min_scope_version(workflow.min_scope_version, warnings)
 

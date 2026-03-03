@@ -4,9 +4,6 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
-from pydantic import BaseModel, Field
-
-from scope.core.pipelines.base_schema import ui_field_config
 from scope.core.workflows.resolve import (
     ResolutionItem,
     WorkflowPipeline,
@@ -23,29 +20,11 @@ def make_workflow(**overrides) -> WorkflowRequest:
             WorkflowPipeline(
                 pipeline_id="test_pipe",
                 source=WorkflowPipelineSource(type="builtin"),
-                params={"height": 480, "width": 640},
             )
         ],
     }
     defaults.update(overrides)
     return WorkflowRequest(**defaults)
-
-
-class FakeConfig(BaseModel):
-    """Minimal pipeline config with load and runtime params for testing."""
-
-    height: int = Field(
-        default=480,
-        json_schema_extra=ui_field_config(is_load_param=True),
-    )
-    width: int = Field(
-        default=640,
-        json_schema_extra=ui_field_config(is_load_param=True),
-    )
-    noise_scale: float = Field(
-        default=0.7,
-        json_schema_extra=ui_field_config(is_load_param=False),
-    )
 
 
 def mock_plugin_manager(plugins: list[dict] | None = None) -> MagicMock:
