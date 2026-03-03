@@ -117,6 +117,10 @@ export function usePipeline(options: UsePipelineOptions = {}) {
           const checkComplete = async () => {
             try {
               const currentStatus = await getPipelineStatus();
+              // Keep hook state synchronized while polling so callers can
+              // reliably read fields like loaded_lora_adapters after load.
+              setStatus(currentStatus.status);
+              setPipelineInfo(currentStatus);
               if (currentStatus.status === "loaded") {
                 resolve(true);
               } else if (currentStatus.status === "error") {
