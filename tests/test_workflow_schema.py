@@ -439,21 +439,7 @@ class TestNegativeValidation:
 
 
 class TestWorkflowEndpoints:
-    """Tests for the /api/v1/workflow/schema and /api/v1/workflow/validate endpoints."""
-
-    def test_workflow_schema_endpoint(self):
-        """GET /api/v1/workflow/schema returns valid JSON Schema."""
-        from fastapi.testclient import TestClient
-
-        from scope.server.app import app
-
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.get("/api/v1/workflow/schema")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "properties" in data
-        assert "title" in data
-        assert "$defs" in data or "definitions" in data or "properties" in data
+    """Tests for the /api/v1/workflow/validate endpoint."""
 
     def test_workflow_validate_valid(self):
         """POST /api/v1/workflow/validate returns 200 with a resolution plan."""

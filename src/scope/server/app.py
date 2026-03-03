@@ -1201,16 +1201,8 @@ async def tag_lora_provenance(
 
 
 # ---------------------------------------------------------------------------
-# Workflow schema, validate & apply
+# Workflow validate & apply
 # ---------------------------------------------------------------------------
-
-
-@app.get("/api/v1/workflow/schema")
-def get_workflow_schema():
-    """Return the JSON Schema for .scope-workflow.json documents."""
-    from scope.core.workflows.schema import ScopeWorkflow
-
-    return ScopeWorkflow.model_json_schema()
 
 
 class WorkflowApplyRequest(BaseModel):
