@@ -2,9 +2,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { OutputSinkToggle } from "./OutputSinkToggle";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import type { SettingsState } from "../types";
-import { TempoSyncSection } from "./settings/TempoSyncSection";
-import type { TempoState } from "../hooks/useTempoSync";
-import type { TempoSourcesResponse, TempoEnableRequest } from "../lib/api";
 
 interface OutputsPanelProps {
   className?: string;
@@ -17,14 +14,6 @@ interface OutputsPanelProps {
   ndiAvailable?: boolean;
   syphonAvailable?: boolean;
   isStreaming?: boolean;
-  tempoState?: TempoState;
-  tempoSources?: TempoSourcesResponse | null;
-  tempoLoading?: boolean;
-  tempoError?: string | null;
-  onTempoEnable?: (request: TempoEnableRequest) => void;
-  onTempoDisable?: () => void;
-  onTempoSetBpm?: (bpm: number) => void;
-  onTempoRefreshSources?: () => void;
 }
 
 export function OutputsPanel({
@@ -35,14 +24,6 @@ export function OutputsPanel({
   ndiAvailable = false,
   syphonAvailable = false,
   isStreaming = false,
-  tempoState,
-  tempoSources,
-  tempoLoading = false,
-  tempoError = null,
-  onTempoEnable,
-  onTempoDisable,
-  onTempoSetBpm,
-  onTempoRefreshSources,
 }: OutputsPanelProps) {
   return (
     <Card className={className}>
@@ -92,20 +73,6 @@ export function OutputsPanel({
           />
         )}
       </CardContent>
-
-      {/* Tempo Sync */}
-      {tempoState && onTempoEnable && onTempoDisable && (
-        <TempoSyncSection
-          tempoState={tempoState}
-          sources={tempoSources ?? null}
-          loading={tempoLoading}
-          error={tempoError}
-          onEnable={onTempoEnable}
-          onDisable={onTempoDisable}
-          onSetBpm={onTempoSetBpm}
-          onRefreshSources={onTempoRefreshSources ?? (() => {})}
-        />
-      )}
     </Card>
   );
 }
