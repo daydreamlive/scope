@@ -289,28 +289,6 @@ export function buildScopeWorkflow(
   return workflow;
 }
 
-// ---------------------------------------------------------------------------
-// Export: Annotate a ScopeWorkflow with frontend-only metadata
-// ---------------------------------------------------------------------------
-
-/**
- * Annotate each pipeline in the workflow with its role (preprocessor/main/postprocessor)
- * based on the settings that produced the export request.
- */
-export function annotateWorkflowRoles(
-  workflow: ScopeWorkflow,
-  settings: SettingsState
-): void {
-  const preCount = settings.preprocessorIds?.length ?? 0;
-  const postCount = settings.postprocessorIds?.length ?? 0;
-  for (let i = 0; i < workflow.pipelines.length; i++) {
-    if (i < preCount) workflow.pipelines[i].role = "preprocessor";
-    else if (i < preCount + 1) workflow.pipelines[i].role = "main";
-    else if (i < preCount + 1 + postCount)
-      workflow.pipelines[i].role = "postprocessor";
-  }
-}
-
 /**
  * Annotate a workflow with the active prompt state so imports can restore
  * the current prompt blend independent of the timeline.

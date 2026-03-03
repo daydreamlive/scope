@@ -1470,7 +1470,7 @@ export function StreamPage() {
     ) => {
       updateSettings(importedSettings);
 
-      if (importedTimeline.length > 0 && timelineRef.current) {
+      if (timelineRef.current) {
         timelineRef.current.loadPrompts(importedTimeline);
       }
 
