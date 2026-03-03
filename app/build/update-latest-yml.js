@@ -100,16 +100,9 @@ function updateLatestYmlMac() {
   const releaseDate = new Date().toISOString();
 
   const arm64Path = findZipFile('arm64');
-  const x64Path = findZipFile('x64');
-
   const arm64Name = path.basename(arm64Path);
-  const x64Name = path.basename(x64Path);
-
   const arm64Sha512 = calculateSha512(arm64Path);
-  const x64Sha512 = calculateSha512(x64Path);
-
   const arm64Size = fs.statSync(arm64Path).size;
-  const x64Size = fs.statSync(x64Path).size;
 
   const latestMacYml = `version: ${version}
 files:
@@ -117,10 +110,6 @@ files:
     sha512: ${arm64Sha512}
     size: ${arm64Size}
     arch: arm64
-  - url: ${x64Name}
-    sha512: ${x64Sha512}
-    size: ${x64Size}
-    arch: x64
 path: ${arm64Name}
 sha512: ${arm64Sha512}
 releaseDate: ${releaseDate}

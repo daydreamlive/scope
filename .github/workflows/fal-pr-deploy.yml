@@ -1,0 +1,18 @@
+name: Cleanup fal PR deployment
+
+on:
+  pull_request:
+    types: [closed]
+
+jobs:
+  cleanup-on-close:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete fal PR app
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          echo "Deleting fal app scope-pr-${PR_NUMBER}..."
+          pip install fal
+          fal apps delete scope-pr-${PR_NUMBER}
