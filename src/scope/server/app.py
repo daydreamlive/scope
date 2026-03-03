@@ -1926,6 +1926,9 @@ async def tail_logs(
 
     file_size = log_file_path.stat().st_size
 
+    if since_offset > 0 and since_offset >= file_size:
+        return {"lines": [], "offset": file_size}
+
     if since_offset > 0 and since_offset < file_size:
         # Read only new content since last offset
         with open(log_file_path, encoding="utf-8", errors="replace") as f:
