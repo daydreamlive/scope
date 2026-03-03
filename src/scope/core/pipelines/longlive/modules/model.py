@@ -18,7 +18,7 @@ def sinusoidal_embedding_1d(dim, position):
     # preprocess
     assert dim % 2 == 0
     half = dim // 2
-    position = position.type(torch.float64)
+    position = position.float()
 
     # torch.outer exports as ONNX Einsum which breaks graphsurgeon
     # external-data round-trip; unsqueeze+mul is equivalent
@@ -86,10 +86,7 @@ class WanRMSNorm(nn.Module):
         Args:
             x(Tensor): Shape [B, L, C]
         """
-        return self._norm(x.float()).type_as(x) * self.weight
-
-    def _norm(self, x):
-        return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps)
+        return x * torch.rsqrt(x.pow(2).mean(dim=-1, keepdim=True) + self.eps) * self.weight
 
 
 class WanLayerNorm(nn.LayerNorm):
@@ -101,7 +98,7 @@ class WanLayerNorm(nn.LayerNorm):
         Args:
             x(Tensor): Shape [B, L, C]
         """
-        return super().forward(x).type_as(x)
+        return super().forward(x)
 
 
 class WanSelfAttention(nn.Module):

@@ -62,16 +62,21 @@ def causal_rope_apply_precomputed(x, freqs_cos, freqs_sin):
     Returns:
         Tensor with rotary embeddings applied, same shape as x.
     """
-    # Split into even/odd pairs and apply rotation in float32
-    x_even = x[..., 0::2].float()
-    x_odd = x[..., 1::2].float()
+    # Cast freqs to x dtype rather than upcasting x to fp32.
+    # This removes 3 Cast nodes per call in the ONNX graph, allowing TRT to fuse
+    # the QKV projections → RoPE → attention into a single tiled kernel.
+    freqs_cos = freqs_cos.to(dtype=x.dtype)
+    freqs_sin = freqs_sin.to(dtype=x.dtype)
+
+    x_even = x[..., 0::2]
+    x_odd = x[..., 1::2]
 
     # Complex rotation: (a + bi)(cos + i*sin) = (a*cos - b*sin) + (a*sin + b*cos)i
     rotated_even = x_even * freqs_cos - x_odd * freqs_sin
     rotated_odd = x_even * freqs_sin + x_odd * freqs_cos
 
     # Interleave back: [even0, odd0, even1, odd1, ...]
-    return torch.stack([rotated_even, rotated_odd], dim=-1).flatten(-2).type_as(x)
+    return torch.stack([rotated_even, rotated_odd], dim=-1).flatten(-2)
 
 
 class CausalWanSelfAttention(nn.Module):
