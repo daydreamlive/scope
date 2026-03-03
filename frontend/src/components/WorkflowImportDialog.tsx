@@ -26,8 +26,13 @@ import type {
   WorkflowLoRA,
   LoRADownloadRequest,
 } from "../lib/workflowApi";
-import { resolveWorkflow, downloadLoRA } from "../lib/workflowApi";
-import { installPlugin, restartServer, waitForServer } from "../lib/api";
+import {
+  resolveWorkflow,
+  downloadLoRA,
+  installPlugin,
+  restartServer,
+  waitForServer,
+} from "../lib/api";
 import type { SettingsState } from "../types";
 import type { TimelinePrompt } from "./PromptTimeline";
 import {

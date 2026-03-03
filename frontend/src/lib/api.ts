@@ -1,4 +1,10 @@
 import type { IceServersResponse, ModelStatusResponse } from "../types";
+import type {
+  ScopeWorkflow,
+  WorkflowResolutionPlan,
+  LoRADownloadRequest,
+  LoRADownloadResult,
+} from "./workflowApi";
 
 export interface PromptItem {
   text: string;
@@ -886,4 +892,38 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+};
+
+// ---------------------------------------------------------------------------
+// Workflow
+// ---------------------------------------------------------------------------
+
+export const resolveWorkflow = async (
+  workflow: ScopeWorkflow
+): Promise<WorkflowResolutionPlan> => {
+  const response = await fetch("/api/v1/workflow/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(workflow),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+export const downloadLoRA = async (
+  request: LoRADownloadRequest
+): Promise<LoRADownloadResult> => {
+  const response = await fetch("/api/v1/lora/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
 };

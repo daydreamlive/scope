@@ -1,12 +1,12 @@
 /**
- * TypeScript types and API wrappers for the workflow resolve endpoint,
- * plus the LoRA download endpoint.
+ * TypeScript types for the shareable workflow schema, resolution plan,
+ * and LoRA download.
  *
  * Types mirror the backend Pydantic models in:
  *   - scope.core.workflows.resolve
  *   - scope.server.lora_downloader
  *
- * Export is handled entirely client-side (see workflowSettings.ts).
+ * API functions live in api.ts; export logic in workflowSettings.ts.
  */
 
 // ---------------------------------------------------------------------------
@@ -125,39 +125,3 @@ export interface LoRADownloadResult {
   size_bytes: number;
 }
 
-// ---------------------------------------------------------------------------
-// API helpers
-// ---------------------------------------------------------------------------
-
-async function postJson<T>(
-  url: string,
-  body: unknown,
-  label: string
-): Promise<T> {
-  const response = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-  if (!response.ok) {
-    const text = await response.text();
-    throw new Error(`${label} failed: ${response.status} ${text}`);
-  }
-  return response.json();
-}
-
-// ---------------------------------------------------------------------------
-// API functions
-// ---------------------------------------------------------------------------
-
-export function resolveWorkflow(
-  workflow: ScopeWorkflow
-): Promise<WorkflowResolutionPlan> {
-  return postJson("/api/v1/workflow/resolve", workflow, "Resolution");
-}
-
-export function downloadLoRA(
-  request: LoRADownloadRequest
-): Promise<LoRADownloadResult> {
-  return postJson("/api/v1/lora/download", request, "LoRA download");
-}
