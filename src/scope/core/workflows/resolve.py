@@ -72,12 +72,10 @@ def resolve_workflow(
         Root models directory (LoRAs live under ``models_dir / "lora"``).
     """
 
-    from ._utils import find_plugin_info, get_plugin_list
-
     items: list[ResolutionItem] = []
     all_pipelines_ok = True
 
-    plugins = get_plugin_list(plugin_manager)
+    plugins = plugin_manager.list_plugins_sync()
 
     lora_dir = models_dir / "lora"
 
@@ -118,7 +116,9 @@ def resolve_workflow(
                 continue
 
             # Find the plugin in installed list
-            installed_info = find_plugin_info(plugins, plugin_name)
+            installed_info = next(
+                (p for p in plugins if p.get("name") == plugin_name), None
+            )
 
             if installed_info is None:
                 # Build install action
