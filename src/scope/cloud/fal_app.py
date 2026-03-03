@@ -165,10 +165,17 @@ kafka_publisher: KafkaPublisher | None = None
 
 
 class LogBroadcaster:
-    """Thread-safe broadcaster that fans out subprocess log lines to async subscribers."""
+    """Thread-safe broadcaster that fans out subprocess log lines to async subscribers.
+
+    Uses stdlib queue.Queue (thread-safe) instead of asyncio.Queue, since publish()
+    is called from a background thread. The async forwarder polls via get_nowait().
+    """
 
     def __init__(self, max_queue_size: int = 200):
-        self._subscribers: dict[str, asyncio.Queue] = {}
+        import queue
+
+        self._queue_class = queue
+        self._subscribers: dict[str, queue.Queue] = {}
         self._lock = threading.Lock()
         self._max_queue_size = max_queue_size
 
@@ -178,13 +185,15 @@ class LogBroadcaster:
             for q in self._subscribers.values():
                 try:
                     q.put_nowait(line)
-                except asyncio.QueueFull:
+                except self._queue_class.Full:
                     # Subscriber is slow — drop the line to avoid backpressure
                     pass
 
-    def subscribe(self, connection_id: str) -> asyncio.Queue:
-        """Subscribe to log lines. Returns an asyncio.Queue for the caller to drain."""
-        q: asyncio.Queue = asyncio.Queue(maxsize=self._max_queue_size)
+    def subscribe(self, connection_id: str) -> "queue.Queue[str]":
+        """Subscribe to log lines. Returns a thread-safe Queue for the caller to drain."""
+        import queue
+
+        q: queue.Queue[str] = queue.Queue(maxsize=self._max_queue_size)
         with self._lock:
             self._subscribers[connection_id] = q
         return q
@@ -358,6 +367,10 @@ class ScopeApp(fal.App, keep_alive=300):
         # (aiortc, uvicorn.access) stay at WARNING level
         scope_env.pop("VERBOSE_LOGGING", None)
 
+        # Force unbuffered stdout in subprocess so log lines arrive immediately
+        # (Python uses block buffering when stdout is a pipe, not a tty)
+        scope_env["PYTHONUNBUFFERED"] = "1"
+
         # Start the scope server in a background thread with captured output
         def start_server():
             print("Starting Scope server...")
@@ -488,29 +501,32 @@ class ScopeApp(fal.App, keep_alive=300):
                 pass
 
         async def forward_logs_to_client():
-            """Forward subprocess log lines to WebSocket client in batches."""
+            """Forward subprocess log lines to WebSocket client in batches.
+
+            Uses stdlib queue.Queue (thread-safe) polled via asyncio.sleep,
+            since the publisher runs in a background thread.
+            """
+            import queue
+
             LOG_BATCH_LIMIT = 50
+            POLL_INTERVAL = 0.5  # seconds
             q = log_broadcaster.subscribe(connection_id)
             try:
                 while True:
                     batch = []
-                    # Wait for the first line (with timeout for cancellation checks)
-                    try:
-                        line = await asyncio.wait_for(q.get(), timeout=1.0)
-                        batch.append(line)
-                    except TimeoutError:
-                        continue
-
-                    # Drain additional available lines up to batch limit
+                    # Drain all available lines (non-blocking)
                     while len(batch) < LOG_BATCH_LIMIT:
                         try:
                             line = q.get_nowait()
                             batch.append(line)
-                        except asyncio.QueueEmpty:
+                        except queue.Empty:
                             break
 
                     if batch:
                         await safe_send_json({"type": "logs", "lines": batch})
+                    else:
+                        # No lines available — yield to event loop before next poll
+                        await asyncio.sleep(POLL_INTERVAL)
             except asyncio.CancelledError:
                 pass
             finally:
