@@ -235,48 +235,44 @@ export function buildScopeWorkflow(
   const mergeStrategy = settings.loraMergeStrategy ?? "permanent_merge";
 
   // --- Build pipeline list ---
-  const pipelines: WorkflowPipeline[] = [];
-
-  // Preprocessors
-  for (const id of settings.preprocessorIds ?? []) {
-    pipelines.push({
+  const buildProcessorPipelines = (
+    ids: string[],
+    role: "preprocessor" | "postprocessor",
+    overridesMap?: Record<string, Record<string, unknown>>
+  ): WorkflowPipeline[] =>
+    ids.map(id => ({
       pipeline_id: id,
       pipeline_version: pipelineInfoMap[id]?.version ?? null,
       source: buildPipelineSource(id, pipelineInfoMap, pluginInfoMap),
       loras: [],
-      params: { ...(settings.preprocessorSchemaFieldOverrides?.[id] ?? {}) },
-      role: "preprocessor",
-    });
-  }
+      params: { ...(overridesMap?.[id] ?? {}) },
+      role,
+    }));
 
-  // Main pipeline
-  pipelines.push({
-    pipeline_id: settings.pipelineId,
-    pipeline_version: pipelineInfoMap[settings.pipelineId]?.version ?? null,
-    source: buildPipelineSource(
-      settings.pipelineId,
-      pipelineInfoMap,
-      pluginInfoMap
+  const pipelines: WorkflowPipeline[] = [
+    ...buildProcessorPipelines(
+      settings.preprocessorIds ?? [],
+      "preprocessor",
+      settings.preprocessorSchemaFieldOverrides
     ),
-    loras: buildWorkflowLoRAs(settings.loras ?? [], loraFiles, mergeStrategy),
-    params: buildMainPipelineParams(settings),
-    role: "main",
-  });
-
-  // Postprocessors
-  for (const id of settings.postprocessorIds ?? []) {
-    pipelines.push({
-      pipeline_id: id,
-      pipeline_version: pipelineInfoMap[id]?.version ?? null,
-      source: buildPipelineSource(id, pipelineInfoMap, pluginInfoMap),
-      loras: [],
-      params: { ...(settings.postprocessorSchemaFieldOverrides?.[id] ?? {}) },
-      role: "postprocessor",
-    });
-  }
-
-  // --- Build timeline ---
-  const timeline = buildWorkflowTimeline(timelinePrompts);
+    {
+      pipeline_id: settings.pipelineId,
+      pipeline_version: pipelineInfoMap[settings.pipelineId]?.version ?? null,
+      source: buildPipelineSource(
+        settings.pipelineId,
+        pipelineInfoMap,
+        pluginInfoMap
+      ),
+      loras: buildWorkflowLoRAs(settings.loras ?? [], loraFiles, mergeStrategy),
+      params: buildMainPipelineParams(settings),
+      role: "main",
+    },
+    ...buildProcessorPipelines(
+      settings.postprocessorIds ?? [],
+      "postprocessor",
+      settings.postprocessorSchemaFieldOverrides
+    ),
+  ];
 
   // --- Assemble workflow ---
   const workflow: ScopeWorkflow = {
@@ -288,33 +284,17 @@ export function buildScopeWorkflow(
       scope_version: scopeVersion,
     },
     pipelines,
-    timeline,
+    timeline: buildWorkflowTimeline(timelinePrompts),
+    prompts:
+      promptState.promptItems.length > 0
+        ? promptState.promptItems.map(p => ({ text: p.text, weight: p.weight }))
+        : undefined,
+    interpolation_method: promptState.interpolationMethod,
+    transition_steps: promptState.transitionSteps,
+    temporal_interpolation_method: promptState.temporalInterpolationMethod,
   };
 
-  // Annotate prompt state
-  annotateWorkflowPromptState(workflow, promptState);
-
   return workflow;
-}
-
-/**
- * Annotate a workflow with the active prompt state so imports can restore
- * the current prompt blend independent of the timeline.
- */
-export function annotateWorkflowPromptState(
-  workflow: ScopeWorkflow,
-  promptState: WorkflowPromptState
-): void {
-  if (promptState.promptItems.length > 0) {
-    workflow.prompts = promptState.promptItems.map(p => ({
-      text: p.text,
-      weight: p.weight,
-    }));
-  }
-  workflow.interpolation_method = promptState.interpolationMethod;
-  workflow.transition_steps = promptState.transitionSteps;
-  workflow.temporal_interpolation_method =
-    promptState.temporalInterpolationMethod;
 }
 
 // ---------------------------------------------------------------------------
@@ -325,7 +305,7 @@ export function annotateWorkflowPromptState(
  * Convert frontend TimelinePrompt[] into the WorkflowTimeline schema.
  * Returns null if there are no meaningful timeline entries.
  */
-export function buildWorkflowTimeline(
+function buildWorkflowTimeline(
   prompts: TimelinePrompt[]
 ): WorkflowTimeline | null {
   const entries: WorkflowTimelineEntry[] = prompts
