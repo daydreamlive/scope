@@ -388,24 +388,26 @@ memory = {}
 print("=" * 60)
 print("1) PyTorch bf16 — with mask")
 print("=" * 60)
-torch.cuda.reset_peak_memory_stats()
+free_before, _ = torch.cuda.mem_get_info()
 times = bench(
     "PyTorch bf16 with mask",
     lambda: model(x, t_steps, context, freqs_cos, freqs_sin, cache_ks, cache_vs, mask),
 )
+free_after, _ = torch.cuda.mem_get_info()
 results["pytorch_mask"] = sum(times) / len(times) * 1000
-memory["pytorch_mask"] = torch.cuda.max_memory_allocated() / GiB
+memory["pytorch_mask"] = (free_before - free_after) / GiB
 
 print("\n" + "=" * 60)
 print("2) PyTorch bf16 — no mask")
 print("=" * 60)
-torch.cuda.reset_peak_memory_stats()
+free_before, _ = torch.cuda.mem_get_info()
 times = bench(
     "PyTorch bf16 no mask",
     lambda: model(x, t_steps, context, freqs_cos, freqs_sin, cache_ks, cache_vs, None),
 )
+free_after, _ = torch.cuda.mem_get_info()
 results["pytorch_nomask"] = sum(times) / len(times) * 1000
-memory["pytorch_nomask"] = torch.cuda.max_memory_allocated() / GiB
+memory["pytorch_nomask"] = (free_before - free_after) / GiB
 
 # capture reference outputs before the model is deleted
 with torch.no_grad():
@@ -547,12 +549,13 @@ print("\n" + "=" * 60)
 print("7) ORT CUDA EP — raw ONNX with mask (fp16)")
 print("=" * 60)
 try:
+    free_before, _ = torch.cuda.mem_get_info()
     sess = make_ort_session(ONNX_RAW)
     print(f"  Providers: {sess.get_providers()}")
-    torch.cuda.reset_peak_memory_stats()
     times = bench("ORT raw with mask", lambda: run_ort(sess, ort_list_mask))
+    free_after, _ = torch.cuda.mem_get_info()
     results["ort_raw_mask"] = sum(times) / len(times) * 1000
-    memory["ort_raw_mask"] = torch.cuda.max_memory_allocated() / GiB
+    memory["ort_raw_mask"] = (free_before - free_after) / GiB
     outputs["ort_raw_mask"] = capture_ort_output(sess, ort_list_mask)
     del sess
 except Exception as e:
@@ -563,12 +566,13 @@ print("\n" + "=" * 60)
 print("8) ORT CUDA EP — raw ONNX no mask (fp16)")
 print("=" * 60)
 try:
+    free_before, _ = torch.cuda.mem_get_info()
     sess = make_ort_session(ONNX_RAW_NM)
     print(f"  Providers: {sess.get_providers()}")
-    torch.cuda.reset_peak_memory_stats()
     times = bench("ORT raw no mask", lambda: run_ort(sess, ort_list_nomask))
+    free_after, _ = torch.cuda.mem_get_info()
     results["ort_raw_nomask"] = sum(times) / len(times) * 1000
-    memory["ort_raw_nomask"] = torch.cuda.max_memory_allocated() / GiB
+    memory["ort_raw_nomask"] = (free_before - free_after) / GiB
     outputs["ort_raw_nomask"] = capture_ort_output(sess, ort_list_nomask)
     del sess
 except Exception as e:
@@ -579,12 +583,13 @@ print("\n" + "=" * 60)
 print("9) ORT CUDA EP — optimized ONNX with mask (fp16)")
 print("=" * 60)
 try:
+    free_before, _ = torch.cuda.mem_get_info()
     sess = make_ort_session(ONNX_OPT)
     print(f"  Providers: {sess.get_providers()}")
-    torch.cuda.reset_peak_memory_stats()
     times = bench("ORT opt with mask", lambda: run_ort(sess, ort_list_mask))
+    free_after, _ = torch.cuda.mem_get_info()
     results["ort_opt_mask"] = sum(times) / len(times) * 1000
-    memory["ort_opt_mask"] = torch.cuda.max_memory_allocated() / GiB
+    memory["ort_opt_mask"] = (free_before - free_after) / GiB
     outputs["ort_opt_mask"] = capture_ort_output(sess, ort_list_mask)
     del sess
 except Exception as e:
@@ -595,12 +600,13 @@ print("\n" + "=" * 60)
 print("10) ORT CUDA EP — optimized ONNX no mask (fp16)")
 print("=" * 60)
 try:
+    free_before, _ = torch.cuda.mem_get_info()
     sess = make_ort_session(ONNX_OPT_NM)
     print(f"  Providers: {sess.get_providers()}")
-    torch.cuda.reset_peak_memory_stats()
     times = bench("ORT opt no mask", lambda: run_ort(sess, ort_list_nomask))
+    free_after, _ = torch.cuda.mem_get_info()
     results["ort_opt_nomask"] = sum(times) / len(times) * 1000
-    memory["ort_opt_nomask"] = torch.cuda.max_memory_allocated() / GiB
+    memory["ort_opt_nomask"] = (free_before - free_after) / GiB
     outputs["ort_opt_nomask"] = capture_ort_output(sess, ort_list_nomask)
     del sess
 except Exception as e:
@@ -614,16 +620,17 @@ print("\n" + "=" * 60)
 print("11) TensorRT fp16 — with mask")
 print("=" * 60)
 try:
+    free_before, _ = torch.cuda.mem_get_info()
     trt_mask = TRTEngine(TRT_ENGINE_PATH)
     if os.path.exists(TRT_ENGINE_PATH):
         trt_mask.load()
     else:
         trt_mask.build(ONNX_OPT, fp16=True)
     trt_mask.activate(fp16_inputs_mask)
-    torch.cuda.reset_peak_memory_stats()
     times = bench("TensorRT fp16 with mask", trt_mask.infer)
+    free_after, _ = torch.cuda.mem_get_info()
     results["trt_mask"] = sum(times) / len(times) * 1000
-    memory["trt_mask"] = torch.cuda.max_memory_allocated() / GiB
+    memory["trt_mask"] = (free_before - free_after) / GiB
     outputs["trt_mask"] = trt_mask.tensors["output"].float()
 except Exception as e:
     print(f"  [FAILED] {e}")
@@ -636,16 +643,17 @@ print("\n" + "=" * 60)
 print("12) TensorRT fp16 — no mask")
 print("=" * 60)
 try:
+    free_before, _ = torch.cuda.mem_get_info()
     trt_nomask = TRTEngine(TRT_ENGINE_NM_PATH)
     if os.path.exists(TRT_ENGINE_NM_PATH):
         trt_nomask.load()
     else:
         trt_nomask.build(ONNX_OPT_NM, fp16=True)
     trt_nomask.activate(fp16_inputs_nomask)
-    torch.cuda.reset_peak_memory_stats()
     times = bench("TensorRT fp16 no mask", trt_nomask.infer)
+    free_after, _ = torch.cuda.mem_get_info()
     results["trt_nomask"] = sum(times) / len(times) * 1000
-    memory["trt_nomask"] = torch.cuda.max_memory_allocated() / GiB
+    memory["trt_nomask"] = (free_before - free_after) / GiB
     outputs["trt_nomask"] = trt_nomask.tensors["output"].float()
 except Exception as e:
     print(f"  [FAILED] {e}")

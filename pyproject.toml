@@ -3,7 +3,7 @@ name = "daydream-scope"
 version = "0.1.0b3"
 description = "A tool for running and customizing real-time, interactive generative AI pipelines and models"
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.12,<3.13"
 authors = [
     {name = "Yondon Fu", email = "yondon@livepeer.org"},
     {name = "Rafal Leszko", email = "rafal@livepeer.org"}
