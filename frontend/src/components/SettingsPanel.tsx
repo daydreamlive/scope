@@ -314,8 +314,6 @@ interface SettingsPanelProps {
   inputMode?: InputMode;
   // Whether this pipeline supports noise controls in video mode (schema-derived)
   supportsNoiseControls?: boolean;
-  // OSC
-  oscEnabled?: boolean;
   // VACE settings
   vaceEnabled?: boolean;
   onVaceEnabledChange?: (enabled: boolean) => void;
@@ -383,7 +381,6 @@ export function SettingsPanel({
   loraMergeStrategy = "permanent_merge",
   inputMode,
   supportsNoiseControls = false,
-  oscEnabled = false,
   vaceEnabled = true,
   onVaceEnabledChange,
   vaceUseInputVideo = true,
@@ -1188,23 +1185,6 @@ export function SettingsPanel({
             </>
           );
         })()}
-
-        {/* OSC Status */}
-        {oscEnabled && (
-          <div className="space-y-1">
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label="OSC Control"
-                tooltip="Open Sound Control server for external parameter control from TouchDesigner, Resolume, Max/MSP, etc."
-                className="text-sm font-medium"
-              />
-              <span className="inline-flex items-center gap-1.5 text-xs text-emerald-500 font-medium">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
-                Listening
-              </span>
-            </div>
-          </div>
-        )}
       </CardContent>
     </Card>
   );

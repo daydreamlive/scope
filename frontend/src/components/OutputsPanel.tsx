@@ -1,5 +1,7 @@
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import { Toggle } from "./ui/toggle";
 import { OutputSinkToggle } from "./OutputSinkToggle";
+import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import type { SettingsState } from "../types";
 
@@ -13,6 +15,8 @@ interface OutputsPanelProps {
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
   syphonAvailable?: boolean;
+  oscEnabled?: boolean;
+  onOscToggle?: (enabled: boolean) => void;
   isStreaming?: boolean;
 }
 
@@ -23,6 +27,8 @@ export function OutputsPanel({
   spoutAvailable = false,
   ndiAvailable = false,
   syphonAvailable = false,
+  oscEnabled = false,
+  onOscToggle,
   isStreaming = false,
 }: OutputsPanelProps) {
   return (
@@ -72,6 +78,25 @@ export function OutputsPanel({
             isStreaming={isStreaming}
           />
         )}
+
+        <div className="space-y-1">
+          <div className="flex items-center justify-between gap-2">
+            <LabelWithTooltip
+              label="OSC Control"
+              tooltip="Open Sound Control server for external parameter control from TouchDesigner, Resolume, Max/MSP, etc."
+              className="text-sm font-medium"
+            />
+            <Toggle
+              pressed={oscEnabled}
+              onPressedChange={onOscToggle ?? (() => {})}
+              variant="outline"
+              size="sm"
+              className="h-7"
+            >
+              {oscEnabled ? "ON" : "OFF"}
+            </Toggle>
+          </div>
+        </div>
       </CardContent>
     </Card>
   );

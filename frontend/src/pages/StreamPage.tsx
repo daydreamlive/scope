@@ -33,7 +33,7 @@ import type {
   DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { getInputSourceResolution } from "../lib/api";
+import { getInputSourceResolution, configureOSC } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -125,8 +125,6 @@ export function StreamPage() {
   const syphonAvailable = availableInputSources.some(
     s => s.source_id === "syphon" && s.available
   );
-  const hasAvailableOutputs =
-    spoutAvailable || ndiOutputAvailable || syphonOutputAvailable;
 
   // Combined refresh function for pipeline schemas, pipelines list, and hardware info
   const handlePipelinesRefresh = useCallback(async () => {
@@ -864,6 +862,18 @@ export function StreamPage() {
     }
   };
 
+  const handleOscToggle = async (enabled: boolean) => {
+    try {
+      await configureOSC(enabled);
+      await refreshHardwareInfo();
+    } catch (error) {
+      console.error("Failed to toggle OSC:", error);
+      toast.error(
+        enabled ? "Failed to start OSC server" : "Failed to stop OSC server"
+      );
+    }
+  };
+
   // Handle Spout input name change from InputAndControlsPanel
   const handleSpoutSourceChange = (name: string) => {
     updateSettings({
@@ -1567,17 +1577,17 @@ export function StreamPage() {
               }
             }}
           />
-          {hasAvailableOutputs && (
-            <OutputsPanel
-              className="flex-shrink-0"
-              outputSinks={settings.outputSinks}
-              onOutputSinkChange={handleOutputSinkChange}
-              spoutAvailable={spoutAvailable}
-              ndiAvailable={ndiOutputAvailable}
-              syphonAvailable={syphonOutputAvailable}
-              isStreaming={isStreaming}
-            />
-          )}
+          <OutputsPanel
+            className="flex-shrink-0"
+            outputSinks={settings.outputSinks}
+            onOutputSinkChange={handleOutputSinkChange}
+            spoutAvailable={spoutAvailable}
+            ndiAvailable={ndiOutputAvailable}
+            syphonAvailable={syphonOutputAvailable}
+            oscEnabled={oscEnabled}
+            onOscToggle={handleOscToggle}
+            isStreaming={isStreaming}
+          />
         </div>
 
         {/* Center Panel - Video Output + Timeline */}
@@ -1783,7 +1793,6 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-            oscEnabled={oscEnabled}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&
