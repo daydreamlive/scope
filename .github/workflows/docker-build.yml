@@ -163,15 +163,11 @@ jobs:
 
           SCOPE_DEPLOY_TAG=$SHORT_SHA fal deploy \
             --app-name "$APP_NAME" \
+            --env preview \
             --auth public \
             src/scope/cloud/fal_app.py 2>&1 | tee deploy_output.txt
 
-          FAL_APP_ID=$(grep -oP 'Deployed to: \K[^\s]+' deploy_output.txt || echo "")
-
-          if [ -z "$FAL_APP_ID" ]; then
-            FAL_APP_ID="daydream/${APP_NAME}"
-          fi
-
+          FAL_APP_ID="daydream/${APP_NAME}--preview"
           FAL_WS_URL="wss://fal.run/${FAL_APP_ID}/ws"
 
           echo "fal_app_id=${FAL_APP_ID}" >> $GITHUB_OUTPUT
@@ -273,7 +269,9 @@ jobs:
 
       - name: Build Scope app
         env:
-          VITE_DAYDREAM_API_KEY: ${{ secrets.DAYDREAM_API_KEY }}
+          VITE_DAYDREAM_API_KEY: ${{ secrets.E2ES_DAYDREAM_API_KEY }}
+          VITE_DAYDREAM_AUTH_URL: https://app.daydream.monster/sign-in/local
+          VITE_DAYDREAM_API_BASE: https://api.daydream.monster
         run: |
           echo "Building Scope with API key auth..."
           uv run build

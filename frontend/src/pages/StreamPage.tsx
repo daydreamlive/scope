@@ -3,6 +3,7 @@ import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
+import { OutputsPanel } from "../components/OutputsPanel";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import type { TimelinePrompt } from "../components/PromptTimeline";
@@ -124,6 +125,8 @@ export function StreamPage() {
   const syphonAvailable = availableInputSources.some(
     s => s.source_id === "syphon" && s.available
   );
+  const hasAvailableOutputs =
+    spoutAvailable || ndiOutputAvailable || syphonOutputAvailable;
 
   // Combined refresh function for pipeline schemas, pipelines list, and hardware info
   const handlePipelinesRefresh = useCallback(async () => {
@@ -1467,9 +1470,9 @@ export function StreamPage() {
       {/* Main Content Area */}
       <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
         {/* Left Panel - Input & Controls */}
-        <div className="w-1/5">
+        <div className="w-1/5 flex flex-col gap-3 min-h-0">
           <InputAndControlsPanel
-            className="h-full"
+            className="flex-1 min-h-0"
             pipelines={pipelines}
             localStream={localStream}
             isInitializing={isInitializing}
@@ -1564,6 +1567,17 @@ export function StreamPage() {
               }
             }}
           />
+          {hasAvailableOutputs && (
+            <OutputsPanel
+              className="flex-shrink-0"
+              outputSinks={settings.outputSinks}
+              onOutputSinkChange={handleOutputSinkChange}
+              spoutAvailable={spoutAvailable}
+              ndiAvailable={ndiOutputAvailable}
+              syphonAvailable={syphonOutputAvailable}
+              isStreaming={isStreaming}
+            />
+          )}
         </div>
 
         {/* Center Panel - Video Output + Timeline */}
@@ -1721,10 +1735,10 @@ export function StreamPage() {
           </div>
         </div>
 
-        {/* Right Panel - Settings */}
-        <div className="w-1/5 flex flex-col gap-3">
+        {/* Right Panel - Parameters */}
+        <div className="w-1/5 flex flex-col gap-3 min-h-0">
           <SettingsPanel
-            className="flex-1 min-h-0 overflow-auto"
+            className="flex-1 min-h-0"
             pipelines={pipelines}
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
@@ -1769,11 +1783,6 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-            outputSinks={settings.outputSinks}
-            onOutputSinkChange={handleOutputSinkChange}
-            spoutAvailable={spoutAvailable}
-            ndiAvailable={ndiOutputAvailable}
-            syphonAvailable={syphonOutputAvailable}
             oscEnabled={oscEnabled}
             vaceEnabled={
               settings.vaceEnabled ??
