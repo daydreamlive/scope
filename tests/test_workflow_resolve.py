@@ -9,10 +9,34 @@ from scope.core.workflows.resolve import (
     WorkflowLoRAProvenance,
     WorkflowPipeline,
     WorkflowPipelineSource,
+    WorkflowRequest,
     resolve_workflow,
 )
 
-from .workflow_helpers import make_workflow, mock_plugin_manager
+# ---------------------------------------------------------------------------
+# Test helpers
+# ---------------------------------------------------------------------------
+
+
+def make_workflow(**overrides) -> WorkflowRequest:
+    """Build a minimal valid WorkflowRequest for tests."""
+    defaults = {
+        "pipelines": [
+            WorkflowPipeline(
+                pipeline_id="test_pipe",
+                source=WorkflowPipelineSource(type="builtin"),
+            )
+        ],
+    }
+    defaults.update(overrides)
+    return WorkflowRequest(**defaults)
+
+
+def mock_plugin_manager(plugins: list[dict] | None = None) -> MagicMock:
+    pm = MagicMock()
+    pm.list_plugins_sync.return_value = plugins or []
+    return pm
+
 
 # ---------------------------------------------------------------------------
 # resolve_workflow tests
@@ -35,7 +59,6 @@ class TestResolveBuiltinPipeline:
     @patch("scope.core.workflows.resolve.PipelineRegistry")
     def test_missing_builtin(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = False
-        mock_registry.get_config_class.return_value = None
 
         wf = make_workflow()
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
@@ -49,7 +72,6 @@ class TestResolvePlugin:
     @patch("scope.core.workflows.resolve.PipelineRegistry")
     def test_missing_plugin_auto_resolvable(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = False
-        mock_registry.get_config_class.return_value = None
 
         wf = make_workflow(
             pipelines=[
@@ -210,7 +232,6 @@ class TestResolvePluginEdgeCases:
     def test_plugin_name_none(self, mock_registry, tmp_path):
         """Non-builtin pipeline with no plugin_name is marked missing."""
         mock_registry.is_registered.return_value = False
-        mock_registry.get_config_class.return_value = None
 
         wf = make_workflow(
             pipelines=[
@@ -233,7 +254,6 @@ class TestResolvePluginEdgeCases:
     def test_missing_plugin_git_source(self, mock_registry, tmp_path):
         """Missing plugin with git source shows git install action."""
         mock_registry.is_registered.return_value = False
-        mock_registry.get_config_class.return_value = None
 
         wf = make_workflow(
             pipelines=[
@@ -513,8 +533,6 @@ class TestExtraFieldsIgnored:
 
     def test_full_workflow_json_accepted(self):
         """A complete .scope-workflow.json document parses into WorkflowRequest."""
-        from scope.core.workflows.resolve import WorkflowRequest
-
         data = {
             "format": "scope-workflow",
             "format_version": "1.0",
@@ -550,8 +568,6 @@ class TestExtraFieldsIgnored:
         assert wf.min_scope_version == "0.5.0"
 
     def test_unknown_top_level_fields_ignored(self):
-        from scope.core.workflows.resolve import WorkflowRequest
-
         data = {
             "pipelines": [{"pipeline_id": "p", "source": {"type": "builtin"}}],
             "future_field": "should be dropped",
@@ -623,37 +639,26 @@ class TestMinScopeVersion:
         assert wf.min_scope_version is None
 
     def test_round_trip(self):
-        from scope.core.workflows.resolve import WorkflowRequest
-
         wf = make_workflow(min_scope_version="0.5.0")
         data = wf.model_dump()
         restored = WorkflowRequest.model_validate(data)
         assert restored.min_scope_version == "0.5.0"
 
-    def test_resolve_warns_when_current_is_older(self):
+    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    def test_resolve_warns_when_current_is_older(self, mock_registry, tmp_path):
         """min_scope_version check produces a warning on resolve."""
-        wf = make_workflow(min_scope_version="99.0.0")
-        pm = mock_plugin_manager()
+        mock_registry.is_registered.return_value = True
 
-        with patch("scope.core.workflows.resolve.PipelineRegistry") as mock_reg:
-            mock_reg.is_registered.return_value = True
-            mock_reg.get_config_class.return_value = None
-            plan = resolve_workflow(wf, pm, MagicMock())
+        wf = make_workflow(min_scope_version="99.0.0")
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
         assert any("99.0.0" in w for w in plan.warnings)
 
-    def test_resolve_no_warning_when_version_ok(self):
+    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    def test_resolve_no_warning_when_version_ok(self, mock_registry, tmp_path):
+        mock_registry.is_registered.return_value = True
+
         wf = make_workflow(min_scope_version="0.0.1")
-        pm = mock_plugin_manager()
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
-        with patch("scope.core.workflows.resolve.PipelineRegistry") as mock_reg:
-            mock_reg.is_registered.return_value = True
-            mock_reg.get_config_class.return_value = None
-            plan = resolve_workflow(wf, pm, MagicMock())
-
-        version_warnings = [
-            w
-            for w in plan.warnings
-            if "min_scope_version" in w.lower() or "Scope >=" in w
-        ]
-        assert len(version_warnings) == 0
+        assert not any("Scope >=" in w for w in plan.warnings)
