@@ -37,6 +37,14 @@ export interface WorkflowPromptState {
 
 // ---------------------------------------------------------------------------
 // Centralized param mapping: single source of truth for camelCase <-> snake_case
+//
+// These exist because some pipeline params have dedicated SettingsState fields
+// (camelCase) rather than flowing through the generic schemaFieldOverrides
+// bucket (already snake_case). Params NOT listed here are handled automatically
+// via schemaFieldOverrides on both export and import — no mapping needed.
+//
+// If the dedicated SettingsState fields are ever migrated to
+// schemaFieldOverrides, this mapping can be removed entirely.
 // ---------------------------------------------------------------------------
 
 interface ParamMapping {
