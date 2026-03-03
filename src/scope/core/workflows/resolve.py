@@ -97,21 +97,6 @@ def is_load_param(config_class: type, field_name: str) -> bool:
     return False
 
 
-def _check_settings(
-    config_class: type,
-    params: dict[str, Any],
-) -> list[str]:
-    """Validate *params* against *config_class* fields, return warnings.
-
-    Parameters not present in the pipeline config schema are silently
-    ignored — they are frontend runtime params that get returned via
-    ``runtime_params`` on apply.
-    """
-    warnings: list[str] = []
-    # Future: validate known fields have compatible types, etc.
-    return warnings
-
-
 def _check_min_scope_version(
     min_version_str: str,
     warnings: list[str],
@@ -151,7 +136,7 @@ def resolve_workflow(
     """
 
     items: list[ResolutionItem] = []
-    settings_warnings: list[str] = []
+    warnings: list[str] = []
     all_pipelines_ok = True
 
     plugins = plugin_manager.list_plugins_sync()
@@ -309,17 +294,12 @@ def resolve_workflow(
                     )
                 )
 
-        # --- Settings validation ---
-        config_class = PipelineRegistry.get_config_class(wp.pipeline_id)
-        if config_class is not None:
-            settings_warnings.extend(_check_settings(config_class, wp.params))
-
     # --- min_scope_version check ---
     if workflow.min_scope_version:
-        _check_min_scope_version(workflow.min_scope_version, settings_warnings)
+        _check_min_scope_version(workflow.min_scope_version, warnings)
 
     return WorkflowResolutionPlan(
         can_apply=all_pipelines_ok,
         items=items,
-        warnings=settings_warnings,
+        warnings=warnings,
     )
