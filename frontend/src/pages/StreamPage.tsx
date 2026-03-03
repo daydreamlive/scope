@@ -124,6 +124,8 @@ export function StreamPage() {
   const syphonAvailable = availableInputSources.some(
     s => s.source_id === "syphon" && s.available
   );
+  const hasAvailableOutputs =
+    spoutAvailable || ndiOutputAvailable || syphonOutputAvailable;
 
   // Combined refresh function for pipeline schemas, pipelines list, and hardware info
   const handlePipelinesRefresh = useCallback(async () => {
@@ -1467,9 +1469,9 @@ export function StreamPage() {
       {/* Main Content Area */}
       <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
         {/* Left Panel - Input & Controls */}
-        <div className="w-1/5">
+        <div className="w-1/5 flex flex-col gap-3 min-h-0">
           <InputAndControlsPanel
-            className="h-full"
+            className="flex-1 min-h-0"
             pipelines={pipelines}
             localStream={localStream}
             isInitializing={isInitializing}
@@ -1564,6 +1566,17 @@ export function StreamPage() {
               }
             }}
           />
+          {hasAvailableOutputs && (
+            <OutputsPanel
+              className="flex-shrink-0"
+              outputSinks={settings.outputSinks}
+              onOutputSinkChange={handleOutputSinkChange}
+              spoutAvailable={spoutAvailable}
+              ndiAvailable={ndiOutputAvailable}
+              syphonAvailable={syphonOutputAvailable}
+              isStreaming={isStreaming}
+            />
+          )}
         </div>
 
         {/* Center Panel - Video Output + Timeline */}
@@ -1721,19 +1734,8 @@ export function StreamPage() {
           </div>
         </div>
 
-        {/* Right Panel - Settings */}
+        {/* Right Panel - Parameters */}
         <div className="w-1/5 flex flex-col gap-3 min-h-0">
-          {(spoutAvailable || ndiOutputAvailable || syphonOutputAvailable) && (
-            <OutputsPanel
-              className="flex-shrink-0"
-              outputSinks={settings.outputSinks}
-              onOutputSinkChange={handleOutputSinkChange}
-              spoutAvailable={spoutAvailable}
-              ndiAvailable={ndiOutputAvailable}
-              syphonAvailable={syphonOutputAvailable}
-              isStreaming={isStreaming}
-            />
-          )}
           <SettingsPanel
             className="flex-1 min-h-0"
             pipelines={pipelines}
