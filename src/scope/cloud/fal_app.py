@@ -207,6 +207,48 @@ class LogBroadcaster:
 # Global log broadcaster — populated once subprocess starts
 log_broadcaster = LogBroadcaster()
 
+# Loggers whose INFO/DEBUG lines are skipped from WebSocket streaming.
+# ERROR/WARNING from these loggers are still forwarded.
+_CLOUD_LOG_SKIP_LOGGERS_DEFAULT = {
+    "scope.server.kafka_publisher",
+}
+
+_cloud_log_skip_loggers: set[str] = set()
+
+
+def _init_cloud_log_skip_loggers() -> set[str]:
+    skip = set(_CLOUD_LOG_SKIP_LOGGERS_DEFAULT)
+    extra = os.environ.get("CLOUD_LOG_SKIP_LOGGERS", "")
+    for name in extra.split(","):
+        name = name.strip()
+        if name:
+            skip.add(name)
+    return skip
+
+
+def _should_forward_log(line: str) -> bool:
+    """Decide whether a subprocess log line should be forwarded over WebSocket.
+
+    Always forwards ERROR/WARNING. Skips INFO/DEBUG from loggers in the skip list.
+    Lines that don't match the standard log format are forwarded as-is (safety net).
+    """
+    global _cloud_log_skip_loggers
+    if not _cloud_log_skip_loggers:
+        _cloud_log_skip_loggers = _init_cloud_log_skip_loggers()
+
+    # Always forward errors and warnings
+    if " - ERROR - " in line or " - WARNING - " in line:
+        return True
+
+    # Parse logger name: "YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - msg"
+    parts = line.split(" - ", 3)
+    if len(parts) >= 3:
+        logger_name = parts[1].strip()
+        if logger_name in _cloud_log_skip_loggers:
+            return False
+
+    return True
+
 
 ASSETS_DIR_PATH = "~/.daydream-scope/assets"
 # Connection timeout settings
@@ -518,7 +560,8 @@ class ScopeApp(fal.App, keep_alive=300):
                     while len(batch) < LOG_BATCH_LIMIT:
                         try:
                             line = q.get_nowait()
-                            batch.append(line)
+                            if _should_forward_log(line):
+                                batch.append(line)
                         except queue.Empty:
                             break
 

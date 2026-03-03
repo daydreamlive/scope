@@ -358,7 +358,6 @@ class CloudConnectionManager:
                 future.set_result(data)
         else:
             # Unsolicited message (e.g., notifications)
-            logger.debug(f"Received unsolicited message: {msg_type}")
             msg_type = data.get("type")
             if msg_type == "logs":
                 self._handle_cloud_logs(data)
