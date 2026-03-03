@@ -110,6 +110,7 @@ class CloudTrack(MediaStreamTrack):
             connection_id=self.connection_id,
             connection_info=self.connection_info,
         )
+        self.frame_processor.set_event_loop(asyncio.get_running_loop())
         self.frame_processor.start()
 
         # Start input processing if we have a source track
@@ -194,8 +195,7 @@ class CloudTrack(MediaStreamTrack):
                     self._last_frame = frame
                     return frame
 
-            # No frame yet, wait a bit
-            await asyncio.sleep(0.01)
+            await self.frame_processor.wait_for_output()
 
     def update_parameters(self, params: dict) -> None:
         """Update pipeline parameters on cloud."""
