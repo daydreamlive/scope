@@ -264,6 +264,29 @@ export function redirectToSignIn(): void {
   }
 }
 
+export interface FalCdnToken {
+  token: string;
+  token_type: string;
+  base_url: string;
+}
+
+/**
+ * Fetch a short-lived fal CDN upload token from the Daydream API
+ */
+export async function fetchFalCdnToken(): Promise<FalCdnToken> {
+  const apiKey = getDaydreamAPIKey();
+  if (!apiKey) {
+    throw new Error("Not authenticated: no API key available");
+  }
+  const response = await fetch(`${DAYDREAM_API_BASE}/auth/fal/cdn-token`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch fal CDN token: ${response.status}`);
+  }
+  return response.json() as Promise<FalCdnToken>;
+}
+
 /**
  * Exchange a short-lived token for a long-lived API key
  */

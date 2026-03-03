@@ -5,6 +5,7 @@ import type {
   LoRADownloadRequest,
   LoRADownloadResult,
 } from "./workflowApi";
+import { fetchFalCdnToken } from "./auth";
 
 export interface PromptItem {
   text: string;
@@ -470,11 +471,22 @@ export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
   const fileContent = await file.arrayBuffer();
   const filename = encodeURIComponent(file.name);
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/octet-stream",
+  };
+
+  try {
+    const cdnToken = await fetchFalCdnToken();
+    headers["X-Fal-CDN-Token"] = cdnToken.token;
+    headers["X-Fal-CDN-Token-Type"] = cdnToken.token_type;
+    headers["X-Fal-CDN-Base-URL"] = cdnToken.base_url;
+  } catch (e) {
+    console.warn("uploadAsset: failed to fetch CDN token, upload may fail:", e);
+  }
+
   const response = await fetch(`/api/v1/assets?filename=${filename}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/octet-stream",
-    },
+    headers,
     body: fileContent,
   });
 
