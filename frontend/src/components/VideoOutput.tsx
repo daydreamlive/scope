@@ -21,6 +21,8 @@ interface VideoOutputProps {
   onRequestPointerLock?: () => void;
   /** Ref to expose the video container element for pointer lock */
   videoContainerRef?: React.RefObject<HTMLDivElement | null>;
+  /** Ref to expose the video element for external use (e.g. recording) */
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
   /** Video scale mode: 'fit' fills available space, 'native' shows at actual resolution */
   videoScaleMode?: "fit" | "native";
 }
@@ -41,9 +43,11 @@ export function VideoOutput({
   isPointerLocked = false,
   onRequestPointerLock,
   videoContainerRef,
+  videoRef: externalVideoRef,
   videoScaleMode = "fit",
 }: VideoOutputProps) {
-  const videoRef = useRef<HTMLVideoElement>(null);
+  const internalVideoRef = useRef<HTMLVideoElement>(null);
+  const videoRef = externalVideoRef || internalVideoRef;
   const internalContainerRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);

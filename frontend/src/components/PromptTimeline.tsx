@@ -694,10 +694,16 @@ export function PromptTimeline({
             </Button>
             <Button
               onClick={onRecordingToggle}
-              disabled={disabled || isLoading || isDownloading || isStreaming}
+              disabled={disabled || isLoading || isDownloading || !isStreaming}
               size="sm"
               variant="outline"
-              title={isRecording ? "Stop recording" : "Start recording"}
+              title={
+                !isStreaming
+                  ? "Start streaming to enable recording"
+                  : isRecording
+                    ? "Stop recording"
+                    : "Start recording"
+              }
               className={
                 isRecording
                   ? "border-red-500 hover:border-red-400 animate-record-pulse"
