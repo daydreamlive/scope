@@ -17,6 +17,7 @@ from ..wan2_1.blocks import (
 )
 from ..wan2_1.vace.blocks import VaceEncodingBlock
 from .blocks import (
+    BeatNoiseModulationBlock,
     PrepareRecacheFramesBlock,
     RecacheFramesBlock,
 )
@@ -37,6 +38,7 @@ ALL_BLOCKS = InsertableDict(
             "set_transformer_blocks_local_attn_size",
             SetTransformerBlocksLocalAttnSizeBlock,
         ),
+        ("beat_noise_modulation", BeatNoiseModulationBlock),
         ("auto_preprocess_video", AutoPreprocessVideoBlock),
         ("auto_prepare_latents", AutoPrepareLatentsBlock),
         ("recache_frames", RecacheFramesBlock),
