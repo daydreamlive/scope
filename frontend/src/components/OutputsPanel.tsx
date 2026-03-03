@@ -27,9 +27,6 @@ export function OutputsPanel({
   syphonAvailable = false,
   isStreaming = false,
 }: OutputsPanelProps) {
-  const hasAvailableOutputs = spoutAvailable || ndiAvailable || syphonAvailable;
-  if (!hasAvailableOutputs) return null;
-
   return (
     <Card className={className}>
       <CardHeader className="px-4 py-3">
