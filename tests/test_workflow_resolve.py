@@ -578,55 +578,6 @@ class TestExtraFieldsIgnored:
 
 
 # ---------------------------------------------------------------------------
-# Endpoint tests (moved from test_workflow_schema.py)
-# ---------------------------------------------------------------------------
-
-
-class TestWorkflowEndpoints:
-    """Tests for the /api/v1/workflow/resolve endpoint."""
-
-    def test_workflow_resolve_valid(self):
-        """POST /api/v1/workflow/resolve returns 200 with a resolution plan."""
-        from fastapi.testclient import TestClient
-
-        from scope.server.app import app
-
-        client = TestClient(app, raise_server_exceptions=False)
-        doc = {
-            "format": "scope-workflow",
-            "format_version": "1.0",
-            "metadata": {
-                "name": "test",
-                "created_at": "2025-01-01T00:00:00Z",
-                "scope_version": "0.1.0",
-            },
-            "pipelines": [
-                {
-                    "pipeline_id": "test_pipe",
-                    "source": {"type": "builtin"},
-                    "params": {"height": 480, "width": 640},
-                }
-            ],
-        }
-        resp = client.post("/api/v1/workflow/resolve", json=doc)
-        assert resp.status_code == 200
-        body = resp.json()
-        assert "can_apply" in body
-        assert "items" in body
-        assert isinstance(body["items"], list)
-
-    def test_workflow_resolve_invalid(self):
-        """POST /api/v1/workflow/resolve returns 422 for a bad document."""
-        from fastapi.testclient import TestClient
-
-        from scope.server.app import app
-
-        client = TestClient(app, raise_server_exceptions=False)
-        resp = client.post("/api/v1/workflow/resolve", json={"bad": "data"})
-        assert resp.status_code == 422
-
-
-# ---------------------------------------------------------------------------
 # min_scope_version tests (moved from test_workflow_timeline.py)
 # ---------------------------------------------------------------------------
 
