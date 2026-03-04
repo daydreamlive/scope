@@ -539,23 +539,23 @@ export function workflowToPromptState(
       workflow.temporal_interpolation_method ?? "slerp",
   } as const;
 
-  // Prefer explicit top-level prompt state
-  if (workflow.prompts && workflow.prompts.length > 0) {
+  // Prefer first timeline entry since that's what plays first
+  const firstEntry = workflow.timeline?.entries?.[0];
+  if (firstEntry && firstEntry.prompts.length > 0) {
     return {
       ...base,
-      promptItems: workflow.prompts.map(p => ({
+      promptItems: firstEntry.prompts.map(p => ({
         text: p.text,
         weight: p.weight,
       })),
     };
   }
 
-  // Fallback: derive from first timeline entry
-  const firstEntry = workflow.timeline?.entries?.[0];
-  if (firstEntry && firstEntry.prompts.length > 0) {
+  // Fallback: use top-level prompt state
+  if (workflow.prompts && workflow.prompts.length > 0) {
     return {
       ...base,
-      promptItems: firstEntry.prompts.map(p => ({
+      promptItems: workflow.prompts.map(p => ({
         text: p.text,
         weight: p.weight,
       })),
