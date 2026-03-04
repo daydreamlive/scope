@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ArrowUpSquare,
   FolderOpen,
+  Info,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -76,7 +77,7 @@ export function PluginsTab({
   return (
     <div className="space-y-4">
       {/* Install & Updates Section */}
-      {!hideInstall && (
+      {!hideInstall ? (
         <div className="rounded-lg bg-muted/50 p-4 space-y-4">
           {/* Install Plugin */}
           <div className="flex items-center gap-2">
@@ -105,6 +106,14 @@ export function PluginsTab({
               {isInstalling ? "Installing..." : "Install"}
             </Button>
           </div>
+        </div>
+      ) : (
+        <div className="rounded-lg bg-muted/50 p-4 flex items-start gap-2">
+          <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+          <p className="text-sm text-muted-foreground">
+            With remote inference enabled, plugins can only be installed from
+            the Discover tab.
+          </p>
         </div>
       )}
 

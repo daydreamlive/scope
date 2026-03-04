@@ -22,6 +22,9 @@ import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
 
+SCOPE_PORT = 8000
+SCOPE_LOCAL_URL = f"http://localhost:{SCOPE_PORT}"
+
 
 async def validate_user_access(user_id: str) -> tuple[bool, str]:
     """
@@ -216,10 +219,11 @@ async def cleanup_installed_plugins():
     """Uninstall all plugins installed during the session via the Scope API."""
     import httpx
 
-    scope_url = "http://localhost:8000"
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(f"{scope_url}/api/v1/plugins", timeout=10.0)
+            response = await client.get(
+                f"{SCOPE_LOCAL_URL}/api/v1/plugins", timeout=10.0
+            )
             if response.status_code != 200:
                 print(
                     f"Warning: Failed to list plugins for cleanup: {response.status_code}"
@@ -236,7 +240,7 @@ async def cleanup_installed_plugins():
                     continue
                 try:
                     resp = await client.delete(
-                        f"{scope_url}/api/v1/plugins/{name}", timeout=60.0
+                        f"{SCOPE_LOCAL_URL}/api/v1/plugins/{name}", timeout=60.0
                     )
                     if resp.status_code == 200:
                         print(f"Cleanup: uninstalled plugin '{name}'")
@@ -399,7 +403,7 @@ class ScopeApp(fal.App, keep_alive=300):
                         "--host",
                         "0.0.0.0",
                         "--port",
-                        "8000",
+                        str(SCOPE_PORT),
                     ],
                     env=scope_env,
                 )
@@ -426,9 +430,9 @@ class ScopeApp(fal.App, keep_alive=300):
             try:
                 import requests
 
-                response = requests.get("http://localhost:8000/health", timeout=2)
+                response = requests.get(f"{SCOPE_LOCAL_URL}/health", timeout=2)
                 if response.status_code == 200:
-                    print("✅ Scope server is running on port 8000")
+                    print(f"✅ Scope server is running on port {SCOPE_PORT}")
                     break
             except Exception:
                 pass
@@ -459,8 +463,6 @@ class ScopeApp(fal.App, keep_alive=300):
 
         import httpx
         from starlette.websockets import WebSocketDisconnect, WebSocketState
-
-        SCOPE_BASE_URL = "http://localhost:8000"
 
         # Initialize Kafka publisher if not already done
         global kafka_publisher
@@ -529,7 +531,7 @@ class ScopeApp(fal.App, keep_alive=300):
             request_id = payload.get("request_id")
             async with httpx.AsyncClient() as client:
                 response = await client.get(
-                    f"{SCOPE_BASE_URL}/api/v1/webrtc/ice-servers"
+                    f"{SCOPE_LOCAL_URL}/api/v1/webrtc/ice-servers"
                 )
                 return {
                     "type": "ice_servers",
@@ -563,7 +565,7 @@ class ScopeApp(fal.App, keep_alive=300):
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.post(
-                        f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
+                        f"{SCOPE_LOCAL_URL}/api/v1/webrtc/offer",
                         json={
                             "sdp": payload.get("sdp"),
                             "type": payload.get("sdp_type", "offer"),
@@ -624,7 +626,7 @@ class ScopeApp(fal.App, keep_alive=300):
 
             async with httpx.AsyncClient() as client:
                 response = await client.patch(
-                    f"{SCOPE_BASE_URL}/api/v1/webrtc/offer/{target_session}",
+                    f"{SCOPE_LOCAL_URL}/api/v1/webrtc/offer/{target_session}",
                     json={
                         "candidates": [
                             {
@@ -674,7 +676,11 @@ class ScopeApp(fal.App, keep_alive=300):
             body = payload.get("body")
             request_id = payload.get("request_id")
 
-            if method == "POST" and path == "/api/v1/plugins":
+            from urllib.parse import unquote, urlparse
+
+            normalized_path = unquote(urlparse(path).path).rstrip("/")
+
+            if method == "POST" and normalized_path == "/api/v1/plugins":
                 requested_package = (
                     body.get("package", "") if isinstance(body, dict) else ""
                 )
@@ -724,7 +730,7 @@ class ScopeApp(fal.App, keep_alive=300):
             # Inject connection_id into pipeline load requests for event correlation
             if (
                 method == "POST"
-                and path == "/api/v1/pipeline/load"
+                and normalized_path == "/api/v1/pipeline/load"
                 and isinstance(body, dict)
             ):
                 body["connection_id"] = connection_id
@@ -740,9 +746,9 @@ class ScopeApp(fal.App, keep_alive=300):
 
                     if method == "GET":
                         # Use longer timeout for potential binary downloads (recordings)
-                        timeout = 120.0 if "/recordings/" in path else 30.0
+                        timeout = 120.0 if "/recordings/" in normalized_path else 30.0
                         response = await client.get(
-                            f"{SCOPE_BASE_URL}{path}", timeout=timeout
+                            f"{SCOPE_LOCAL_URL}{path}", timeout=timeout
                         )
                     elif method == "POST":
                         if is_binary_upload:
@@ -752,26 +758,28 @@ class ScopeApp(fal.App, keep_alive=300):
                                 "_content_type", "application/octet-stream"
                             )
                             response = await client.post(
-                                f"{SCOPE_BASE_URL}{path}",
+                                f"{SCOPE_LOCAL_URL}{path}",
                                 content=binary_content,
                                 headers={"Content-Type": content_type},
                                 timeout=60.0,  # Longer timeout for uploads
                             )
                         else:
                             # Use longer timeout for LoRA installs
-                            post_timeout = 300.0 if path == "/api/v1/loras" else 30.0
+                            post_timeout = (
+                                300.0 if normalized_path == "/api/v1/loras" else 30.0
+                            )
                             response = await client.post(
-                                f"{SCOPE_BASE_URL}{path}",
+                                f"{SCOPE_LOCAL_URL}{path}",
                                 json=body,
                                 timeout=post_timeout,
                             )
                     elif method == "PATCH":
                         response = await client.patch(
-                            f"{SCOPE_BASE_URL}{path}", json=body, timeout=30.0
+                            f"{SCOPE_LOCAL_URL}{path}", json=body, timeout=30.0
                         )
                     elif method == "DELETE":
                         response = await client.delete(
-                            f"{SCOPE_BASE_URL}{path}", timeout=30.0
+                            f"{SCOPE_LOCAL_URL}{path}", timeout=30.0
                         )
                     else:
                         return {
