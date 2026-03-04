@@ -12,6 +12,7 @@ import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
+import { useRecording } from "../hooks/useRecording";
 import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
@@ -189,8 +190,8 @@ export function StreamPage() {
   const [timelineCurrentTime, setTimelineCurrentTime] = useState(0);
   const [isTimelinePlaying, setIsTimelinePlaying] = useState(false);
 
-  // Recording toggle state
-  const [isRecording, setIsRecording] = useState(false);
+  // Ref for the output video element (used by client-side recording)
+  const outputVideoRef = useRef<HTMLVideoElement>(null);
 
   // Track when waiting for cloud WebSocket to connect after clicking Play
   const [isCloudConnecting, setIsCloudConnecting] = useState(false);
@@ -263,7 +264,6 @@ export function StreamPage() {
     stopStream,
     updateVideoTrack,
     sendParameterUpdate,
-    sessionId,
   } = useUnifiedWebRTC();
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
@@ -275,6 +275,39 @@ export function StreamPage() {
     peerConnectionRef,
     isStreaming,
   });
+
+  // Client-side recording of the output video
+  const {
+    isRecording,
+    result: recordingResult,
+    startRecording,
+    stopRecording: stopClientRecording,
+    download: downloadRecording,
+    cleanup: cleanupRecording,
+  } = useRecording(outputVideoRef, {
+    onError: err => {
+      toast.error("Recording error", {
+        description: err.message,
+        duration: 5000,
+      });
+    },
+  });
+
+  // Auto-download when a recording result becomes available
+  useEffect(() => {
+    if (recordingResult) {
+      downloadRecording();
+      cleanupRecording();
+    }
+  }, [recordingResult, downloadRecording, cleanupRecording]);
+
+  const handleRecordingToggle = useCallback(() => {
+    if (isRecording) {
+      stopClientRecording();
+    } else {
+      startRecording();
+    }
+  }, [isRecording, stopClientRecording, startRecording]);
 
   // Video container ref for controller input pointer lock
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -1322,7 +1355,6 @@ export function StreamPage() {
         first_frame_image?: string;
         last_frame_image?: string;
         images?: string[];
-        recording?: boolean;
         input_source?: {
           enabled: boolean;
           source_type: string;
@@ -1410,9 +1442,6 @@ export function StreamPage() {
         initialParameters.input_source = settings.inputSource;
       }
 
-      // Include recording toggle state
-      initialParameters.recording = isRecording;
-
       // Include runtime schema field overrides so they reach __call__ on first frame
       if (
         settings.schemaFieldOverrides &&
@@ -1434,27 +1463,19 @@ export function StreamPage() {
     }
   };
 
-  const handleSaveGeneration = async () => {
-    try {
-      if (!sessionId) {
-        toast.error("No active session", {
-          description: "Please start a stream before downloading the recording",
-          duration: 5000,
-        });
-        return;
-      }
-      await api.downloadRecording(sessionId);
-    } catch (error) {
-      console.error("Error downloading recording:", error);
-      toast.error("Error downloading recording", {
-        description:
-          error instanceof Error
-            ? error.message
-            : "An error occurred while downloading the recording",
+  const handleSaveGeneration = useCallback(() => {
+    if (isRecording) {
+      // Stop recording - the auto-download effect will handle the download
+      stopClientRecording();
+    } else if (recordingResult) {
+      downloadRecording();
+    } else {
+      toast.error("No recording available", {
+        description: "Start and stop a recording first to save a generation",
         duration: 5000,
       });
     }
-  };
+  }, [isRecording, stopClientRecording, recordingResult, downloadRecording]);
 
   return (
     <div className="h-screen flex flex-col bg-background">
@@ -1616,6 +1637,7 @@ export function StreamPage() {
               isPointerLocked={isPointerLocked}
               onRequestPointerLock={requestPointerLock}
               videoContainerRef={videoContainerRef}
+              videoRef={outputVideoRef}
               // Video scale mode
               videoScaleMode={videoScaleMode}
             />
@@ -1729,7 +1751,7 @@ export function StreamPage() {
               isDownloading={isDownloading}
               onSaveGeneration={handleSaveGeneration}
               isRecording={isRecording}
-              onRecordingToggle={() => setIsRecording(prev => !prev)}
+              onRecordingToggle={handleRecordingToggle}
             />
           </div>
         </div>
