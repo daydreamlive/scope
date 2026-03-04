@@ -103,7 +103,7 @@ export function ControlNode({
   const dotColorClass = "bg-purple-400";
   const title = getControlTitle(controlType);
 
-  // Initialize currentValue in node data on mount
+  // Initialize currentValue
   useEffect(() => {
     const initialValue = controlType === "string" ? items[0] || "" : min;
     setNodes((nds) =>
@@ -172,7 +172,7 @@ export function ControlNode({
     };
   }, [isPlaying, pattern, speed, min, max, controlType, items]);
 
-  // Store currentValue in node data (throttled to ~10Hz for forwarding)
+  // Store currentValue (throttled)
   const lastUpdateTimeRef = useRef<number>(0);
   useEffect(() => {
     const now = Date.now();

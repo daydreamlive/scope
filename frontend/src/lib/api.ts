@@ -890,6 +890,7 @@ export interface GraphNode {
   x?: number | null;
   y?: number | null;
   source_mode?: string | null;
+  source_name?: string | null;
 }
 
 export interface GraphEdge {

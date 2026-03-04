@@ -20,7 +20,7 @@ export type PortType = "stream" | "string" | "number" | "boolean";
 
 export interface ParameterPortDef {
   name: string;
-  type: "string" | "number" | "boolean";
+  type: "string" | "number" | "boolean" | "list_number";
   defaultValue?: unknown;
   label?: string;
   min?: number;
@@ -69,12 +69,30 @@ export interface FlowNodeData {
   currentValue?: number | string;
   /** For source nodes: video source mode (video, camera, spout, ndi) */
   sourceMode?: "video" | "camera" | "spout" | "ndi";
+  /** For source nodes: source name/identifier for Spout/NDI (sender name for Spout, identifier for NDI) */
+  sourceName?: string;
   /** For source nodes: local video preview stream (camera or file) */
   localStream?: MediaStream | null;
   /** For source nodes: callback to upload a video file */
   onVideoFileUpload?: (file: File) => Promise<boolean>;
+  /** For source nodes: callback when source mode changes */
+  onSourceModeChange?: (mode: string) => void;
+  /** For source nodes: whether Spout is available */
+  spoutAvailable?: boolean;
+  /** For source nodes: whether NDI is available */
+  ndiAvailable?: boolean;
+  /** For source nodes: callback when Spout receiver name changes */
+  onSpoutSourceChange?: (name: string) => void;
+  /** For source nodes: callback when NDI source changes */
+  onNdiSourceChange?: (identifier: string) => void;
   /** For sink nodes: remote output stream */
   remoteStream?: MediaStream | null;
+  /** For pipeline nodes: whether the selected pipeline supports prompts */
+  supportsPrompts?: boolean;
+  /** For pipeline nodes: current prompt text */
+  promptText?: string;
+  /** For pipeline nodes: callback when prompt text changes */
+  onPromptChange?: (nodeId: string, text: string) => void;
   [key: string]: unknown;
 }
 
@@ -125,7 +143,7 @@ export function buildPipelinePortsMap(
 
 /**
  * Extract parameter ports from a pipeline schema's config_schema.
- * Returns only primitive types (string, number, boolean) that can be connected.
+ * Returns primitive types (string, number, boolean) and list types (list_number) that can be connected.
  */
 export function extractParameterPorts(
   schema: PipelineSchemaInfo | null
@@ -139,6 +157,35 @@ export function extractParameterPorts(
     const schemaProp = prop as SchemaProperty;
     // Only include fields that have ui metadata (json_schema_extra), matching sidebar behavior
     if (!schemaProp.ui) continue;
+
+    // Check for array types with integer/number items (e.g. denoising_steps: list[int])
+    // Handles both direct { type: "array", items: ... } and anyOf: [{ type: "array" }, { type: "null" }]
+    const isArrayOfNumbers = (obj: Record<string, unknown>): boolean => {
+      if (obj.type === "array" && obj.items) {
+        const items = obj.items as { type?: string };
+        return items.type === "integer" || items.type === "number";
+      }
+      return false;
+    };
+
+    if (isArrayOfNumbers(schemaProp as unknown as Record<string, unknown>)) {
+      const ui = schemaProp.ui;
+      const label = ui?.label || key;
+      params.push({ name: key, type: "list_number", defaultValue: schemaProp.default, label });
+      continue;
+    }
+
+    // Check anyOf for array types (e.g. list[int] | None)
+    const anyOf = (schemaProp as Record<string, unknown>).anyOf as Record<string, unknown>[] | undefined;
+    if (anyOf?.length) {
+      const arrayVariant = anyOf.find(v => isArrayOfNumbers(v));
+      if (arrayVariant) {
+        const ui = schemaProp.ui;
+        const label = ui?.label || key;
+        params.push({ name: key, type: "list_number", defaultValue: schemaProp.default, label });
+        continue;
+      }
+    }
 
     const fieldType = inferPrimitiveFieldType(schemaProp);
     if (!fieldType) continue;
@@ -200,10 +247,12 @@ export function graphConfigToFlow(
         x: savedX !== undefined ? savedX : START_X,
         y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
       },
+      style: { width: 240, height: 200 },
       data: {
         label: n.id,
         nodeType: "source",
         sourceMode: n.source_mode as "video" | "camera" | "spout" | "ndi" | undefined,
+        sourceName: n.source_name ?? undefined,
       },
     });
   });
@@ -241,6 +290,7 @@ export function graphConfigToFlow(
         x: savedX !== undefined ? savedX : START_X + COLUMN_GAP * 2,
         y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
       },
+      style: { width: 240, height: 200 },
       data: { label: n.id, nodeType: "sink" },
     });
   });
@@ -280,6 +330,7 @@ export function flowToGraphConfig(
       x: n.position.x,
       y: n.position.y,
       source_mode: n.data.nodeType === "source" ? (n.data.sourceMode ?? null) : undefined,
+      source_name: n.data.nodeType === "source" ? (n.data.sourceName ?? null) : undefined,
     }));
 
   // Filter edges to only include those where both source and target exist in graphNodes

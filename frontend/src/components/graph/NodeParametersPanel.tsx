@@ -13,26 +13,21 @@ import {
   NodePillSelect,
   NodePillInput,
   NodePillToggle,
+  NodePillListInput,
   NodeSection,
   NODE_TOKENS,
 } from "./node-ui";
 
 interface NodeParametersPanelProps {
-  /** The pipeline_id of the selected node */
   pipelineId: string | null;
-  /** The node_id in the graph */
   nodeId: string;
-  /** All available pipeline schemas */
   pipelineSchemas: Record<string, PipelineSchemaInfo>;
-  /** Current parameter values for this node */
   parameterValues: Record<string, unknown>;
-  /** Callback when a parameter value changes */
   onParameterChange: (nodeId: string, key: string, value: unknown) => void;
-  /** Whether the stream is currently active */
   isStreaming: boolean;
 }
 
-/** Load params in this set remain editable during streaming (they are runtime-safe). */
+// Load params that remain editable during streaming
 const RUNTIME_EDITABLE_LOAD_PARAMS = new Set(["vace_context_scale"]);
 
 export function NodeParametersPanel({
@@ -93,7 +88,32 @@ export function NodeParametersPanel({
   ) => {
     let resolvedType = field.fieldType;
 
-    // For complex component fields, try to infer a primitive type as fallback
+    // Check for array types with integer/number items
+    const isArrayOfNumbers = (obj: Record<string, unknown>): boolean => {
+      if (obj.type === "array" && obj.items) {
+        const items = obj.items as { type?: string };
+        return items.type === "integer" || items.type === "number";
+      }
+      return false;
+    };
+    const propAsRecord = field.prop as unknown as Record<string, unknown>;
+    const anyOfVariants = propAsRecord.anyOf as Record<string, unknown>[] | undefined;
+
+    if (isArrayOfNumbers(propAsRecord) || anyOfVariants?.some(v => isArrayOfNumbers(v))) {
+      const currentValue = parameterValues[field.key] ?? field.prop.default;
+      const label = field.ui.label || field.key;
+      return (
+        <NodeParamRow key={field.key} label={label}>
+          <NodePillListInput
+            value={Array.isArray(currentValue) ? currentValue : (Array.isArray(field.prop.default) ? field.prop.default : [])}
+            onChange={value => onParameterChange(nodeId, field.key, value)}
+            disabled={disabled}
+          />
+        </NodeParamRow>
+      );
+    }
+
+    // Try to infer primitive type for complex fields
     if (
       typeof resolvedType === "string" &&
       COMPLEX_COMPONENTS.includes(resolvedType as ComplexComponentName)
@@ -111,7 +131,6 @@ export function NodeParametersPanel({
       const displayValue = formatValue(currentValue);
       const label = field.ui.label || field.key;
 
-      // For enum fields, render as select
       if (resolvedType === "enum" && field.prop.enum) {
         const enumValues = Array.isArray(field.prop.enum) ? field.prop.enum : [];
         const options = enumValues.map((opt: unknown) => {
@@ -130,7 +149,6 @@ export function NodeParametersPanel({
         );
       }
 
-      // For text fields, render as input
       if (resolvedType === "text") {
         return (
           <NodeParamRow key={field.key} label={label}>
@@ -144,7 +162,6 @@ export function NodeParametersPanel({
         );
       }
 
-      // For number fields, render as input
       if (resolvedType === "number") {
         const min = typeof field.prop.minimum === "number" ? field.prop.minimum : undefined;
         const max = typeof field.prop.maximum === "number" ? field.prop.maximum : undefined;
@@ -162,7 +179,6 @@ export function NodeParametersPanel({
         );
       }
 
-      // For toggle fields, render as checkbox styled as pill
       if (resolvedType === "toggle") {
         return (
           <NodeParamRow key={field.key} label={label}>
@@ -175,7 +191,6 @@ export function NodeParametersPanel({
         );
       }
 
-      // For slider and other types, render as display value
       return (
         <NodeParamRow key={field.key} label={label}>
           <NodePill>{displayValue}</NodePill>

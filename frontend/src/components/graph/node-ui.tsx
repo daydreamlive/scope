@@ -1,7 +1,8 @@
-import { type ReactNode, useState, useRef, useEffect } from "react";
+import { type ReactNode, useState, useRef, useEffect, useCallback } from "react";
+import { NodeResizer } from "@xyflow/react";
 
 export const NODE_TOKENS = {
-  card: "bg-[#2a2a2a] border border-[rgba(119,119,119,0.55)] rounded-xl min-w-[240px] relative",
+  card: "bg-[#2a2a2a] border border-[rgba(119,119,119,0.55)] rounded-xl min-w-[240px] relative w-full h-full flex flex-col",
   cardSelected: "ring-2 ring-blue-400/50",
   header: "bg-[#181717] border-b border-[rgba(119,119,119,0.15)] flex items-center gap-2 px-2 py-1 h-[28px] rounded-t-xl",
   body: "py-1.5 px-4",
@@ -33,6 +34,13 @@ export function NodeCard({ children, selected, className = "" }: NodeCardProps) 
     <div
       className={`${NODE_TOKENS.card} ${selected ? NODE_TOKENS.cardSelected : ""} ${className}`}
     >
+      <NodeResizer
+        isVisible={!!selected}
+        minWidth={240}
+        minHeight={60}
+        lineClassName="!border-transparent"
+        handleClassName="!w-2 !h-2 !bg-transparent !border !border-blue-400/20 hover:!border-blue-400/40 !rounded-sm"
+      />
       {children}
     </div>
   );
@@ -61,7 +69,7 @@ interface NodeBodyProps {
 
 export function NodeBody({ children, withGap = false, className = "" }: NodeBodyProps) {
   return (
-    <div className={`${withGap ? NODE_TOKENS.bodyWithGap : NODE_TOKENS.body} ${className}`}>
+    <div className={`${withGap ? NODE_TOKENS.bodyWithGap : NODE_TOKENS.body} flex-1 min-h-0 ${className}`}>
       {children}
     </div>
   );
@@ -162,6 +170,7 @@ export function NodePillSearchableSelect({
   const [searchText, setSearchText] = useState("");
   const containerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const scrollableRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -181,6 +190,24 @@ export function NodePillSearchableSelect({
     };
   }, [isOpen]);
 
+  // Prevent graph zoom when scrolling dropdown
+  useEffect(() => {
+    const scrollable = scrollableRef.current;
+    if (!scrollable) return;
+
+    const handleWheel = (e: WheelEvent) => {
+      e.stopPropagation();
+      e.preventDefault();
+      scrollable.scrollTop += e.deltaY;
+    };
+
+    scrollable.addEventListener("wheel", handleWheel, { passive: false });
+
+    return () => {
+      scrollable.removeEventListener("wheel", handleWheel);
+    };
+  }, [isOpen]);
+
   const filteredOptions = options.filter(opt =>
     opt.label.toLowerCase().includes(searchText.toLowerCase()) ||
     opt.value.toLowerCase().includes(searchText.toLowerCase())
@@ -193,13 +220,6 @@ export function NodePillSearchableSelect({
     onChange(optionValue);
     setIsOpen(false);
     setSearchText("");
-  };
-
-  const handleWheel = (e: React.WheelEvent) => {
-    e.stopPropagation();
-    e.preventDefault();
-    const target = e.currentTarget as HTMLElement;
-    target.scrollTop += e.deltaY;
   };
 
   return (
@@ -231,8 +251,8 @@ export function NodePillSearchableSelect({
             onWheel={e => e.stopPropagation()}
           />
           <div
+            ref={scrollableRef}
             className="overflow-y-auto overflow-x-hidden max-h-[200px] nowheel [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-black/50 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-black/70"
-            onWheel={handleWheel}
             style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,0,0,0.5) transparent' }}
           >
             {filteredOptions.length === 0 ? (
@@ -282,6 +302,13 @@ export function NodePillInput({
   max,
   className = "",
 }: NodePillInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dragRef = useRef<{
+    startX: number;
+    startValue: number;
+    hasDragged: boolean;
+  } | null>(null);
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (type === "number") {
       const numValue = Number(e.target.value);
@@ -293,16 +320,73 @@ export function NodePillInput({
     }
   };
 
+  const clampValue = useCallback(
+    (v: number) => {
+      let clamped = v;
+      if (min !== undefined) clamped = Math.max(min, clamped);
+      if (max !== undefined) clamped = Math.min(max, clamped);
+      return clamped;
+    },
+    [min, max]
+  );
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (type !== "number" || disabled) return;
+      if (document.activeElement === inputRef.current) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      dragRef.current = {
+        startX: e.clientX,
+        startValue: Number(value) || 0,
+        hasDragged: false,
+      };
+
+      const sensitivity =
+        min !== undefined && max !== undefined
+          ? (max - min) / 300
+          : 0.5;
+
+      const onMove = (ev: MouseEvent) => {
+        if (!dragRef.current) return;
+        const dx = ev.clientX - dragRef.current.startX;
+        if (!dragRef.current.hasDragged && Math.abs(dx) < 3) return;
+        dragRef.current.hasDragged = true;
+        const newVal = clampValue(dragRef.current.startValue + dx * sensitivity);
+        onChange(sensitivity >= 1 ? Math.round(newVal) : Math.round(newVal * 1000) / 1000);
+      };
+
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        if (!dragRef.current?.hasDragged) {
+          inputRef.current?.focus();
+          inputRef.current?.select();
+        }
+        dragRef.current = null;
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [type, disabled, value, min, max, clampValue, onChange]
+  );
+
+  const isNumber = type === "number";
+
   return (
     <input
+      ref={inputRef}
       type={type}
       value={value}
       onChange={handleChange}
+      onMouseDown={isNumber ? handleMouseDown : undefined}
       disabled={disabled}
       placeholder={placeholder}
       min={min}
       max={max}
-      className={`${NODE_TOKENS.pillInput} ${type === "number" ? NODE_TOKENS.pillInputNumber : NODE_TOKENS.pillInputText} ${className}`}
+      className={`${NODE_TOKENS.pillInput} ${isNumber ? NODE_TOKENS.pillInputNumber : NODE_TOKENS.pillInputText} ${isNumber && !disabled ? "cursor-ew-resize focus:cursor-text" : ""} ${isNumber ? "nodrag" : ""} ${className}`}
     />
   );
 }
@@ -330,5 +414,98 @@ export function NodePillToggle({
         className="w-3 h-3"
       />
     </div>
+  );
+}
+
+interface NodePillTextareaProps {
+  value: string;
+  onChange: (value: string) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  className?: string;
+}
+
+export function NodePillTextarea({
+  value,
+  onChange,
+  disabled = false,
+  placeholder,
+  className = "",
+}: NodePillTextareaProps) {
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    onChange(e.target.value);
+  };
+
+  const handleWheel = (e: React.WheelEvent) => {
+    e.stopPropagation();
+  };
+
+  return (
+    <textarea
+      ref={textareaRef}
+      value={value}
+      onChange={handleChange}
+      onWheel={handleWheel}
+      disabled={disabled}
+      placeholder={placeholder}
+      rows={3}
+      className={`${NODE_TOKENS.pillInput} !rounded-md w-full min-w-[110px] resize-y min-h-[60px] text-left py-1.5 leading-relaxed nowheel ${className}`}
+    />
+  );
+}
+
+interface NodePillListInputProps {
+  value: number[];
+  onChange: (value: number[]) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  className?: string;
+}
+
+export function NodePillListInput({
+  value,
+  onChange,
+  disabled = false,
+  placeholder = "e.g. 1000, 750, 500",
+  className = "",
+}: NodePillListInputProps) {
+  const [inputValue, setInputValue] = useState(() => {
+    return Array.isArray(value) ? value.join(", ") : "";
+  });
+
+  useEffect(() => {
+    if (Array.isArray(value)) {
+      setInputValue(value.join(", "));
+    }
+  }, [value]);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const text = e.target.value;
+    setInputValue(text);
+
+    const parts = text.split(",").map(s => s.trim()).filter(s => s);
+    const numbers = parts.map(s => {
+      const num = Number(s);
+      return Number.isNaN(num) ? null : num;
+    }).filter((n): n is number => n !== null);
+
+    if (numbers.length > 0) {
+      onChange(numbers);
+    } else if (text === "") {
+      onChange([]);
+    }
+  };
+
+  return (
+    <input
+      type="text"
+      value={inputValue}
+      onChange={handleChange}
+      disabled={disabled}
+      placeholder={placeholder}
+      className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputText} ${className}`}
+    />
   );
 }

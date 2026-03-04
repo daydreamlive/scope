@@ -27,7 +27,7 @@ export function ContextMenu({ x, y, onClose, items }: ContextMenuProps) {
       }
     };
 
-    // Add listeners after a small delay to avoid immediate close
+    // Add listeners after delay
     const timeout = setTimeout(() => {
       document.addEventListener("mousedown", handleClickOutside);
       document.addEventListener("contextmenu", handleClickOutside);

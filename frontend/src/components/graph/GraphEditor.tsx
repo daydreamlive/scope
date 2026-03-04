@@ -105,30 +105,41 @@ function getEdgeColor(
 }
 
 interface GraphEditorProps {
-  /** Whether the stream is currently active */
   isStreaming?: boolean;
-  /** Callback when a per-node parameter changes during streaming */
+  isConnecting?: boolean;
+  isLoading?: boolean;
   onNodeParameterChange?: (nodeId: string, key: string, value: unknown) => void;
-  /** Called whenever the user edits the graph (not on initial load) */
   onGraphChange?: () => void;
-  /** Called when the user clears the graph */
   onGraphClear?: () => void;
-  /** Local video stream (camera/file) for source node preview */
   localStream?: MediaStream | null;
-  /** Remote output stream for sink node preview */
   remoteStream?: MediaStream | null;
-  /** Callback to upload a video file for the source node */
   onVideoFileUpload?: (file: File) => Promise<boolean>;
+  onStartStream?: () => void;
+  onStopStream?: () => void;
+  onSourceModeChange?: (mode: string) => void;
+  spoutAvailable?: boolean;
+  ndiAvailable?: boolean;
+  onSpoutSourceChange?: (name: string) => void;
+  onNdiSourceChange?: (identifier: string) => void;
 }
 
 export function GraphEditor({
   isStreaming = false,
+  isConnecting = false,
+  isLoading = false,
   onNodeParameterChange,
   onGraphChange,
   onGraphClear,
   localStream,
   remoteStream,
   onVideoFileUpload,
+  onStartStream,
+  onStopStream,
+  onSourceModeChange,
+  spoutAvailable = false,
+  ndiAvailable = false,
+  onSpoutSourceChange,
+  onNdiSourceChange,
 }: GraphEditorProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<FlowNodeData>>(
     []
@@ -173,6 +184,7 @@ export function GraphEditor({
             newPipelineId && portsMap ? portsMap[newPipelineId] : null;
           const schema = newPipelineId ? pipelineSchemas[newPipelineId] : null;
           const parameterInputs = schema ? extractParameterPorts(schema) : [];
+          const supportsPrompts = schema?.supports_prompts ?? false;
           return {
             ...n,
             data: {
@@ -182,6 +194,7 @@ export function GraphEditor({
               streamInputs: ports?.inputs ?? ["video"],
               streamOutputs: ports?.outputs ?? ["video"],
               parameterInputs,
+              supportsPrompts,
             },
           };
         })
@@ -202,15 +215,67 @@ export function GraphEditor({
       });
   }, []);
 
+  // Refs to keep callbacks stable
+  const nodesRef = useRef(nodes);
+  nodesRef.current = nodes;
+
+  const onNodeParamChangeRef = useRef(onNodeParameterChange);
+  onNodeParamChangeRef.current = onNodeParameterChange;
+
+  const isStreamingRef = useRef(isStreaming);
+  isStreamingRef.current = isStreaming;
+
+  const onVideoFileUploadRef = useRef(onVideoFileUpload);
+  onVideoFileUploadRef.current = onVideoFileUpload;
+
+  const onSourceModeChangeRef = useRef(onSourceModeChange);
+  onSourceModeChangeRef.current = onSourceModeChange;
+
+  const onSpoutSourceChangeRef = useRef(onSpoutSourceChange);
+  onSpoutSourceChangeRef.current = onSpoutSourceChange;
+
+  const onNdiSourceChangeRef = useRef(onNdiSourceChange);
+  onNdiSourceChangeRef.current = onNdiSourceChange;
+
+  const onGraphChangeRef = useRef(onGraphChange);
+  onGraphChangeRef.current = onGraphChange;
+
+  const nodeParamsRef = useRef(nodeParams);
+  nodeParamsRef.current = nodeParams;
+
+  const resolveBackendId = useCallback(
+    (nodeId: string): string => {
+      const node = nodesRef.current.find(n => n.id === nodeId);
+      if (node?.data.nodeType === "pipeline" && node.data.pipelineId) {
+        return node.data.pipelineId as string;
+      }
+      return nodeId;
+    },
+    []
+  );
+
   const handleNodeParameterChange = useCallback(
     (nodeId: string, key: string, value: unknown) => {
       setNodeParams(prev => ({
         ...prev,
         [nodeId]: { ...(prev[nodeId] || {}), [key]: value },
       }));
-      onNodeParameterChange?.(nodeId, key, value);
+      onNodeParamChangeRef.current?.(resolveBackendId(nodeId), key, value);
     },
-    [onNodeParameterChange]
+    [resolveBackendId]
+  );
+
+  const handlePromptChange = useCallback(
+    (nodeId: string, text: string) => {
+      setNodeParams(prev => ({
+        ...prev,
+        [nodeId]: { ...(prev[nodeId] || {}), __prompt: text },
+      }));
+      if (isStreamingRef.current) {
+        onNodeParamChangeRef.current?.(resolveBackendId(nodeId), "prompts", [{ text, weight: 100 }]);
+      }
+    },
+    [resolveBackendId]
   );
 
   useEffect(() => {
@@ -221,6 +286,8 @@ export function GraphEditor({
           const pipelineId = n.data.pipelineId;
           const schema = pipelineId ? pipelineSchemas[pipelineId] : null;
           const parameterInputs = schema ? extractParameterPorts(schema) : [];
+          const supportsPrompts = schema?.supports_prompts ?? false;
+          const nodeParamValues = nodeParamsRef.current[n.id] || {};
           return {
             ...n,
             data: {
@@ -229,15 +296,27 @@ export function GraphEditor({
               pipelinePortsMap: portsMap,
               onPipelineSelect: handlePipelineSelect,
               parameterInputs,
-              parameterValues: nodeParams[n.id] || {},
+              parameterValues: nodeParamValues,
               onParameterChange: handleNodeParameterChange,
+              supportsPrompts,
+              promptText: (nodeParamValues.__prompt as string) || "",
+              onPromptChange: handlePromptChange,
             },
           };
         }
         if (n.data.nodeType === "source") {
           return {
             ...n,
-            data: { ...n.data, localStream, onVideoFileUpload },
+            data: {
+              ...n.data,
+              localStream,
+              onVideoFileUpload: onVideoFileUploadRef.current,
+              onSourceModeChange: onSourceModeChangeRef.current,
+              spoutAvailable,
+              ndiAvailable,
+              onSpoutSourceChange: onSpoutSourceChangeRef.current,
+              onNdiSourceChange: onNdiSourceChangeRef.current,
+            },
           };
         }
         if (n.data.nodeType === "sink") {
@@ -249,7 +328,28 @@ export function GraphEditor({
         return n;
       })
     );
-  }, [availablePipelineIds, portsMap, handlePipelineSelect, setNodes, pipelineSchemas, nodeParams, handleNodeParameterChange, localStream, remoteStream, onVideoFileUpload]);
+  }, [availablePipelineIds, portsMap, handlePipelineSelect, setNodes, pipelineSchemas, handleNodeParameterChange, localStream, remoteStream, spoutAvailable, ndiAvailable]);
+
+  // Sync nodeParams to pipeline node parameterValues
+  useEffect(() => {
+    setNodes(nds =>
+      nds.map(n => {
+        if (n.data.nodeType === "pipeline") {
+          const vals = nodeParams[n.id] || {};
+          if (n.data.parameterValues === vals) return n;
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              parameterValues: vals,
+              promptText: (vals.__prompt as string) || "",
+            },
+          };
+        }
+        return n;
+      })
+    );
+  }, [nodeParams, setNodes]);
 
   useEffect(() => {
     if (Object.keys(portsMap).length === 0) return;
@@ -274,13 +374,25 @@ export function GraphEditor({
                 pipelinePortsMap: portsMap,
                 onPipelineSelect: handlePipelineSelect,
                 parameterInputs,
-                parameterValues: nodeParams[n.id] || {},
+                parameterValues: nodeParamsRef.current[n.id] || {},
                 onParameterChange: handleNodeParameterChange,
               },
             };
           }
           if (n.data.nodeType === "source") {
-            return { ...n, data: { ...n.data, localStream, onVideoFileUpload } };
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                localStream,
+                onVideoFileUpload: onVideoFileUploadRef.current,
+                onSourceModeChange: onSourceModeChangeRef.current,
+                spoutAvailable,
+                ndiAvailable,
+                onSpoutSourceChange: onSpoutSourceChangeRef.current,
+                onNdiSourceChange: onNdiSourceChangeRef.current,
+              },
+            };
           }
           if (n.data.nodeType === "sink") {
             return { ...n, data: { ...n.data, remoteStream } };
@@ -323,10 +435,7 @@ export function GraphEditor({
     [setEdges]
   );
 
-  /**
-   * Find all pipeline nodes and their parameter names connected to a value/control node's output.
-   * Returns array of { nodeId, paramName } tuples.
-   */
+  // Find pipeline params connected to a value/control node output
   const findConnectedPipelineParams = useCallback(
     (sourceNodeId: string, edges: Edge[], nodes: Node<FlowNodeData>[]): Array<{ nodeId: string; paramName: string }> => {
       const connected: Array<{ nodeId: string; paramName: string }> = [];
@@ -398,10 +507,20 @@ export function GraphEditor({
 
         if (!sourceType) return false;
 
+        if (targetParsed.name === "__prompt") {
+          return sourceType === "string";
+        }
+
         const targetParam = targetNode.data.parameterInputs?.find(
           p => p.name === targetParsed.name
         );
-        return sourceType === targetParam?.type;
+        if (!targetParam) return false;
+
+        if (targetParam.type === "list_number" && sourceType === "number") {
+          return true;
+        }
+
+        return sourceType === targetParam.type;
       }
 
       return false;
@@ -485,6 +604,7 @@ export function GraphEditor({
         id,
         type: "source",
         position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        style: { width: 240, height: 200 },
         data: { label: id, nodeType: "source" },
       };
       setNodes(nds => [...nds, newNode]);
@@ -522,6 +642,7 @@ export function GraphEditor({
         id,
         type: "sink",
         position: position ?? { x: 650, y: 50 + nodes.length * 100 },
+        style: { width: 240, height: 200 },
         data: { label: id, nodeType: "sink" },
       };
       setNodes(nds => [...nds, newNode]);
@@ -669,8 +790,8 @@ export function GraphEditor({
     if (!initialLoadDone.current) return;
     if (nodes.length === 0 && edges.length === 0) return;
 
-    onGraphChange?.();
-  }, [nodes, edges, onGraphChange]);
+    onGraphChangeRef.current?.();
+  }, [nodes, edges]);
 
   useEffect(() => {
     if (!initialLoadDone.current) return;
@@ -691,12 +812,11 @@ export function GraphEditor({
     return () => clearTimeout(timer);
   }, [nodes, edges]);
 
-  // Forward value/control node changes to connected pipeline parameters
+  // Forward value/control node changes to connected params
   const lastForwardTimeRef = useRef<Record<string, number>>({});
   useEffect(() => {
-    if (!isStreaming || !onNodeParameterChange) return;
+    if (!isStreamingRef.current || !onNodeParamChangeRef.current) return;
 
-    // Throttle control node updates to ~10Hz (100ms)
     const throttleMs = 100;
 
     for (const node of nodes) {
@@ -709,14 +829,11 @@ export function GraphEditor({
       if (node.data.nodeType === "value") {
         value = node.data.value;
       } else if (node.data.nodeType === "control") {
-        // For control nodes, we need to get the current animated value
-        // This is stored in node.data.currentValue (set by ControlNode)
         value = node.data.currentValue;
       }
 
       if (value === undefined) continue;
 
-      // Throttle control node updates
       if (node.data.nodeType === "control") {
         const now = Date.now();
         const lastTime = lastForwardTimeRef.current[node.id] || 0;
@@ -724,12 +841,16 @@ export function GraphEditor({
         lastForwardTimeRef.current[node.id] = now;
       }
 
-      // Forward to all connected pipeline parameters
       for (const { nodeId, paramName } of connected) {
-        onNodeParameterChange(nodeId, paramName, value);
+        const backendId = resolveBackendId(nodeId);
+        if (paramName === "__prompt") {
+          onNodeParamChangeRef.current(backendId, "prompts", [{ text: String(value), weight: 100 }]);
+        } else {
+          onNodeParamChangeRef.current(backendId, paramName, value);
+        }
       }
     }
-  }, [nodes, edges, isStreaming, onNodeParameterChange, findConnectedPipelineParams]);
+  }, [nodes, edges, findConnectedPipelineParams, resolveBackendId]);
 
   const handleClear = useCallback(async () => {
     try {
@@ -770,6 +891,8 @@ export function GraphEditor({
               const pipelineId = n.data.pipelineId;
               const schema = pipelineId ? pipelineSchemas[pipelineId] : null;
               const parameterInputs = schema ? extractParameterPorts(schema) : [];
+              const supportsPrompts = schema?.supports_prompts ?? false;
+              const nodeParamValues = nodeParamsRef.current[n.id] || {};
               return {
                 ...n,
                 data: {
@@ -778,13 +901,28 @@ export function GraphEditor({
                   pipelinePortsMap: portsMap,
                   onPipelineSelect: handlePipelineSelect,
                   parameterInputs,
-                  parameterValues: nodeParams[n.id] || {},
+                  parameterValues: nodeParamValues,
                   onParameterChange: handleNodeParameterChange,
+                  supportsPrompts,
+                  promptText: (nodeParamValues.__prompt as string) || "",
+                  onPromptChange: handlePromptChange,
                 },
               };
             }
             if (n.data.nodeType === "source") {
-              return { ...n, data: { ...n.data, localStream, onVideoFileUpload } };
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  localStream,
+                  onVideoFileUpload,
+                  onSourceModeChange,
+                  spoutAvailable,
+                  ndiAvailable,
+                  onSpoutSourceChange,
+                  onNdiSourceChange,
+                },
+              };
             }
             if (n.data.nodeType === "sink") {
               return { ...n, data: { ...n.data, remoteStream } };
@@ -843,40 +981,38 @@ export function GraphEditor({
       <div className="flex flex-col flex-1">
         <div className={NODE_TOKENS.toolbar}>
           <button
-            onClick={() => addSourceNode()}
-            className={NODE_TOKENS.toolbarButton}
+            onClick={isStreaming ? onStopStream : onStartStream}
+            disabled={isConnecting || isLoading}
+            className={`${NODE_TOKENS.toolbarButton} ${isConnecting || isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
+            title={isStreaming ? "Stop stream" : "Start stream"}
           >
-            + Source
+            {isConnecting || isLoading ? (
+              <span className="inline-flex items-center gap-1">
+                <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              </span>
+            ) : isStreaming ? (
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+            ) : (
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21" /></svg>
+            )}
           </button>
-          <button
-            onClick={() => addPipelineNode()}
-            className={NODE_TOKENS.toolbarButton}
-          >
-            + Pipeline
-          </button>
-          <button
-            onClick={() => addSinkNode()}
-            className={NODE_TOKENS.toolbarButton}
-          >
-            + Sink
-          </button>
+          {isStreaming && (
+            <button
+              onClick={onStopStream}
+              className={NODE_TOKENS.toolbarButton}
+              title="Stop and clear"
+            >
+              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+              </svg>
+            </button>
+          )}
+
           <div className="flex-1" />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".json"
-            onChange={handleImport}
-            className="hidden"
-          />
-          <button onClick={() => fileInputRef.current?.click()} className={NODE_TOKENS.toolbarButton}>
-            Import JSON
-          </button>
-          <button onClick={handleExport} className={NODE_TOKENS.toolbarButton}>
-            Export JSON
-          </button>
-          <button onClick={handleClear} className={NODE_TOKENS.toolbarButton}>
-            Clear
-          </button>
+
           {status && (
             <span className={NODE_TOKENS.toolbarStatus}>
               {status}
@@ -885,6 +1021,23 @@ export function GraphEditor({
               )}
             </span>
           )}
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".json"
+            onChange={handleImport}
+            className="hidden"
+          />
+          <button onClick={() => fileInputRef.current?.click()} className={NODE_TOKENS.toolbarButton}>
+            Import
+          </button>
+          <button onClick={handleExport} className={NODE_TOKENS.toolbarButton}>
+            Export
+          </button>
+          <button onClick={handleClear} className={NODE_TOKENS.toolbarButton} title="Clear graph">
+            Clear
+          </button>
         </div>
 
         <div className="flex-1 relative">

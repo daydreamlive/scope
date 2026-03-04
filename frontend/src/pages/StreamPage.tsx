@@ -1803,12 +1803,12 @@ export function StreamPage() {
                   const sourceMode = sourceNode.source_mode as "video" | "camera" | "spout" | "ndi";
                   // Sync to useVideoSource
                   if (sourceMode === "spout" || sourceMode === "ndi") {
-                    // For server-side sources, update settings.inputSource
+                    // For server-side sources, update settings.inputSource with graph's source_name
                     updateSettings({
                       inputSource: {
                         enabled: true,
                         source_type: sourceMode,
-                        source_name: settings.inputSource?.source_name ?? "",
+                        source_name: sourceNode.source_name ?? settings.inputSource?.source_name ?? "",
                       },
                     });
                     // Also call switchMode to sync the mode state
@@ -1833,6 +1833,8 @@ export function StreamPage() {
         <div className="flex-1 min-h-0 overflow-hidden">
           <GraphEditor
             isStreaming={isStreaming}
+            isConnecting={isConnecting || isCloudConnecting}
+            isLoading={isPipelineLoading || isDownloading}
             onNodeParameterChange={(nodeId, key, value) => {
               sendParameterUpdate({ node_id: nodeId, [key]: value });
             }}
@@ -1841,6 +1843,13 @@ export function StreamPage() {
             localStream={localStream}
             remoteStream={remoteStream}
             onVideoFileUpload={handleVideoFileUpload}
+            onStartStream={() => handleStartStream()}
+            onStopStream={stopStream}
+            onSourceModeChange={(mode) => switchMode(mode as "video" | "camera" | "spout" | "ndi")}
+            spoutAvailable={spoutAvailable}
+            ndiAvailable={ndiAvailable}
+            onSpoutSourceChange={handleSpoutSourceChange}
+            onNdiSourceChange={handleNdiSourceChange}
           />
           {hasAvailableOutputs && (
             <OutputsPanel
