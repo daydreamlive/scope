@@ -40,7 +40,7 @@ class StreamDiffusionV2Config(BasePipelineConfig):
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/StreamDiffusionV2",
-            files=["wan_causal_dmd_v2v/model.pt"],
+            files=["config.json", "wan_causal_dmd_v2v/model.pt"],
         ),
     ]
 

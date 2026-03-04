@@ -35,7 +35,7 @@ class LongLiveConfig(BasePipelineConfig):
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/LongLive-1.3B",
-            files=["models/longlive_base.pt", "models/lora.pt"],
+            files=["config.json", "models/longlive_base.pt", "models/lora.pt"],
         ),
     ]
 

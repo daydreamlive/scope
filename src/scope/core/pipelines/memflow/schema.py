@@ -35,7 +35,7 @@ class MemFlowConfig(BasePipelineConfig):
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/MemFlow",
-            files=["base.pt", "lora.pt"],
+            files=["config.json", "base.pt", "lora.pt"],
         ),
     ]
 

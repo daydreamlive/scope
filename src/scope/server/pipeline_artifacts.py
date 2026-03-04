@@ -12,7 +12,7 @@ WAN_1_3B_ARTIFACT = HuggingfaceRepoArtifact(
 
 UMT5_ENCODER_ARTIFACT = HuggingfaceRepoArtifact(
     repo_id="daydreamlive/WanVideo_comfy",
-    files=["umt5-xxl-enc-fp8_e4m3fn.safetensors"],
+    files=["config.json", "umt5-xxl-enc-fp8_e4m3fn.safetensors"],
 )
 
 VACE_ARTIFACT = HuggingfaceRepoArtifact(
@@ -29,7 +29,7 @@ VACE_14B_ARTIFACT = HuggingfaceRepoArtifact(
 # Extra VAE artifacts (lightweight/alternative encoders)
 LIGHTVAE_ARTIFACT = HuggingfaceRepoArtifact(
     repo_id="daydreamlive/Autoencoders",
-    files=["lightvaew2_1.pth"],
+    files=["config.json", "lightvaew2_1.pth"],
 )
 
 TAE_ARTIFACT = HuggingfaceRepoArtifact(
@@ -53,7 +53,7 @@ PIPELINE_ARTIFACTS = {
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/StreamDiffusionV2",
-            files=["wan_causal_dmd_v2v/model.pt"],
+            files=["config.json", "wan_causal_dmd_v2v/model.pt"],
         ),
     ],
     "longlive": [
@@ -65,7 +65,7 @@ PIPELINE_ARTIFACTS = {
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/LongLive-1.3B",
-            files=["models/longlive_base.pt", "models/lora.pt"],
+            files=["config.json", "models/longlive_base.pt", "models/lora.pt"],
         ),
     ],
     "krea-realtime-video": [
@@ -81,7 +81,7 @@ PIPELINE_ARTIFACTS = {
         ),
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/krea-realtime-video",
-            files=["krea-realtime-video-14b.safetensors"],
+            files=["config.json", "krea-realtime-video-14b.safetensors"],
         ),
     ],
     "reward-forcing": [
@@ -93,7 +93,7 @@ PIPELINE_ARTIFACTS = {
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/Reward-Forcing-T2V-1.3B",
-            files=["rewardforcing.pt"],
+            files=["config.json", "rewardforcing.pt"],
         ),
     ],
     "memflow": [
@@ -105,7 +105,7 @@ PIPELINE_ARTIFACTS = {
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/MemFlow",
-            files=["base.pt", "lora.pt"],
+            files=["config.json", "base.pt", "lora.pt"],
         ),
     ],
 }

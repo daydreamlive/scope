@@ -19,7 +19,7 @@ class ScribbleConfig(BasePipelineConfig):
     artifacts = [
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/VACE-Annotators",
-            files=["scribble/anime_style/netG_A_latest.pth"],
+            files=["config.json", "scribble/anime_style/netG_A_latest.pth"],
         ),
     ]
     supports_prompts = False

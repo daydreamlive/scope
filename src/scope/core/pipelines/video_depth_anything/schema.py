@@ -21,7 +21,7 @@ class VideoDepthAnythingConfig(BasePipelineConfig):
     artifacts = [
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/Video-Depth-Anything-Small",
-            files=["video_depth_anything_vits.pth"],
+            files=["config.json", "video_depth_anything_vits.pth"],
         ),
     ]
     supports_prompts = False

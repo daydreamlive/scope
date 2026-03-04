@@ -22,7 +22,7 @@ class RIFEConfig(BasePipelineConfig):
     artifacts = [
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/RIFE",
-            files=["flownet.pkl"],
+            files=["config.json", "flownet.pkl"],
         ),
     ]
     supports_prompts = False

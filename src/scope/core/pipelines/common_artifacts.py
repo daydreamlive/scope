@@ -16,7 +16,7 @@ WAN_1_3B_ARTIFACT = HuggingfaceRepoArtifact(
 
 UMT5_ENCODER_ARTIFACT = HuggingfaceRepoArtifact(
     repo_id="daydreamlive/WanVideo_comfy",
-    files=["umt5-xxl-enc-fp8_e4m3fn.safetensors"],
+    files=["config.json", "umt5-xxl-enc-fp8_e4m3fn.safetensors"],
 )
 
 VACE_ARTIFACT = HuggingfaceRepoArtifact(
@@ -33,7 +33,7 @@ VACE_14B_ARTIFACT = HuggingfaceRepoArtifact(
 # Extra VAE artifacts (lightweight/alternative encoders)
 LIGHTVAE_ARTIFACT = HuggingfaceRepoArtifact(
     repo_id="daydreamlive/Autoencoders",
-    files=["lightvaew2_1.pth"],
+    files=["config.json", "lightvaew2_1.pth"],
 )
 
 TAE_ARTIFACT = HuggingfaceRepoArtifact(

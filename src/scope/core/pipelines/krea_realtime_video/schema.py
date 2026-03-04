@@ -38,7 +38,7 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         ),
         HuggingfaceRepoArtifact(
             repo_id="daydreamlive/krea-realtime-video",
-            files=["krea-realtime-video-14b.safetensors"],
+            files=["config.json", "krea-realtime-video-14b.safetensors"],
         ),
     ]
 
