@@ -3,6 +3,8 @@ import { StreamPage } from "./pages/StreamPage";
 import { Toaster } from "./components/ui/sonner";
 import { PipelinesProvider } from "./contexts/PipelinesContext";
 import { LoRAsProvider } from "./contexts/LoRAsContext";
+import { PluginsProvider } from "./contexts/PluginsContext";
+import { ServerInfoProvider } from "./contexts/ServerInfoContext";
 import { CloudProvider } from "./lib/cloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
 import {
@@ -104,9 +106,13 @@ function App() {
     <CloudStatusProvider>
       <PipelinesProvider>
         <LoRAsProvider>
-          <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
-            <StreamPage />
-          </CloudProvider>
+          <PluginsProvider>
+            <ServerInfoProvider>
+              <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
+                <StreamPage />
+              </CloudProvider>
+            </ServerInfoProvider>
+          </PluginsProvider>
           <Toaster />
         </LoRAsProvider>
       </PipelinesProvider>

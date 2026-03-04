@@ -15,10 +15,11 @@ import type { SettingsState } from "../types";
 import type { TimelinePrompt } from "./PromptTimeline";
 import type { WorkflowPromptState } from "../lib/workflowSettings";
 import { buildScopeWorkflow } from "../lib/workflowSettings";
-import { listPlugins, getServerInfo } from "../lib/api";
 import type { PluginInfo } from "../lib/api";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
+import { usePluginsContext } from "../contexts/PluginsContext";
+import { useServerInfoContext } from "../contexts/ServerInfoContext";
 
 interface WorkflowExportDialogProps {
   open: boolean;
@@ -39,18 +40,14 @@ export function WorkflowExportDialog({
   const [exporting, setExporting] = useState(false);
   const { pipelines } = usePipelinesContext();
   const { loraFiles } = useLoRAsContext();
+  const { plugins } = usePluginsContext();
+  const { version: scopeVersion } = useServerInfoContext();
 
-  const handleExport = async () => {
+  const handleExport = () => {
     setExporting(true);
     try {
-      // Fetch plugin info and scope version on demand
-      const [pluginResponse, serverInfo] = await Promise.all([
-        listPlugins(),
-        getServerInfo(),
-      ]);
-
       const pluginInfoMap = new Map<string, PluginInfo>(
-        pluginResponse.plugins.map(p => [p.name, p])
+        plugins.map(p => [p.name, p])
       );
 
       const workflow = buildScopeWorkflow({
@@ -61,7 +58,7 @@ export function WorkflowExportDialog({
         pipelineInfoMap: pipelines ?? {},
         loraFiles,
         pluginInfoMap,
-        scopeVersion: serverInfo.version,
+        scopeVersion: scopeVersion ?? "unknown",
       });
 
       // Download as JSON file

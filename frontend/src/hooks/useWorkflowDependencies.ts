@@ -73,7 +73,10 @@ function buildLoRADownloadRequest(
   return null;
 }
 
-export function useLoRADownloads(workflow: ScopeWorkflow | null) {
+export function useLoRADownloads(
+  workflow: ScopeWorkflow | null,
+  onDownloadComplete?: () => void | Promise<void>
+) {
   const [downloads, setDownloads] = useState<
     Record<string, LoRADownloadStatus>
   >({});
@@ -109,6 +112,7 @@ export function useLoRADownloads(workflow: ScopeWorkflow | null) {
         await downloadLoRA(req);
         setDownloads(prev => ({ ...prev, [filename]: "done" }));
         toast.success(`Downloaded ${filename}`);
+        if (onDownloadComplete) await onDownloadComplete();
       } catch (err) {
         setDownloads(prev => ({ ...prev, [filename]: "error" }));
         toast.error(`Failed to download ${filename}`, {
@@ -116,7 +120,7 @@ export function useLoRADownloads(workflow: ScopeWorkflow | null) {
         });
       }
     },
-    [workflow]
+    [workflow, onDownloadComplete]
   );
 
   const downloadAll = useCallback(async () => {

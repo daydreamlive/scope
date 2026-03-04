@@ -8,7 +8,8 @@ import { ReportBugDialog } from "./ReportBugDialog";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
 import { useLoRAsContext } from "@/contexts/LoRAsContext";
 import { LoRAsTab } from "./settings/LoRAsTab";
-import { installLoRAFile, deleteLoRAFile, getServerInfo } from "@/lib/api";
+import { installLoRAFile, deleteLoRAFile } from "@/lib/api";
+import { useServerInfoContext } from "@/contexts/ServerInfoContext";
 import { toast } from "sonner";
 
 interface SettingsDialogProps {
@@ -32,6 +33,8 @@ export function SettingsDialog({
     isLoading: isLoadingLoRAs,
     refresh: refreshLoRAs,
   } = useLoRAsContext();
+  const { version: serverVersion, gitCommit: serverGitCommit } =
+    useServerInfoContext();
   const [modelsDirectory, setModelsDirectory] = useState(
     "~/.daydream-scope/models"
   );
@@ -42,25 +45,15 @@ export function SettingsDialog({
   const [loraInstallUrl, setLoraInstallUrl] = useState("");
   const [isInstallingLoRA, setIsInstallingLoRA] = useState(false);
   const [deletingLoRAs, setDeletingLoRAs] = useState<Set<string>>(new Set());
-  const [version, setVersion] = useState<string>("");
-  const [gitCommit, setGitCommit] = useState<string>("");
+
+  const version = serverVersion ?? "";
+  const gitCommit = serverGitCommit ?? "";
 
   useEffect(() => {
     if (open) {
       setActiveTab(initialTab);
     }
   }, [open, initialTab]);
-
-  useEffect(() => {
-    if (open) {
-      getServerInfo()
-        .then(info => {
-          setVersion(info.version);
-          setGitCommit(info.gitCommit);
-        })
-        .catch(err => console.error("Failed to fetch server info:", err));
-    }
-  }, [open]);
 
   // Refresh LoRAs when switching to LoRAs tab
   useEffect(() => {

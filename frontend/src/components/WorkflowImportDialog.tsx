@@ -148,10 +148,22 @@ export function WorkflowImportDialog({
   const [plan, setPlan] = useState<WorkflowResolutionPlan | null>(null);
   const [validating, setValidating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { loraFiles } = useLoRAsContext();
+  const { loraFiles, refresh: refreshLoRAs } = useLoRAsContext();
   const { refreshPipelines } = usePipelinesContext();
 
-  const loras = useLoRADownloads(workflow);
+  // -- Re-resolution callback (used by both LoRA downloads and plugin installs)
+  const reResolveWorkflow = useCallback(async () => {
+    if (!workflow) return;
+    try {
+      await Promise.all([refreshPipelines(), refreshLoRAs()]);
+      const resolution = await resolveWorkflow(workflow);
+      setPlan(resolution);
+    } catch (err) {
+      console.error("Failed to re-resolve workflow:", err);
+    }
+  }, [workflow, refreshPipelines, refreshLoRAs]);
+
+  const loras = useLoRADownloads(workflow, reResolveWorkflow);
 
   // -- Confirm dialog state (shared for load & plugin-install confirms) -----
   const [confirmState, setConfirmState] = useState<{
@@ -187,17 +199,6 @@ export function WorkflowImportDialog({
       ),
     [showConfirm]
   );
-
-  const reResolveWorkflow = useCallback(async () => {
-    if (!workflow) return;
-    try {
-      await refreshPipelines();
-      const resolution = await resolveWorkflow(workflow);
-      setPlan(resolution);
-    } catch (err) {
-      console.error("Failed to re-resolve workflow:", err);
-    }
-  }, [workflow, refreshPipelines]);
 
   const plugins = usePluginInstalls(
     workflow,
