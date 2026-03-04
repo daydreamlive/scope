@@ -36,6 +36,7 @@ import type {
 } from "../lib/workflowApi";
 import { resolveWorkflow } from "../lib/api";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
+import { usePipelinesContext } from "../contexts/PipelinesContext";
 import type { SettingsState } from "../types";
 import type { TimelinePrompt } from "./PromptTimeline";
 import {
@@ -148,6 +149,7 @@ export function WorkflowImportDialog({
   const [validating, setValidating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { loraFiles } = useLoRAsContext();
+  const { refreshPipelines } = usePipelinesContext();
 
   const loras = useLoRADownloads(workflow);
 
@@ -189,12 +191,13 @@ export function WorkflowImportDialog({
   const reResolveWorkflow = useCallback(async () => {
     if (!workflow) return;
     try {
+      await refreshPipelines();
       const resolution = await resolveWorkflow(workflow);
       setPlan(resolution);
     } catch (err) {
       console.error("Failed to re-resolve workflow:", err);
     }
-  }, [workflow]);
+  }, [workflow, refreshPipelines]);
 
   const plugins = usePluginInstalls(
     workflow,

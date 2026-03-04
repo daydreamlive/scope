@@ -181,7 +181,9 @@ export function usePluginInstalls(
   );
 
   const doRestartServer = useCallback(async () => {
-    toast.info("Restarting server to load new plugins...");
+    toast.info("Restarting server to load new plugins...", {
+      id: "plugin-server-restart",
+    });
     try {
       const oldStartTime = await restartServer();
       await waitForServer(oldStartTime);
