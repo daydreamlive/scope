@@ -68,9 +68,11 @@ async def _proxy_to_cloud(
 
     status = response.get("status", 200)
     if status >= 400:
+        logger.error(f"Cloud proxy request failed: {response}")
         raise HTTPException(
             status_code=status,
-            detail=response.get("error", error_detail),
+            detail=response.get("data", {}).get("detail")
+            or response.get("error", error_detail),
         )
 
     # Binary response: cloud returned base64-encoded content (e.g. recording download)
