@@ -1,4 +1,4 @@
-from ..artifacts import GoogleDriveArtifact
+from ..artifacts import HuggingfaceRepoArtifact
 from ..base_schema import BasePipelineConfig, ModeDefaults, UsageType
 
 
@@ -10,10 +10,6 @@ class RIFEConfig(BasePipelineConfig):
 
     Model weights are from Practical-RIFE v4.25:
     https://github.com/hzwer/Practical-RIFE
-
-    This pipeline uses the v4.25 architecture with 5 blocks (block0-block4)
-    and scale_list [16, 8, 4, 2, 1]. The model weights are downloaded from
-    Google Drive and extracted from the ZIP archive.
     """
 
     pipeline_id = "rife"
@@ -24,10 +20,9 @@ class RIFEConfig(BasePipelineConfig):
     )
     docs_url = "https://github.com/hzwer/Practical-RIFE"
     artifacts = [
-        GoogleDriveArtifact(
-            file_id="1Smy6gY7BkS_RzCjPCbMEy-TsX8Ma5B0R",  # Practical-RIFE v4.25
+        HuggingfaceRepoArtifact(
+            repo_id="daydreamlive/RIFE",
             files=["flownet.pkl"],
-            name="RIFE",
         ),
     ]
     supports_prompts = False
