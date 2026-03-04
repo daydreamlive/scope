@@ -14,8 +14,6 @@ from typing import TYPE_CHECKING, Literal
 from packaging.version import InvalidVersion, Version
 from pydantic import BaseModel, Field
 
-from scope.core.pipelines.registry import PipelineRegistry
-
 if TYPE_CHECKING:
     from scope.core.plugins.manager import PluginManager
 
@@ -91,6 +89,8 @@ class WorkflowResolutionPlan(BaseModel):
 
 
 def _resolve_builtin(pipeline_id: str) -> ResolutionItem:
+    from scope.core.pipelines.registry import PipelineRegistry
+
     if PipelineRegistry.is_registered(pipeline_id):
         return ResolutionItem(kind="pipeline", name=pipeline_id, status="ok")
     return ResolutionItem(
