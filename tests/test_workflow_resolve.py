@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from scope.core.workflows.resolve import (
     WorkflowLoRA,
     WorkflowLoRAProvenance,
@@ -613,3 +615,163 @@ class TestMinScopeVersion:
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
         assert not any("Scope >=" in w for w in plan.warnings)
+
+    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("importlib.metadata.version")
+    def test_resolve_warns_when_package_not_found(
+        self, mock_version, mock_registry, tmp_path
+    ):
+        """PackageNotFoundError produces a warning."""
+        import importlib.metadata
+
+        mock_registry.is_registered.return_value = True
+        mock_version.side_effect = importlib.metadata.PackageNotFoundError(
+            "daydream-scope"
+        )
+
+        wf = make_workflow(min_scope_version="1.0.0")
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+
+        assert any("Could not verify" in w for w in plan.warnings)
+
+
+# ---------------------------------------------------------------------------
+# Path traversal tests
+# ---------------------------------------------------------------------------
+
+
+class TestPathTraversal:
+    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    def test_lora_path_traversal_rejected(self, mock_registry, tmp_path):
+        """LoRA filenames with path traversal components are rejected."""
+        mock_registry.is_registered.return_value = True
+
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
+
+        wf = make_workflow(
+            pipelines=[
+                WorkflowPipeline(
+                    pipeline_id="test_pipe",
+                    source=WorkflowPipelineSource(type="builtin"),
+                    loras=[WorkflowLoRA(filename="../../etc/passwd")],
+                )
+            ]
+        )
+
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+
+        lora_items = [i for i in plan.items if i.kind == "lora"]
+        assert lora_items[0].status == "missing"
+        assert lora_items[0].detail == "Invalid LoRA filename"
+        assert lora_items[0].can_auto_resolve is False
+
+    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    def test_lora_normal_filename_ok(self, mock_registry, tmp_path):
+        """Normal filenames still work after path traversal guard."""
+        mock_registry.is_registered.return_value = True
+
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
+        (lora_dir / "valid.safetensors").write_bytes(b"data")
+
+        wf = make_workflow(
+            pipelines=[
+                WorkflowPipeline(
+                    pipeline_id="test_pipe",
+                    source=WorkflowPipelineSource(type="builtin"),
+                    loras=[WorkflowLoRA(filename="valid.safetensors")],
+                )
+            ]
+        )
+
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+
+        lora_items = [i for i in plan.items if i.kind == "lora"]
+        assert lora_items[0].status == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Empty pipelines + version_mismatch can_apply tests
+# ---------------------------------------------------------------------------
+
+
+class TestEdgeCases:
+    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    def test_empty_pipelines(self, mock_registry, tmp_path):
+        """Empty pipelines list resolves with can_apply=True and no items."""
+        wf = WorkflowRequest(pipelines=[])
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+
+        assert plan.can_apply is True
+        assert plan.items == []
+
+    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    def test_version_mismatch_blocks_can_apply(self, mock_registry, tmp_path):
+        """Plugin version_mismatch sets can_apply=False."""
+        mock_registry.is_registered.return_value = True
+
+        wf = make_workflow(
+            pipelines=[
+                WorkflowPipeline(
+                    pipeline_id="face-swap",
+                    source=WorkflowPipelineSource(
+                        type="pypi",
+                        plugin_name="scope-deeplivecam",
+                        plugin_version="2.0.0",
+                    ),
+                )
+            ]
+        )
+        pm = mock_plugin_manager([{"name": "scope-deeplivecam", "version": "0.1.0"}])
+
+        plan = resolve_workflow(wf, pm, tmp_path)
+
+        plugin_items = [i for i in plan.items if i.kind == "plugin"]
+        assert plugin_items[0].status == "version_mismatch"
+        assert plan.can_apply is False
+
+
+# ---------------------------------------------------------------------------
+# Input validation (Field constraints)
+# ---------------------------------------------------------------------------
+
+
+class TestInputValidation:
+    def test_lora_filename_max_length(self):
+        """LoRA filename exceeding max_length is rejected."""
+        from pydantic import ValidationError
+
+        with pytest.raises(ValidationError):
+            WorkflowLoRA(filename="a" * 256)
+
+    def test_lora_filename_at_max_length(self):
+        """LoRA filename at max_length is accepted."""
+        lora = WorkflowLoRA(filename="a" * 255)
+        assert len(lora.filename) == 255
+
+    def test_too_many_pipelines_rejected(self):
+        """WorkflowRequest with >50 pipelines is rejected."""
+        from pydantic import ValidationError
+
+        pipelines = [
+            WorkflowPipeline(
+                pipeline_id=f"pipe_{i}",
+                source=WorkflowPipelineSource(type="builtin"),
+            )
+            for i in range(51)
+        ]
+        with pytest.raises(ValidationError):
+            WorkflowRequest(pipelines=pipelines)
+
+    def test_too_many_loras_rejected(self):
+        """WorkflowPipeline with >100 LoRAs is rejected."""
+        from pydantic import ValidationError
+
+        loras = [WorkflowLoRA(filename=f"lora_{i}.safetensors") for i in range(101)]
+        with pytest.raises(ValidationError):
+            WorkflowPipeline(
+                pipeline_id="test",
+                source=WorkflowPipelineSource(type="builtin"),
+                loras=loras,
+            )

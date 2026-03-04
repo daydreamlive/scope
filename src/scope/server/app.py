@@ -39,7 +39,12 @@ from scope.core.lora.manifest import (
     load_manifest,
     save_manifest,
 )
-from scope.core.workflows.resolve import WorkflowRequest
+from scope.core.workflows.resolve import (
+    WorkflowRequest,
+    WorkflowResolutionPlan,
+    resolve_workflow,
+)
+from scope.server.models_config import get_models_dir
 
 from .cloud_proxy import (
     cloud_proxy,
@@ -1205,7 +1210,7 @@ async def tag_lora_provenance(
 # ---------------------------------------------------------------------------
 
 
-@app.post("/api/v1/workflow/resolve")
+@app.post("/api/v1/workflow/resolve", response_model=WorkflowResolutionPlan)
 def resolve_workflow_endpoint(
     workflow: WorkflowRequest,
 ):
@@ -1213,15 +1218,17 @@ def resolve_workflow_endpoint(
 
     This is side-effect-free: no installs, no downloads.  The request
     body uses ``extra="ignore"`` so the frontend can send the full
-    workflow JSON — the backend only reads the fields it needs.
+    workflow JSON; the backend only reads the fields it needs.
     """
     from scope.core.plugins import get_plugin_manager
-    from scope.core.workflows.resolve import resolve_workflow
-    from scope.server.models_config import get_models_dir
 
-    plugin_manager = get_plugin_manager()
-    models_dir = get_models_dir()
-    return resolve_workflow(workflow, plugin_manager, models_dir)
+    try:
+        plugin_manager = get_plugin_manager()
+        models_dir = get_models_dir()
+        return resolve_workflow(workflow, plugin_manager, models_dir)
+    except Exception as e:
+        logger.error("Error resolving workflow: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/v1/assets", response_model=AssetsResponse)
