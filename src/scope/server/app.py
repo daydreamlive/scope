@@ -158,7 +158,7 @@ if os.getenv("VERBOSE_LOGGING"):
     logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
 
-# Set INFO for the cloud log re-emitter so [CLOUD] lines reach console and file
+# Set INFO for the cloud log re-emitter so cloud lines reach console and file
 logging.getLogger("scope.cloud").setLevel(logging.INFO)
 
 # Allow suppressing noisy loggers via env var (comma-separated logger names)
@@ -682,7 +682,7 @@ async def handle_webrtc_offer(
         # If connected to cloud, use cloud mode (video flows through backend)
         if cloud_manager.is_connected:
             logger.info(
-                "[CLOUD] Using relay mode - video will flow through backend to cloud"
+                "Using relay mode - video will flow through backend to cloud"
             )
             return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
 

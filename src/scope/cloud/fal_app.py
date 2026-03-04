@@ -12,6 +12,7 @@ Based on:
 import asyncio
 import json
 import os
+import queue
 import shutil
 import subprocess as _subprocess
 import threading
@@ -172,8 +173,6 @@ class LogBroadcaster:
     """
 
     def __init__(self, max_queue_size: int = 200):
-        import queue
-
         self._queue_class = queue
         self._subscribers: dict[str, queue.Queue] = {}
         self._lock = threading.Lock()
@@ -189,10 +188,8 @@ class LogBroadcaster:
                     # Subscriber is slow — drop the line to avoid backpressure
                     pass
 
-    def subscribe(self, connection_id: str) -> "queue.Queue[str]":
+    def subscribe(self, connection_id: str) -> queue.Queue[str]:
         """Subscribe to log lines. Returns a thread-safe Queue for the caller to drain."""
-        import queue
-
         q: queue.Queue[str] = queue.Queue(maxsize=self._max_queue_size)
         with self._lock:
             self._subscribers[connection_id] = q
@@ -548,8 +545,6 @@ class ScopeApp(fal.App, keep_alive=300):
             Uses stdlib queue.Queue (thread-safe) polled via asyncio.sleep,
             since the publisher runs in a background thread.
             """
-            import queue
-
             LOG_BATCH_LIMIT = 50
             POLL_INTERVAL = 0.5  # seconds
             q = log_broadcaster.subscribe(connection_id)
