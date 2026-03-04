@@ -787,7 +787,7 @@ class ScopeApp(fal.App, keep_alive=300):
                                 }
 
                             response = await client.post(
-                                f"{SCOPE_BASE_URL}{path}",
+                                f"{SCOPE_LOCAL_URL}{path}",
                                 content=binary_content,
                                 headers={"Content-Type": content_type},
                                 timeout=60.0,
