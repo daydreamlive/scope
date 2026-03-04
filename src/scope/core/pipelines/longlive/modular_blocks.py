@@ -17,9 +17,9 @@ from ..wan2_1.blocks import (
 )
 from ..wan2_1.vace.blocks import VaceEncodingBlock
 from .blocks import (
-    BeatNoiseModulationBlock,
     PrepareRecacheFramesBlock,
     RecacheFramesBlock,
+    TempoEffectsBlock,
 )
 
 logger = diffusers_logging.get_logger(__name__)
@@ -32,13 +32,13 @@ ALL_BLOCKS = InsertableDict(
     [
         ("text_conditioning", TextConditioningBlock),
         ("embedding_blending", EmbeddingBlendingBlock),
+        ("tempo_effects", TempoEffectsBlock),
         ("set_timesteps", SetTimestepsBlock),
         ("setup_caches", SetupCachesBlock),
         (
             "set_transformer_blocks_local_attn_size",
             SetTransformerBlocksLocalAttnSizeBlock,
         ),
-        ("beat_noise_modulation", BeatNoiseModulationBlock),
         ("auto_preprocess_video", AutoPreprocessVideoBlock),
         ("auto_prepare_latents", AutoPrepareLatentsBlock),
         ("recache_frames", RecacheFramesBlock),

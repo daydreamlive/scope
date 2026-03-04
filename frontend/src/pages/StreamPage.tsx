@@ -35,6 +35,7 @@ import type {
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { getInputSourceResolution } from "../lib/api";
+import type { TempoEffectsConfig } from "../components/settings/TempoEffectsPanel";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -860,11 +861,19 @@ export function StreamPage() {
   };
 
   const handleResetCache = () => {
-    // Send reset cache command to backend
     sendParameterUpdate({
       reset_cache: true,
     });
   };
+
+  const handleTempoEffectsChange = useCallback(
+    (config: TempoEffectsConfig) => {
+      sendParameterUpdate({
+        tempo_effects: config as unknown as Record<string, unknown>,
+      });
+    },
+    [sendParameterUpdate]
+  );
 
   const handleOutputSinkChange = (
     sinkType: string,
@@ -1846,6 +1855,7 @@ export function StreamPage() {
             onTempoDisable={disableTempoSync}
             onTempoSetBpm={setTempoSessionBpm}
             onTempoRefreshSources={refreshTempoSources}
+            onTempoEffectsChange={handleTempoEffectsChange}
           />
         </div>
       </div>

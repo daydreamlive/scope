@@ -59,6 +59,7 @@ import { SchemaPrimitiveField } from "./PrimitiveFields";
 import { TempoSyncSection } from "./settings/TempoSyncSection";
 import type { TempoState } from "../hooks/useTempoSync";
 import type { TempoSourcesResponse, TempoEnableRequest } from "../lib/api";
+import type { TempoEffectsConfig } from "./settings/TempoEffectsPanel";
 
 // Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
 const DEFAULT_MIN_DIMENSION = 1;
@@ -363,6 +364,7 @@ interface SettingsPanelProps {
   onTempoDisable?: () => void;
   onTempoSetBpm?: (bpm: number) => void;
   onTempoRefreshSources?: () => void;
+  onTempoEffectsChange?: (config: TempoEffectsConfig) => void;
 }
 
 export function SettingsPanel({
@@ -419,6 +421,7 @@ export function SettingsPanel({
   onTempoDisable,
   onTempoSetBpm,
   onTempoRefreshSources,
+  onTempoEffectsChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -1217,6 +1220,7 @@ export function SettingsPanel({
             onDisable={onTempoDisable}
             onSetBpm={onTempoSetBpm}
             onRefreshSources={onTempoRefreshSources ?? (() => {})}
+            onTempoEffectsChange={onTempoEffectsChange}
           />
         )}
       </CardContent>

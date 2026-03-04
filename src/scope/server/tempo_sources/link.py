@@ -54,6 +54,8 @@ class LinkTempoSource(TempoSource):
         loop = asyncio.get_running_loop()
         self._link = Link(self._initial_bpm, loop)
         self._link.enabled = True
+        self._link.start_stop_sync_enabled = True
+        self._link.playing = True
 
         self._poll_task = asyncio.ensure_future(self._poll_loop())
         logger.info(

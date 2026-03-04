@@ -478,6 +478,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       images?: string[];
       first_frame_image?: string;
       last_frame_image?: string;
+      tempo_effects?: Record<string, unknown>;
     }) => {
       if (
         dataChannelRef.current &&

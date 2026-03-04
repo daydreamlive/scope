@@ -11,6 +11,10 @@ import {
 import { Button } from "../ui/button";
 import type { TempoState } from "../../hooks/useTempoSync";
 import type { TempoSourcesResponse, TempoEnableRequest } from "../../lib/api";
+import {
+  TempoEffectsPanel,
+  type TempoEffectsConfig,
+} from "./TempoEffectsPanel";
 
 function BeatIndicator({
   beatPhase,
@@ -56,6 +60,7 @@ export function TempoSyncSection({
   onDisable,
   onSetBpm,
   onRefreshSources,
+  onTempoEffectsChange,
 }: {
   tempoState: TempoState;
   sources: TempoSourcesResponse | null;
@@ -65,6 +70,7 @@ export function TempoSyncSection({
   onDisable: () => void;
   onSetBpm?: (bpm: number) => void;
   onRefreshSources: () => void;
+  onTempoEffectsChange?: (config: TempoEffectsConfig) => void;
 }) {
   const [selectedSource, setSelectedSource] = useState<"link" | "midi_clock">(
     "link"
@@ -271,6 +277,10 @@ export function TempoSyncSection({
             </div>
           )}
         </div>
+      )}
+
+      {tempoState.enabled && onTempoEffectsChange && (
+        <TempoEffectsPanel onConfigChange={onTempoEffectsChange} />
       )}
 
       {error && <p className="text-xs text-destructive">{error}</p>}

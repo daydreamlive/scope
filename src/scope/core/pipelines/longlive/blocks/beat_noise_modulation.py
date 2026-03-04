@@ -1,9 +1,34 @@
 """Beat-reactive noise modulation block.
 
-Modulates noise_scale and denoising steps based on tempo sync beat state,
-creating VJ-style pulsing visuals synced to music.
+Creates a rhythmic "breathing" effect synced to the tempo clock by oscillating
+noise_scale and kv_cache_attention_bias with the beat.
+
+How the two levers work:
+
+  noise_scale (the primary lever):
+    DenoiseBlock overrides the first denoising timestep as:
+      denoising_step_list[0] = int(1000 * noise_scale) - 100
+    So noise_scale=0.9 → timestep 800 (chaotic, novel), noise_scale=0.4 →
+    timestep 300 (stable, coherent). In video mode it also controls the
+    latent blend: latents = noise * scale + input * (1 - scale).
+    This is the lever that produces the most dramatic visual change.
+
+  kv_cache_attention_bias (secondary lever):
+    Applied as log(bias) to attention scores for past-frame tokens.
+    bias=1.0 → no effect, bias=0.15 → log(0.15)=-1.9 → strong suppression
+    of past-frame attention, producing more novel content.
+
+  Together: on beats, high noise_scale + low kv_bias = "inhale" (break from
+  the past, chaotic). Between beats, low noise_scale + high kv_bias =
+  "exhale" (return to coherence).
+
+Design constraint:
+  The pipeline runs at ~2-7 FPS. At 120 BPM a beat is 500ms. We use
+  beat_count change detection to reliably detect beats even when the
+  pipeline call rate is close to the beat rate.
 """
 
+import logging
 import math
 from typing import Any
 
@@ -11,26 +36,39 @@ import torch
 from diffusers.modular_pipelines import ModularPipelineBlocks, PipelineState
 from diffusers.modular_pipelines.modular_pipeline_utils import InputParam, OutputParam
 
+logger = logging.getLogger(__name__)
+
+# noise_scale range: controls first denoising timestep via int(1000*ns)-100
+# and latent blend in video mode. Must stay in [0.2, 0.95] for valid timesteps.
+NS_BEAT_HIGH = 0.90  # On beat: timestep 800, very chaotic
+NS_BEAT_LOW = 0.45  # Between beats: timestep 350, stable
+NS_VIDEO_BEAT_HIGH = 0.88  # Video mode ceiling (also affects latent blend)
+NS_VIDEO_BEAT_LOW = 0.50  # Video mode floor
+
+# kv_cache_attention_bias range
+KV_BIAS_BEAT_HIGH = 1.0  # Between beats: full coherence with past
+KV_BIAS_BEAT_LOW = 0.15  # On beat: log(0.15)=-1.9, strong past suppression
+
 
 class BeatNoiseModulationBlock(ModularPipelineBlocks):
-    """Modulates generation parameters based on beat/tempo state.
+    """Rhythmic "breathing" modulation synced to beat state.
 
-    When tempo sync is active (is_playing=True), this block overrides:
-    - noise_scale: Spikes on beat onsets, decays between beats. Downbeats hit harder.
-    - noise_controller: Forced off so beat modulation takes precedence over motion-aware control.
-    - denoising_step_list: In text mode (no video input), adds/removes steps on beats
-      for a grittier-on-beat / cleaner-off-beat effect.
-    - kv_cache_attention_bias: Briefly weakened on strong beats for more visual novelty.
-
-    The modulation curve uses an exponential decay from beat onset (beat_phase=0)
-    with configurable intensity. Bar downbeats (bar_position near 0) get a stronger hit.
+    On every pipeline call, oscillates noise_scale and kv_cache_attention_bias
+    based on the current beat state. noise_scale is the primary lever —
+    it directly controls the first denoising timestep in both text and video
+    mode, producing dramatic visual variation on beat onsets.
     """
 
     model_name = "Wan2.1"
 
+    def __init__(self):
+        super().__init__()
+        self._last_beat_count: int | None = None
+        self._modulation: float = 0.0
+
     @property
     def description(self) -> str:
-        return "Beat-reactive noise modulation for tempo-synced visual effects"
+        return "Beat-reactive breathing modulation for tempo-synced visual effects"
 
     @property
     def inputs(self) -> list[InputParam]:
@@ -115,74 +153,89 @@ class BeatNoiseModulationBlock(ModularPipelineBlocks):
             ),
         ]
 
+    def _reset(self) -> None:
+        self._last_beat_count = None
+        self._modulation = 0.0
+
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
 
         is_playing = block_state.is_playing
         if not is_playing:
+            self._reset()
             self.set_block_state(state, block_state)
             return components, state
 
+        beat_count = int(block_state.beat_count or 0)
         beat_phase = float(block_state.beat_phase or 0.0)
         bar_position = float(block_state.bar_position or 0.0)
         intensity = float(block_state.beat_noise_intensity or 0.8)
-        base_noise_scale = float(block_state.noise_scale or 0.7)
         is_video_mode = block_state.video is not None
 
-        # --- Beat envelope ---
-        # Exponential decay from beat onset: strongest at phase=0, fades to ~0 by phase=1
-        # decay_rate controls how fast the hit fades (higher = sharper transient)
-        decay_rate = 6.0
-        beat_envelope = math.exp(-decay_rate * beat_phase)
+        # --- Beat onset detection ---
+        beat_hit = False
+        if self._last_beat_count is None:
+            self._last_beat_count = beat_count
+        elif beat_count != self._last_beat_count:
+            beat_hit = True
+            self._last_beat_count = beat_count
 
-        # Downbeat emphasis: bar_position near 0 (or near beats_per_bar) gets a boost
-        beat_in_bar = bar_position % 1.0
-        is_downbeat = bar_position < 1.0
-        downbeat_boost = 1.3 if is_downbeat else 1.0
+        # --- Breathing envelope ---
+        # Cosine curve: 1.0 at beat onset (phase=0), 0.0 at mid-beat (phase=0.5)
+        cosine_envelope = (1.0 + math.cos(beat_phase * 2.0 * math.pi)) / 2.0
 
-        # Accent on beats 1 and 3 (backbeat)
-        bar_beat = int(bar_position) % 4
-        accent = 1.15 if bar_beat in (0, 2) else 1.0
-
-        # Combined modulation factor: 0 (no beat effect) to ~1.3 (strong downbeat hit)
-        modulation = beat_envelope * intensity * downbeat_boost * accent
-        modulation = min(modulation, 1.0)
-
-        if is_video_mode:
-            # Video mode: modulate noise_scale
-            # On beat: push noise_scale toward 0.95 (aggressive reimagining)
-            # Off beat: let it settle to a lower base (more input preservation)
-            noise_floor = max(0.2, base_noise_scale * 0.4)
-            noise_ceiling = 0.95
-            modulated_noise = noise_floor + (noise_ceiling - noise_floor) * modulation
-
-            block_state.noise_scale = modulated_noise
-            block_state.noise_controller = False
+        if beat_hit:
+            self._modulation = 1.0
         else:
-            # Text mode: modulate denoising steps for quality variation
-            # On beat: fewer steps = rawer, grittier generation
-            # Off beat: more steps = cleaner, more refined
-            base_steps = block_state.denoising_step_list
-            if base_steps is not None:
-                if isinstance(base_steps, torch.Tensor):
-                    steps_list = base_steps.tolist()
-                else:
-                    steps_list = list(base_steps)
+            self._modulation = max(cosine_envelope, self._modulation * 0.25)
 
-                if len(steps_list) >= 2 and modulation > 0.3:
-                    # On strong beats, drop to fewer denoising steps
-                    # This gives a rawer, more chaotic look
-                    reduced = steps_list[: max(2, len(steps_list) - 1)]
-                    block_state.denoising_step_list = reduced
+        # Downbeat emphasis
+        is_downbeat = bar_position < 1.0
+        bar_beat = int(bar_position) % 4
+        if is_downbeat:
+            accent = 1.0
+        elif bar_beat == 2:
+            accent = 0.85
+        else:
+            accent = 0.7
 
-        # KV cache attention bias: weaken on strong beats for more visual novelty
-        # Normal: 1.0 (full reliance on cached context)
-        # On beat: drops toward 0.5 (less temporal coherence = more surprise)
-        base_bias = float(block_state.kv_cache_attention_bias or 1.0)
-        bias_floor = 0.5
-        modulated_bias = base_bias - (base_bias - bias_floor) * modulation * 0.6
+        modulation = min(self._modulation * intensity * accent, 1.0)
+
+        # --- noise_scale (PRIMARY LEVER — works in both text and video mode) ---
+        # This is what actually produces visible change. DenoiseBlock uses it as:
+        #   denoising_step_list[0] = int(1000 * noise_scale) - 100
+        # High noise_scale on beat = high first timestep = chaotic/novel output.
+        # Low noise_scale between beats = low first timestep = stable/coherent.
+        if is_video_mode:
+            ns_high = NS_VIDEO_BEAT_HIGH
+            ns_low = NS_VIDEO_BEAT_LOW
+        else:
+            ns_high = NS_BEAT_HIGH
+            ns_low = NS_BEAT_LOW
+
+        modulated_noise = ns_low + (ns_high - ns_low) * modulation
+        block_state.noise_scale = modulated_noise
+        block_state.noise_controller = False
+
+        # --- kv_cache_attention_bias (secondary lever) ---
+        modulated_bias = KV_BIAS_BEAT_HIGH - (KV_BIAS_BEAT_HIGH - KV_BIAS_BEAT_LOW) * modulation
+        modulated_bias = max(modulated_bias, 0.05)
         block_state.kv_cache_attention_bias = modulated_bias
+
+        logger.info(
+            "beat_mod: beat=%d hit=%s phase=%.2f bar=%.2f mod=%.3f | "
+            "noise=%.3f (ts=%d) kv_bias=%.3f video=%s",
+            beat_count,
+            beat_hit,
+            beat_phase,
+            bar_position,
+            modulation,
+            modulated_noise,
+            int(1000 * modulated_noise) - 100,
+            modulated_bias,
+            is_video_mode,
+        )
 
         self.set_block_state(state, block_state)
         return components, state
