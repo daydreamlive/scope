@@ -86,7 +86,6 @@ export function PipelineNode({
   // Measure DOM positions for handle placement
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
   const [rowPositions, setRowPositions] = useState<Record<string, number>>({});
-  const prevStructureRef = useRef<string>("");
 
   const setRowRef = useCallback(
     (key: string) => (el: HTMLDivElement | null) => {
@@ -96,31 +95,22 @@ export function PipelineNode({
     []
   );
 
-  const structureSig = `${streamInputs.length}-${streamOutputs.length}-${parameterInputs.length}-${supportsPrompts}-${data.pipelineId || ""}`;
-
   useLayoutEffect(() => {
-    if (prevStructureRef.current === structureSig) {
-      return;
-    }
-    prevStructureRef.current = structureSig;
-
-    requestAnimationFrame(() => {
-      const positions: Record<string, number> = {};
-      rowRefs.current.forEach((el, key) => {
-        if (el) {
-          positions[key] = el.offsetTop + el.offsetHeight / 2;
-        }
-      });
-      setRowPositions(prev => {
-        const keysChanged = Object.keys(positions).length !== Object.keys(prev).length ||
-          Object.keys(positions).some(key => Math.abs((prev[key] ?? 0) - positions[key]) > 0.5);
-        return keysChanged ? positions : prev;
-      });
+    const positions: Record<string, number> = {};
+    rowRefs.current.forEach((el, key) => {
+      if (el) {
+        positions[key] = el.offsetTop + el.offsetHeight / 2;
+      }
     });
-  }, [structureSig]);
+    setRowPositions(prev => {
+      const keysChanged = Object.keys(positions).length !== Object.keys(prev).length ||
+        Object.keys(positions).some(key => Math.abs((prev[key] ?? 0) - positions[key]) > 0.5);
+      return keysChanged ? positions : prev;
+    });
+  }, [streamInputs, streamOutputs, parameterInputs, supportsPrompts, data.pipelineId]);
 
   return (
-    <NodeCard selected={selected}>
+    <NodeCard selected={selected} autoMinHeight>
       <NodeHeader title={pipelineName} dotColor="bg-blue-400" />
       <NodeBody withGap>
         {/* Pipeline selector */}

@@ -185,8 +185,14 @@ export function GraphEditor({
           const schema = newPipelineId ? pipelineSchemas[newPipelineId] : null;
           const parameterInputs = schema ? extractParameterPorts(schema) : [];
           const supportsPrompts = schema?.supports_prompts ?? false;
+          // Clear all height constraints so node auto-sizes to new content
+          const newStyle = { ...n.style };
+          delete newStyle.height;
           return {
             ...n,
+            style: newStyle,
+            height: undefined,
+            measured: undefined,
             data: {
               ...n.data,
               pipelineId: newPipelineId,

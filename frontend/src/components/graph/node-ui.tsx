@@ -1,4 +1,4 @@
-import { type ReactNode, useState, useRef, useEffect, useCallback } from "react";
+import { type ReactNode, useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
 import { NodeResizer } from "@xyflow/react";
 
 export const NODE_TOKENS = {
@@ -27,9 +27,20 @@ interface NodeCardProps {
   children: ReactNode;
   selected?: boolean;
   className?: string;
+  /** When true, measures content height and enforces it as minHeight on resize */
+  autoMinHeight?: boolean;
 }
 
-export function NodeCard({ children, selected, className = "" }: NodeCardProps) {
+export function NodeCard({ children, selected, className = "", autoMinHeight = false }: NodeCardProps) {
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [minH, setMinH] = useState(60);
+
+  useLayoutEffect(() => {
+    if (!autoMinHeight || !measureRef.current) return;
+    const h = measureRef.current.offsetHeight;
+    setMinH(prev => (Math.abs(h - prev) > 1 ? h : prev));
+  });
+
   return (
     <div
       className={`${NODE_TOKENS.card} ${selected ? NODE_TOKENS.cardSelected : ""} ${className}`}
@@ -37,11 +48,17 @@ export function NodeCard({ children, selected, className = "" }: NodeCardProps) 
       <NodeResizer
         isVisible={!!selected}
         minWidth={240}
-        minHeight={60}
+        minHeight={autoMinHeight ? Math.max(60, minH) : 60}
         lineClassName="!border-transparent"
         handleClassName="!w-2 !h-2 !bg-transparent !border !border-blue-400/20 hover:!border-blue-400/40 !rounded-sm"
       />
-      {children}
+      {autoMinHeight ? (
+        <div ref={measureRef} className="flex flex-col w-full">
+          {children}
+        </div>
+      ) : (
+        children
+      )}
     </div>
   );
 }
