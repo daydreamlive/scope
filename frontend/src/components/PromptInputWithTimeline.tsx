@@ -164,7 +164,6 @@ export function PromptInputWithTimeline({
     }
   }, [prompts, onPromptSubmit, onPromptItemsSubmit]);
 
-  // Enhanced rewind handler
   // Enhanced disconnect handler
   const handleEnhancedDisconnect = useCallback(() => {
     onDisconnect?.();
@@ -372,7 +371,6 @@ export function PromptInputWithTimeline({
 
       // Check if the new prompt is the same as the current live prompt
       // Compare both text and weights for prompt blending
-      console.log("handleLivePromptSubmit", promptItems);
       const newPromptText = promptItems.map(p => p.text).join(", ");
       const newPromptWeights = promptItems.map(p => p.weight);
       const currentLivePrompt = prompts.find(p => p.isLive);

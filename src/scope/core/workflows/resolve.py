@@ -9,18 +9,21 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from packaging.version import InvalidVersion, Version
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from scope.core.pipelines.registry import PipelineRegistry
+
+if TYPE_CHECKING:
+    from scope.core.plugins.manager import PluginManager
 
 logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Minimal request models — only the fields the backend actually accesses.
+# Minimal request models -- only the fields the backend actually accesses.
 # All models use extra="ignore" so the frontend can send the full workflow
 # JSON and the backend silently drops fields it doesn't care about.
 # ---------------------------------------------------------------------------
@@ -36,7 +39,7 @@ class WorkflowLoRAProvenance(BaseModel, extra="ignore"):
 
 
 class WorkflowLoRA(BaseModel, extra="ignore"):
-    filename: str
+    filename: str = Field(max_length=255)
     provenance: WorkflowLoRAProvenance | None = None
 
 
@@ -50,11 +53,11 @@ class WorkflowPipelineSource(BaseModel, extra="ignore"):
 class WorkflowPipeline(BaseModel, extra="ignore"):
     pipeline_id: str
     source: WorkflowPipelineSource
-    loras: list[WorkflowLoRA] = []
+    loras: list[WorkflowLoRA] = Field(default=[], max_length=100)
 
 
 class WorkflowRequest(BaseModel, extra="ignore"):
-    pipelines: list[WorkflowPipeline]
+    pipelines: list[WorkflowPipeline] = Field(max_length=50)
     min_scope_version: str | None = None
 
 
@@ -175,7 +178,17 @@ def _check_plugin_version(
 
 
 def _resolve_lora(lora: WorkflowLoRA, lora_dir: Path) -> ResolutionItem:
-    if (lora_dir / lora.filename).exists():
+    # Guard against path traversal: ensure the resolved path stays within lora_dir
+    target = (lora_dir / lora.filename).resolve()
+    if not target.is_relative_to(lora_dir.resolve()):
+        return ResolutionItem(
+            kind="lora",
+            name=lora.filename,
+            status="missing",
+            detail="Invalid LoRA filename",
+        )
+
+    if target.exists():
         return ResolutionItem(kind="lora", name=lora.filename, status="ok")
 
     prov = lora.provenance
@@ -228,12 +241,12 @@ def _check_min_scope_version(
 
 def resolve_workflow(
     workflow: WorkflowRequest,
-    plugin_manager: Any,
+    plugin_manager: PluginManager,
     models_dir: Path,
 ) -> WorkflowResolutionPlan:
     """Resolve all dependencies for *workflow*.
 
-    This is a **read-only** operation — no downloads, no installs.
+    This is a **read-only** operation -- no downloads, no installs.
     """
     items: list[ResolutionItem] = []
     warnings: list[str] = []
@@ -249,7 +262,7 @@ def resolve_workflow(
             item = _resolve_plugin(wp, plugins)
 
         items.append(item)
-        if item.status == "missing":
+        if item.status in ("missing", "version_mismatch"):
             all_pipelines_ok = False
 
         for lora in wp.loras:

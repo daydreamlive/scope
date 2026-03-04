@@ -101,6 +101,17 @@ function extractFilename(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+/** Resolve a LoRA filename to the full path from the available files list. */
+function resolveLoRAPath(
+  filename: string,
+  availableLoRAs: LoRAFileInfo[]
+): string {
+  const match = availableLoRAs.find(
+    f => extractFilename(f.path).toLowerCase() === filename.toLowerCase()
+  );
+  return match?.path ?? filename;
+}
+
 /** Determine the pipeline source (builtin vs plugin). */
 function buildPipelineSource(
   pipelineId: string,
@@ -375,7 +386,8 @@ function extractProcessorSettings(pipelines: WorkflowPipeline[]): {
  * resolve full paths after the workflow is applied and LoRAs are present.
  */
 export function workflowToSettings(
-  workflow: ScopeWorkflow
+  workflow: ScopeWorkflow,
+  availableLoRAs: LoRAFileInfo[] = []
 ): Partial<SettingsState> {
   if (workflow.pipelines.length === 0) return {};
 
@@ -421,12 +433,18 @@ export function workflowToSettings(
 
   // LoRAs
   if (mainPipeline.loras.length > 0) {
+    const VALID_MERGE_MODES: LoraMergeStrategy[] = [
+      "permanent_merge",
+      "runtime_peft",
+    ];
     partial.loras = mainPipeline.loras.map(
       (l): LoRAConfig => ({
         id: l.id ?? l.filename,
-        path: l.filename, // filename-only; resolved after apply
+        path: resolveLoRAPath(l.filename, availableLoRAs),
         scale: l.weight,
-        mergeMode: l.merge_mode as LoraMergeStrategy | undefined,
+        mergeMode: VALID_MERGE_MODES.includes(l.merge_mode as LoraMergeStrategy)
+          ? (l.merge_mode as LoraMergeStrategy)
+          : undefined,
       })
     );
     // Use the first LoRA's merge_mode as the global strategy

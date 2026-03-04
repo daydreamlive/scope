@@ -124,4 +124,3 @@ export interface LoRADownloadResult {
   sha256: string;
   size_bytes: number;
 }
-

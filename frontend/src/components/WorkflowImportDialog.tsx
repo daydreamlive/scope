@@ -23,16 +23,9 @@ import type {
   ResolutionItem,
   WorkflowResolutionPlan,
   WorkflowLoRAProvenance,
-  WorkflowLoRA,
-  LoRADownloadRequest,
 } from "../lib/workflowApi";
-import {
-  resolveWorkflow,
-  downloadLoRA,
-  installPlugin,
-  restartServer,
-  waitForServer,
-} from "../lib/api";
+import { resolveWorkflow } from "../lib/api";
+import { useLoRAsContext } from "../contexts/LoRAsContext";
 import type { SettingsState } from "../types";
 import type { TimelinePrompt } from "./PromptTimeline";
 import {
@@ -41,20 +34,16 @@ import {
   workflowToPromptState,
 } from "../lib/workflowSettings";
 import type { WorkflowPromptState } from "../lib/workflowSettings";
+import {
+  useLoRADownloads,
+  usePluginInstalls,
+} from "../hooks/useWorkflowDependencies";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
 type ImportStep = "select" | "review";
-
-interface LoRADownloadState {
-  [filename: string]: "idle" | "downloading" | "done" | "error";
-}
-
-interface PluginInstallState {
-  [pluginName: string]: "idle" | "installing" | "done" | "error";
-}
 
 interface WorkflowImportDialogProps {
   open: boolean;
@@ -91,41 +80,6 @@ const kindLabel = (kind: ResolutionItem["kind"]) => {
       return "LoRA";
   }
 };
-
-function buildLoRADownloadRequest(
-  lora: WorkflowLoRA
-): LoRADownloadRequest | null {
-  const prov = lora.provenance;
-  if (!prov || prov.source === "local") return null;
-
-  if (prov.source === "huggingface") {
-    return {
-      source: "huggingface",
-      repo_id: prov.repo_id,
-      hf_filename: prov.hf_filename,
-      expected_sha256: lora.sha256,
-    };
-  }
-
-  if (prov.source === "civitai") {
-    return {
-      source: "civitai",
-      model_id: prov.model_id,
-      version_id: prov.version_id,
-      expected_sha256: lora.sha256,
-    };
-  }
-
-  if (prov.source === "url" && prov.url) {
-    return {
-      source: "url",
-      url: prov.url,
-      expected_sha256: lora.sha256,
-    };
-  }
-
-  return null;
-}
 
 function provenanceLabel(prov: WorkflowLoRAProvenance): string {
   if (prov.source === "huggingface" && prov.repo_id) {
@@ -169,18 +123,6 @@ function LoRAProvenanceLabel({
   );
 }
 
-function findPluginInstallSpec(
-  workflow: ScopeWorkflow,
-  pluginName: string
-): string | null {
-  for (const p of workflow.pipelines) {
-    if (p.source.plugin_name === pluginName) {
-      return p.source.package_spec ?? p.source.plugin_name ?? null;
-    }
-  }
-  return null;
-}
-
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
@@ -193,21 +135,23 @@ export function WorkflowImportDialog({
   const [step, setStep] = useState<ImportStep>("select");
   const [workflow, setWorkflow] = useState<ScopeWorkflow | null>(null);
   const [plan, setPlan] = useState<WorkflowResolutionPlan | null>(null);
-  const [loraDownloads, setLoraDownloads] = useState<LoRADownloadState>({});
-  const [pluginInstalls, setPluginInstalls] = useState<PluginInstallState>({});
   const [validating, setValidating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const { loraFiles } = useLoRAsContext();
+
+  const loras = useLoRADownloads(workflow);
+  const plugins = usePluginInstalls(workflow);
 
   // Reset all state when dialog closes
   const handleClose = useCallback(() => {
     setStep("select");
     setWorkflow(null);
     setPlan(null);
-    setLoraDownloads({});
-    setPluginInstalls({});
+    loras.reset();
+    plugins.reset();
     setValidating(false);
     onClose();
-  }, [onClose]);
+  }, [onClose, loras, plugins]);
 
   // -----------------------------------------------------------------------
   // File selection and validation
@@ -234,32 +178,41 @@ export function WorkflowImportDialog({
         return;
       }
 
+      if (
+        !parsed.metadata ||
+        typeof parsed.metadata.name !== "string" ||
+        !Array.isArray(parsed.pipelines) ||
+        parsed.pipelines.length === 0
+      ) {
+        toast.error("Malformed workflow file", {
+          description: "Missing required fields: metadata or pipelines",
+        });
+        setValidating(false);
+        return;
+      }
+
       setWorkflow(parsed);
 
       const resolution = await resolveWorkflow(parsed);
       setPlan(resolution);
 
-      // Initialize LoRA download states
-      const initialDownloads: LoRADownloadState = {};
-      for (const item of resolution.items) {
-        if (item.kind === "lora" && item.status === "missing") {
-          initialDownloads[item.name] = "idle";
-        }
-      }
-      setLoraDownloads(initialDownloads);
+      // Initialize dependency states from resolution items
+      loras.initialize(
+        resolution.items
+          .filter(i => i.kind === "lora" && i.status === "missing")
+          .map(i => i.name)
+      );
+      plugins.initialize(
+        resolution.items
+          .filter(
+            i =>
+              i.kind === "plugin" &&
+              i.status === "missing" &&
+              i.can_auto_resolve
+          )
+          .map(i => i.name)
+      );
 
-      // Initialize plugin install states
-      const initialPlugins: PluginInstallState = {};
-      for (const item of resolution.items) {
-        if (
-          item.kind === "plugin" &&
-          item.status === "missing" &&
-          item.can_auto_resolve
-        ) {
-          initialPlugins[item.name] = "idle";
-        }
-      }
-      setPluginInstalls(initialPlugins);
       setStep("review");
     } catch (err) {
       console.error("Workflow validation failed:", err);
@@ -291,117 +244,21 @@ export function WorkflowImportDialog({
   );
 
   // -----------------------------------------------------------------------
-  // LoRA download
-  // -----------------------------------------------------------------------
-
-  const handleDownloadLoRA = useCallback(
-    async (filename: string) => {
-      if (!workflow) return;
-
-      // Find the LoRA in the workflow
-      const lora = workflow.pipelines
-        .flatMap(p => p.loras)
-        .find(l => l.filename === filename);
-      if (!lora) return;
-
-      const req = buildLoRADownloadRequest(lora);
-      if (!req) {
-        toast.error("No download source available for this LoRA");
-        return;
-      }
-
-      setLoraDownloads(prev => ({ ...prev, [filename]: "downloading" }));
-      try {
-        await downloadLoRA(req);
-        setLoraDownloads(prev => ({ ...prev, [filename]: "done" }));
-        toast.success(`Downloaded ${filename}`);
-      } catch (err) {
-        setLoraDownloads(prev => ({ ...prev, [filename]: "error" }));
-        toast.error(`Failed to download ${filename}`, {
-          description: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
-    [workflow]
-  );
-
-  const handleDownloadAllLoRAs = useCallback(async () => {
-    if (!workflow) return;
-    const missing = Object.entries(loraDownloads)
-      .filter(([, s]) => s === "idle" || s === "error")
-      .map(([name]) => name);
-
-    await Promise.allSettled(missing.map(f => handleDownloadLoRA(f)));
-  }, [workflow, loraDownloads, handleDownloadLoRA]);
-
-  // -----------------------------------------------------------------------
-  // Plugin install
-  // -----------------------------------------------------------------------
-
-  const doRestartServer = useCallback(async () => {
-    toast.info("Restarting server to load new plugins...");
-    try {
-      const oldStartTime = await restartServer();
-      await waitForServer(oldStartTime);
-      toast.success("Server restarted successfully");
-    } catch {
-      toast.error(
-        "Server did not restart in time. You may need to restart manually."
-      );
-    }
-  }, []);
-
-  const handleInstallPlugin = useCallback(
-    async (pluginName: string, { skipRestart = false } = {}) => {
-      if (!workflow) return;
-
-      const installSpec = findPluginInstallSpec(workflow, pluginName);
-      if (!installSpec) {
-        toast.error("No install source available for this plugin");
-        return;
-      }
-
-      setPluginInstalls(prev => ({ ...prev, [pluginName]: "installing" }));
-      try {
-        const result = await installPlugin({ package: installSpec });
-        if (!result.success) {
-          throw new Error(result.message || "Installation failed");
-        }
-        setPluginInstalls(prev => ({ ...prev, [pluginName]: "done" }));
-        toast.success(`Installed ${pluginName}`);
-        if (!skipRestart) {
-          await doRestartServer();
-        }
-      } catch (err) {
-        setPluginInstalls(prev => ({ ...prev, [pluginName]: "error" }));
-        toast.error(`Failed to install ${pluginName}`, {
-          description: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
-    [workflow, doRestartServer]
-  );
-
-  const handleInstallAllPlugins = useCallback(async () => {
-    if (!workflow) return;
-    const missing = Object.entries(pluginInstalls)
-      .filter(([, s]) => s === "idle" || s === "error")
-      .map(([name]) => name);
-
-    await Promise.allSettled(
-      missing.map(name => handleInstallPlugin(name, { skipRestart: true }))
-    );
-    await doRestartServer();
-  }, [workflow, pluginInstalls, handleInstallPlugin, doRestartServer]);
-
-  // -----------------------------------------------------------------------
-  // Load workflow into the interface (no pipeline loading)
+  // Load workflow into the interface
   // -----------------------------------------------------------------------
 
   const handleLoad = useCallback(() => {
     if (!workflow) return;
 
-    const importedSettings = workflowToSettings(workflow);
+    if (
+      !window.confirm(
+        "Loading this workflow will replace your current settings and timeline. Continue?"
+      )
+    ) {
+      return;
+    }
+
+    const importedSettings = workflowToSettings(workflow, loraFiles);
     const timelinePrompts = workflowTimelineToPrompts(workflow.timeline);
     const promptState = workflowToPromptState(workflow);
 
@@ -420,17 +277,11 @@ export function WorkflowImportDialog({
     i => i.kind === "lora" && i.status === "missing"
   );
   const downloadableLoRAs = missingLoRAs?.filter(i => i.can_auto_resolve);
-  const someLoRAsDownloading = Object.values(loraDownloads).some(
-    s => s === "downloading"
-  );
 
   const missingPlugins = plan?.items.filter(
     i => i.kind === "plugin" && i.status === "missing"
   );
   const installablePlugins = missingPlugins?.filter(i => i.can_auto_resolve);
-  const somePluginsInstalling = Object.values(pluginInstalls).some(
-    s => s === "installing"
-  );
 
   // -----------------------------------------------------------------------
   // Render
@@ -529,12 +380,12 @@ export function WorkflowImportDialog({
                       item.status === "missing" &&
                       item.can_auto_resolve && (
                         <div className="mt-1">
-                          {loraDownloads[item.name] === "done" ? (
+                          {loras.downloads[item.name] === "done" ? (
                             <span className="text-xs text-green-500 flex items-center gap-1">
                               <CheckCircle2 className="h-3 w-3" />
                               Downloaded
                             </span>
-                          ) : loraDownloads[item.name] === "downloading" ? (
+                          ) : loras.downloads[item.name] === "downloading" ? (
                             <span className="text-xs text-muted-foreground flex items-center gap-1">
                               <Loader2 className="h-3 w-3 animate-spin" />
                               Downloading...
@@ -544,10 +395,10 @@ export function WorkflowImportDialog({
                               variant="ghost"
                               size="sm"
                               className="h-6 text-xs px-2"
-                              onClick={() => handleDownloadLoRA(item.name)}
+                              onClick={() => loras.downloadOne(item.name)}
                             >
                               <Download className="h-3 w-3 mr-1" />
-                              {loraDownloads[item.name] === "error"
+                              {loras.downloads[item.name] === "error"
                                 ? "Retry"
                                 : "Download"}
                             </Button>
@@ -564,12 +415,12 @@ export function WorkflowImportDialog({
                       item.status === "missing" &&
                       item.can_auto_resolve && (
                         <div className="mt-1">
-                          {pluginInstalls[item.name] === "done" ? (
+                          {plugins.installs[item.name] === "done" ? (
                             <span className="text-xs text-green-500 flex items-center gap-1">
                               <CheckCircle2 className="h-3 w-3" />
                               Installed
                             </span>
-                          ) : pluginInstalls[item.name] === "installing" ? (
+                          ) : plugins.installs[item.name] === "installing" ? (
                             <span className="text-xs text-muted-foreground flex items-center gap-1">
                               <Loader2 className="h-3 w-3 animate-spin" />
                               Installing...
@@ -579,10 +430,10 @@ export function WorkflowImportDialog({
                               variant="ghost"
                               size="sm"
                               className="h-6 text-xs px-2"
-                              onClick={() => handleInstallPlugin(item.name)}
+                              onClick={() => plugins.installOne(item.name)}
                             >
                               <Download className="h-3 w-3 mr-1" />
-                              {pluginInstalls[item.name] === "error"
+                              {plugins.installs[item.name] === "error"
                                 ? "Retry"
                                 : "Install"}
                             </Button>
@@ -598,17 +449,17 @@ export function WorkflowImportDialog({
             {downloadableLoRAs &&
               downloadableLoRAs.length > 1 &&
               missingLoRAs &&
-              missingLoRAs.some(l => loraDownloads[l.name] !== "done") && (
+              missingLoRAs.some(l => loras.downloads[l.name] !== "done") && (
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleDownloadAllLoRAs}
-                  disabled={someLoRAsDownloading}
+                  onClick={loras.downloadAll}
+                  disabled={loras.someDownloading}
                 >
                   <Download className="h-4 w-4 mr-2" />
-                  {someLoRAsDownloading
+                  {loras.someDownloading
                     ? "Downloading..."
-                    : `Download All Missing LoRAs (${downloadableLoRAs.filter(l => loraDownloads[l.name] !== "done").length})`}
+                    : `Download All Missing LoRAs (${downloadableLoRAs.filter(l => loras.downloads[l.name] !== "done").length})`}
                 </Button>
               )}
 
@@ -616,17 +467,17 @@ export function WorkflowImportDialog({
             {installablePlugins &&
               installablePlugins.length > 1 &&
               missingPlugins &&
-              missingPlugins.some(p => pluginInstalls[p.name] !== "done") && (
+              missingPlugins.some(p => plugins.installs[p.name] !== "done") && (
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={handleInstallAllPlugins}
-                  disabled={somePluginsInstalling}
+                  onClick={plugins.installAll}
+                  disabled={plugins.someInstalling}
                 >
                   <Download className="h-4 w-4 mr-2" />
-                  {somePluginsInstalling
+                  {plugins.someInstalling
                     ? "Installing..."
-                    : `Install All Missing Plugins (${installablePlugins.filter(p => pluginInstalls[p.name] !== "done").length})`}
+                    : `Install All Missing Plugins (${installablePlugins.filter(p => plugins.installs[p.name] !== "done").length})`}
                 </Button>
               )}
 
@@ -654,7 +505,7 @@ export function WorkflowImportDialog({
           {step === "review" && (
             <Button
               onClick={handleLoad}
-              disabled={someLoRAsDownloading || somePluginsInstalling}
+              disabled={loras.someDownloading || plugins.someInstalling}
             >
               Load Workflow
             </Button>
