@@ -1,20 +1,28 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
+import { NodeCard, NodeHeader, NodeBody, NodeParamRow, NodePill } from "./node-ui";
 
 type SourceNodeType = Node<FlowNodeData, "source">;
 
+const ROW_CENTER_Y = 28 + 6 + 10;
+
 export function SourceNode({ data }: NodeProps<SourceNodeType>) {
   return (
-    <div className="rounded-lg border-2 border-green-500 bg-green-950/80 px-4 py-3 min-w-[160px]">
-      <div className="text-xs text-green-400 font-medium mb-1">Source</div>
-      <div className="text-sm text-green-100 font-semibold">{data.label}</div>
+    <NodeCard>
+      <NodeHeader title="Source" dotColor="bg-green-400" />
+      <NodeBody>
+        <NodeParamRow label="Label">
+          <NodePill>{data.label}</NodePill>
+        </NodeParamRow>
+      </NodeBody>
       <Handle
         type="source"
         position={Position.Right}
-        id="video"
-        className="!bg-green-400 !w-3 !h-3"
+        id="stream:video"
+        className="!w-2 !h-2 !border-0"
+        style={{ top: ROW_CENTER_Y, right: 8, backgroundColor: "#4ade80" }}
       />
-    </div>
+    </NodeCard>
   );
 }

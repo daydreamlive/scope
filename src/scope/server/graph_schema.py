@@ -49,6 +49,14 @@ class GraphNode(BaseModel):
         default=None,
         description="Pipeline ID (registry key) when type is 'pipeline'",
     )
+    x: float | None = Field(
+        default=None,
+        description="X position in UI canvas (optional, for layout persistence)",
+    )
+    y: float | None = Field(
+        default=None,
+        description="Y position in UI canvas (optional, for layout persistence)",
+    )
 
 
 class GraphEdge(BaseModel):

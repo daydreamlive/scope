@@ -887,6 +887,8 @@ export interface GraphNode {
   id: string;
   type: "source" | "pipeline" | "sink";
   pipeline_id?: string | null;
+  x?: number | null;
+  y?: number | null;
 }
 
 export interface GraphEdge {

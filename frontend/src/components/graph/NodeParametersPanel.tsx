@@ -7,7 +7,15 @@ import {
   type ParsedFieldConfig,
   type ComplexComponentName,
 } from "../../lib/schemaSettings";
-import { SchemaPrimitiveField } from "../PrimitiveFields";
+import {
+  NodeParamRow,
+  NodePill,
+  NodePillSelect,
+  NodePillInput,
+  NodePillToggle,
+  NodeSection,
+  NODE_TOKENS,
+} from "./node-ui";
 
 interface NodeParametersPanelProps {
   /** The pipeline_id of the selected node */
@@ -69,6 +77,16 @@ export function NodeParametersPanel({
     );
   }
 
+  const formatValue = (value: unknown): string => {
+    if (value === null || value === undefined) return "Null";
+    if (typeof value === "boolean") return value ? "True" : "False";
+    if (typeof value === "string") {
+      if (value.length > 15) return value.substring(0, 12) + "...";
+      return value;
+    }
+    return String(value);
+  };
+
   const renderPrimitiveField = (
     field: ParsedFieldConfig,
     disabled: boolean
@@ -89,60 +107,108 @@ export function NodeParametersPanel({
       typeof resolvedType === "string" &&
       ["text", "number", "slider", "toggle", "enum"].includes(resolvedType)
     ) {
+      const currentValue = parameterValues[field.key] ?? field.prop.default;
+      const displayValue = formatValue(currentValue);
+      const label = field.ui.label || field.key;
+
+      // For enum fields, render as select
+      if (resolvedType === "enum" && field.prop.enum) {
+        const enumValues = Array.isArray(field.prop.enum) ? field.prop.enum : [];
+        const options = enumValues.map((opt: unknown) => {
+          const optValue = String(opt);
+          return { value: optValue, label: formatValue(opt) };
+        });
+        return (
+          <NodeParamRow key={field.key} label={label}>
+            <NodePillSelect
+              value={String(currentValue ?? "")}
+              onChange={value => onParameterChange(nodeId, field.key, value)}
+              disabled={disabled}
+              options={options}
+            />
+          </NodeParamRow>
+        );
+      }
+
+      // For text fields, render as input
+      if (resolvedType === "text") {
+        return (
+          <NodeParamRow key={field.key} label={label}>
+            <NodePillInput
+              type="text"
+              value={String(currentValue ?? "")}
+              onChange={value => onParameterChange(nodeId, field.key, value)}
+              disabled={disabled}
+            />
+          </NodeParamRow>
+        );
+      }
+
+      // For number fields, render as input
+      if (resolvedType === "number") {
+        const min = typeof field.prop.minimum === "number" ? field.prop.minimum : undefined;
+        const max = typeof field.prop.maximum === "number" ? field.prop.maximum : undefined;
+        return (
+          <NodeParamRow key={field.key} label={label}>
+            <NodePillInput
+              type="number"
+              value={Number(currentValue ?? field.prop.default ?? 0)}
+              onChange={value => onParameterChange(nodeId, field.key, value)}
+              disabled={disabled}
+              min={min}
+              max={max}
+            />
+          </NodeParamRow>
+        );
+      }
+
+      // For toggle fields, render as checkbox styled as pill
+      if (resolvedType === "toggle") {
+        return (
+          <NodeParamRow key={field.key} label={label}>
+            <NodePillToggle
+              checked={Boolean(currentValue ?? field.prop.default ?? false)}
+              onChange={checked => onParameterChange(nodeId, field.key, checked)}
+              disabled={disabled}
+            />
+          </NodeParamRow>
+        );
+      }
+
+      // For slider and other types, render as display value
       return (
-        <SchemaPrimitiveField
-          key={field.key}
-          fieldKey={field.key}
-          prop={field.prop}
-          value={parameterValues[field.key] ?? field.prop.default}
-          onChange={(val: unknown) => onParameterChange(nodeId, field.key, val)}
-          disabled={disabled}
-          label={field.ui.label}
-          fieldType={
-            resolvedType as "text" | "number" | "slider" | "toggle" | "enum"
-          }
-        />
+        <NodeParamRow key={field.key} label={label}>
+          <NodePill>{displayValue}</NodePill>
+        </NodeParamRow>
       );
     }
     return null;
   };
 
   return (
-    <div className="flex flex-col gap-4 p-4 overflow-y-auto h-full">
+    <div className={`flex flex-col gap-4 p-4 overflow-y-auto h-full ${NODE_TOKENS.panelBackground}`}>
       <div>
-        <h3 className="text-sm font-semibold text-zinc-200 mb-1">
-          {schema.name}
-        </h3>
-        <p className="text-xs text-zinc-500">Node: {nodeId}</p>
+        <h3 className="text-sm font-semibold text-[#fafafa] mb-1">{schema.name}</h3>
+        <p className={NODE_TOKENS.labelText}>Node: {nodeId}</p>
       </div>
 
       {/* Runtime Parameters */}
       {runtimeFields.length > 0 && (
-        <div>
-          <h4 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">
-            Properties
-          </h4>
-          <div className="flex flex-col gap-3">
-            {runtimeFields.map(field => renderPrimitiveField(field, false))}
-          </div>
-        </div>
+        <NodeSection title="Properties">
+          {runtimeFields.map(field => renderPrimitiveField(field, false))}
+        </NodeSection>
       )}
 
       {/* Load Parameters */}
       {loadFields.length > 0 && (
-        <div>
-          <h4 className="text-xs font-medium text-zinc-400 uppercase tracking-wider mb-2">
-            Model Parameters
-          </h4>
-          <div className="flex flex-col gap-3">
-            {loadFields.map(field =>
-              renderPrimitiveField(
-                field,
-                isStreaming && !RUNTIME_EDITABLE_LOAD_PARAMS.has(field.key)
-              )
-            )}
-          </div>
-        </div>
+        <NodeSection title="Model Parameters">
+          {loadFields.map(field =>
+            renderPrimitiveField(
+              field,
+              isStreaming && !RUNTIME_EDITABLE_LOAD_PARAMS.has(field.key)
+            )
+          )}
+        </NodeSection>
       )}
     </div>
   );

@@ -5,6 +5,8 @@ import type {
   GraphEdge,
   PipelineSchemaInfo,
 } from "./api";
+import { inferPrimitiveFieldType } from "./schemaSettings";
+import type { SchemaProperty } from "./schemaSettings";
 
 // Layout constants
 const NODE_WIDTH = 200;
@@ -14,6 +16,18 @@ const ROW_GAP = 100;
 const START_X = 50;
 const START_Y = 50;
 
+export type PortType = "stream" | "string" | "number" | "boolean";
+
+export interface ParameterPortDef {
+  name: string;
+  type: "string" | "number" | "boolean";
+  defaultValue?: unknown;
+  label?: string;
+  min?: number;
+  max?: number;
+  enum?: unknown[];
+}
+
 export interface PortInfo {
   name: string;
 }
@@ -21,15 +35,52 @@ export interface PortInfo {
 export interface FlowNodeData {
   label: string;
   pipelineId?: string | null;
-  nodeType: "source" | "pipeline" | "sink";
+  nodeType: "source" | "pipeline" | "sink" | "value";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
   /** Declared output ports for the selected pipeline */
   streamOutputs?: string[];
+  /** Parameter input ports (for pipeline nodes) */
+  parameterInputs?: ParameterPortDef[];
+  /** Parameter output ports (for value nodes) */
+  parameterOutputs?: ParameterPortDef[];
   /** Pipeline schemas keyed by pipeline_id, for looking up ports on selection change */
   pipelinePortsMap?: Record<string, { inputs: string[]; outputs: string[] }>;
+  /** For value nodes: the type of value (string, number, boolean) */
+  valueType?: "string" | "number" | "boolean";
+  /** For value nodes: the current value */
+  value?: unknown;
   [key: string]: unknown;
+}
+
+/**
+ * Parse a handle ID to extract its kind and name.
+ * Handles both prefixed (stream:video, param:noise_scale) and legacy (video) formats.
+ */
+export function parseHandleId(handleId: string | null | undefined): {
+  kind: "stream" | "param";
+  name: string;
+} | null {
+  if (!handleId) return null;
+  if (handleId.startsWith("stream:")) {
+    return { kind: "stream", name: handleId.slice(7) };
+  }
+  if (handleId.startsWith("param:")) {
+    return { kind: "param", name: handleId.slice(6) };
+  }
+  // Legacy format: assume stream for backward compatibility
+  return { kind: "stream", name: handleId };
+}
+
+/**
+ * Build a handle ID from kind and name.
+ */
+export function buildHandleId(
+  kind: "stream" | "param",
+  name: string
+): string {
+  return `${kind}:${name}`;
 }
 
 /**
@@ -49,6 +100,55 @@ export function buildPipelinePortsMap(
 }
 
 /**
+ * Extract parameter ports from a pipeline schema's config_schema.
+ * Returns only primitive types (string, number, boolean) that can be connected.
+ */
+export function extractParameterPorts(
+  schema: PipelineSchemaInfo | null
+): ParameterPortDef[] {
+  if (!schema?.config_schema?.properties) return [];
+
+  const params: ParameterPortDef[] = [];
+  const properties = schema.config_schema.properties;
+
+  for (const [key, prop] of Object.entries(properties)) {
+    const schemaProp = prop as SchemaProperty;
+    // Only include fields that have ui metadata (json_schema_extra), matching sidebar behavior
+    if (!schemaProp.ui) continue;
+
+    const fieldType = inferPrimitiveFieldType(schemaProp);
+    if (!fieldType) continue;
+
+    // Map PrimitiveFieldType to PortType
+    let paramType: "string" | "number" | "boolean" | null = null;
+    if (fieldType === "text" || fieldType === "enum") {
+      paramType = "string";
+    } else if (fieldType === "number" || fieldType === "slider") {
+      paramType = "number";
+    } else if (fieldType === "toggle") {
+      paramType = "boolean";
+    }
+
+    if (!paramType) continue;
+
+    const ui = schemaProp.ui;
+    const label = ui?.label || key;
+
+    params.push({
+      name: key,
+      type: paramType,
+      defaultValue: schemaProp.default,
+      label,
+      min: typeof schemaProp.minimum === "number" ? schemaProp.minimum : undefined,
+      max: typeof schemaProp.maximum === "number" ? schemaProp.maximum : undefined,
+      enum: Array.isArray(schemaProp.enum) ? schemaProp.enum : undefined,
+    });
+  }
+
+  return params;
+}
+
+/**
  * Convert backend GraphConfig to React Flow nodes and edges.
  * Auto-layout: sources on the left, pipelines in the middle, sinks on the right.
  */
@@ -65,25 +165,32 @@ export function graphConfigToFlow(
 
   const nodes: Node<FlowNodeData>[] = [];
 
-  // Layout sources (column 0)
+  // Layout sources (column 0) - use saved position if available, otherwise auto-layout
   sources.forEach((n, i) => {
+    const savedX = n.x ?? undefined;
+    const savedY = n.y ?? undefined;
     nodes.push({
       id: n.id,
       type: "source",
-      position: { x: START_X, y: START_Y + i * (NODE_HEIGHT + ROW_GAP) },
+      position: {
+        x: savedX !== undefined ? savedX : START_X,
+        y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
+      },
       data: { label: n.id, nodeType: "source" },
     });
   });
 
-  // Layout pipelines (column 1)
+  // Layout pipelines (column 1) - use saved position if available, otherwise auto-layout
   pipelines.forEach((n, i) => {
     const ports = n.pipeline_id && portsMap ? portsMap[n.pipeline_id] : null;
+    const savedX = n.x ?? undefined;
+    const savedY = n.y ?? undefined;
     nodes.push({
       id: n.id,
       type: "pipeline",
       position: {
-        x: START_X + COLUMN_GAP,
-        y: START_Y + i * (NODE_HEIGHT + ROW_GAP),
+        x: savedX !== undefined ? savedX : START_X + COLUMN_GAP,
+        y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
       },
       data: {
         label: n.pipeline_id || n.id,
@@ -95,29 +202,35 @@ export function graphConfigToFlow(
     });
   });
 
-  // Layout sinks (column 2)
+  // Layout sinks (column 2) - use saved position if available, otherwise auto-layout
   sinks.forEach((n, i) => {
+    const savedX = n.x ?? undefined;
+    const savedY = n.y ?? undefined;
     nodes.push({
       id: n.id,
       type: "sink",
       position: {
-        x: START_X + COLUMN_GAP * 2,
-        y: START_Y + i * (NODE_HEIGHT + ROW_GAP),
+        x: savedX !== undefined ? savedX : START_X + COLUMN_GAP * 2,
+        y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
       },
       data: { label: n.id, nodeType: "sink" },
     });
   });
 
-  // Convert edges
-  const edges: Edge[] = graph.edges.map((e, i) => ({
-    id: `e-${i}-${e.from}-${e.to_node}`,
-    source: e.from,
-    sourceHandle: e.from_port,
-    target: e.to_node,
-    targetHandle: e.to_port,
-    label: e.from_port !== "video" ? e.from_port : undefined,
-    animated: true,
-  }));
+  // Convert edges - add stream: prefix to handle IDs
+  const edges: Edge[] = graph.edges.map((e, i) => {
+    const sourceHandle = e.kind === "parameter" ? buildHandleId("param", e.from_port) : buildHandleId("stream", e.from_port);
+    const targetHandle = e.kind === "parameter" ? buildHandleId("param", e.to_port) : buildHandleId("stream", e.to_port);
+    return {
+      id: `e-${i}-${e.from}-${e.to_node}`,
+      source: e.from,
+      sourceHandle,
+      target: e.to_node,
+      targetHandle,
+      label: e.from_port !== "video" ? e.from_port : undefined,
+      animated: false,
+    };
+  });
 
   return { nodes, edges };
 }
@@ -129,20 +242,29 @@ export function flowToGraphConfig(
   nodes: Node<FlowNodeData>[],
   edges: Edge[]
 ): GraphConfig {
-  const graphNodes: GraphNode[] = nodes.map(n => ({
-    id: n.id,
-    type: n.data.nodeType,
-    pipeline_id:
-      n.data.nodeType === "pipeline" ? (n.data.pipelineId ?? null) : undefined,
-  }));
+  const graphNodes: GraphNode[] = nodes
+    .filter(n => n.data.nodeType !== "value") // Filter out value nodes for now
+    .map(n => ({
+      id: n.id,
+      type: n.data.nodeType === "source" ? "source" : n.data.nodeType === "sink" ? "sink" : "pipeline",
+      pipeline_id:
+        n.data.nodeType === "pipeline" ? (n.data.pipelineId ?? null) : undefined,
+      x: n.position.x,
+      y: n.position.y,
+    }));
 
-  const graphEdges: GraphEdge[] = edges.map(e => ({
-    from: e.source,
-    from_port: e.sourceHandle || "video",
-    to_node: e.target,
-    to_port: e.targetHandle || "video",
-    kind: "stream" as const,
-  }));
+  const graphEdges: GraphEdge[] = edges.map(e => {
+    const sourceParsed = parseHandleId(e.sourceHandle);
+    const targetParsed = parseHandleId(e.targetHandle);
+    const kind = sourceParsed?.kind === "param" && targetParsed?.kind === "param" ? "parameter" : "stream";
+    return {
+      from: e.source,
+      from_port: sourceParsed?.name || "video",
+      to_node: e.target,
+      to_port: targetParsed?.name || "video",
+      kind: kind as "stream" | "parameter",
+    };
+  });
 
   return { nodes: graphNodes, edges: graphEdges };
 }

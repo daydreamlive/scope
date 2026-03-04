@@ -1,20 +1,28 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
+import { NodeCard, NodeHeader, NodeBody, NodeParamRow, NodePill } from "./node-ui";
 
 type SinkNodeType = Node<FlowNodeData, "sink">;
 
+const ROW_CENTER_Y = 28 + 6 + 10;
+
 export function SinkNode({ data }: NodeProps<SinkNodeType>) {
   return (
-    <div className="rounded-lg border-2 border-orange-500 bg-orange-950/80 px-4 py-3 min-w-[160px]">
-      <div className="text-xs text-orange-400 font-medium mb-1">Sink</div>
-      <div className="text-sm text-orange-100 font-semibold">{data.label}</div>
+    <NodeCard>
+      <NodeHeader title="Sink" dotColor="bg-orange-400" />
+      <NodeBody>
+        <NodeParamRow label="Label">
+          <NodePill>{data.label}</NodePill>
+        </NodeParamRow>
+      </NodeBody>
       <Handle
         type="target"
         position={Position.Left}
-        id="video"
-        className="!bg-orange-400 !w-3 !h-3"
+        id="stream:video"
+        className="!w-2 !h-2 !border-0"
+        style={{ top: ROW_CENTER_Y, left: 8, backgroundColor: "#fb923c" }}
       />
-    </div>
+    </NodeCard>
   );
 }

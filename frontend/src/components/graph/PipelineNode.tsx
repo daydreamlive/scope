@@ -1,19 +1,49 @@
-import { Handle, Position } from "@xyflow/react";
+import { Handle, Position, useEdges } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
+import { buildHandleId } from "../../lib/graphUtils";
+import {
+  NodeCard,
+  NodeHeader,
+  NodeBody,
+  NodeParamRow,
+  NodePillSelect,
+  NodePillSearchableSelect,
+  NodePill,
+  NodePillInput,
+  NodePillToggle,
+} from "./node-ui";
 
 type PipelineNodeType = Node<FlowNodeData, "pipeline">;
 
-/** Color palette for port handles - each port gets a consistent color */
-const PORT_COLORS: Record<string, string> = {
-  video: "bg-blue-400",
-  video2: "bg-cyan-400",
-  vace_input_frames: "bg-purple-400",
-  vace_input_masks: "bg-pink-400",
+const PORT_COLORS_HEX: Record<string, string> = {
+  video: "#60a5fa",
+  video2: "#22d3ee",
+  vace_input_frames: "#a78bfa",
+  vace_input_masks: "#f472b6",
 };
 
-function getPortColor(portName: string): string {
-  return PORT_COLORS[portName] ?? "bg-gray-400";
+function getPortColorHex(portName: string): string {
+  return PORT_COLORS_HEX[portName] ?? "#9ca3af";
+}
+
+const PARAM_TYPE_COLORS: Record<string, string> = {
+  string: "#fbbf24", // amber-400
+  number: "#38bdf8", // sky-400
+  boolean: "#34d399", // emerald-400
+};
+
+function getParamTypeColor(type: "string" | "number" | "boolean"): string {
+  return PARAM_TYPE_COLORS[type] || "#9ca3af";
+}
+
+const HEADER_H = 28;
+const BODY_PAD = 6;
+const ROW_H = 20;
+const ROW_GAP = 6;
+
+function rowCenterY(n: number): number {
+  return HEADER_H + BODY_PAD + n * (ROW_H + ROW_GAP) + ROW_H / 2;
 }
 
 export function PipelineNode({
@@ -21,85 +51,152 @@ export function PipelineNode({
   data,
   selected,
 }: NodeProps<PipelineNodeType>) {
+  const edges = useEdges();
   const pipelineIds = data.availablePipelineIds || [];
   const streamInputs = data.streamInputs ?? ["video"];
   const streamOutputs = data.streamOutputs ?? ["video"];
+  const parameterInputs = data.parameterInputs || [];
   const onPipelineSelect = data.onPipelineSelect as
     | ((nodeId: string, pipelineId: string | null) => void)
     | undefined;
+  const onParameterChange = data.onParameterChange as
+    | ((nodeId: string, key: string, value: unknown) => void)
+    | undefined;
+  const parameterValues = (data.parameterValues as Record<string, unknown>) || {};
 
-  const handleChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newPipelineId = e.target.value || null;
-    onPipelineSelect?.(id, newPipelineId);
+  const pipelineName = data.pipelineId || "Pipeline";
+
+  const selectOptions = [
+    { value: "", label: "Select pipeline..." },
+    ...pipelineIds.map(pid => ({ value: pid, label: pid })),
+  ];
+
+  const isParamConnected = (paramName: string): boolean => {
+    const handleId = buildHandleId("param", paramName);
+    return edges.some(
+      e => e.target === id && e.targetHandle === handleId
+    );
   };
 
-  // Calculate handle positions evenly distributed
-  const inputCount = streamInputs.length;
-  const outputCount = streamOutputs.length;
+  const inputStartRow = 1;
+  const outputStartRow = inputStartRow + streamInputs.length;
+  const paramStartRow = outputStartRow + streamOutputs.length;
 
   return (
-    <div
-      className={`rounded-lg border-2 px-4 py-3 min-w-[220px] ${
-        selected
-          ? "border-blue-300 bg-blue-900/90 ring-2 ring-blue-400/50"
-          : "border-blue-500 bg-blue-950/80"
-      }`}
-    >
-      <div className="text-xs text-blue-400 font-medium mb-1">Pipeline</div>
-      <select
-        value={data.pipelineId || ""}
-        onChange={handleChange}
-        className="w-full bg-blue-900/60 text-blue-100 text-sm rounded px-2 py-1 border border-blue-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
-      >
-        <option value="">Select pipeline...</option>
-        {pipelineIds.map(pid => (
-          <option key={pid} value={pid}>
-            {pid}
-          </option>
+    <NodeCard selected={selected}>
+      <NodeHeader title={pipelineName} dotColor="bg-blue-400" />
+      <NodeBody withGap>
+        <NodeParamRow label="Pipeline">
+          <NodePillSearchableSelect
+            value={data.pipelineId || ""}
+            onChange={newValue => {
+              const newPipelineId = newValue || null;
+              onPipelineSelect?.(id, newPipelineId);
+            }}
+            options={selectOptions}
+            placeholder="Select pipeline..."
+          />
+        </NodeParamRow>
+
+        {streamInputs.map(port => (
+          <NodeParamRow key={`in-${port}`} label="Input">
+            <NodePill>{port}</NodePill>
+          </NodeParamRow>
         ))}
-      </select>
+        {streamOutputs.map(port => (
+          <NodeParamRow key={`out-${port}`} label="Output">
+            <NodePill>{port}</NodePill>
+          </NodeParamRow>
+        ))}
 
-      {/* Port labels */}
-      <div className="flex justify-between mt-2 gap-4">
-        <div className="flex flex-col gap-0.5">
-          {streamInputs.map(port => (
-            <div key={`in-${port}`} className="text-[10px] text-blue-300/70">
-              {port}
-            </div>
-          ))}
-        </div>
-        <div className="flex flex-col gap-0.5 text-right">
-          {streamOutputs.map(port => (
-            <div key={`out-${port}`} className="text-[10px] text-blue-300/70">
-              {port}
-            </div>
-          ))}
-        </div>
-      </div>
+        {parameterInputs.map((param) => {
+          const isConnected = isParamConnected(param.name);
+          const currentValue = parameterValues[param.name] ?? param.defaultValue;
 
-      {/* Input handles (left side) */}
+          return (
+            <NodeParamRow key={`param-${param.name}`} label={param.label || param.name}>
+              {isConnected ? (
+                <NodePill className="opacity-50">Connected</NodePill>
+              ) : param.type === "string" ? (
+                param.enum ? (
+                  <NodePillSelect
+                    value={String(currentValue ?? "")}
+                    onChange={val => onParameterChange?.(id, param.name, val)}
+                    options={param.enum.map(opt => ({
+                      value: String(opt),
+                      label: String(opt),
+                    }))}
+                  />
+                ) : (
+                  <NodePillInput
+                    type="text"
+                    value={String(currentValue ?? "")}
+                    onChange={val => onParameterChange?.(id, param.name, val)}
+                  />
+                )
+              ) : param.type === "number" ? (
+                <NodePillInput
+                  type="number"
+                  value={Number(currentValue ?? param.defaultValue ?? 0)}
+                  onChange={val => onParameterChange?.(id, param.name, Number(val))}
+                  min={param.min}
+                  max={param.max}
+                />
+              ) : (
+                <NodePillToggle
+                  checked={Boolean(currentValue ?? param.defaultValue ?? false)}
+                  onChange={val => onParameterChange?.(id, param.name, val)}
+                />
+              )}
+            </NodeParamRow>
+          );
+        })}
+      </NodeBody>
+
       {streamInputs.map((port, i) => (
         <Handle
           key={`target-${port}`}
           type="target"
           position={Position.Left}
-          id={port}
-          className={`!${getPortColor(port)} !w-3 !h-3`}
-          style={{ top: `${((i + 1) / (inputCount + 1)) * 100}%` }}
+          id={buildHandleId("stream", port)}
+          className="!w-2 !h-2 !border-0"
+          style={{
+            top: rowCenterY(inputStartRow + i),
+            left: 8,
+            backgroundColor: getPortColorHex(port),
+          }}
         />
       ))}
 
-      {/* Output handles (right side) */}
       {streamOutputs.map((port, i) => (
         <Handle
           key={`source-${port}`}
           type="source"
           position={Position.Right}
-          id={port}
-          className={`!${getPortColor(port)} !w-3 !h-3`}
-          style={{ top: `${((i + 1) / (outputCount + 1)) * 100}%` }}
+          id={buildHandleId("stream", port)}
+          className="!w-2 !h-2 !border-0"
+          style={{
+            top: rowCenterY(outputStartRow + i),
+            right: 8,
+            backgroundColor: getPortColorHex(port),
+          }}
         />
       ))}
-    </div>
+
+      {parameterInputs.map((param, i) => (
+        <Handle
+          key={`param-target-${param.name}`}
+          type="target"
+          position={Position.Left}
+          id={buildHandleId("param", param.name)}
+          className="!w-2 !h-2 !border-0"
+          style={{
+            top: rowCenterY(paramStartRow + i),
+            left: 8,
+            backgroundColor: getParamTypeColor(param.type),
+          }}
+        />
+      ))}
+    </NodeCard>
   );
 }
