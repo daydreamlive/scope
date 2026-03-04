@@ -681,9 +681,7 @@ async def handle_webrtc_offer(
     try:
         # If connected to cloud, use cloud mode (video flows through backend)
         if cloud_manager.is_connected:
-            logger.info(
-                "Using relay mode - video will flow through backend to cloud"
-            )
+            logger.info("Using relay mode - video will flow through backend to cloud")
             return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
 
         # Local mode: ensure pipeline is loaded before proceeding

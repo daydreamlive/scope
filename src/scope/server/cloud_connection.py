@@ -534,13 +534,9 @@ class CloudConnectionManager:
         self._stats["last_activity_at"] = time.time()
 
         if candidate:
-            logger.debug(
-                f"Sending ICE candidate to cloud for session {session_id}"
-            )
+            logger.debug(f"Sending ICE candidate to cloud for session {session_id}")
         else:
-            logger.info(
-                f"Sending end-of-candidates signal for session {session_id}"
-            )
+            logger.info(f"Sending end-of-candidates signal for session {session_id}")
 
         message = {
             "type": "icecandidate",

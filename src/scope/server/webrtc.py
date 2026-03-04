@@ -470,9 +470,7 @@ class WebRTCManager:
 
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
-                logger.info(
-                    f"Track received: {track.kind} for session {session.id}"
-                )
+                logger.info(f"Track received: {track.kind} for session {session.id}")
                 if track.kind == "video":
                     # Set the browser's video track as the source for the relay
                     cloud_track.set_source_track(track)
