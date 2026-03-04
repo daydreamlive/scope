@@ -660,8 +660,10 @@ class PluginManager:
                                 )
 
                     # For git packages, use the git URL; for PyPI, use package name
+                    # Strip .git suffix - not needed for pip/uv and causes issues
+                    # when web platform parses the URL for GitHub API calls (#508)
                     package_spec = (
-                        f"git+{git_url}"
+                        f"git+{git_url.removesuffix('.git')}"
                         if source == "git" and git_url
                         else package_name
                     )

@@ -1325,6 +1325,9 @@ async def upload_asset(
                 filename,
                 content_type,
                 asset_type,
+                fal_cdn_token=request.headers.get("X-Fal-CDN-Token"),
+                fal_cdn_token_type=request.headers.get("X-Fal-CDN-Token-Type"),
+                fal_cdn_base_url=request.headers.get("X-Fal-CDN-Base-URL"),
             )
 
         # Local mode: save to local assets directory
