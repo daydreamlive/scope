@@ -46,7 +46,7 @@ def mock_plugin_manager(plugins: list[dict] | None = None) -> MagicMock:
 
 
 class TestResolveBuiltinPipeline:
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_all_ok(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
 
@@ -58,7 +58,7 @@ class TestResolveBuiltinPipeline:
         assert len(pipeline_items) == 1
         assert pipeline_items[0].status == "ok"
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_builtin(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = False
 
@@ -71,7 +71,7 @@ class TestResolveBuiltinPipeline:
 
 
 class TestResolvePlugin:
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_plugin_auto_resolvable(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = False
 
@@ -97,7 +97,7 @@ class TestResolvePlugin:
         assert plugin_items[0].can_auto_resolve is True
         assert "scope-deeplivecam" in plugin_items[0].action
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_plugin_installed_ok(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
 
@@ -121,7 +121,7 @@ class TestResolvePlugin:
         plugin_items = [i for i in plan.items if i.kind == "plugin"]
         assert plugin_items[0].status == "ok"
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_plugin_version_mismatch(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
 
@@ -147,7 +147,7 @@ class TestResolvePlugin:
 
 
 class TestResolveLoRA:
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_present(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
 
@@ -169,7 +169,7 @@ class TestResolveLoRA:
         lora_items = [i for i in plan.items if i.kind == "lora"]
         assert lora_items[0].status == "ok"
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_missing_no_provenance(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
 
@@ -192,7 +192,7 @@ class TestResolveLoRA:
         assert lora_items[0].status == "missing"
         assert lora_items[0].can_auto_resolve is False
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_missing_with_provenance(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
 
@@ -230,7 +230,7 @@ class TestResolveLoRA:
 
 
 class TestResolvePluginEdgeCases:
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_plugin_name_none(self, mock_registry, tmp_path):
         """Non-builtin pipeline with no plugin_name is marked missing."""
         mock_registry.is_registered.return_value = False
@@ -252,7 +252,7 @@ class TestResolvePluginEdgeCases:
         assert plugin_items[0].status == "missing"
         assert "No plugin name" in plugin_items[0].detail
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_plugin_git_source(self, mock_registry, tmp_path):
         """Missing plugin with git source shows git install action."""
         mock_registry.is_registered.return_value = False
@@ -277,7 +277,7 @@ class TestResolvePluginEdgeCases:
         assert "Install from git:" in plugin_items[0].action
         assert "github.com" in plugin_items[0].action
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_invalid_version_treated_as_ok(self, mock_registry, tmp_path):
         """Unparseable version strings don't block; treated as ok with detail."""
         mock_registry.is_registered.return_value = True
@@ -304,7 +304,7 @@ class TestResolvePluginEdgeCases:
         assert plugin_items[0].status == "ok"
         assert "Could not compare versions" in plugin_items[0].detail
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_plugin_no_version_info(self, mock_registry, tmp_path):
         """Plugin installed with no version on either side is ok."""
         mock_registry.is_registered.return_value = True
@@ -336,7 +336,7 @@ class TestResolvePluginEdgeCases:
 
 
 class TestResolveLoRAProvenance:
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_lora_civitai_provenance(self, mock_registry, tmp_path):
         """CivitAI provenance generates correct action string."""
         mock_registry.is_registered.return_value = True
@@ -369,7 +369,7 @@ class TestResolveLoRAProvenance:
         assert "CivitAI" in lora_items[0].action
         assert "12345" in lora_items[0].action
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_lora_url_provenance_with_url(self, mock_registry, tmp_path):
         """URL provenance with a url field uses that URL in the action."""
         mock_registry.is_registered.return_value = True
@@ -400,7 +400,7 @@ class TestResolveLoRAProvenance:
         assert lora_items[0].can_auto_resolve is True
         assert "example.com" in lora_items[0].action
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_lora_url_provenance_without_url(self, mock_registry, tmp_path):
         """URL provenance without a url field falls back to generic action."""
         mock_registry.is_registered.return_value = True
@@ -428,7 +428,7 @@ class TestResolveLoRAProvenance:
         assert lora_items[0].can_auto_resolve is True
         assert lora_items[0].action == "Download from source"
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_lora_local_provenance_not_auto_resolvable(
         self, mock_registry, tmp_path
     ):
@@ -466,7 +466,7 @@ class TestResolveLoRAProvenance:
 
 
 class TestResolveMultiplePipelines:
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_mixed_builtin_ok_and_plugin_missing(self, mock_registry, tmp_path):
         """One ok builtin + one missing plugin: can_apply is False, both items present."""
         mock_registry.is_registered.side_effect = lambda pid: pid == "test_pipe"
@@ -497,7 +497,7 @@ class TestResolveMultiplePipelines:
         assert len(plugin_items) == 1
         assert plugin_items[0].status == "missing"
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_multiple_pipelines_all_ok(self, mock_registry, tmp_path):
         """Multiple builtin pipelines all registered: can_apply is True."""
         mock_registry.is_registered.return_value = True
@@ -597,7 +597,7 @@ class TestMinScopeVersion:
         restored = WorkflowRequest.model_validate(data)
         assert restored.min_scope_version == "0.5.0"
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_resolve_warns_when_current_is_older(self, mock_registry, tmp_path):
         """min_scope_version check produces a warning on resolve."""
         mock_registry.is_registered.return_value = True
@@ -607,7 +607,7 @@ class TestMinScopeVersion:
 
         assert any("99.0.0" in w for w in plan.warnings)
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_resolve_no_warning_when_version_ok(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
 
@@ -616,7 +616,7 @@ class TestMinScopeVersion:
 
         assert not any("Scope >=" in w for w in plan.warnings)
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     @patch("importlib.metadata.version")
     def test_resolve_warns_when_package_not_found(
         self, mock_version, mock_registry, tmp_path
@@ -641,7 +641,7 @@ class TestMinScopeVersion:
 
 
 class TestPathTraversal:
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_path_traversal_rejected(self, mock_registry, tmp_path):
         """LoRA filenames with path traversal components are rejected."""
         mock_registry.is_registered.return_value = True
@@ -666,7 +666,7 @@ class TestPathTraversal:
         assert lora_items[0].detail == "Invalid LoRA filename"
         assert lora_items[0].can_auto_resolve is False
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_normal_filename_ok(self, mock_registry, tmp_path):
         """Normal filenames still work after path traversal guard."""
         mock_registry.is_registered.return_value = True
@@ -697,7 +697,7 @@ class TestPathTraversal:
 
 
 class TestEdgeCases:
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_empty_pipelines(self, mock_registry, tmp_path):
         """Empty pipelines list resolves with can_apply=True and no items."""
         wf = WorkflowRequest(pipelines=[])
@@ -706,7 +706,7 @@ class TestEdgeCases:
         assert plan.can_apply is True
         assert plan.items == []
 
-    @patch("scope.core.workflows.resolve.PipelineRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_version_mismatch_blocks_can_apply(self, mock_registry, tmp_path):
         """Plugin version_mismatch sets can_apply=False."""
         mock_registry.is_registered.return_value = True
