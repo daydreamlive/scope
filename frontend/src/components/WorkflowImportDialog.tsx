@@ -148,7 +148,7 @@ export function WorkflowImportDialog({
   const [plan, setPlan] = useState<WorkflowResolutionPlan | null>(null);
   const [validating, setValidating] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { loraFiles, refresh: refreshLoRAs } = useLoRAsContext();
+  const { refresh: refreshLoRAs } = useLoRAsContext();
   const { refreshPipelines } = usePipelinesContext();
 
   // -- Re-resolution callback (used by both LoRA downloads and plugin installs)
@@ -320,7 +320,9 @@ export function WorkflowImportDialog({
     );
     if (!confirmed) return;
 
-    const importedSettings = workflowToSettings(workflow, loraFiles);
+    // Fetch fresh LoRA files to avoid stale closure after downloads
+    const freshLoraFiles = await refreshLoRAs();
+    const importedSettings = workflowToSettings(workflow, freshLoraFiles);
     const timelinePrompts = workflowTimelineToPrompts(workflow.timeline);
     const promptState = workflowToPromptState(workflow);
 
@@ -329,7 +331,7 @@ export function WorkflowImportDialog({
       description: `"${workflow.metadata.name}" loaded into the interface`,
     });
     handleClose();
-  }, [workflow, onLoad, handleClose, showConfirm, loraFiles]);
+  }, [workflow, onLoad, handleClose, showConfirm, refreshLoRAs]);
 
   // -----------------------------------------------------------------------
   // Derived state
