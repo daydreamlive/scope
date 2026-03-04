@@ -17,6 +17,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "./ui/alert-dialog";
 import { toast } from "sonner";
 import type {
   ScopeWorkflow,
@@ -141,6 +151,41 @@ export function WorkflowImportDialog({
 
   const loras = useLoRADownloads(workflow);
 
+  // -- Confirm dialog state (shared for load & plugin-install confirms) -----
+  const [confirmState, setConfirmState] = useState<{
+    title: string;
+    description: string;
+    resolve: (confirmed: boolean) => void;
+  } | null>(null);
+
+  const showConfirm = useCallback(
+    (title: string, description: string): Promise<boolean> =>
+      new Promise(resolve => {
+        setConfirmState({ title, description, resolve });
+      }),
+    []
+  );
+
+  const handleConfirmAction = useCallback(() => {
+    confirmState?.resolve(true);
+    setConfirmState(null);
+  }, [confirmState]);
+
+  const handleConfirmCancel = useCallback(() => {
+    confirmState?.resolve(false);
+    setConfirmState(null);
+  }, [confirmState]);
+
+  // -- Plugin install confirm callback --------------------------------------
+  const confirmPluginInstall = useCallback(
+    (installSpec: string) =>
+      showConfirm(
+        "Install Plugin",
+        `This will install the package "${installSpec}" via pip. Only proceed if you trust the workflow source.`
+      ),
+    [showConfirm]
+  );
+
   const reResolveWorkflow = useCallback(async () => {
     if (!workflow) return;
     try {
@@ -151,7 +196,11 @@ export function WorkflowImportDialog({
     }
   }, [workflow]);
 
-  const plugins = usePluginInstalls(workflow, reResolveWorkflow);
+  const plugins = usePluginInstalls(
+    workflow,
+    reResolveWorkflow,
+    confirmPluginInstall
+  );
 
   // Reset all state when dialog closes
   const handleClose = useCallback(() => {
@@ -258,16 +307,14 @@ export function WorkflowImportDialog({
   // Load workflow into the interface
   // -----------------------------------------------------------------------
 
-  const handleLoad = useCallback(() => {
+  const handleLoad = useCallback(async () => {
     if (!workflow) return;
 
-    if (
-      !window.confirm(
-        "Loading this workflow will replace your current settings and timeline. Continue?"
-      )
-    ) {
-      return;
-    }
+    const confirmed = await showConfirm(
+      "Load Workflow",
+      "Loading this workflow will replace your current settings and timeline. Continue?"
+    );
+    if (!confirmed) return;
 
     const importedSettings = workflowToSettings(workflow, loraFiles);
     const timelinePrompts = workflowTimelineToPrompts(workflow.timeline);
@@ -278,7 +325,7 @@ export function WorkflowImportDialog({
       description: `"${workflow.metadata.name}" loaded into the interface`,
     });
     handleClose();
-  }, [workflow, onLoad, handleClose]);
+  }, [workflow, onLoad, handleClose, showConfirm, loraFiles]);
 
   // -----------------------------------------------------------------------
   // Derived state
@@ -523,6 +570,31 @@ export function WorkflowImportDialog({
           )}
         </DialogFooter>
       </DialogContent>
+
+      {/* Confirmation alert dialog (replaces window.confirm) */}
+      <AlertDialog
+        open={confirmState !== null}
+        onOpenChange={open => {
+          if (!open) handleConfirmCancel();
+        }}
+      >
+        <AlertDialogContent className="sm:max-w-md">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{confirmState?.title}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {confirmState?.description}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={handleConfirmCancel}>
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction onClick={handleConfirmAction}>
+              Continue
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Dialog>
   );
 }

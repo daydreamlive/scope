@@ -162,7 +162,8 @@ function findPluginInstallSpec(
 
 export function usePluginInstalls(
   workflow: ScopeWorkflow | null,
-  onRestartComplete?: () => void | Promise<void>
+  onRestartComplete?: () => void | Promise<void>,
+  confirmInstall?: (installSpec: string) => Promise<boolean>
 ) {
   const [installs, setInstalls] = useState<Record<string, PluginInstallStatus>>(
     {}
@@ -203,12 +204,9 @@ export function usePluginInstalls(
         return;
       }
 
-      if (
-        !window.confirm(
-          `This will install the package "${installSpec}" via pip. Only proceed if you trust the workflow source.\n\nContinue?`
-        )
-      ) {
-        return;
+      if (confirmInstall) {
+        const confirmed = await confirmInstall(installSpec);
+        if (!confirmed) return;
       }
 
       setInstalls(prev => ({ ...prev, [pluginName]: "installing" }));
