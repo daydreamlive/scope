@@ -38,12 +38,28 @@ function buildLoRADownloadRequest(
   }
 
   if (prov.source === "civitai") {
-    return {
-      source: "civitai",
-      model_id: prov.model_id,
-      version_id: prov.version_id,
-      expected_sha256: lora.sha256,
-    };
+    // Try to use explicit version_id; if missing, extract from CivitAI URL.
+    const versionId =
+      prov.version_id ??
+      prov.url?.match(/civitai\.com\/api\/download\/models\/(\d+)/)?.[1];
+
+    if (versionId) {
+      return {
+        source: "civitai",
+        model_id: prov.model_id,
+        version_id: versionId,
+        expected_sha256: lora.sha256,
+      };
+    }
+
+    // Fall back to direct URL download if we can't resolve a version_id.
+    if (prov.url) {
+      return {
+        source: "url",
+        url: prov.url,
+        expected_sha256: lora.sha256,
+      };
+    }
   }
 
   if (prov.source === "url" && prov.url) {
@@ -144,7 +160,10 @@ function findPluginInstallSpec(
   return null;
 }
 
-export function usePluginInstalls(workflow: ScopeWorkflow | null) {
+export function usePluginInstalls(
+  workflow: ScopeWorkflow | null,
+  onRestartComplete?: () => void | Promise<void>
+) {
   const [installs, setInstalls] = useState<Record<string, PluginInstallStatus>>(
     {}
   );
@@ -166,12 +185,13 @@ export function usePluginInstalls(workflow: ScopeWorkflow | null) {
       const oldStartTime = await restartServer();
       await waitForServer(oldStartTime);
       toast.success("Server restarted successfully");
+      if (onRestartComplete) await onRestartComplete();
     } catch {
       toast.error(
         "Server did not restart in time. You may need to restart manually."
       );
     }
-  }, []);
+  }, [onRestartComplete]);
 
   const installOne = useCallback(
     async (pluginName: string, { skipRestart = false } = {}) => {

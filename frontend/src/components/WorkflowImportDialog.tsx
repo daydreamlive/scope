@@ -140,7 +140,18 @@ export function WorkflowImportDialog({
   const { loraFiles } = useLoRAsContext();
 
   const loras = useLoRADownloads(workflow);
-  const plugins = usePluginInstalls(workflow);
+
+  const reResolveWorkflow = useCallback(async () => {
+    if (!workflow) return;
+    try {
+      const resolution = await resolveWorkflow(workflow);
+      setPlan(resolution);
+    } catch (err) {
+      console.error("Failed to re-resolve workflow:", err);
+    }
+  }, [workflow]);
+
+  const plugins = usePluginInstalls(workflow, reResolveWorkflow);
 
   // Reset all state when dialog closes
   const handleClose = useCallback(() => {

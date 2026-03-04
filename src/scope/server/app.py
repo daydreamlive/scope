@@ -970,18 +970,22 @@ async def install_lora_file(
         if not filename:
             filename = unquote(parsed.path.split("/")[-1])
 
-        # For CivitAI URLs, resolve filename via API if path doesn't have one
-        if is_civitai and (not filename or "." not in filename):
+        # For CivitAI URLs, extract version ID and resolve filename via API
+        version_id = None
+        if is_civitai:
             # Extract version ID: check query param first, then path
             query_params = parse_qs(parsed.query)
-            version_id = None
             if "modelVersionId" in query_params:
                 version_id = query_params["modelVersionId"][0]
             else:
                 # Fall back to last path segment (e.g. /api/download/models/<version_id>)
                 path_parts = parsed.path.rstrip("/").split("/")
-                version_id = path_parts[-1] if path_parts else None
-            if version_id and version_id.isdigit():
+                candidate = path_parts[-1] if path_parts else None
+                if candidate and candidate.isdigit():
+                    version_id = candidate
+
+        if is_civitai and (not filename or "." not in filename):
+            if version_id:
                 try:
                     from .lora_downloader import resolve_civitai_metadata
 
@@ -1077,7 +1081,11 @@ async def install_lora_file(
             )
         )
 
-        provenance = LoRAProvenance(source=source, url=clean_url)
+        provenance = LoRAProvenance(
+            source=source,
+            url=clean_url,
+            version_id=version_id if is_civitai else None,
+        )
         entry = add_manifest_entry(
             lora_dir, relative_key, provenance, sha256, size_bytes
         )
