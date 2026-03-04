@@ -23,7 +23,7 @@ export function GeneralTab({
   const handleDocsClick = () => {
     console.log("Docs clicked");
     window.open(
-      "https://docs.daydream.live/knowledge-hub/tutorials/scope",
+      "https://docs.daydream.live/scope/getting-started/quickstart",
       "_blank"
     );
   };
