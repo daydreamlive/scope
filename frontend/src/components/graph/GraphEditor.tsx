@@ -113,6 +113,12 @@ interface GraphEditorProps {
   onGraphChange?: () => void;
   /** Called when the user clears the graph */
   onGraphClear?: () => void;
+  /** Local video stream (camera/file) for source node preview */
+  localStream?: MediaStream | null;
+  /** Remote output stream for sink node preview */
+  remoteStream?: MediaStream | null;
+  /** Callback to upload a video file for the source node */
+  onVideoFileUpload?: (file: File) => Promise<boolean>;
 }
 
 export function GraphEditor({
@@ -120,6 +126,9 @@ export function GraphEditor({
   onNodeParameterChange,
   onGraphChange,
   onGraphClear,
+  localStream,
+  remoteStream,
+  onVideoFileUpload,
 }: GraphEditorProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<FlowNodeData>>(
     []
@@ -208,38 +217,7 @@ export function GraphEditor({
     if (availablePipelineIds.length === 0) return;
     setNodes(nds =>
       nds.map(n => {
-        if (n.data.nodeType !== "pipeline") return n;
-        const pipelineId = n.data.pipelineId;
-        const schema = pipelineId ? pipelineSchemas[pipelineId] : null;
-        const parameterInputs = schema ? extractParameterPorts(schema) : [];
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            availablePipelineIds,
-            pipelinePortsMap: portsMap,
-            onPipelineSelect: handlePipelineSelect,
-            parameterInputs,
-            parameterValues: nodeParams[n.id] || {},
-            onParameterChange: handleNodeParameterChange,
-          },
-        };
-      })
-    );
-  }, [availablePipelineIds, portsMap, handlePipelineSelect, setNodes, pipelineSchemas, nodeParams, handleNodeParameterChange]);
-
-  useEffect(() => {
-    if (Object.keys(portsMap).length === 0) return;
-
-    getGraph()
-      .then(response => {
-        if (response.graph) {
-          const { nodes: flowNodes, edges: flowEdges } = graphConfigToFlow(
-            response.graph,
-            portsMap
-          );
-        const enrichedNodes = flowNodes.map(n => {
-          if (n.data.nodeType !== "pipeline") return n;
+        if (n.data.nodeType === "pipeline") {
           const pipelineId = n.data.pipelineId;
           const schema = pipelineId ? pipelineSchemas[pipelineId] : null;
           const parameterInputs = schema ? extractParameterPorts(schema) : [];
@@ -255,6 +233,59 @@ export function GraphEditor({
               onParameterChange: handleNodeParameterChange,
             },
           };
+        }
+        if (n.data.nodeType === "source") {
+          return {
+            ...n,
+            data: { ...n.data, localStream, onVideoFileUpload },
+          };
+        }
+        if (n.data.nodeType === "sink") {
+          return {
+            ...n,
+            data: { ...n.data, remoteStream },
+          };
+        }
+        return n;
+      })
+    );
+  }, [availablePipelineIds, portsMap, handlePipelineSelect, setNodes, pipelineSchemas, nodeParams, handleNodeParameterChange, localStream, remoteStream, onVideoFileUpload]);
+
+  useEffect(() => {
+    if (Object.keys(portsMap).length === 0) return;
+
+    getGraph()
+      .then(response => {
+        if (response.graph) {
+          const { nodes: flowNodes, edges: flowEdges } = graphConfigToFlow(
+            response.graph,
+            portsMap
+          );
+        const enrichedNodes = flowNodes.map(n => {
+          if (n.data.nodeType === "pipeline") {
+            const pipelineId = n.data.pipelineId;
+            const schema = pipelineId ? pipelineSchemas[pipelineId] : null;
+            const parameterInputs = schema ? extractParameterPorts(schema) : [];
+            return {
+              ...n,
+              data: {
+                ...n.data,
+                availablePipelineIds,
+                pipelinePortsMap: portsMap,
+                onPipelineSelect: handlePipelineSelect,
+                parameterInputs,
+                parameterValues: nodeParams[n.id] || {},
+                onParameterChange: handleNodeParameterChange,
+              },
+            };
+          }
+          if (n.data.nodeType === "source") {
+            return { ...n, data: { ...n.data, localStream, onVideoFileUpload } };
+          }
+          if (n.data.nodeType === "sink") {
+            return { ...n, data: { ...n.data, remoteStream } };
+          }
+          return n;
         });
           setNodes(enrichedNodes);
           const coloredEdges = flowEdges.map(edge => {
@@ -290,6 +321,34 @@ export function GraphEditor({
       setEdges(eds => eds.filter(e => e.id !== edgeId));
     },
     [setEdges]
+  );
+
+  /**
+   * Find all pipeline nodes and their parameter names connected to a value/control node's output.
+   * Returns array of { nodeId, paramName } tuples.
+   */
+  const findConnectedPipelineParams = useCallback(
+    (sourceNodeId: string, edges: Edge[], nodes: Node<FlowNodeData>[]): Array<{ nodeId: string; paramName: string }> => {
+      const connected: Array<{ nodeId: string; paramName: string }> = [];
+
+      for (const edge of edges) {
+        if (edge.source !== sourceNodeId) continue;
+
+        const targetParsed = parseHandleId(edge.targetHandle);
+        if (targetParsed?.kind !== "param") continue;
+
+        const targetNode = nodes.find(n => n.id === edge.target);
+        if (targetNode?.data.nodeType !== "pipeline") continue;
+
+        connected.push({
+          nodeId: edge.target,
+          paramName: targetParsed.name,
+        });
+      }
+
+      return connected;
+    },
+    []
   );
 
   const isValidConnection = useCallback(
@@ -632,6 +691,46 @@ export function GraphEditor({
     return () => clearTimeout(timer);
   }, [nodes, edges]);
 
+  // Forward value/control node changes to connected pipeline parameters
+  const lastForwardTimeRef = useRef<Record<string, number>>({});
+  useEffect(() => {
+    if (!isStreaming || !onNodeParameterChange) return;
+
+    // Throttle control node updates to ~10Hz (100ms)
+    const throttleMs = 100;
+
+    for (const node of nodes) {
+      if (node.data.nodeType !== "value" && node.data.nodeType !== "control") continue;
+
+      const connected = findConnectedPipelineParams(node.id, edges, nodes);
+      if (connected.length === 0) continue;
+
+      let value: unknown;
+      if (node.data.nodeType === "value") {
+        value = node.data.value;
+      } else if (node.data.nodeType === "control") {
+        // For control nodes, we need to get the current animated value
+        // This is stored in node.data.currentValue (set by ControlNode)
+        value = node.data.currentValue;
+      }
+
+      if (value === undefined) continue;
+
+      // Throttle control node updates
+      if (node.data.nodeType === "control") {
+        const now = Date.now();
+        const lastTime = lastForwardTimeRef.current[node.id] || 0;
+        if (now - lastTime < throttleMs) continue;
+        lastForwardTimeRef.current[node.id] = now;
+      }
+
+      // Forward to all connected pipeline parameters
+      for (const { nodeId, paramName } of connected) {
+        onNodeParameterChange(nodeId, paramName, value);
+      }
+    }
+  }, [nodes, edges, isStreaming, onNodeParameterChange, findConnectedPipelineParams]);
+
   const handleClear = useCallback(async () => {
     try {
       await clearGraph();
@@ -667,22 +766,30 @@ export function GraphEditor({
             portsMap
           );
           const enrichedNodes = flowNodes.map((n: Node<FlowNodeData>) => {
-            if (n.data.nodeType !== "pipeline") return n;
-            const pipelineId = n.data.pipelineId;
-            const schema = pipelineId ? pipelineSchemas[pipelineId] : null;
-            const parameterInputs = schema ? extractParameterPorts(schema) : [];
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                availablePipelineIds,
-                pipelinePortsMap: portsMap,
-                onPipelineSelect: handlePipelineSelect,
-                parameterInputs,
-                parameterValues: nodeParams[n.id] || {},
-                onParameterChange: handleNodeParameterChange,
-              },
-            };
+            if (n.data.nodeType === "pipeline") {
+              const pipelineId = n.data.pipelineId;
+              const schema = pipelineId ? pipelineSchemas[pipelineId] : null;
+              const parameterInputs = schema ? extractParameterPorts(schema) : [];
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  availablePipelineIds,
+                  pipelinePortsMap: portsMap,
+                  onPipelineSelect: handlePipelineSelect,
+                  parameterInputs,
+                  parameterValues: nodeParams[n.id] || {},
+                  onParameterChange: handleNodeParameterChange,
+                },
+              };
+            }
+            if (n.data.nodeType === "source") {
+              return { ...n, data: { ...n.data, localStream, onVideoFileUpload } };
+            }
+            if (n.data.nodeType === "sink") {
+              return { ...n, data: { ...n.data, remoteStream } };
+            }
+            return n;
           });
           setNodes(enrichedNodes);
           const coloredEdges = flowEdges.map((edge: Edge) => {

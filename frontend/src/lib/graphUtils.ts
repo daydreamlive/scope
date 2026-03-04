@@ -65,6 +65,16 @@ export interface FlowNodeData {
   controlItems?: string[];
   /** For control nodes: whether animation is playing */
   isPlaying?: boolean;
+  /** For control nodes: current animated value (updated by animation loop) */
+  currentValue?: number | string;
+  /** For source nodes: video source mode (video, camera, spout, ndi) */
+  sourceMode?: "video" | "camera" | "spout" | "ndi";
+  /** For source nodes: local video preview stream (camera or file) */
+  localStream?: MediaStream | null;
+  /** For source nodes: callback to upload a video file */
+  onVideoFileUpload?: (file: File) => Promise<boolean>;
+  /** For sink nodes: remote output stream */
+  remoteStream?: MediaStream | null;
   [key: string]: unknown;
 }
 
@@ -190,7 +200,11 @@ export function graphConfigToFlow(
         x: savedX !== undefined ? savedX : START_X,
         y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
       },
-      data: { label: n.id, nodeType: "source" },
+      data: {
+        label: n.id,
+        nodeType: "source",
+        sourceMode: n.source_mode as "video" | "camera" | "spout" | "ndi" | undefined,
+      },
     });
   });
 
@@ -265,20 +279,25 @@ export function flowToGraphConfig(
         n.data.nodeType === "pipeline" ? (n.data.pipelineId ?? null) : undefined,
       x: n.position.x,
       y: n.position.y,
+      source_mode: n.data.nodeType === "source" ? (n.data.sourceMode ?? null) : undefined,
     }));
 
-  const graphEdges: GraphEdge[] = edges.map(e => {
-    const sourceParsed = parseHandleId(e.sourceHandle);
-    const targetParsed = parseHandleId(e.targetHandle);
-    const kind = sourceParsed?.kind === "param" && targetParsed?.kind === "param" ? "parameter" : "stream";
-    return {
-      from: e.source,
-      from_port: sourceParsed?.name || "video",
-      to_node: e.target,
-      to_port: targetParsed?.name || "video",
-      kind: kind as "stream" | "parameter",
-    };
-  });
+  // Filter edges to only include those where both source and target exist in graphNodes
+  const graphNodeIds = new Set(graphNodes.map(n => n.id));
+  const graphEdges: GraphEdge[] = edges
+    .filter(e => graphNodeIds.has(e.source) && graphNodeIds.has(e.target))
+    .map(e => {
+      const sourceParsed = parseHandleId(e.sourceHandle);
+      const targetParsed = parseHandleId(e.targetHandle);
+      const kind = sourceParsed?.kind === "param" && targetParsed?.kind === "param" ? "parameter" : "stream";
+      return {
+        from: e.source,
+        from_port: sourceParsed?.name || "video",
+        to_node: e.target,
+        to_port: targetParsed?.name || "video",
+        kind: kind as "stream" | "parameter",
+      };
+    });
 
   return { nodes: graphNodes, edges: graphEdges };
 }

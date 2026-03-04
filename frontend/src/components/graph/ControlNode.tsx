@@ -103,6 +103,24 @@ export function ControlNode({
   const dotColorClass = "bg-purple-400";
   const title = getControlTitle(controlType);
 
+  // Initialize currentValue in node data on mount
+  useEffect(() => {
+    const initialValue = controlType === "string" ? items[0] || "" : min;
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.id !== id) return n;
+        if (n.data.currentValue !== undefined) return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            currentValue: initialValue,
+          },
+        };
+      })
+    );
+  }, [id, setNodes, controlType, items, min]);
+
   useEffect(() => {
     if (!isPlaying) {
       if (animationFrameRef.current) {
@@ -153,6 +171,27 @@ export function ControlNode({
       }
     };
   }, [isPlaying, pattern, speed, min, max, controlType, items]);
+
+  // Store currentValue in node data (throttled to ~10Hz for forwarding)
+  const lastUpdateTimeRef = useRef<number>(0);
+  useEffect(() => {
+    const now = Date.now();
+    if (now - lastUpdateTimeRef.current < 100) return; // Throttle to 100ms
+    lastUpdateTimeRef.current = now;
+
+    setNodes((nds) =>
+      nds.map((n) => {
+        if (n.id !== id) return n;
+        return {
+          ...n,
+          data: {
+            ...n.data,
+            currentValue,
+          },
+        };
+      })
+    );
+  }, [currentValue, id, setNodes]);
 
   const handleTogglePlay = () => {
     setNodes((nds) =>

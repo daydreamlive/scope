@@ -1793,6 +1793,35 @@ export function StreamPage() {
             } catch {
               /* ignore */
             }
+          } else {
+            // Switching Graph → Perform: sync source mode from graph
+            try {
+              const response = await getGraph();
+              if (response.graph) {
+                const sourceNode = response.graph.nodes.find(n => n.type === "source");
+                if (sourceNode?.source_mode) {
+                  const sourceMode = sourceNode.source_mode as "video" | "camera" | "spout" | "ndi";
+                  // Sync to useVideoSource
+                  if (sourceMode === "spout" || sourceMode === "ndi") {
+                    // For server-side sources, update settings.inputSource
+                    updateSettings({
+                      inputSource: {
+                        enabled: true,
+                        source_type: sourceMode,
+                        source_name: settings.inputSource?.source_name ?? "",
+                      },
+                    });
+                    // Also call switchMode to sync the mode state
+                    switchMode(sourceMode);
+                  } else {
+                    // For browser-side sources (video, camera), just switch mode
+                    switchMode(sourceMode);
+                  }
+                }
+              }
+            } catch {
+              /* ignore */
+            }
           }
           // Graph → Perform: just switch mode (modes are independent)
           setGraphMode(prev => !prev);
@@ -1809,6 +1838,9 @@ export function StreamPage() {
             }}
             onGraphChange={handleGraphChange}
             onGraphClear={handleGraphClear}
+            localStream={localStream}
+            remoteStream={remoteStream}
+            onVideoFileUpload={handleVideoFileUpload}
           />
           {hasAvailableOutputs && (
             <OutputsPanel

@@ -889,6 +889,7 @@ export interface GraphNode {
   pipeline_id?: string | null;
   x?: number | null;
   y?: number | null;
+  source_mode?: string | null;
 }
 
 export interface GraphEdge {

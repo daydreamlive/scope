@@ -1,27 +1,53 @@
+import { useEffect, useRef } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
-import { NodeCard, NodeHeader, NodeBody, NodeParamRow, NodePill } from "./node-ui";
+import { NodeCard, NodeHeader, NodeBody } from "./node-ui";
 
 type SinkNodeType = Node<FlowNodeData, "sink">;
 
-const ROW_CENTER_Y = 28 + 6 + 10;
+const HEADER_H = 28;
+const BODY_PAD = 6;
+const PREVIEW_H = 120;
 
 export function SinkNode({ data }: NodeProps<SinkNodeType>) {
+  const remoteStream = data.remoteStream as MediaStream | null | undefined;
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (videoRef.current && remoteStream) {
+      videoRef.current.srcObject = remoteStream;
+    }
+  }, [remoteStream]);
+
+  const handleY = HEADER_H + BODY_PAD + PREVIEW_H / 2;
+
   return (
     <NodeCard>
       <NodeHeader title="Sink" dotColor="bg-orange-400" />
       <NodeBody>
-        <NodeParamRow label="Label">
-          <NodePill>{data.label}</NodePill>
-        </NodeParamRow>
+        <div className="relative rounded-md overflow-hidden bg-black/50" style={{ height: PREVIEW_H }}>
+          {remoteStream ? (
+            <video
+              ref={videoRef}
+              className="w-full h-full object-cover"
+              autoPlay
+              muted
+              playsInline
+            />
+          ) : (
+            <div className="flex items-center justify-center h-full text-[10px] text-[#8c8c8d]">
+              No output stream
+            </div>
+          )}
+        </div>
       </NodeBody>
       <Handle
         type="target"
         position={Position.Left}
         id="stream:video"
         className="!w-2 !h-2 !border-0"
-        style={{ top: ROW_CENTER_Y, left: 8, backgroundColor: "#ffffff" }}
+        style={{ top: handleY, left: 8, backgroundColor: "#ffffff" }}
       />
     </NodeCard>
   );
