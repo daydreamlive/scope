@@ -16,6 +16,7 @@ import { SourceNode } from "./SourceNode";
 import { PipelineNode } from "./PipelineNode";
 import { SinkNode } from "./SinkNode";
 import { ValueNode } from "./ValueNode";
+import { ControlNode } from "./ControlNode";
 import { NodeParametersPanel } from "./NodeParametersPanel";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
@@ -43,6 +44,7 @@ const nodeTypes = {
   pipeline: PipelineNode,
   sink: SinkNode,
   value: ValueNode,
+  control: ControlNode,
 };
 
 const edgeTypes = {
@@ -50,8 +52,8 @@ const edgeTypes = {
 };
 
 const HANDLE_COLORS: Record<string, string> = {
-  video: "#60a5fa",
-  video2: "#22d3ee",
+  video: "#ffffff",
+  video2: "#ffffff",
   vace_input_frames: "#a78bfa",
   vace_input_masks: "#f472b6",
   source: "#4ade80",
@@ -62,6 +64,8 @@ const PARAM_TYPE_COLORS: Record<string, string> = {
   string: "#fbbf24",
   number: "#38bdf8",
   boolean: "#34d399",
+  float: "#a78bfa",
+  int: "#a78bfa",
 };
 
 function getEdgeColor(
@@ -78,6 +82,11 @@ function getEdgeColor(
       const valueType = sourceNode.data.valueType;
       return PARAM_TYPE_COLORS[valueType || "string"] || "#9ca3af";
     }
+    if (sourceNode.data.nodeType === "control") {
+      const controlType = sourceNode.data.controlType;
+      const outputType = controlType === "string" ? "string" : "number";
+      return PARAM_TYPE_COLORS[outputType] || "#9ca3af";
+    }
     return "#9ca3af";
   }
 
@@ -86,7 +95,7 @@ function getEdgeColor(
   }
 
   if (sourceNode.data.nodeType === "source") {
-    return HANDLE_COLORS.source;
+    return HANDLE_COLORS[parsed.name] || HANDLE_COLORS.video;
   }
   if (sourceNode.data.nodeType === "sink") {
     return HANDLE_COLORS.sink;
@@ -319,15 +328,21 @@ export function GraphEditor({
 
         if (!sourceNode || !targetNode) return false;
 
+        let sourceType: "string" | "number" | "boolean" | undefined;
+
         if (sourceNode.data.nodeType === "value") {
-          const sourceType = sourceNode.data.valueType;
-          const targetParam = targetNode.data.parameterInputs?.find(
-            p => p.name === targetParsed.name
-          );
-          return sourceType === targetParam?.type;
+          sourceType = sourceNode.data.valueType;
+        } else if (sourceNode.data.nodeType === "control") {
+          const controlType = sourceNode.data.controlType;
+          sourceType = controlType === "string" ? "string" : "number";
         }
 
-        return false;
+        if (!sourceType) return false;
+
+        const targetParam = targetNode.data.parameterInputs?.find(
+          p => p.name === targetParsed.name
+        );
+        return sourceType === targetParam?.type;
       }
 
       return false;
@@ -516,8 +531,37 @@ export function GraphEditor({
     [existingIds, nodes.length, setNodes]
   );
 
+  const addControlNode = useCallback(
+    (controlType: "float" | "int" | "string", position?: { x: number; y: number }) => {
+      const id = generateNodeId(controlType === "float" ? "floatControl" : controlType === "int" ? "intControl" : "stringControl", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "control",
+        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        data: {
+          label: controlType === "float" ? "FloatControl" : controlType === "int" ? "IntControl" : "StringControl",
+          nodeType: "control",
+          controlType,
+          controlPattern: "sine",
+          controlSpeed: 1.0,
+          controlMin: 0,
+          controlMax: 1.0,
+          controlItems: controlType === "string" ? ["item1", "item2", "item3"] : undefined,
+          isPlaying: false,
+          parameterOutputs: [{
+            name: "value",
+            type: controlType === "string" ? "string" : "number",
+            defaultValue: controlType === "string" ? "" : 0,
+          }],
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes]
+  );
+
   const handleNodeTypeSelect = useCallback(
-    (type: "source" | "pipeline" | "sink" | "value", valueType?: "string" | "number" | "boolean") => {
+    (type: "source" | "pipeline" | "sink" | "value" | "control", subType?: string) => {
       if (!pendingNodePosition) return;
 
       switch (type) {
@@ -531,15 +575,20 @@ export function GraphEditor({
           addSinkNode(pendingNodePosition);
           break;
         case "value":
-          if (valueType) {
-            addValueNode(valueType, pendingNodePosition);
+          if (subType === "string" || subType === "number" || subType === "boolean") {
+            addValueNode(subType, pendingNodePosition);
+          }
+          break;
+        case "control":
+          if (subType === "float" || subType === "int" || subType === "string") {
+            addControlNode(subType, pendingNodePosition);
           }
           break;
       }
 
       setPendingNodePosition(null);
     },
-    [pendingNodePosition, addSourceNode, addPipelineNode, addSinkNode, addValueNode]
+    [pendingNodePosition, addSourceNode, addPipelineNode, addSinkNode, addValueNode, addControlNode]
   );
 
   const handleDeleteNode = useCallback(

@@ -35,7 +35,7 @@ export interface PortInfo {
 export interface FlowNodeData {
   label: string;
   pipelineId?: string | null;
-  nodeType: "source" | "pipeline" | "sink" | "value";
+  nodeType: "source" | "pipeline" | "sink" | "value" | "control";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -51,6 +51,20 @@ export interface FlowNodeData {
   valueType?: "string" | "number" | "boolean";
   /** For value nodes: the current value */
   value?: unknown;
+  /** For control nodes: the type of control (float, int, string) */
+  controlType?: "float" | "int" | "string";
+  /** For control nodes: the animation pattern */
+  controlPattern?: "sine" | "bounce" | "random_walk" | "linear" | "step";
+  /** For control nodes: cycles per second */
+  controlSpeed?: number;
+  /** For control nodes: minimum value (for float/int) */
+  controlMin?: number;
+  /** For control nodes: maximum value (for float/int) */
+  controlMax?: number;
+  /** For control nodes: list of strings to cycle through (for string variant) */
+  controlItems?: string[];
+  /** For control nodes: whether animation is playing */
+  isPlaying?: boolean;
   [key: string]: unknown;
 }
 
@@ -243,7 +257,7 @@ export function flowToGraphConfig(
   edges: Edge[]
 ): GraphConfig {
   const graphNodes: GraphNode[] = nodes
-    .filter(n => n.data.nodeType !== "value") // Filter out value nodes for now
+    .filter(n => n.data.nodeType !== "value" && n.data.nodeType !== "control") // Filter out value and control nodes
     .map(n => ({
       id: n.id,
       type: n.data.nodeType === "source" ? "source" : n.data.nodeType === "sink" ? "sink" : "pipeline",

@@ -17,8 +17,8 @@ import {
 type PipelineNodeType = Node<FlowNodeData, "pipeline">;
 
 const PORT_COLORS_HEX: Record<string, string> = {
-  video: "#60a5fa",
-  video2: "#22d3ee",
+  video: "#ffffff",
+  video2: "#ffffff",
   vace_input_frames: "#a78bfa",
   vace_input_masks: "#f472b6",
 };

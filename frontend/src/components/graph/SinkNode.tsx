@@ -21,7 +21,7 @@ export function SinkNode({ data }: NodeProps<SinkNodeType>) {
         position={Position.Left}
         id="stream:video"
         className="!w-2 !h-2 !border-0"
-        style={{ top: ROW_CENTER_Y, left: 8, backgroundColor: "#fb923c" }}
+        style={{ top: ROW_CENTER_Y, left: 8, backgroundColor: "#ffffff" }}
       />
     </NodeCard>
   );

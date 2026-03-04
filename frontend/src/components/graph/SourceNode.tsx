@@ -21,7 +21,7 @@ export function SourceNode({ data }: NodeProps<SourceNodeType>) {
         position={Position.Right}
         id="stream:video"
         className="!w-2 !h-2 !border-0"
-        style={{ top: ROW_CENTER_Y, right: 8, backgroundColor: "#4ade80" }}
+        style={{ top: ROW_CENTER_Y, right: 8, backgroundColor: "#ffffff" }}
       />
     </NodeCard>
   );
