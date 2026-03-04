@@ -1268,8 +1268,9 @@ async def resolve_workflow_endpoint(
 
     try:
         plugin_manager = get_plugin_manager()
-        models_dir = get_models_dir()
-        return resolve_workflow(workflow, plugin_manager, models_dir)
+        lora_dir = get_lora_dir()
+
+        return resolve_workflow(workflow, plugin_manager, lora_dir)
     except Exception as e:
         logger.error("Error resolving workflow: %s", e, exc_info=True)
         raise HTTPException(
