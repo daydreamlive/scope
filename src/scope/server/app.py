@@ -1208,8 +1208,11 @@ async def delete_lora_file(
 
 
 @app.post("/api/v1/lora/download")
+@cloud_proxy(timeout=60.0)
 async def download_lora_endpoint(
     request: LoRADownloadRequest,
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ) -> LoRADownloadResult:
     """Download a LoRA from HuggingFace, CivitAI, or a direct URL."""
     from .lora_downloader import download_lora
@@ -1249,8 +1252,11 @@ async def tag_lora_provenance(
 
 
 @app.post("/api/v1/workflow/resolve", response_model=WorkflowResolutionPlan)
-def resolve_workflow_endpoint(
+@cloud_proxy()
+async def resolve_workflow_endpoint(
     workflow: WorkflowRequest,
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Resolve workflow dependencies and return a resolution plan.
 
