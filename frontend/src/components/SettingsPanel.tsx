@@ -1070,7 +1070,9 @@ export function SettingsPanel({
                         <div className="flex items-center justify-between gap-2">
                           <LabelWithTooltip
                             label={PARAMETER_METADATA.resetCache.label}
-                            tooltip={PARAMETER_METADATA.firstFrameAndResetCache.tooltip}
+                            tooltip={
+                              PARAMETER_METADATA.firstFrameAndResetCache.tooltip
+                            }
                             className="text-sm font-medium"
                           />
                           <Button

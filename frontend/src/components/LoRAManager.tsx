@@ -213,7 +213,9 @@ export function LoRAManager({
             <MIDIMappable
               parameterId={`lora_scale_${lora.id}`}
               range={{ min: -10, max: 10 }}
-              disabled={(lora.mergeMode || loraMergeStrategy) !== "runtime_peft"}
+              disabled={
+                (lora.mergeMode || loraMergeStrategy) !== "runtime_peft"
+              }
             >
               <div className="flex items-center gap-2">
                 <LabelWithTooltip
