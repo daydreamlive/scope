@@ -35,6 +35,7 @@ import {
 } from "../lib/schemaSettings";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import { MIDIMappable } from "./MIDIMappable";
 
 interface InputAndControlsPanelProps {
   className?: string;
@@ -756,26 +757,31 @@ export function InputAndControlsPanel({
                   </Select>
                 </div>
                 <div className="flex items-center justify-end">
-                  <Button
-                    onMouseDown={e => {
-                      e.preventDefault();
-                      onSendExtensionFrames?.();
-                    }}
-                    disabled={
-                      isDownloading ||
-                      !isStreaming ||
-                      (!firstFrameImage && !lastFrameImage)
-                    }
-                    size="sm"
-                    className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                    title={
-                      !isStreaming
-                        ? "Start streaming to send extension frames"
-                        : "Send extension frames"
-                    }
+                  <MIDIMappable
+                    actionId="first_frame_and_reset_cache"
+                    mappingType="trigger"
                   >
-                    <ArrowUp className="h-4 w-4" />
-                  </Button>
+                    <Button
+                      onMouseDown={e => {
+                        e.preventDefault();
+                        onSendExtensionFrames?.();
+                      }}
+                      disabled={
+                        isDownloading ||
+                        !isStreaming ||
+                        (!firstFrameImage && !lastFrameImage)
+                      }
+                      size="sm"
+                      className="rounded-full w-8 h-8 p-0 bg-black hover:bg-gray-800 text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                      title={
+                        !isStreaming
+                          ? "Start streaming to send extension frames"
+                          : "Send first frame + reset cache"
+                      }
+                    >
+                      <ArrowUp className="h-4 w-4" />
+                    </Button>
+                  </MIDIMappable>
                 </div>
               </div>
             )}

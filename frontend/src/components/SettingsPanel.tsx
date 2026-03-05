@@ -312,6 +312,7 @@ interface SettingsPanelProps {
   kvCacheAttentionBias?: number;
   onKvCacheAttentionBiasChange?: (bias: number) => void;
   onResetCache?: () => void;
+  onFirstFrameAndResetCache?: () => void;
   loras?: LoRAConfig[];
   onLorasChange: (loras: LoRAConfig[]) => void;
   loraMergeStrategy?: LoraMergeStrategy;
@@ -381,6 +382,7 @@ export function SettingsPanel({
   kvCacheAttentionBias = 0.3,
   onKvCacheAttentionBiasChange,
   onResetCache,
+  onFirstFrameAndResetCache,
   loras = [],
   onLorasChange,
   loraMergeStrategy = "permanent_merge",
@@ -720,6 +722,7 @@ export function SettingsPanel({
               manageCache,
               onManageCacheChange,
               onResetCache,
+              onFirstFrameAndResetCache,
               kvCacheAttentionBiasSlider,
               denoisingSteps,
               onDenoisingStepsChange,
@@ -1061,38 +1064,18 @@ export function SettingsPanel({
                       )}
 
                       <MIDIMappable
-                        parameterId="manage_cache"
-                        mappingType="toggle"
+                        actionId="first_frame_and_reset_cache"
+                        mappingType="trigger"
                       >
                         <div className="flex items-center justify-between gap-2">
                           <LabelWithTooltip
-                            label={PARAMETER_METADATA.manageCache.label}
-                            tooltip={PARAMETER_METADATA.manageCache.tooltip}
-                            className="text-sm font-medium"
-                          />
-                          <Toggle
-                            pressed={manageCache}
-                            onPressedChange={onManageCacheChange || (() => {})}
-                            variant="outline"
-                            size="sm"
-                            className="h-7"
-                          >
-                            {manageCache ? "ON" : "OFF"}
-                          </Toggle>
-                        </div>
-                      </MIDIMappable>
-
-                      <MIDIMappable actionId="reset_cache">
-                        <div className="flex items-center justify-between gap-2">
-                          <LabelWithTooltip
                             label={PARAMETER_METADATA.resetCache.label}
-                            tooltip={PARAMETER_METADATA.resetCache.tooltip}
+                            tooltip={PARAMETER_METADATA.firstFrameAndResetCache.tooltip}
                             className="text-sm font-medium"
                           />
                           <Button
                             type="button"
-                            onClick={onResetCache || (() => {})}
-                            disabled={manageCache}
+                            onClick={onFirstFrameAndResetCache || (() => {})}
                             variant="outline"
                             size="sm"
                             className="h-7 w-7 p-0"

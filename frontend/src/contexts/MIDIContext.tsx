@@ -96,6 +96,8 @@ interface MIDIProviderProps {
   currentNoiseController?: boolean;
   currentManageCache?: boolean;
   onSwitchPrompt?: (index: number) => void;
+  onPlayPauseToggle?: () => void;
+  onFirstFrameAndResetCache?: () => void;
 }
 
 export function MIDIProvider({
@@ -106,6 +108,8 @@ export function MIDIProvider({
   currentNoiseController,
   currentManageCache,
   onSwitchPrompt,
+  onPlayPauseToggle,
+  onFirstFrameAndResetCache,
 }: MIDIProviderProps) {
   const [midiEnabled, setMidiEnabledState] = useState(loadMIDIEnabled);
   const [selectedDeviceId, setSelectedDeviceIdState] =
@@ -419,6 +423,8 @@ export function MIDIProvider({
     currentManageCache,
     onSwitchPrompt,
     onParameterActivity: markParameterActive,
+    onPlayPauseToggle,
+    onFirstFrameAndResetCache,
   });
 
   useEffect(() => {

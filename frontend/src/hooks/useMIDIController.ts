@@ -1,6 +1,8 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import type { MIDIMappingProfile } from "../types/midi";
 
+const CONTINUOUS_THROTTLE_MS = 16; // ~60Hz max for continuous CC sends
+
 export interface MIDIControllerConfig {
   mappingProfile?: MIDIMappingProfile;
   enabled?: boolean;
@@ -15,6 +17,8 @@ export interface MIDIControllerConfig {
   currentManageCache?: boolean;
   onSwitchPrompt?: (index: number) => void;
   onParameterActivity?: (paramId: string) => void;
+  onPlayPauseToggle?: () => void;
+  onFirstFrameAndResetCache?: () => void;
 }
 
 export function useMIDIController(
@@ -32,6 +36,8 @@ export function useMIDIController(
     currentManageCache,
     onSwitchPrompt,
     onParameterActivity,
+    onPlayPauseToggle,
+    onFirstFrameAndResetCache,
   } = config || {};
 
   const [midiAccess, setMidiAccess] = useState<MIDIAccess | null>(null);
@@ -43,6 +49,10 @@ export function useMIDIController(
   const enumStatesRef = useRef<Map<string, number>>(new Map());
   const lastCCStateRef = useRef<Map<string, number>>(new Map());
   const learningMappingIndexRef = useRef<number | null>(null);
+  const throttleTimersRef = useRef<Map<string, number>>(new Map());
+  const pendingUpdatesRef = useRef<Map<string, Record<string, unknown>>>(
+    new Map()
+  );
 
   // Sync toggle states from current settings
   useEffect(() => {
@@ -63,6 +73,8 @@ export function useMIDIController(
   const onLearnCompleteRef = useRef(onLearnComplete);
   const onSwitchPromptRef = useRef(onSwitchPrompt);
   const onParameterActivityRef = useRef(onParameterActivity);
+  const onPlayPauseToggleRef = useRef(onPlayPauseToggle);
+  const onFirstFrameAndResetCacheRef = useRef(onFirstFrameAndResetCache);
 
   sendParameterUpdateRef.current = sendParameterUpdate;
   enabledRef.current = enabled;
@@ -72,6 +84,29 @@ export function useMIDIController(
   onLearnCompleteRef.current = onLearnComplete;
   onSwitchPromptRef.current = onSwitchPrompt;
   onParameterActivityRef.current = onParameterActivity;
+  onPlayPauseToggleRef.current = onPlayPauseToggle;
+  onFirstFrameAndResetCacheRef.current = onFirstFrameAndResetCache;
+
+  // Throttled send for continuous CC — batches rapid updates per parameter key
+  const throttledSendRef = useRef(
+    (paramKey: string, params: Record<string, unknown>) => {
+      pendingUpdatesRef.current.set(paramKey, params);
+      if (throttleTimersRef.current.has(paramKey)) return;
+      // Send immediately on first call, then throttle subsequent
+      sendParameterUpdateRef.current(params);
+      throttleTimersRef.current.set(
+        paramKey,
+        window.setTimeout(() => {
+          throttleTimersRef.current.delete(paramKey);
+          const pending = pendingUpdatesRef.current.get(paramKey);
+          if (pending) {
+            pendingUpdatesRef.current.delete(paramKey);
+            sendParameterUpdateRef.current(pending);
+          }
+        }, CONTINUOUS_THROTTLE_MS)
+      );
+    }
+  );
 
   const updateDeviceList = useCallback((access: MIDIAccess) => {
     const inputs: MIDIInput[] = [];
@@ -94,16 +129,30 @@ export function useMIDIController(
       return;
     }
 
+    let pollTimer: number | undefined;
     navigator
       .requestMIDIAccess({ sysex: false })
       .then(access => {
         setMidiAccess(access);
         updateDeviceList(access);
         access.addEventListener("statechange", () => updateDeviceList(access));
+
+        // Poll briefly to catch already-connected devices that enumerate late
+        let polls = 0;
+        const poll = () => {
+          polls++;
+          updateDeviceList(access);
+          if (polls < 5) pollTimer = window.setTimeout(poll, 200);
+        };
+        pollTimer = window.setTimeout(poll, 100);
       })
       .catch(err => {
         setError(`Failed to access MIDI: ${err.message}`);
       });
+
+    return () => {
+      if (pollTimer !== undefined) clearTimeout(pollTimer);
+    };
   }, [enabled, updateDeviceList]);
 
   useEffect(() => {
@@ -215,16 +264,18 @@ export function useMIDIController(
           }
 
           onDenoisingStepsChange(steps);
-          sendParameterUpdate({ denoising_step_list: steps });
+          throttledSendRef.current(`denoising_step_list[${idx}]`, {
+            denoising_step_list: steps,
+          });
           notifyActivity?.(`denoising_step_list[${idx}]`);
           continue;
         }
 
-        // Scalar parameter
+        // Scalar parameter — throttle to avoid flooding the data channel
         const normalized = value / 127.0;
         const min = mapping.range?.min ?? 0;
         const max = mapping.range?.max ?? 1;
-        sendParameterUpdate({
+        throttledSendRef.current(mapping.target.parameter, {
           [mapping.target.parameter]: min + normalized * (max - min),
         });
         notifyActivity?.(mapping.target.parameter);
@@ -292,7 +343,9 @@ export function useMIDIController(
           } else if (target.action === "reset_cache") {
             sendParameterUpdate({ reset_cache: true });
           } else if (target.action === "toggle_pause") {
-            sendParameterUpdate({ paused: true });
+            onPlayPauseToggleRef.current?.();
+          } else if (target.action === "first_frame_and_reset_cache") {
+            onFirstFrameAndResetCacheRef.current?.();
           } else if (target.action === "add_denoising_step") {
             if (!currentDenoisingSteps || !onDenoisingStepsChange) continue;
             if (currentDenoisingSteps.length >= 10) continue;
@@ -330,6 +383,15 @@ export function useMIDIController(
     selectedInput.addEventListener("midimessage", handler);
     return () => selectedInput.removeEventListener("midimessage", handler);
   }, [selectedInput, handleMIDIMessage]);
+
+  // Cleanup throttle timers on unmount
+  useEffect(() => {
+    const timers = throttleTimersRef.current;
+    return () => {
+      timers.forEach(timer => clearTimeout(timer));
+      timers.clear();
+    };
+  }, []);
 
   const startLearn = useCallback((mappingIndex: number) => {
     learningMappingIndexRef.current = mappingIndex;

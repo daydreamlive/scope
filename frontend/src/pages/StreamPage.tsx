@@ -1818,6 +1818,11 @@ export function StreamPage() {
           }
         }
       }}
+      onPlayPauseToggle={handlePlayPauseToggle}
+      onFirstFrameAndResetCache={() => {
+        handleSendExtensionFrames();
+        sendParameterUpdate({ reset_cache: true });
+      }}
     >
       <div className="h-screen flex flex-col bg-background">
         {/* Header */}
@@ -2162,6 +2167,10 @@ export function StreamPage() {
             kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
             onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
             onResetCache={handleResetCache}
+            onFirstFrameAndResetCache={() => {
+              handleSendExtensionFrames();
+              sendParameterUpdate({ reset_cache: true });
+            }}
             loras={settings.loras || []}
             onLorasChange={handleLorasChange}
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}

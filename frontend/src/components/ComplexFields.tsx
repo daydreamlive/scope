@@ -57,6 +57,7 @@ export interface SchemaComplexFieldContext {
   manageCache?: boolean;
   onManageCacheChange?: (enabled: boolean) => void;
   onResetCache?: () => void;
+  onFirstFrameAndResetCache?: () => void;
   kvCacheAttentionBiasSlider?: SliderState;
   denoisingSteps?: number[];
   onDenoisingStepsChange?: (steps: number[]) => void;
@@ -193,17 +194,19 @@ export function SchemaComplexField({
                 className="text-xs text-muted-foreground w-16"
               />
               <div className="flex-1 min-w-0">
-                <SliderWithInput
-                  value={ctx.vaceContextScaleSlider.localValue}
-                  onValueChange={ctx.vaceContextScaleSlider.handleValueChange}
-                  onValueCommit={ctx.vaceContextScaleSlider.handleValueCommit}
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  incrementAmount={0.1}
-                  valueFormatter={ctx.vaceContextScaleSlider.formatValue}
-                  inputParser={v => parseFloat(v) || 1.0}
-                />
+                <MIDIMappable parameterId="vace_context_scale">
+                  <SliderWithInput
+                    value={ctx.vaceContextScaleSlider.localValue}
+                    onValueChange={ctx.vaceContextScaleSlider.handleValueChange}
+                    onValueCommit={ctx.vaceContextScaleSlider.handleValueCommit}
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    incrementAmount={0.1}
+                    valueFormatter={ctx.vaceContextScaleSlider.formatValue}
+                    inputParser={v => parseFloat(v) || 1.0}
+                  />
+                </MIDIMappable>
               </div>
             </div>
           </div>
@@ -374,35 +377,19 @@ export function SchemaComplexField({
                 />
               </MIDIMappable>
             )}
-            <MIDIMappable parameterId="manage_cache" mappingType="toggle">
-              <div className="flex items-center justify-between gap-2">
-                <LabelWithTooltip
-                  label={PARAMETER_METADATA.manageCache.label}
-                  tooltip={PARAMETER_METADATA.manageCache.tooltip}
-                  className="text-sm font-medium"
-                />
-                <Toggle
-                  pressed={ctx.manageCache ?? true}
-                  onPressedChange={ctx.onManageCacheChange ?? (() => {})}
-                  variant="outline"
-                  size="sm"
-                  className="h-7"
-                >
-                  {(ctx.manageCache ?? true) ? "ON" : "OFF"}
-                </Toggle>
-              </div>
-            </MIDIMappable>
-            <MIDIMappable actionId="reset_cache">
+            <MIDIMappable
+              actionId="first_frame_and_reset_cache"
+              mappingType="trigger"
+            >
               <div className="flex items-center justify-between gap-2">
                 <LabelWithTooltip
                   label={PARAMETER_METADATA.resetCache.label}
-                  tooltip={PARAMETER_METADATA.resetCache.tooltip}
+                  tooltip={PARAMETER_METADATA.firstFrameAndResetCache.tooltip}
                   className="text-sm font-medium"
                 />
                 <Button
                   type="button"
-                  onClick={ctx.onResetCache ?? (() => {})}
-                  disabled={ctx.manageCache}
+                  onClick={ctx.onFirstFrameAndResetCache ?? (() => {})}
                   variant="outline"
                   size="sm"
                   className="h-7 w-7 p-0"
