@@ -86,7 +86,7 @@ class LongLiveConfig(BasePipelineConfig):
         default=42,
         ge=0,
         description="Base random seed for reproducible generation",
-        json_schema_extra=ui_field_config(order=5, is_load_param=True, label="Seed"),
+        json_schema_extra=ui_field_config(order=5, label="Seed"),
     )
     manage_cache: bool = Field(
         default=True,
