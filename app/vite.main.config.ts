@@ -3,6 +3,9 @@ import path from 'path';
 
 // https://vitejs.dev/config
 export default defineConfig({
+  define: {
+    __SCOPE_CLOUD_APP_ID__: JSON.stringify(process.env.SCOPE_CLOUD_APP_ID || ''),
+  },
   resolve: {
     // Electron's main process runs in Node.js, so we need Node.js-compatible modules
     browserField: false,
