@@ -2432,7 +2432,11 @@ async def reload_plugin(
 
 
 @app.post("/api/v1/graph")
-async def set_graph_config(request: Request):
+@cloud_proxy()
+async def set_graph_config(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Accept and store a graph configuration.
 
     Validates the structure and checks that pipeline_ids exist in the registry.
@@ -2443,7 +2447,7 @@ async def set_graph_config(request: Request):
     from .graph_state import set_api_graph
 
     try:
-        body = await request.json()
+        body = await http_request.json()
         graph = GraphConfig.model_validate(body)
 
         # Structural validation
@@ -2479,7 +2483,11 @@ async def set_graph_config(request: Request):
 
 
 @app.get("/api/v1/graph")
-async def get_graph_config():
+@cloud_proxy()
+async def get_graph_config(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Return the current graph configuration.
 
     Priority: API-set graph > none.
@@ -2497,7 +2505,11 @@ async def get_graph_config():
 
 
 @app.delete("/api/v1/graph")
-async def clear_graph_config():
+@cloud_proxy()
+async def clear_graph_config(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Clear the API-set graph, reverting to fallback behavior."""
     from .graph_state import clear_api_graph
 

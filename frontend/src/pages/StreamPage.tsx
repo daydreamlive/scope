@@ -10,6 +10,7 @@ import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
 import { WorkflowImportDialog } from "../components/WorkflowImportDialog";
 import type { WorkflowPromptState } from "../lib/workflowSettings";
 import { GraphEditor } from "../components/graph/GraphEditor";
+import type { GraphEditorHandle } from "../components/graph/GraphEditor";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { LogPanel } from "../components/LogPanel";
@@ -220,6 +221,7 @@ export function StreamPage() {
 
   // Graph mode state
   const [graphMode, setGraphMode] = useState(false);
+  const graphEditorRef = useRef<GraphEditorHandle>(null);
 
   // When true, pipeline controls are disabled in Perform Mode
   // (set when user edits anything in Graph Mode, cleared when user clicks Clear)
@@ -376,7 +378,7 @@ export function StreamPage() {
     onStreamUpdate: updateVideoTrack,
     onStopStream: stopStream,
     shouldReinitialize: shouldReinitializeVideo,
-    enabled: settings.inputMode === "video",
+    enabled: settings.inputMode === "video" || graphMode,
     // Sync output resolution when user uploads a custom video
     // Store the custom resolution so it persists across mode/pipeline changes
     onCustomVideoResolution: resolution => {
@@ -1357,7 +1359,7 @@ export function StreamPage() {
     }
 
     // Use override pipeline ID if provided, otherwise use current settings
-    const pipelineIdToUse = overridePipelineId || settings.pipelineId;
+    let pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
     try {
       // Build pipeline chain: preprocessors + main pipeline + postprocessors
@@ -1368,6 +1370,28 @@ export function StreamPage() {
       pipelineIds.push(pipelineIdToUse);
       if (settings.postprocessorIds && settings.postprocessorIds.length > 0) {
         pipelineIds.push(...settings.postprocessorIds);
+      }
+
+      // In graph mode, extract pipeline IDs from the graph's pipeline nodes
+      // instead of using the perform-mode settings
+      if (graphMode) {
+        try {
+          const graphResponse = await getGraph();
+          if (graphResponse.graph) {
+            const graphPipelineIds = graphResponse.graph.nodes
+              .filter(
+                (n) => n.type === "pipeline" && n.pipeline_id
+              )
+              .map((n) => n.pipeline_id as string);
+            if (graphPipelineIds.length > 0) {
+              pipelineIds.length = 0;
+              pipelineIds.push(...graphPipelineIds);
+              pipelineIdToUse = graphPipelineIds[0];
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to extract pipeline IDs from graph:", err);
+        }
       }
 
       // Check if models are needed but not downloaded for all pipelines in the chain
@@ -1789,6 +1813,9 @@ export function StreamPage() {
                 );
                 await setGraph(graph);
               }
+              // Always refresh the graph editor so it picks up the
+              // current graph (either existing or just-created)
+              graphEditorRef.current?.refreshGraph();
             } catch {
               /* ignore */
             }
@@ -1851,6 +1878,7 @@ export function StreamPage() {
         }
       >
         <GraphEditor
+          ref={graphEditorRef}
           isStreaming={isStreaming}
           isConnecting={isConnecting || isCloudConnecting}
           isLoading={isPipelineLoading || isDownloading}

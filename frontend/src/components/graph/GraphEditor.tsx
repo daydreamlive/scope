@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { forwardRef, useCallback, useImperativeHandle, useRef, useState } from "react";
 import {
   ReactFlow,
   Controls,
@@ -44,6 +44,10 @@ const edgeTypes = {
   default: CustomEdge,
 };
 
+export interface GraphEditorHandle {
+  refreshGraph: () => void;
+}
+
 interface GraphEditorProps {
   isStreaming?: boolean;
   isConnecting?: boolean;
@@ -72,7 +76,7 @@ interface GraphEditorProps {
   syphonOutputAvailable?: boolean;
 }
 
-export function GraphEditor({
+export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(function GraphEditor({
   isStreaming = false,
   isConnecting = false,
   isLoading = false,
@@ -95,7 +99,7 @@ export function GraphEditor({
   spoutOutputAvailable = false,
   ndiOutputAvailable = false,
   syphonOutputAvailable = false,
-}: GraphEditorProps) {
+}, ref) {
   // --- Core graph state, pipeline schemas, load/save, import/export ---
   const {
     nodes,
@@ -119,6 +123,7 @@ export function GraphEditor({
     handleClear,
     handleImport,
     handleExport,
+    refreshGraph,
   } = useGraphState(
     {
       onNodeParameterChange,
@@ -141,6 +146,9 @@ export function GraphEditor({
       syphonOutputAvailable,
     }
   );
+
+  // Expose refreshGraph to parent via ref
+  useImperativeHandle(ref, () => ({ refreshGraph }), [refreshGraph]);
 
   // --- Context menu & add-node modal state ---
   const [contextMenu, setContextMenu] = useState<{
@@ -428,4 +436,4 @@ export function GraphEditor({
       </div>
     </div>
   );
-}
+});

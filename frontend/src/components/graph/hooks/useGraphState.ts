@@ -375,8 +375,8 @@ export function useGraphState(
     );
   }, [nodeParams, setNodes]);
 
-  // Load graph from backend
-  useEffect(() => {
+  // Reload graph from backend (shared by initial load and manual refresh)
+  const loadGraphFromBackend = useCallback(() => {
     if (Object.keys(portsMap).length === 0) return;
 
     getGraph()
@@ -403,6 +403,11 @@ export function useGraphState(
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portsMap]);
+
+  // Load graph from backend on mount / when portsMap changes
+  useEffect(() => {
+    loadGraphFromBackend();
+  }, [loadGraphFromBackend]);
 
   // Notify parent on graph changes
   useEffect(() => {
@@ -523,5 +528,6 @@ export function useGraphState(
     handleClear,
     handleImport,
     handleExport,
+    refreshGraph: loadGraphFromBackend,
   };
 }
