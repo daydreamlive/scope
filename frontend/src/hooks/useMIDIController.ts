@@ -328,6 +328,7 @@ export function useMIDIController(
           notifyAct?.(key);
         } else if (mapping.type === "trigger") {
           const target = mapping.target;
+          const actionId = target.action ?? "";
 
           if (
             target.action === "switch_prompt" &&
@@ -361,6 +362,8 @@ export function useMIDIController(
             onDenoisingStepsChange(steps);
             sendParameterUpdate({ denoising_step_list: steps });
           }
+
+          if (actionId) notifyAct?.(actionId);
         } else if (mapping.type === "enum_cycle") {
           if (!mapping.target.parameter || !mapping.target.values) continue;
           const key = mapping.target.parameter;

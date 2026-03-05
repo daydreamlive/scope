@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useEffect, useRef, useState, useMemo } from "react";
 import { useMIDI } from "../contexts/MIDIContext";
 import { cn } from "../lib/utils";
 
@@ -71,13 +71,17 @@ export function MIDIMappable({
     }
   };
 
+  const wasLearningRef = useRef(false);
   useEffect(() => {
-    if (isMapped && !isLearning && learningParameter === null) {
+    if (isLearning) {
+      wasLearningRef.current = true;
+    } else if (wasLearningRef.current && isMapped) {
+      wasLearningRef.current = false;
       setJustMapped(true);
       const timer = setTimeout(() => setJustMapped(false), 1000);
       return () => clearTimeout(timer);
     }
-  }, [isMapped, isLearning, learningParameter]);
+  }, [isMapped, isLearning]);
 
   useEffect(() => {
     return () => {
