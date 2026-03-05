@@ -259,6 +259,8 @@ server_start_time = time.time()
 cloud_connection_manager = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
 kafka_publisher = None
+# Global OSC server instance
+osc_server = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -283,7 +285,12 @@ async def lifespan(app: FastAPI):
     from .webrtc import WebRTCManager
 
     # Startup
-    global webrtc_manager, pipeline_manager, cloud_connection_manager, kafka_publisher
+    global \
+        webrtc_manager, \
+        pipeline_manager, \
+        cloud_connection_manager, \
+        kafka_publisher, \
+        osc_server
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -334,6 +341,15 @@ async def lifespan(app: FastAPI):
             kafka_publisher = None
             logger.warning("Kafka publisher failed to start")
 
+    # Start OSC UDP server on the same port as the HTTP API
+    from .osc_server import OSCServer
+
+    osc_host = os.getenv("SCOPE_HOST", "0.0.0.0")
+    osc_port = int(os.getenv("SCOPE_PORT", "8000"))
+    osc_server = OSCServer(osc_host, osc_port)
+    osc_server.set_managers(pipeline_manager, webrtc_manager)
+    await osc_server.start()
+
     # Syphon server discovery (macOS only): create the ObjC singleton and do
     # an initial NSRunLoop pump so servers are available when the UI first loads.
     # Subsequent refreshes pump on demand in the list_input_sources endpoint.
@@ -353,6 +369,11 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if osc_server:
+        logger.info("Shutting down OSC server...")
+        await osc_server.stop()
+        logger.info("OSC server shutdown complete")
+
     if webrtc_manager:
         logger.info("Shutting down WebRTC manager...")
         await webrtc_manager.stop()
@@ -388,6 +409,12 @@ def get_pipeline_manager() -> "PipelineManager":
 def get_cloud_connection_manager() -> "CloudConnectionManager":
     """Dependency to get cloud connection manager instance."""
     return cloud_connection_manager
+
+
+def get_osc_server():
+    """Dependency to get OSC server instance."""
+
+    return osc_server
 
 
 app = FastAPI(
@@ -623,6 +650,44 @@ async def get_pipeline_schemas(
             pipelines[pipeline_id] = schema_data
 
     return PipelineSchemasResponse(pipelines=pipelines)
+
+
+# ---------------------------------------------------------------------------
+# OSC endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/osc/status")
+async def osc_status():
+    """Return current OSC server status (port, listening state)."""
+
+    srv = get_osc_server()
+    if srv is None:
+        return {"enabled": False, "listening": False, "port": None, "host": None}
+    return srv.status()
+
+
+@app.get("/api/v1/osc/paths")
+async def osc_paths(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Return all OSC paths split into active / available sections."""
+    from .osc_docs import get_osc_paths
+
+    return get_osc_paths(pm)
+
+
+@app.get("/api/v1/osc/docs")
+async def osc_docs_page(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Serve a self-contained HTML reference page for OSC control."""
+    from .osc_docs import render_osc_docs_html
+
+    srv = get_osc_server()
+    port = srv.port if srv else 8000
+    html_content = render_osc_docs_html(pm, port)
+    return Response(content=html_content, media_type="text/html")
 
 
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
@@ -2399,6 +2464,10 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     from scope.core.pipelines.registry import (
         PipelineRegistry,  # noqa: F401 - imported for side effects (registry initialization)
     )
+
+    # Propagate host/port so lifespan can read them (e.g. for OSC UDP bind)
+    os.environ["SCOPE_HOST"] = host
+    os.environ["SCOPE_PORT"] = str(port)
 
     # Configure static file serving
     configure_static_files()

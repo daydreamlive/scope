@@ -645,6 +645,16 @@ class WebRTCManager:
             logger.error(f"Failed to add ICE candidate to session {session_id}: {e}")
             raise ValueError(f"Invalid ICE candidate: {e}") from e
 
+    def broadcast_parameter_update(self, parameters: dict) -> None:
+        """Send a parameter update to all active sessions (e.g. from OSC)."""
+        for session in self.sessions.values():
+            if session.pc.connectionState in ("closed", "failed"):
+                continue
+            if "paused" in parameters and session.video_track:
+                session.video_track.pause(parameters["paused"])
+            if session.video_track and hasattr(session.video_track, "frame_processor"):
+                session.video_track.frame_processor.update_parameters(parameters)
+
     async def stop(self):
         """Close and cleanup all sessions."""
         # Close all sessions in parallel
