@@ -35,7 +35,7 @@ export interface PortInfo {
 export interface FlowNodeData {
   label: string;
   pipelineId?: string | null;
-  nodeType: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note";
+  nodeType: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note" | "output";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -71,6 +71,12 @@ export interface FlowNodeData {
   mathOp?: "add" | "subtract" | "multiply" | "divide" | "mod" | "min" | "max" | "power" | "abs" | "negate" | "sqrt" | "floor" | "ceil" | "round";
   /** For note nodes: the note text content */
   noteText?: string;
+  /** For output nodes: sink type (spout, ndi, syphon) */
+  outputSinkType?: string;
+  /** For output nodes: whether the output is enabled */
+  outputSinkEnabled?: boolean;
+  /** For output nodes: the sender name */
+  outputSinkName?: string;
   /** For source nodes: video source mode (video, camera, spout, ndi, syphon) */
   sourceMode?: "video" | "camera" | "spout" | "ndi" | "syphon";
   /** For source nodes: source name/identifier for Spout/NDI (sender name for Spout, identifier for NDI) */
@@ -341,7 +347,7 @@ export function flowToGraphConfig(
   edges: Edge[]
 ): GraphConfig {
   const graphNodes: GraphNode[] = nodes
-    .filter(n => n.data.nodeType !== "value" && n.data.nodeType !== "control" && n.data.nodeType !== "math" && n.data.nodeType !== "note") // Filter out frontend-only nodes
+    .filter(n => n.data.nodeType !== "value" && n.data.nodeType !== "control" && n.data.nodeType !== "math" && n.data.nodeType !== "note" && n.data.nodeType !== "output") // Filter out frontend-only nodes
     .map(n => {
       // Read dimensions: node.width/height (set by NodeResizer) > measured > style
       const w = n.width ?? n.measured?.width ?? (typeof n.style?.width === "number" ? n.style.width : undefined);

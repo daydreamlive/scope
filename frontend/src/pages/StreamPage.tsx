@@ -3,7 +3,7 @@ import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
-import { OutputsPanel } from "../components/OutputsPanel";
+// OutputsPanel removed from graph mode - outputs managed via output nodes in graph
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
@@ -148,8 +148,7 @@ export function StreamPage() {
   const syphonAvailable = availableInputSources.some(
     s => s.source_id === "syphon" && s.available
   );
-  const hasAvailableOutputs =
-    spoutAvailable || ndiOutputAvailable || syphonOutputAvailable;
+  // Output availability flags are passed to GraphEditor for output nodes
 
   // Combined refresh function for pipeline schemas, pipelines list, and hardware info
   const handlePipelinesRefresh = useCallback(async () => {
@@ -1852,18 +1851,11 @@ export function StreamPage() {
             onSpoutSourceChange={handleSpoutSourceChange}
             onNdiSourceChange={handleNdiSourceChange}
             onSyphonSourceChange={handleSyphonSourceChange}
+            onOutputSinkChange={handleOutputSinkChange}
+            spoutOutputAvailable={spoutAvailable}
+            ndiOutputAvailable={ndiOutputAvailable}
+            syphonOutputAvailable={syphonOutputAvailable}
           />
-          {hasAvailableOutputs && (
-            <OutputsPanel
-              className="flex-shrink-0"
-              outputSinks={settings.outputSinks}
-              onOutputSinkChange={handleOutputSinkChange}
-              spoutAvailable={spoutAvailable}
-              ndiAvailable={ndiOutputAvailable}
-              syphonAvailable={syphonOutputAvailable}
-              isStreaming={isStreaming}
-            />
-          )}
         </div>
       ) : (
         <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">

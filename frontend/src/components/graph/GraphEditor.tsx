@@ -19,6 +19,7 @@ import { ValueNode } from "./ValueNode";
 import { ControlNode } from "./ControlNode";
 import { MathNode } from "./MathNode";
 import { NoteNode } from "./NoteNode";
+import { OutputNode } from "./OutputNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -48,6 +49,7 @@ const nodeTypes = {
   control: ControlNode,
   math: MathNode,
   note: NoteNode,
+  output: OutputNode,
 };
 
 const edgeTypes = {
@@ -129,6 +131,10 @@ interface GraphEditorProps {
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
+  onOutputSinkChange?: (sinkType: string, config: { enabled: boolean; name: string }) => void;
+  spoutOutputAvailable?: boolean;
+  ndiOutputAvailable?: boolean;
+  syphonOutputAvailable?: boolean;
 }
 
 export function GraphEditor({
@@ -150,6 +156,10 @@ export function GraphEditor({
   onSpoutSourceChange,
   onNdiSourceChange,
   onSyphonSourceChange,
+  onOutputSinkChange,
+  spoutOutputAvailable = false,
+  ndiOutputAvailable = false,
+  syphonOutputAvailable = false,
 }: GraphEditorProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<FlowNodeData>>(
     []
@@ -256,6 +266,9 @@ export function GraphEditor({
   const onSyphonSourceChangeRef = useRef(onSyphonSourceChange);
   onSyphonSourceChangeRef.current = onSyphonSourceChange;
 
+  const onOutputSinkChangeRef = useRef(onOutputSinkChange);
+  onOutputSinkChangeRef.current = onOutputSinkChange;
+
   const onGraphChangeRef = useRef(onGraphChange);
   onGraphChangeRef.current = onGraphChange;
 
@@ -346,10 +359,16 @@ export function GraphEditor({
             data: { ...n.data, remoteStream },
           };
         }
+        if (n.data.nodeType === "output") {
+          return {
+            ...n,
+            data: { ...n.data, spoutAvailable: spoutOutputAvailable, ndiAvailable: ndiOutputAvailable, syphonAvailable: syphonOutputAvailable },
+          };
+        }
         return n;
       })
     );
-  }, [availablePipelineIds, portsMap, handlePipelineSelect, setNodes, pipelineSchemas, handleNodeParameterChange, localStream, remoteStream, spoutAvailable, ndiAvailable, syphonAvailable]);
+  }, [availablePipelineIds, portsMap, handlePipelineSelect, setNodes, pipelineSchemas, handleNodeParameterChange, localStream, remoteStream, spoutAvailable, ndiAvailable, syphonAvailable, spoutOutputAvailable, ndiOutputAvailable, syphonOutputAvailable]);
 
   // Sync nodeParams to pipeline node parameterValues
   useEffect(() => {
@@ -419,6 +438,9 @@ export function GraphEditor({
           }
           if (n.data.nodeType === "sink") {
             return { ...n, data: { ...n.data, remoteStream } };
+          }
+          if (n.data.nodeType === "output") {
+            return { ...n, data: { ...n.data, spoutAvailable: spoutOutputAvailable, ndiAvailable: ndiOutputAvailable, syphonAvailable: syphonOutputAvailable } };
           }
           return n;
         });
@@ -812,8 +834,31 @@ export function GraphEditor({
     [existingIds, nodes.length, setNodes]
   );
 
+  const addOutputNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      // Pick a default type based on output availability
+      const defaultType = spoutOutputAvailable ? "spout" : ndiOutputAvailable ? "ndi" : syphonOutputAvailable ? "syphon" : "spout";
+      const defaultNames: Record<string, string> = { spout: "ScopeOut", ndi: "Scope", syphon: "Scope" };
+      const id = generateNodeId("output_sink", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "output",
+        position: position ?? { x: 900, y: 50 + nodes.length * 100 },
+        data: {
+          label: "Output",
+          nodeType: "output",
+          outputSinkType: defaultType,
+          outputSinkEnabled: false,
+          outputSinkName: defaultNames[defaultType] || "Scope",
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes, spoutOutputAvailable, ndiOutputAvailable, syphonOutputAvailable]
+  );
+
   const handleNodeTypeSelect = useCallback(
-    (type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note", subType?: string) => {
+    (type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note" | "output", subType?: string) => {
       if (!pendingNodePosition) return;
 
       switch (type) {
@@ -842,11 +887,14 @@ export function GraphEditor({
         case "note":
           addNoteNode(pendingNodePosition);
           break;
+        case "output":
+          addOutputNode(pendingNodePosition);
+          break;
       }
 
       setPendingNodePosition(null);
     },
-    [pendingNodePosition, addSourceNode, addPipelineNode, addSinkNode, addValueNode, addControlNode, addMathNode, addNoteNode]
+    [pendingNodePosition, addSourceNode, addPipelineNode, addSinkNode, addValueNode, addControlNode, addMathNode, addNoteNode, addOutputNode]
   );
 
   const handleDeleteNode = useCallback(
@@ -929,6 +977,39 @@ export function GraphEditor({
       }
     }
   }, [nodes, edges, findConnectedPipelineParams, resolveBackendId]);
+
+  // Sync output node configs to onOutputSinkChange
+  const prevOutputConfigsRef = useRef<string>("");
+  useEffect(() => {
+    const outputNodes = nodes.filter(n => n.data.nodeType === "output");
+    // Build a serializable config snapshot
+    const configs = outputNodes.map(n => ({
+      type: (n.data.outputSinkType as string) || "spout",
+      enabled: (n.data.outputSinkEnabled as boolean) ?? false,
+      name: (n.data.outputSinkName as string) || "Scope",
+    }));
+    const configKey = JSON.stringify(configs);
+    if (configKey === prevOutputConfigsRef.current) return;
+    prevOutputConfigsRef.current = configKey;
+
+    if (!onOutputSinkChangeRef.current) return;
+
+    // Collect all output sink types we've seen from nodes
+    const allSinkTypes = new Set(["spout", "ndi", "syphon"]);
+    // Build per-type config (last node of each type wins if duplicates)
+    const sinkConfigs: Record<string, { enabled: boolean; name: string }> = {};
+    for (const c of configs) {
+      sinkConfigs[c.type] = { enabled: c.enabled, name: c.name };
+    }
+    // For types without an output node, disable them
+    for (const sinkType of allSinkTypes) {
+      if (!sinkConfigs[sinkType]) {
+        onOutputSinkChangeRef.current(sinkType, { enabled: false, name: "" });
+      } else {
+        onOutputSinkChangeRef.current(sinkType, sinkConfigs[sinkType]);
+      }
+    }
+  }, [nodes]);
 
   // Keyboard shortcut: Tab to open Add Node modal at viewport center
   useEffect(() => {
@@ -1039,6 +1120,9 @@ export function GraphEditor({
             }
             if (n.data.nodeType === "sink") {
               return { ...n, data: { ...n.data, remoteStream } };
+            }
+            if (n.data.nodeType === "output") {
+              return { ...n, data: { ...n.data, spoutAvailable: spoutOutputAvailable, ndiAvailable: ndiOutputAvailable, syphonAvailable: syphonOutputAvailable } };
             }
             return n;
           });

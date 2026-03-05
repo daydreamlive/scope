@@ -10,11 +10,11 @@ import {
 interface AddNodeModalProps {
   open: boolean;
   onClose: () => void;
-  onSelectNodeType: (type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note", subType?: string) => void;
+  onSelectNodeType: (type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note" | "output", subType?: string) => void;
 }
 
 interface NodeCatalogItem {
-  type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note";
+  type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note" | "output";
   subType?: string;
   name: string;
   description: string;
@@ -26,6 +26,7 @@ const NODE_CATALOG: NodeCatalogItem[] = [
   { type: "source", name: "Source", description: "Input node for the workflow", color: "#4ade80", category: "I/O" },
   { type: "pipeline", name: "Pipeline", description: "Processing pipeline node", color: "#60a5fa", category: "I/O" },
   { type: "sink", name: "Sink", description: "Output node for the workflow", color: "#fb923c", category: "I/O" },
+  { type: "output", name: "Output", description: "Send video to Spout, NDI, or Syphon receivers", color: "#f87171", category: "I/O" },
   { type: "value", subType: "string", name: "String", description: "Static text value", color: "#fbbf24", category: "Values" },
   { type: "value", subType: "number", name: "Number", description: "Static numeric value", color: "#38bdf8", category: "Values" },
   { type: "value", subType: "boolean", name: "Boolean", description: "True / false value", color: "#34d399", category: "Values" },

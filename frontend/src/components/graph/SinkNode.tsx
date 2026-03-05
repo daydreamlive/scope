@@ -49,6 +49,13 @@ export function SinkNode({ data, selected }: NodeProps<SinkNodeType>) {
         className="!w-2 !h-2 !border-0"
         style={{ top: handleY, left: 8, backgroundColor: "#ffffff" }}
       />
+      <Handle
+        type="source"
+        position={Position.Right}
+        id="stream:out"
+        className="!w-2 !h-2 !border-0"
+        style={{ top: handleY, right: 8, backgroundColor: "#ffffff" }}
+      />
     </NodeCard>
   );
 }
