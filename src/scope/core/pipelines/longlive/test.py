@@ -16,7 +16,7 @@ def generate_video(
     pipeline: LongLivePipeline,
     prompt_texts: list[str],
     output_path: Path,
-    max_output_frames: int = 81,
+    max_output_frames: int = 162,
 ) -> tuple[list[float], list[float]]:
     """Generate a video from a sequence of prompts.
 
@@ -99,7 +99,7 @@ def main():
     )
 
     device = torch.device("cuda")
-    pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)
+    pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16, quantization="fp8_e4m3fn", compile=True)
 
     # Create output directory
     output_dir = Path(__file__).parent / "output"

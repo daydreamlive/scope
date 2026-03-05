@@ -43,6 +43,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         quantization: Quantization | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
+        compile: bool = False,
     ):
         from .modules.causal_model import CausalWanModel
 
@@ -111,28 +112,36 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         generator.model = self._init_loras(config, generator.model)
 
         if quantization == Quantization.FP8_E4M3FN:
-            # Cast before optional quantization
-            generator = generator.to(dtype=dtype)
+            generator = generator.to(device=device, dtype=dtype)
 
             start = time.time()
 
-            from torchao.quantization.quant_api import (
-                Float8DynamicActivationFloat8WeightConfig,
-                PerTensor,
-                quantize_,
-            )
+            from torchao.float8 import Float8LinearConfig, convert_to_float8_training
 
-            # Move to target device during quantization
-            # Defaults to using fp8_e4m3fn for both weights and activations
-            quantize_(
+            def fp8_filter_fn(module: torch.nn.Module, _) -> bool:
+                if not isinstance(module, torch.nn.Linear):
+                    return False
+                if "Float8Linear" in type(module).__name__:
+                    return False
+                return True
+
+            fp8_config = Float8LinearConfig()
+            convert_to_float8_training(
                 generator,
-                Float8DynamicActivationFloat8WeightConfig(granularity=PerTensor()),
-                device=device,
+                config=fp8_config,
+                module_filter_fn=fp8_filter_fn,
             )
 
             print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
         else:
             generator = generator.to(device=device, dtype=dtype)
+
+        if compile:
+            torch._dynamo.config.capture_scalar_outputs = True
+
+            start = time.time()
+            generator = torch.compile(generator, mode="max-autotune-no-cudagraphs", fullgraph=False)
+            print(f"Compiled generator in {time.time() - start:.3f}s")
 
         start = time.time()
         text_encoder = WanTextEncoderWrapper(
@@ -188,6 +197,8 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
 
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
+        if compile:
+            self._warmup()
 
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements based on current mode."""
@@ -240,3 +251,19 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
 
         _, self.state = self.blocks(self.components, self.state)
         return {"video": postprocess_chunk(self.state.values["output_video"])}
+
+    def _warmup(self):
+        start = time.time()
+
+        warmup_prompt = [{"text": "warmup", "weight": 100}]
+        for i in range(self.components.config.local_attn_size // self.components.config.num_frame_per_block):
+            _ = self(prompts=warmup_prompt, init_cache=(i == 0))
+
+        warmup_prompt[0]["text"] = "warmup next"
+        _ = self(prompts=warmup_prompt, init_cache=False)
+
+        self.first_call = True
+        self.last_mode = None
+        self.state.set("current_start_frame", 0)
+
+        print(f"Warmup completed in {time.time() - start:.2f}s")

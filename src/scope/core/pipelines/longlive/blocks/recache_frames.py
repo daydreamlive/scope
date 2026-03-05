@@ -11,6 +11,7 @@ from scope.core.pipelines.wan2_1.utils import (
     initialize_crossattn_cache,
     initialize_kv_cache,
 )
+import time
 
 
 class RecacheFramesBlock(ModularPipelineBlocks):
@@ -170,17 +171,6 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             block_state.recache_buffer[:, -num_recache_frames:]
             .contiguous()
             .to(generator_param.device)
-        )
-
-        # Prepare blockwise causal mask
-        components.generator.model.block_mask = (
-            components.generator.model._prepare_blockwise_causal_attn_mask(
-                device=recache_frames.device,
-                num_frames=num_recache_frames,
-                frame_seqlen=frame_seq_length,
-                num_frame_per_block=components.config.num_frame_per_block,
-                local_attn_size=components.config.local_attn_size,
-            )
         )
 
         context_timestep = (
