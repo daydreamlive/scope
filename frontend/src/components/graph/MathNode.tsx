@@ -45,6 +45,8 @@ const UNARY_OPERATIONS = [
   { value: "floor", label: "Floor" },
   { value: "ceil", label: "Ceil" },
   { value: "round", label: "Round" },
+  { value: "toInt", label: "Float → Int" },
+  { value: "toFloat", label: "Int → Float" },
 ];
 
 const ALL_OPERATIONS = [...BINARY_OPERATIONS, ...UNARY_OPERATIONS];
@@ -91,6 +93,10 @@ function computeResult(
       return Math.ceil(a);
     case "round":
       return Math.round(a);
+    case "toInt":
+      return Math.trunc(a);
+    case "toFloat":
+      return a + 0.0; // identity — ensures float representation
   }
 
   // Binary operations need both A and B

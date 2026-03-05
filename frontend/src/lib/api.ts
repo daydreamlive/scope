@@ -906,6 +906,8 @@ export interface GraphEdge {
 export interface GraphConfig {
   nodes: GraphNode[];
   edges: GraphEdge[];
+  /** Opaque frontend UI state (frontend-only nodes, edges, etc.). Stored and returned as-is by the backend. */
+  ui_state?: Record<string, unknown> | null;
 }
 
 export interface GraphResponse {

@@ -282,10 +282,10 @@ export function GraphEditor({
   nodeParamsRef.current = nodeParams;
 
   const resolveBackendId = useCallback((nodeId: string): string => {
-    const node = nodesRef.current.find(n => n.id === nodeId);
-    if (node?.data.nodeType === "pipeline" && node.data.pipelineId) {
-      return node.data.pipelineId as string;
-    }
+    // Return the graph node ID directly — the backend routes parameter
+    // updates via _processors_by_node_id which is keyed by graph node ID,
+    // not by pipeline_id. Returning pipelineId would cause a lookup miss
+    // and broadcast the update to ALL processors.
     return nodeId;
   }, []);
 

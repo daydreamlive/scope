@@ -97,6 +97,11 @@ class GraphConfig(BaseModel):
 
     nodes: list[GraphNode] = Field(..., description="Graph nodes")
     edges: list[GraphEdge] = Field(..., description="Connections between nodes")
+    ui_state: dict | None = Field(
+        default=None,
+        description="Opaque frontend UI state (frontend-only nodes, edges, etc.). "
+        "Stored and returned as-is, never interpreted by the backend.",
+    )
 
     def get_pipeline_node_ids(self) -> list[str]:
         """Return node ids that are pipeline nodes, in definition order."""

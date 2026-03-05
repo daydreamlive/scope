@@ -90,7 +90,9 @@ export interface FlowNodeData {
     | "sqrt"
     | "floor"
     | "ceil"
-    | "round";
+    | "round"
+    | "toInt"
+    | "toFloat";
   /** For note nodes: the note text content */
   noteText?: string;
   /** For output nodes: sink type (spout, ndi, syphon) */
@@ -389,7 +391,98 @@ export function graphConfigToFlow(
     };
   });
 
+  // Restore frontend-only nodes and edges from ui_state
+  if (graph.ui_state) {
+    const uiNodes = (graph.ui_state.nodes ?? []) as UIStateNode[];
+    const uiEdges = (graph.ui_state.edges ?? []) as UIStateEdge[];
+
+    for (const un of uiNodes) {
+      const sizeProps =
+        un.width != null || un.height != null
+          ? {
+              width: un.width ?? undefined,
+              height: un.height ?? undefined,
+              style: {
+                width: un.width ?? undefined,
+                height: un.height ?? undefined,
+              },
+            }
+          : {};
+      nodes.push({
+        id: un.id,
+        type: un.type as string,
+        position: { x: un.position.x, y: un.position.y },
+        ...sizeProps,
+        data: un.data as FlowNodeData,
+      });
+    }
+
+    for (const ue of uiEdges) {
+      edges.push({
+        id: ue.id,
+        source: ue.source,
+        sourceHandle: ue.sourceHandle ?? undefined,
+        target: ue.target,
+        targetHandle: ue.targetHandle ?? undefined,
+      });
+    }
+  }
+
   return { nodes, edges };
+}
+
+/** Node types that are frontend-only and not sent to the backend graph. */
+const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
+  "value",
+  "control",
+  "math",
+  "note",
+  "output",
+]);
+
+/** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
+const NON_SERIALIZABLE_KEYS = new Set<string>([
+  "localStream",
+  "remoteStream",
+  "onVideoFileUpload",
+  "onSourceModeChange",
+  "onSpoutSourceChange",
+  "onNdiSourceChange",
+  "onSyphonSourceChange",
+  "onPromptChange",
+  "pipelinePortsMap",
+]);
+
+/**
+ * Pick only serializable data fields from FlowNodeData.
+ */
+function serializableData(data: FlowNodeData): Record<string, unknown> {
+  const result: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(data)) {
+    if (NON_SERIALIZABLE_KEYS.has(key)) continue;
+    if (typeof value === "function") continue;
+    result[key] = value;
+  }
+  return result;
+}
+
+/** Shape of a serialized UI node stored in ui_state. */
+interface UIStateNode {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  width?: number;
+  height?: number;
+  data: Record<string, unknown>;
+}
+
+/** Shape of a serialized UI edge stored in ui_state. */
+interface UIStateEdge {
+  id: string;
+  source: string;
+  sourceHandle?: string | null;
+  target: string;
+  targetHandle?: string | null;
 }
 
 /**
@@ -399,15 +492,17 @@ export function flowToGraphConfig(
   nodes: Node<FlowNodeData>[],
   edges: Edge[]
 ): GraphConfig {
+  // Separate backend nodes from frontend-only nodes
+  const frontendNodeIds = new Set<string>();
+
   const graphNodes: GraphNode[] = nodes
-    .filter(
-      n =>
-        n.data.nodeType !== "value" &&
-        n.data.nodeType !== "control" &&
-        n.data.nodeType !== "math" &&
-        n.data.nodeType !== "note" &&
-        n.data.nodeType !== "output"
-    ) // Filter out frontend-only nodes
+    .filter(n => {
+      if (FRONTEND_ONLY_TYPES.has(n.data.nodeType)) {
+        frontendNodeIds.add(n.id);
+        return false;
+      }
+      return true;
+    })
     .map(n => {
       // Read dimensions: node.width/height (set by NodeResizer) > measured > style
       const w =
@@ -465,7 +560,51 @@ export function flowToGraphConfig(
       };
     });
 
-  return { nodes: graphNodes, edges: graphEdges };
+  // Serialize frontend-only nodes and their edges into ui_state
+  let ui_state: Record<string, unknown> | undefined;
+  if (frontendNodeIds.size > 0) {
+    const uiNodes: UIStateNode[] = nodes
+      .filter(n => frontendNodeIds.has(n.id))
+      .map(n => {
+        const w =
+          n.width ??
+          n.measured?.width ??
+          (typeof n.style?.width === "number" ? n.style.width : undefined);
+        const h =
+          n.height ??
+          n.measured?.height ??
+          (typeof n.style?.height === "number" ? n.style.height : undefined);
+        return {
+          id: n.id,
+          type: n.data.nodeType,
+          position: { x: n.position.x, y: n.position.y },
+          ...(w && !Number.isNaN(w) ? { width: w } : {}),
+          ...(h && !Number.isNaN(h) ? { height: h } : {}),
+          data: serializableData(n.data),
+        };
+      });
+
+    // Edges that touch at least one frontend-only node (and aren't already in graphEdges)
+    const uiEdges: UIStateEdge[] = edges
+      .filter(
+        e => frontendNodeIds.has(e.source) || frontendNodeIds.has(e.target)
+      )
+      .map(e => ({
+        id: e.id,
+        source: e.source,
+        sourceHandle: e.sourceHandle ?? null,
+        target: e.target,
+        targetHandle: e.targetHandle ?? null,
+      }));
+
+    ui_state = { nodes: uiNodes, edges: uiEdges };
+  }
+
+  return {
+    nodes: graphNodes,
+    edges: graphEdges,
+    ...(ui_state ? { ui_state } : {}),
+  };
 }
 
 /**

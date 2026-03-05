@@ -1841,41 +1841,47 @@ export function StreamPage() {
         }}
       />
 
-      {/* Main Content Area */}
-      {graphMode ? (
-        <div className="flex-1 min-h-0 overflow-hidden">
-          <GraphEditor
-            isStreaming={isStreaming}
-            isConnecting={isConnecting || isCloudConnecting}
-            isLoading={isPipelineLoading || isDownloading}
-            onNodeParameterChange={(nodeId, key, value) => {
-              sendParameterUpdate({ node_id: nodeId, [key]: value });
-            }}
-            onGraphChange={handleGraphChange}
-            onGraphClear={handleGraphClear}
-            localStream={localStream}
-            remoteStream={remoteStream}
-            onVideoFileUpload={handleVideoFileUpload}
-            onStartStream={() => handleStartStream()}
-            onStopStream={stopStream}
-            onSourceModeChange={mode =>
-              switchMode(
-                mode as "video" | "camera" | "spout" | "ndi" | "syphon"
-              )
-            }
-            spoutAvailable={spoutAvailable}
-            ndiAvailable={ndiAvailable}
-            syphonAvailable={syphonAvailable}
-            onSpoutSourceChange={handleSpoutSourceChange}
-            onNdiSourceChange={handleNdiSourceChange}
-            onSyphonSourceChange={handleSyphonSourceChange}
-            onOutputSinkChange={handleOutputSinkChange}
-            spoutOutputAvailable={spoutAvailable}
-            ndiOutputAvailable={ndiOutputAvailable}
-            syphonOutputAvailable={syphonOutputAvailable}
-          />
-        </div>
-      ) : (
+      {/* Graph Editor - always mounted so control/value node animations and
+          value-forwarding effects keep running even in perform mode */}
+      <div
+        className={
+          graphMode
+            ? "flex-1 min-h-0 overflow-hidden"
+            : "fixed inset-0 -z-50 invisible pointer-events-none"
+        }
+      >
+        <GraphEditor
+          isStreaming={isStreaming}
+          isConnecting={isConnecting || isCloudConnecting}
+          isLoading={isPipelineLoading || isDownloading}
+          onNodeParameterChange={(nodeId, key, value) => {
+            sendParameterUpdate({ node_id: nodeId, [key]: value });
+          }}
+          onGraphChange={handleGraphChange}
+          onGraphClear={handleGraphClear}
+          localStream={localStream}
+          remoteStream={remoteStream}
+          onVideoFileUpload={handleVideoFileUpload}
+          onStartStream={() => handleStartStream()}
+          onStopStream={stopStream}
+          onSourceModeChange={mode =>
+            switchMode(mode as "video" | "camera" | "spout" | "ndi" | "syphon")
+          }
+          spoutAvailable={spoutAvailable}
+          ndiAvailable={ndiAvailable}
+          syphonAvailable={syphonAvailable}
+          onSpoutSourceChange={handleSpoutSourceChange}
+          onNdiSourceChange={handleNdiSourceChange}
+          onSyphonSourceChange={handleSyphonSourceChange}
+          onOutputSinkChange={handleOutputSinkChange}
+          spoutOutputAvailable={spoutAvailable}
+          ndiOutputAvailable={ndiOutputAvailable}
+          syphonOutputAvailable={syphonOutputAvailable}
+        />
+      </div>
+
+      {/* Main Content Area - Perform Mode */}
+      {!graphMode && (
         <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
           {/* Left Panel - Input & Controls */}
           <div className="w-1/5">
