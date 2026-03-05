@@ -204,9 +204,7 @@ jobs:
 
           Commit: ${{ github.sha }}
 
-          **These builds include \`SCOPE_CLOUD_APP_ID=daydream/scope-app/ws\`.**
-
-          > This is an automated preview — not a versioned release. Do not use for production." \
+          This is an automated preview — not a versioned release. Do not use for production." \
             --prerelease \
             artifacts/DaydreamScope-Setup.exe \
             artifacts/DaydreamScope-arm64.dmg
