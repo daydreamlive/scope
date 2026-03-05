@@ -131,7 +131,10 @@ interface GraphEditorProps {
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
-  onOutputSinkChange?: (sinkType: string, config: { enabled: boolean; name: string }) => void;
+  onOutputSinkChange?: (
+    sinkType: string,
+    config: { enabled: boolean; name: string }
+  ) => void;
   spoutOutputAvailable?: boolean;
   ndiOutputAvailable?: boolean;
   syphonOutputAvailable?: boolean;
@@ -194,7 +197,10 @@ export function GraphEditor({
     y: number;
   } | null>(null);
 
-  const reactFlowInstanceRef = useRef<ReactFlowInstance<Node<FlowNodeData>, Edge> | null>(null);
+  const reactFlowInstanceRef = useRef<ReactFlowInstance<
+    Node<FlowNodeData>,
+    Edge
+  > | null>(null);
   const handlePipelineSelect = useCallback(
     (nodeId: string, newPipelineId: string | null) => {
       setNodes(nds =>
@@ -275,16 +281,13 @@ export function GraphEditor({
   const nodeParamsRef = useRef(nodeParams);
   nodeParamsRef.current = nodeParams;
 
-  const resolveBackendId = useCallback(
-    (nodeId: string): string => {
-      const node = nodesRef.current.find(n => n.id === nodeId);
-      if (node?.data.nodeType === "pipeline" && node.data.pipelineId) {
-        return node.data.pipelineId as string;
-      }
-      return nodeId;
-    },
-    []
-  );
+  const resolveBackendId = useCallback((nodeId: string): string => {
+    const node = nodesRef.current.find(n => n.id === nodeId);
+    if (node?.data.nodeType === "pipeline" && node.data.pipelineId) {
+      return node.data.pipelineId as string;
+    }
+    return nodeId;
+  }, []);
 
   const handleNodeParameterChange = useCallback(
     (nodeId: string, key: string, value: unknown) => {
@@ -304,7 +307,9 @@ export function GraphEditor({
         [nodeId]: { ...(prev[nodeId] || {}), __prompt: text },
       }));
       if (isStreamingRef.current) {
-        onNodeParamChangeRef.current?.(resolveBackendId(nodeId), "prompts", [{ text, weight: 100 }]);
+        onNodeParamChangeRef.current?.(resolveBackendId(nodeId), "prompts", [
+          { text, weight: 100 },
+        ]);
       }
     },
     [resolveBackendId]
@@ -362,13 +367,33 @@ export function GraphEditor({
         if (n.data.nodeType === "output") {
           return {
             ...n,
-            data: { ...n.data, spoutAvailable: spoutOutputAvailable, ndiAvailable: ndiOutputAvailable, syphonAvailable: syphonOutputAvailable },
+            data: {
+              ...n.data,
+              spoutAvailable: spoutOutputAvailable,
+              ndiAvailable: ndiOutputAvailable,
+              syphonAvailable: syphonOutputAvailable,
+            },
           };
         }
         return n;
       })
     );
-  }, [availablePipelineIds, portsMap, handlePipelineSelect, setNodes, pipelineSchemas, handleNodeParameterChange, localStream, remoteStream, spoutAvailable, ndiAvailable, syphonAvailable, spoutOutputAvailable, ndiOutputAvailable, syphonOutputAvailable]);
+  }, [
+    availablePipelineIds,
+    portsMap,
+    handlePipelineSelect,
+    setNodes,
+    pipelineSchemas,
+    handleNodeParameterChange,
+    localStream,
+    remoteStream,
+    spoutAvailable,
+    ndiAvailable,
+    syphonAvailable,
+    spoutOutputAvailable,
+    ndiOutputAvailable,
+    syphonOutputAvailable,
+  ]);
 
   // Sync nodeParams to pipeline node parameterValues
   useEffect(() => {
@@ -401,49 +426,59 @@ export function GraphEditor({
             response.graph,
             portsMap
           );
-        const enrichedNodes = flowNodes.map(n => {
-          if (n.data.nodeType === "pipeline") {
-            const pipelineId = n.data.pipelineId;
-            const schema = pipelineId ? pipelineSchemas[pipelineId] : null;
-            const parameterInputs = schema ? extractParameterPorts(schema) : [];
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                availablePipelineIds,
-                pipelinePortsMap: portsMap,
-                onPipelineSelect: handlePipelineSelect,
-                parameterInputs,
-                parameterValues: nodeParamsRef.current[n.id] || {},
-                onParameterChange: handleNodeParameterChange,
-              },
-            };
-          }
-          if (n.data.nodeType === "source") {
-            return {
-              ...n,
-              data: {
-                ...n.data,
-                localStream,
-                onVideoFileUpload: onVideoFileUploadRef.current,
-                onSourceModeChange: onSourceModeChangeRef.current,
-                spoutAvailable,
-                ndiAvailable,
-                syphonAvailable,
-                onSpoutSourceChange: onSpoutSourceChangeRef.current,
-                onNdiSourceChange: onNdiSourceChangeRef.current,
-                onSyphonSourceChange: onSyphonSourceChangeRef.current,
-              },
-            };
-          }
-          if (n.data.nodeType === "sink") {
-            return { ...n, data: { ...n.data, remoteStream } };
-          }
-          if (n.data.nodeType === "output") {
-            return { ...n, data: { ...n.data, spoutAvailable: spoutOutputAvailable, ndiAvailable: ndiOutputAvailable, syphonAvailable: syphonOutputAvailable } };
-          }
-          return n;
-        });
+          const enrichedNodes = flowNodes.map(n => {
+            if (n.data.nodeType === "pipeline") {
+              const pipelineId = n.data.pipelineId;
+              const schema = pipelineId ? pipelineSchemas[pipelineId] : null;
+              const parameterInputs = schema
+                ? extractParameterPorts(schema)
+                : [];
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  availablePipelineIds,
+                  pipelinePortsMap: portsMap,
+                  onPipelineSelect: handlePipelineSelect,
+                  parameterInputs,
+                  parameterValues: nodeParamsRef.current[n.id] || {},
+                  onParameterChange: handleNodeParameterChange,
+                },
+              };
+            }
+            if (n.data.nodeType === "source") {
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  localStream,
+                  onVideoFileUpload: onVideoFileUploadRef.current,
+                  onSourceModeChange: onSourceModeChangeRef.current,
+                  spoutAvailable,
+                  ndiAvailable,
+                  syphonAvailable,
+                  onSpoutSourceChange: onSpoutSourceChangeRef.current,
+                  onNdiSourceChange: onNdiSourceChangeRef.current,
+                  onSyphonSourceChange: onSyphonSourceChangeRef.current,
+                },
+              };
+            }
+            if (n.data.nodeType === "sink") {
+              return { ...n, data: { ...n.data, remoteStream } };
+            }
+            if (n.data.nodeType === "output") {
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  spoutAvailable: spoutOutputAvailable,
+                  ndiAvailable: ndiOutputAvailable,
+                  syphonAvailable: syphonOutputAvailable,
+                },
+              };
+            }
+            return n;
+          });
           setNodes(enrichedNodes);
           const coloredEdges = flowEdges.map(edge => {
             const sourceNode = enrichedNodes.find(n => n.id === edge.source);
@@ -482,7 +517,11 @@ export function GraphEditor({
 
   // Find pipeline params connected to a value/control node output
   const findConnectedPipelineParams = useCallback(
-    (sourceNodeId: string, edges: Edge[], nodes: Node<FlowNodeData>[]): Array<{ nodeId: string; paramName: string }> => {
+    (
+      sourceNodeId: string,
+      edges: Edge[],
+      nodes: Node<FlowNodeData>[]
+    ): Array<{ nodeId: string; paramName: string }> => {
       const connected: Array<{ nodeId: string; paramName: string }> = [];
 
       for (const edge of edges) {
@@ -520,7 +559,12 @@ export function GraphEditor({
         };
       }
 
-      if (!connection.source || !connection.target || !connection.sourceHandle || !connection.targetHandle) {
+      if (
+        !connection.source ||
+        !connection.target ||
+        !connection.sourceHandle ||
+        !connection.targetHandle
+      ) {
         return true;
       }
 
@@ -560,7 +604,10 @@ export function GraphEditor({
 
         // Math nodes accept param:a and param:b inputs (both must be number)
         if (targetNode.data.nodeType === "math") {
-          return sourceType === "number" && (targetParsed.name === "a" || targetParsed.name === "b");
+          return (
+            sourceType === "number" &&
+            (targetParsed.name === "a" || targetParsed.name === "b")
+          );
         }
 
         const targetParam = targetNode.data.parameterInputs?.find(
@@ -684,7 +731,14 @@ export function GraphEditor({
       };
       setNodes(nds => [...nds, newNode]);
     },
-    [existingIds, nodes.length, setNodes, availablePipelineIds, portsMap, handlePipelineSelect]
+    [
+      existingIds,
+      nodes.length,
+      setNodes,
+      availablePipelineIds,
+      portsMap,
+      handlePipelineSelect,
+    ]
   );
 
   const addSinkNode = useCallback(
@@ -707,8 +761,10 @@ export function GraphEditor({
       event.preventDefault();
       if (!reactFlowInstanceRef.current) return;
 
-      const clientX = event instanceof MouseEvent ? event.clientX : event.clientX;
-      const clientY = event instanceof MouseEvent ? event.clientY : event.clientY;
+      const clientX =
+        event instanceof MouseEvent ? event.clientX : event.clientX;
+      const clientY =
+        event instanceof MouseEvent ? event.clientY : event.clientY;
 
       const position = reactFlowInstanceRef.current.screenToFlowPosition({
         x: clientX,
@@ -739,9 +795,13 @@ export function GraphEditor({
   );
 
   const addValueNode = useCallback(
-    (valueType: "string" | "number" | "boolean", position?: { x: number; y: number }) => {
+    (
+      valueType: "string" | "number" | "boolean",
+      position?: { x: number; y: number }
+    ) => {
       const id = generateNodeId(valueType, existingIds);
-      const defaultValue = valueType === "boolean" ? false : valueType === "number" ? 0 : "";
+      const defaultValue =
+        valueType === "boolean" ? false : valueType === "number" ? 0 : "";
       const newNode: Node<FlowNodeData> = {
         id,
         type: "value",
@@ -751,11 +811,13 @@ export function GraphEditor({
           nodeType: "value",
           valueType,
           value: defaultValue,
-          parameterOutputs: [{
-            name: "value",
-            type: valueType,
-            defaultValue,
-          }],
+          parameterOutputs: [
+            {
+              name: "value",
+              type: valueType,
+              defaultValue,
+            },
+          ],
         },
       };
       setNodes(nds => [...nds, newNode]);
@@ -764,27 +826,45 @@ export function GraphEditor({
   );
 
   const addControlNode = useCallback(
-    (controlType: "float" | "int" | "string", position?: { x: number; y: number }) => {
-      const id = generateNodeId(controlType === "float" ? "floatControl" : controlType === "int" ? "intControl" : "stringControl", existingIds);
+    (
+      controlType: "float" | "int" | "string",
+      position?: { x: number; y: number }
+    ) => {
+      const id = generateNodeId(
+        controlType === "float"
+          ? "floatControl"
+          : controlType === "int"
+            ? "intControl"
+            : "stringControl",
+        existingIds
+      );
       const newNode: Node<FlowNodeData> = {
         id,
         type: "control",
         position: position ?? { x: 50, y: 50 + nodes.length * 100 },
         data: {
-          label: controlType === "float" ? "FloatControl" : controlType === "int" ? "IntControl" : "StringControl",
+          label:
+            controlType === "float"
+              ? "FloatControl"
+              : controlType === "int"
+                ? "IntControl"
+                : "StringControl",
           nodeType: "control",
           controlType,
           controlPattern: "sine",
           controlSpeed: 1.0,
           controlMin: 0,
           controlMax: 1.0,
-          controlItems: controlType === "string" ? ["item1", "item2", "item3"] : undefined,
+          controlItems:
+            controlType === "string" ? ["item1", "item2", "item3"] : undefined,
           isPlaying: false,
-          parameterOutputs: [{
-            name: "value",
-            type: controlType === "string" ? "string" : "number",
-            defaultValue: controlType === "string" ? "" : 0,
-          }],
+          parameterOutputs: [
+            {
+              name: "value",
+              type: controlType === "string" ? "string" : "number",
+              defaultValue: controlType === "string" ? "" : 0,
+            },
+          ],
         },
       };
       setNodes(nds => [...nds, newNode]);
@@ -804,11 +884,13 @@ export function GraphEditor({
           nodeType: "math",
           mathOp: "add",
           currentValue: undefined,
-          parameterOutputs: [{
-            name: "value",
-            type: "number",
-            defaultValue: 0,
-          }],
+          parameterOutputs: [
+            {
+              name: "value",
+              type: "number",
+              defaultValue: 0,
+            },
+          ],
         },
       };
       setNodes(nds => [...nds, newNode]);
@@ -837,8 +919,18 @@ export function GraphEditor({
   const addOutputNode = useCallback(
     (position?: { x: number; y: number }) => {
       // Pick a default type based on output availability
-      const defaultType = spoutOutputAvailable ? "spout" : ndiOutputAvailable ? "ndi" : syphonOutputAvailable ? "syphon" : "spout";
-      const defaultNames: Record<string, string> = { spout: "ScopeOut", ndi: "Scope", syphon: "Scope" };
+      const defaultType = spoutOutputAvailable
+        ? "spout"
+        : ndiOutputAvailable
+          ? "ndi"
+          : syphonOutputAvailable
+            ? "syphon"
+            : "spout";
+      const defaultNames: Record<string, string> = {
+        spout: "ScopeOut",
+        ndi: "Scope",
+        syphon: "Scope",
+      };
       const id = generateNodeId("output_sink", existingIds);
       const newNode: Node<FlowNodeData> = {
         id,
@@ -854,11 +946,29 @@ export function GraphEditor({
       };
       setNodes(nds => [...nds, newNode]);
     },
-    [existingIds, nodes.length, setNodes, spoutOutputAvailable, ndiOutputAvailable, syphonOutputAvailable]
+    [
+      existingIds,
+      nodes.length,
+      setNodes,
+      spoutOutputAvailable,
+      ndiOutputAvailable,
+      syphonOutputAvailable,
+    ]
   );
 
   const handleNodeTypeSelect = useCallback(
-    (type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note" | "output", subType?: string) => {
+    (
+      type:
+        | "source"
+        | "pipeline"
+        | "sink"
+        | "value"
+        | "control"
+        | "math"
+        | "note"
+        | "output",
+      subType?: string
+    ) => {
       if (!pendingNodePosition) return;
 
       switch (type) {
@@ -872,12 +982,20 @@ export function GraphEditor({
           addSinkNode(pendingNodePosition);
           break;
         case "value":
-          if (subType === "string" || subType === "number" || subType === "boolean") {
+          if (
+            subType === "string" ||
+            subType === "number" ||
+            subType === "boolean"
+          ) {
             addValueNode(subType, pendingNodePosition);
           }
           break;
         case "control":
-          if (subType === "float" || subType === "int" || subType === "string") {
+          if (
+            subType === "float" ||
+            subType === "int" ||
+            subType === "string"
+          ) {
             addControlNode(subType, pendingNodePosition);
           }
           break;
@@ -894,7 +1012,17 @@ export function GraphEditor({
 
       setPendingNodePosition(null);
     },
-    [pendingNodePosition, addSourceNode, addPipelineNode, addSinkNode, addValueNode, addControlNode, addMathNode, addNoteNode, addOutputNode]
+    [
+      pendingNodePosition,
+      addSourceNode,
+      addPipelineNode,
+      addSinkNode,
+      addValueNode,
+      addControlNode,
+      addMathNode,
+      addNoteNode,
+      addOutputNode,
+    ]
   );
 
   const handleDeleteNode = useCallback(
@@ -946,7 +1074,12 @@ export function GraphEditor({
     const throttleMs = 100;
 
     for (const node of nodes) {
-      if (node.data.nodeType !== "value" && node.data.nodeType !== "control" && node.data.nodeType !== "math") continue;
+      if (
+        node.data.nodeType !== "value" &&
+        node.data.nodeType !== "control" &&
+        node.data.nodeType !== "math"
+      )
+        continue;
 
       const connected = findConnectedPipelineParams(node.id, edges, nodes);
       if (connected.length === 0) continue;
@@ -954,7 +1087,10 @@ export function GraphEditor({
       let value: unknown;
       if (node.data.nodeType === "value") {
         value = node.data.value;
-      } else if (node.data.nodeType === "control" || node.data.nodeType === "math") {
+      } else if (
+        node.data.nodeType === "control" ||
+        node.data.nodeType === "math"
+      ) {
         value = node.data.currentValue;
       }
 
@@ -970,7 +1106,9 @@ export function GraphEditor({
       for (const { nodeId, paramName } of connected) {
         const backendId = resolveBackendId(nodeId);
         if (paramName === "__prompt") {
-          onNodeParamChangeRef.current(backendId, "prompts", [{ text: String(value), weight: 100 }]);
+          onNodeParamChangeRef.current(backendId, "prompts", [
+            { text: String(value), weight: 100 },
+          ]);
         } else {
           onNodeParamChangeRef.current(backendId, paramName, value);
         }
@@ -1017,9 +1155,10 @@ export function GraphEditor({
       if (e.key !== "Tab") return;
 
       const activeElement = document.activeElement;
-      const isInputElement = activeElement?.tagName === "INPUT" ||
-                             activeElement?.tagName === "TEXTAREA" ||
-                             activeElement?.tagName === "SELECT";
+      const isInputElement =
+        activeElement?.tagName === "INPUT" ||
+        activeElement?.tagName === "TEXTAREA" ||
+        activeElement?.tagName === "SELECT";
 
       if (isInputElement) return;
 
@@ -1082,7 +1221,9 @@ export function GraphEditor({
             if (n.data.nodeType === "pipeline") {
               const pipelineId = n.data.pipelineId;
               const schema = pipelineId ? pipelineSchemas[pipelineId] : null;
-              const parameterInputs = schema ? extractParameterPorts(schema) : [];
+              const parameterInputs = schema
+                ? extractParameterPorts(schema)
+                : [];
               const supportsPrompts = schema?.supports_prompts ?? false;
               const nodeParamValues = nodeParamsRef.current[n.id] || {};
               return {
@@ -1122,7 +1263,15 @@ export function GraphEditor({
               return { ...n, data: { ...n.data, remoteStream } };
             }
             if (n.data.nodeType === "output") {
-              return { ...n, data: { ...n.data, spoutAvailable: spoutOutputAvailable, ndiAvailable: ndiOutputAvailable, syphonAvailable: syphonOutputAvailable } };
+              return {
+                ...n,
+                data: {
+                  ...n.data,
+                  spoutAvailable: spoutOutputAvailable,
+                  ndiAvailable: ndiOutputAvailable,
+                  syphonAvailable: syphonOutputAvailable,
+                },
+              };
             }
             return n;
           });
@@ -1167,7 +1316,6 @@ export function GraphEditor({
     setStatus("Graph exported");
   }, [nodes, edges]);
 
-
   return (
     <div className="flex h-full w-full">
       <div className="flex flex-col flex-1">
@@ -1180,15 +1328,42 @@ export function GraphEditor({
           >
             {isConnecting || isLoading ? (
               <span className="inline-flex items-center gap-1">
-                <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24" fill="none">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                <svg
+                  className="animate-spin h-3 w-3"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                >
+                  <circle
+                    className="opacity-25"
+                    cx="12"
+                    cy="12"
+                    r="10"
+                    stroke="currentColor"
+                    strokeWidth="4"
+                  />
+                  <path
+                    className="opacity-75"
+                    fill="currentColor"
+                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                  />
                 </svg>
               </span>
             ) : isStreaming ? (
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="2" /></svg>
+              <svg
+                className="h-3.5 w-3.5"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <rect x="4" y="4" width="16" height="16" rx="2" />
+              </svg>
             ) : (
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="currentColor"><polygon points="5,3 19,12 5,21" /></svg>
+              <svg
+                className="h-3.5 w-3.5"
+                viewBox="0 0 24 24"
+                fill="currentColor"
+              >
+                <polygon points="5,3 19,12 5,21" />
+              </svg>
             )}
           </button>
           {isStreaming && (
@@ -1197,8 +1372,17 @@ export function GraphEditor({
               className={NODE_TOKENS.toolbarButton}
               title="Stop and clear"
             >
-              <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M1 4v6h6" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+              <svg
+                className="h-3.5 w-3.5"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <path d="M1 4v6h6" />
+                <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
               </svg>
             </button>
           )}
@@ -1221,13 +1405,20 @@ export function GraphEditor({
             onChange={handleImport}
             className="hidden"
           />
-          <button onClick={() => fileInputRef.current?.click()} className={NODE_TOKENS.toolbarButton}>
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            className={NODE_TOKENS.toolbarButton}
+          >
             Import
           </button>
           <button onClick={handleExport} className={NODE_TOKENS.toolbarButton}>
             Export
           </button>
-          <button onClick={handleClear} className={NODE_TOKENS.toolbarButton} title="Clear graph">
+          <button
+            onClick={handleClear}
+            className={NODE_TOKENS.toolbarButton}
+            title="Clear graph"
+          >
             Clear
           </button>
         </div>
@@ -1242,7 +1433,7 @@ export function GraphEditor({
             onReconnect={onReconnect}
             reconnectRadius={25}
             isValidConnection={isValidConnection}
-            onInit={(instance) => {
+            onInit={instance => {
               reactFlowInstanceRef.current = instance;
             }}
             onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
@@ -1302,7 +1493,6 @@ export function GraphEditor({
           />
         </div>
       </div>
-
     </div>
   );
 }

@@ -35,7 +35,15 @@ export interface PortInfo {
 export interface FlowNodeData {
   label: string;
   pipelineId?: string | null;
-  nodeType: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note" | "output";
+  nodeType:
+    | "source"
+    | "pipeline"
+    | "sink"
+    | "value"
+    | "control"
+    | "math"
+    | "note"
+    | "output";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -68,7 +76,21 @@ export interface FlowNodeData {
   /** For control nodes: current animated value (updated by animation loop) */
   currentValue?: number | string;
   /** For math nodes: the operation to perform */
-  mathOp?: "add" | "subtract" | "multiply" | "divide" | "mod" | "min" | "max" | "power" | "abs" | "negate" | "sqrt" | "floor" | "ceil" | "round";
+  mathOp?:
+    | "add"
+    | "subtract"
+    | "multiply"
+    | "divide"
+    | "mod"
+    | "min"
+    | "max"
+    | "power"
+    | "abs"
+    | "negate"
+    | "sqrt"
+    | "floor"
+    | "ceil"
+    | "round";
   /** For note nodes: the note text content */
   noteText?: string;
   /** For output nodes: sink type (spout, ndi, syphon) */
@@ -132,10 +154,7 @@ export function parseHandleId(handleId: string | null | undefined): {
 /**
  * Build a handle ID from kind and name.
  */
-export function buildHandleId(
-  kind: "stream" | "param",
-  name: string
-): string {
+export function buildHandleId(kind: "stream" | "param", name: string): string {
   return `${kind}:${name}`;
 }
 
@@ -185,18 +204,30 @@ export function extractParameterPorts(
     if (isArrayOfNumbers(schemaProp as unknown as Record<string, unknown>)) {
       const ui = schemaProp.ui;
       const label = ui?.label || key;
-      params.push({ name: key, type: "list_number", defaultValue: schemaProp.default, label });
+      params.push({
+        name: key,
+        type: "list_number",
+        defaultValue: schemaProp.default,
+        label,
+      });
       continue;
     }
 
     // Check anyOf for array types (e.g. list[int] | None)
-    const anyOf = (schemaProp as Record<string, unknown>).anyOf as Record<string, unknown>[] | undefined;
+    const anyOf = (schemaProp as Record<string, unknown>).anyOf as
+      | Record<string, unknown>[]
+      | undefined;
     if (anyOf?.length) {
       const arrayVariant = anyOf.find(v => isArrayOfNumbers(v));
       if (arrayVariant) {
         const ui = schemaProp.ui;
         const label = ui?.label || key;
-        params.push({ name: key, type: "list_number", defaultValue: schemaProp.default, label });
+        params.push({
+          name: key,
+          type: "list_number",
+          defaultValue: schemaProp.default,
+          label,
+        });
         continue;
       }
     }
@@ -224,8 +255,10 @@ export function extractParameterPorts(
       type: paramType,
       defaultValue: schemaProp.default,
       label,
-      min: typeof schemaProp.minimum === "number" ? schemaProp.minimum : undefined,
-      max: typeof schemaProp.maximum === "number" ? schemaProp.maximum : undefined,
+      min:
+        typeof schemaProp.minimum === "number" ? schemaProp.minimum : undefined,
+      max:
+        typeof schemaProp.maximum === "number" ? schemaProp.maximum : undefined,
       enum: Array.isArray(schemaProp.enum) ? schemaProp.enum : undefined,
     });
   }
@@ -261,7 +294,8 @@ export function graphConfigToFlow(
       type: "source",
       position: {
         x: savedX !== undefined ? savedX : START_X,
-        y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
+        y:
+          savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
       },
       width: w,
       height: h,
@@ -269,7 +303,13 @@ export function graphConfigToFlow(
       data: {
         label: n.id,
         nodeType: "source",
-        sourceMode: n.source_mode as "video" | "camera" | "spout" | "ndi" | "syphon" | undefined,
+        sourceMode: n.source_mode as
+          | "video"
+          | "camera"
+          | "spout"
+          | "ndi"
+          | "syphon"
+          | undefined,
         sourceName: n.source_name ?? undefined,
       },
     });
@@ -280,15 +320,21 @@ export function graphConfigToFlow(
     const ports = n.pipeline_id && portsMap ? portsMap[n.pipeline_id] : null;
     const savedX = n.x ?? undefined;
     const savedY = n.y ?? undefined;
-    const sizeProps = n.w != null || n.h != null
-      ? { width: n.w ?? undefined, height: n.h ?? undefined, style: { width: n.w ?? undefined, height: n.h ?? undefined } }
-      : {};
+    const sizeProps =
+      n.w != null || n.h != null
+        ? {
+            width: n.w ?? undefined,
+            height: n.h ?? undefined,
+            style: { width: n.w ?? undefined, height: n.h ?? undefined },
+          }
+        : {};
     nodes.push({
       id: n.id,
       type: "pipeline",
       position: {
         x: savedX !== undefined ? savedX : START_X + COLUMN_GAP,
-        y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
+        y:
+          savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
       },
       ...sizeProps,
       data: {
@@ -312,7 +358,8 @@ export function graphConfigToFlow(
       type: "sink",
       position: {
         x: savedX !== undefined ? savedX : START_X + COLUMN_GAP * 2,
-        y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
+        y:
+          savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
       },
       width: w,
       height: h,
@@ -323,8 +370,14 @@ export function graphConfigToFlow(
 
   // Convert edges - add stream: prefix to handle IDs
   const edges: Edge[] = graph.edges.map((e, i) => {
-    const sourceHandle = e.kind === "parameter" ? buildHandleId("param", e.from_port) : buildHandleId("stream", e.from_port);
-    const targetHandle = e.kind === "parameter" ? buildHandleId("param", e.to_port) : buildHandleId("stream", e.to_port);
+    const sourceHandle =
+      e.kind === "parameter"
+        ? buildHandleId("param", e.from_port)
+        : buildHandleId("stream", e.from_port);
+    const targetHandle =
+      e.kind === "parameter"
+        ? buildHandleId("param", e.to_port)
+        : buildHandleId("stream", e.to_port);
     return {
       id: `e-${i}-${e.from}-${e.to_node}`,
       source: e.from,
@@ -347,22 +400,48 @@ export function flowToGraphConfig(
   edges: Edge[]
 ): GraphConfig {
   const graphNodes: GraphNode[] = nodes
-    .filter(n => n.data.nodeType !== "value" && n.data.nodeType !== "control" && n.data.nodeType !== "math" && n.data.nodeType !== "note" && n.data.nodeType !== "output") // Filter out frontend-only nodes
+    .filter(
+      n =>
+        n.data.nodeType !== "value" &&
+        n.data.nodeType !== "control" &&
+        n.data.nodeType !== "math" &&
+        n.data.nodeType !== "note" &&
+        n.data.nodeType !== "output"
+    ) // Filter out frontend-only nodes
     .map(n => {
       // Read dimensions: node.width/height (set by NodeResizer) > measured > style
-      const w = n.width ?? n.measured?.width ?? (typeof n.style?.width === "number" ? n.style.width : undefined);
-      const h = n.height ?? n.measured?.height ?? (typeof n.style?.height === "number" ? n.style.height : undefined);
+      const w =
+        n.width ??
+        n.measured?.width ??
+        (typeof n.style?.width === "number" ? n.style.width : undefined);
+      const h =
+        n.height ??
+        n.measured?.height ??
+        (typeof n.style?.height === "number" ? n.style.height : undefined);
       return {
         id: n.id,
-        type: n.data.nodeType === "source" ? "source" : n.data.nodeType === "sink" ? "sink" : "pipeline",
+        type:
+          n.data.nodeType === "source"
+            ? "source"
+            : n.data.nodeType === "sink"
+              ? "sink"
+              : "pipeline",
         pipeline_id:
-          n.data.nodeType === "pipeline" ? (n.data.pipelineId ?? null) : undefined,
+          n.data.nodeType === "pipeline"
+            ? (n.data.pipelineId ?? null)
+            : undefined,
         x: n.position.x,
         y: n.position.y,
         w: w && !Number.isNaN(w) ? w : undefined,
         h: h && !Number.isNaN(h) ? h : undefined,
-        source_mode: n.data.nodeType === "source" ? (n.data.sourceMode ?? null) : undefined,
-        source_name: n.data.nodeType === "source" ? (n.data.sourceName ?? null) : undefined,
+        source_mode:
+          n.data.nodeType === "source"
+            ? (n.data.sourceMode ?? null)
+            : undefined,
+        source_name:
+          n.data.nodeType === "source"
+            ? (n.data.sourceName ?? null)
+            : undefined,
       };
     });
 
@@ -373,7 +452,10 @@ export function flowToGraphConfig(
     .map(e => {
       const sourceParsed = parseHandleId(e.sourceHandle);
       const targetParsed = parseHandleId(e.targetHandle);
-      const kind = sourceParsed?.kind === "param" && targetParsed?.kind === "param" ? "parameter" : "stream";
+      const kind =
+        sourceParsed?.kind === "param" && targetParsed?.kind === "param"
+          ? "parameter"
+          : "stream";
       return {
         from: e.source,
         from_port: sourceParsed?.name || "video",

@@ -36,7 +36,9 @@ const PARAM_TYPE_COLORS: Record<string, string> = {
   boolean: "#34d399",
 };
 
-function getParamTypeColor(type: "string" | "number" | "boolean" | "list_number"): string {
+function getParamTypeColor(
+  type: "string" | "number" | "boolean" | "list_number"
+): string {
   if (type === "list_number") return PARAM_TYPE_COLORS.number;
   return PARAM_TYPE_COLORS[type] || "#9ca3af";
 }
@@ -57,7 +59,8 @@ export function PipelineNode({
   const onParameterChange = data.onParameterChange as
     | ((nodeId: string, key: string, value: unknown) => void)
     | undefined;
-  const parameterValues = (data.parameterValues as Record<string, unknown>) || {};
+  const parameterValues =
+    (data.parameterValues as Record<string, unknown>) || {};
   const supportsPrompts = data.supportsPrompts ?? false;
   const promptText = data.promptText || "";
   const onPromptChange = data.onPromptChange as
@@ -77,7 +80,8 @@ export function PipelineNode({
   };
 
   const isPromptConnected = edges.some(
-    e => e.target === id && e.targetHandle === buildHandleId("param", "__prompt")
+    e =>
+      e.target === id && e.targetHandle === buildHandleId("param", "__prompt")
   );
 
   const listParams = parameterInputs.filter(p => p.type === "list_number");
@@ -103,11 +107,20 @@ export function PipelineNode({
       }
     });
     setRowPositions(prev => {
-      const keysChanged = Object.keys(positions).length !== Object.keys(prev).length ||
-        Object.keys(positions).some(key => Math.abs((prev[key] ?? 0) - positions[key]) > 0.5);
+      const keysChanged =
+        Object.keys(positions).length !== Object.keys(prev).length ||
+        Object.keys(positions).some(
+          key => Math.abs((prev[key] ?? 0) - positions[key]) > 0.5
+        );
       return keysChanged ? positions : prev;
     });
-  }, [streamInputs, streamOutputs, parameterInputs, supportsPrompts, data.pipelineId]);
+  }, [
+    streamInputs,
+    streamOutputs,
+    parameterInputs,
+    supportsPrompts,
+    data.pipelineId,
+  ]);
 
   return (
     <NodeCard selected={selected} autoMinHeight>
@@ -147,10 +160,14 @@ export function PipelineNode({
         {/* Primitive parameters (string, number, boolean) */}
         {primitiveParams.map(param => {
           const isConnected = isParamConnected(param.name);
-          const currentValue = parameterValues[param.name] ?? param.defaultValue;
+          const currentValue =
+            parameterValues[param.name] ?? param.defaultValue;
 
           return (
-            <div key={`param-${param.name}`} ref={setRowRef(`param:${param.name}`)}>
+            <div
+              key={`param-${param.name}`}
+              ref={setRowRef(`param:${param.name}`)}
+            >
               <NodeParamRow label={param.label || param.name}>
                 {isConnected ? (
                   <NodePill className="opacity-50">Connected</NodePill>
@@ -175,13 +192,17 @@ export function PipelineNode({
                   <NodePillInput
                     type="number"
                     value={Number(currentValue ?? param.defaultValue ?? 0)}
-                    onChange={val => onParameterChange?.(id, param.name, Number(val))}
+                    onChange={val =>
+                      onParameterChange?.(id, param.name, Number(val))
+                    }
                     min={param.min}
                     max={param.max}
                   />
                 ) : (
                   <NodePillToggle
-                    checked={Boolean(currentValue ?? param.defaultValue ?? false)}
+                    checked={Boolean(
+                      currentValue ?? param.defaultValue ?? false
+                    )}
                     onChange={val => onParameterChange?.(id, param.name, val)}
                   />
                 )}
@@ -194,17 +215,26 @@ export function PipelineNode({
         {listParams.map(param => {
           const isConnected = isParamConnected(param.name);
           const rawValue = parameterValues[param.name] ?? param.defaultValue;
-          const values: number[] = Array.isArray(rawValue) ? rawValue : (Array.isArray(param.defaultValue) ? param.defaultValue : []);
+          const values: number[] = Array.isArray(rawValue)
+            ? rawValue
+            : Array.isArray(param.defaultValue)
+              ? param.defaultValue
+              : [];
 
           return (
-            <div key={`param-${param.name}`} ref={setRowRef(`param:${param.name}`)}>
+            <div
+              key={`param-${param.name}`}
+              ref={setRowRef(`param:${param.name}`)}
+            >
               {isConnected ? (
                 <NodeParamRow label={param.label || param.name}>
                   <NodePill className="opacity-50">Connected</NodePill>
                 </NodeParamRow>
               ) : (
                 <div className="flex flex-col gap-1">
-                  <p className={`${NODE_TOKENS.labelText} text-[10px]`}>{param.label || param.name}</p>
+                  <p className={`${NODE_TOKENS.labelText} text-[10px]`}>
+                    {param.label || param.name}
+                  </p>
                   {values.map((stepVal, idx) => (
                     <NodeParamRow key={idx} label={`Step ${idx + 1}`}>
                       <NodePillInput
@@ -230,7 +260,9 @@ export function PipelineNode({
         {supportsPrompts && (
           <div ref={setRowRef("prompt")}>
             <div className="flex flex-col gap-1">
-              <p className={`${NODE_TOKENS.labelText} text-[10px] mb-0.5`}>Prompt</p>
+              <p className={`${NODE_TOKENS.labelText} text-[10px] mb-0.5`}>
+                Prompt
+              </p>
               {isPromptConnected ? (
                 <NodePill className="opacity-50">Connected</NodePill>
               ) : (

@@ -33,7 +33,8 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
 
   const sinkType = (data.outputSinkType as string) || "spout";
   const enabled = (data.outputSinkEnabled as boolean) ?? false;
-  const senderName = (data.outputSinkName as string) || DEFAULT_NAMES[sinkType] || "Scope";
+  const senderName =
+    (data.outputSinkName as string) || DEFAULT_NAMES[sinkType] || "Scope";
 
   // Availability flags passed from GraphEditor
   const spoutAvailable = data.spoutAvailable ?? false;
@@ -41,7 +42,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   const syphonAvailable = data.syphonAvailable ?? false;
 
   // Filter output type options based on availability
-  const filteredOptions = OUTPUT_TYPE_OPTIONS.filter((opt) => {
+  const filteredOptions = OUTPUT_TYPE_OPTIONS.filter(opt => {
     if (opt.value === "spout") return spoutAvailable;
     if (opt.value === "ndi") return ndiAvailable;
     if (opt.value === "syphon") return syphonAvailable;
@@ -49,8 +50,8 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   });
 
   const updateData = (updates: Partial<FlowNodeData>) => {
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return { ...n, data: { ...n.data, ...updates } };
       })
@@ -75,7 +76,8 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   const handleY = HEADER_H + BODY_PAD + ROW_H / 2;
 
   const dotColor = enabled ? "bg-red-400" : "bg-gray-500";
-  const typeLabel = OUTPUT_TYPE_OPTIONS.find((o) => o.value === sinkType)?.label ?? sinkType;
+  const typeLabel =
+    OUTPUT_TYPE_OPTIONS.find(o => o.value === sinkType)?.label ?? sinkType;
 
   return (
     <NodeCard selected={selected}>
@@ -86,7 +88,11 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
             <NodePillSelect
               value={sinkType}
               onChange={handleTypeChange}
-              options={filteredOptions.length > 0 ? filteredOptions : OUTPUT_TYPE_OPTIONS}
+              options={
+                filteredOptions.length > 0
+                  ? filteredOptions
+                  : OUTPUT_TYPE_OPTIONS
+              }
             />
           </NodeParamRow>
         </div>

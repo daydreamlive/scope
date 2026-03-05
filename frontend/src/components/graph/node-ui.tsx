@@ -1,16 +1,26 @@
-import { type ReactNode, useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import {
+  type ReactNode,
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+} from "react";
 import { NodeResizer } from "@xyflow/react";
 
 export const NODE_TOKENS = {
   card: "bg-[#2a2a2a] border border-[rgba(119,119,119,0.55)] rounded-xl min-w-[240px] relative w-full h-full flex flex-col",
   cardSelected: "ring-2 ring-blue-400/50",
-  header: "bg-[#181717] border-b border-[rgba(119,119,119,0.15)] flex items-center gap-2 px-2 py-1 h-[28px] rounded-t-xl",
+  header:
+    "bg-[#181717] border-b border-[rgba(119,119,119,0.15)] flex items-center gap-2 px-2 py-1 h-[28px] rounded-t-xl",
   body: "py-1.5 px-4",
   bodyWithGap: "py-1.5 px-4 flex flex-col gap-1.5",
   pill: "bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] rounded-full px-2 py-0.5",
-  pillInput: "bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] rounded-full px-2 py-0.5 text-[#fafafa] text-[10px] appearance-none focus:outline-none focus:ring-1 focus:ring-blue-400/50 w-[110px]",
+  pillInput:
+    "bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] rounded-full px-2 py-0.5 text-[#fafafa] text-[10px] appearance-none focus:outline-none focus:ring-1 focus:ring-blue-400/50 w-[110px]",
   pillInputText: "text-center",
-  pillInputNumber: "text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+  pillInputNumber:
+    "text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
   labelText: "text-[#8c8c8d] text-[10px] font-normal",
   primaryText: "text-[#fafafa] text-[10px] font-normal",
   headerText: "text-[#fafafa] text-[12px] font-normal",
@@ -18,8 +28,10 @@ export const NODE_TOKENS = {
   sectionTitle: "text-[10px] font-normal text-[#8c8c8d] mb-2",
   panelBackground: "bg-[#181717]",
   panelBorder: "border-[rgba(119,119,119,0.15)]",
-  toolbar: "flex items-center gap-2 px-4 py-2 bg-[#181717] border-b border-[rgba(119,119,119,0.15)]",
-  toolbarButton: "px-3 py-1.5 text-xs font-medium rounded-lg bg-[#2a2a2a] border border-[rgba(119,119,119,0.35)] text-[#fafafa] hover:bg-[#2a2a2a]/80 transition-colors",
+  toolbar:
+    "flex items-center gap-2 px-4 py-2 bg-[#181717] border-b border-[rgba(119,119,119,0.15)]",
+  toolbarButton:
+    "px-3 py-1.5 text-xs font-medium rounded-lg bg-[#2a2a2a] border border-[rgba(119,119,119,0.35)] text-[#fafafa] hover:bg-[#2a2a2a]/80 transition-colors",
   toolbarStatus: "text-xs text-[#8c8c8d] ml-2",
 } as const;
 
@@ -31,7 +43,12 @@ interface NodeCardProps {
   autoMinHeight?: boolean;
 }
 
-export function NodeCard({ children, selected, className = "", autoMinHeight = false }: NodeCardProps) {
+export function NodeCard({
+  children,
+  selected,
+  className = "",
+  autoMinHeight = false,
+}: NodeCardProps) {
   const measureRef = useRef<HTMLDivElement>(null);
   const [minH, setMinH] = useState(60);
 
@@ -69,7 +86,11 @@ interface NodeHeaderProps {
   className?: string;
 }
 
-export function NodeHeader({ title, dotColor, className = "" }: NodeHeaderProps) {
+export function NodeHeader({
+  title,
+  dotColor,
+  className = "",
+}: NodeHeaderProps) {
   return (
     <div className={`${NODE_TOKENS.header} ${className}`}>
       <div className={`w-[10px] h-[10px] rounded-full ${dotColor} shrink-0`} />
@@ -84,9 +105,15 @@ interface NodeBodyProps {
   className?: string;
 }
 
-export function NodeBody({ children, withGap = false, className = "" }: NodeBodyProps) {
+export function NodeBody({
+  children,
+  withGap = false,
+  className = "",
+}: NodeBodyProps) {
   return (
-    <div className={`${withGap ? NODE_TOKENS.bodyWithGap : NODE_TOKENS.body} flex-1 min-h-0 ${className}`}>
+    <div
+      className={`${withGap ? NODE_TOKENS.bodyWithGap : NODE_TOKENS.body} flex-1 min-h-0 ${className}`}
+    >
       {children}
     </div>
   );
@@ -98,7 +125,11 @@ interface NodeSectionProps {
   className?: string;
 }
 
-export function NodeSection({ title, children, className = "" }: NodeSectionProps) {
+export function NodeSection({
+  title,
+  children,
+  className = "",
+}: NodeSectionProps) {
   return (
     <div className={className}>
       <h4 className={NODE_TOKENS.sectionTitle}>{title}</h4>
@@ -113,10 +144,16 @@ interface NodeParamRowProps {
   className?: string;
 }
 
-export function NodeParamRow({ label, children, className = "" }: NodeParamRowProps) {
+export function NodeParamRow({
+  label,
+  children,
+  className = "",
+}: NodeParamRowProps) {
   return (
     <div className={`${NODE_TOKENS.paramRow} ${className}`}>
-      <p className={`${NODE_TOKENS.labelText} w-[80px] shrink-0 truncate`}>{label}</p>
+      <p className={`${NODE_TOKENS.labelText} w-[80px] shrink-0 truncate`}>
+        {label}
+      </p>
       {children}
     </div>
   );
@@ -129,7 +166,9 @@ interface NodePillProps {
 
 export function NodePill({ children, className = "" }: NodePillProps) {
   return (
-    <div className={`${NODE_TOKENS.pill} w-[110px] flex items-center justify-center ${className}`}>
+    <div
+      className={`${NODE_TOKENS.pill} w-[110px] flex items-center justify-center ${className}`}
+    >
       <p className={`${NODE_TOKENS.primaryText} leading-[1.55]`}>{children}</p>
     </div>
   );
@@ -191,7 +230,10 @@ export function NodePillSearchableSelect({
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (containerRef.current && !containerRef.current.contains(event.target as Node)) {
+      if (
+        containerRef.current &&
+        !containerRef.current.contains(event.target as Node)
+      ) {
         setIsOpen(false);
         setSearchText("");
       }
@@ -225,9 +267,10 @@ export function NodePillSearchableSelect({
     };
   }, [isOpen]);
 
-  const filteredOptions = options.filter(opt =>
-    opt.label.toLowerCase().includes(searchText.toLowerCase()) ||
-    opt.value.toLowerCase().includes(searchText.toLowerCase())
+  const filteredOptions = options.filter(
+    opt =>
+      opt.label.toLowerCase().includes(searchText.toLowerCase()) ||
+      opt.value.toLowerCase().includes(searchText.toLowerCase())
   );
 
   const selectedOption = options.find(opt => opt.value === value);
@@ -270,7 +313,10 @@ export function NodePillSearchableSelect({
           <div
             ref={scrollableRef}
             className="overflow-y-auto overflow-x-hidden max-h-[200px] nowheel [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-black/50 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-black/70"
-            style={{ scrollbarWidth: 'thin', scrollbarColor: 'rgba(0,0,0,0.5) transparent' }}
+            style={{
+              scrollbarWidth: "thin",
+              scrollbarColor: "rgba(0,0,0,0.5) transparent",
+            }}
           >
             {filteredOptions.length === 0 ? (
               <div className="px-2 py-1 text-[10px] text-[#8c8c8d] text-center">
@@ -283,7 +329,9 @@ export function NodePillSearchableSelect({
                   type="button"
                   onClick={() => handleSelect(opt.value)}
                   className={`w-full px-2 py-1 text-[10px] text-left hover:bg-[#2a2a2a] transition-colors truncate ${
-                    opt.value === value ? "bg-[#2a2a2a] text-blue-400" : "text-[#fafafa]"
+                    opt.value === value
+                      ? "bg-[#2a2a2a] text-blue-400"
+                      : "text-[#fafafa]"
                   }`}
                   onMouseDown={e => e.stopPropagation()}
                 >
@@ -361,17 +409,21 @@ export function NodePillInput({
       };
 
       const sensitivity =
-        min !== undefined && max !== undefined
-          ? (max - min) / 300
-          : 0.5;
+        min !== undefined && max !== undefined ? (max - min) / 300 : 0.5;
 
       const onMove = (ev: MouseEvent) => {
         if (!dragRef.current) return;
         const dx = ev.clientX - dragRef.current.startX;
         if (!dragRef.current.hasDragged && Math.abs(dx) < 3) return;
         dragRef.current.hasDragged = true;
-        const newVal = clampValue(dragRef.current.startValue + dx * sensitivity);
-        onChange(sensitivity >= 1 ? Math.round(newVal) : Math.round(newVal * 1000) / 1000);
+        const newVal = clampValue(
+          dragRef.current.startValue + dx * sensitivity
+        );
+        onChange(
+          sensitivity >= 1
+            ? Math.round(newVal)
+            : Math.round(newVal * 1000) / 1000
+        );
       };
 
       const onUp = () => {
@@ -422,7 +474,9 @@ export function NodePillToggle({
   className = "",
 }: NodePillToggleProps) {
   return (
-    <div className={`${NODE_TOKENS.pill} w-[110px] flex items-center justify-center ${className}`}>
+    <div
+      className={`${NODE_TOKENS.pill} w-[110px] flex items-center justify-center ${className}`}
+    >
       <input
         type="checkbox"
         checked={checked}
@@ -502,11 +556,16 @@ export function NodePillListInput({
     const text = e.target.value;
     setInputValue(text);
 
-    const parts = text.split(",").map(s => s.trim()).filter(s => s);
-    const numbers = parts.map(s => {
-      const num = Number(s);
-      return Number.isNaN(num) ? null : num;
-    }).filter((n): n is number => n !== null);
+    const parts = text
+      .split(",")
+      .map(s => s.trim())
+      .filter(s => s);
+    const numbers = parts
+      .map(s => {
+        const num = Number(s);
+        return Number.isNaN(num) ? null : num;
+      })
+      .filter((n): n is number => n !== null);
 
     if (numbers.length > 0) {
       onChange(numbers);

@@ -20,7 +20,9 @@ const PARAM_TYPE_COLORS: Record<string, string> = {
   string: "#fbbf24", // amber-400
 };
 
-function getControlOutputType(controlType: "float" | "int" | "string"): "number" | "string" {
+function getControlOutputType(
+  controlType: "float" | "int" | "string"
+): "number" | "string" {
   return controlType === "string" ? "string" : "number";
 }
 
@@ -106,8 +108,8 @@ export function ControlNode({
   // Initialize currentValue
   useEffect(() => {
     const initialValue = controlType === "string" ? items[0] || "" : min;
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         if (n.data.currentValue !== undefined) return n;
         return {
@@ -156,7 +158,8 @@ export function ControlNode({
           lastValueRef.current
         );
         lastValueRef.current = floatValue;
-        const finalValue = controlType === "int" ? Math.round(floatValue) : floatValue;
+        const finalValue =
+          controlType === "int" ? Math.round(floatValue) : floatValue;
         setCurrentValue(finalValue);
       }
 
@@ -179,8 +182,8 @@ export function ControlNode({
     if (now - lastUpdateTimeRef.current < 100) return; // Throttle to 100ms
     lastUpdateTimeRef.current = now;
 
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -194,13 +197,14 @@ export function ControlNode({
   }, [currentValue, id, setNodes]);
 
   const handleTogglePlay = () => {
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         const newIsPlaying = !isPlaying;
         if (newIsPlaying) {
           startTimeRef.current = Date.now();
-          lastValueRef.current = typeof currentValue === "number" ? currentValue : min;
+          lastValueRef.current =
+            typeof currentValue === "number" ? currentValue : min;
         }
         return {
           ...n,
@@ -214,8 +218,8 @@ export function ControlNode({
   };
 
   const handlePatternChange = (newPattern: string) => {
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -230,8 +234,8 @@ export function ControlNode({
 
   const handleMinChange = (val: string | number) => {
     const numVal = Number(val);
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -246,8 +250,8 @@ export function ControlNode({
 
   const handleMaxChange = (val: string | number) => {
     const numVal = Number(val);
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -262,8 +266,8 @@ export function ControlNode({
 
   const handleSpeedChange = (val: string | number) => {
     const numVal = Number(val);
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -280,10 +284,10 @@ export function ControlNode({
     const itemsStr = String(val);
     const itemsArray = itemsStr
       .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0);
-    setNodes((nds) =>
-      nds.map((n) => {
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -302,7 +306,9 @@ export function ControlNode({
     <NodeCard selected={selected}>
       <div className={`${NODE_TOKENS.header} justify-between`}>
         <div className="flex items-center gap-2">
-          <div className={`w-[10px] h-[10px] rounded-full ${dotColorClass} shrink-0`} />
+          <div
+            className={`w-[10px] h-[10px] rounded-full ${dotColorClass} shrink-0`}
+          />
           <p className={NODE_TOKENS.headerText}>{title}</p>
         </div>
         <button

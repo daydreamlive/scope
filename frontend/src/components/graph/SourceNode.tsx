@@ -3,7 +3,14 @@ import { Handle, Position, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import { getInputSourceSources, type DiscoveredSource } from "../../lib/api";
-import { NodeCard, NodeHeader, NodeParamRow, NodePillSelect, NodePillInput, NodePillSearchableSelect } from "./node-ui";
+import {
+  NodeCard,
+  NodeHeader,
+  NodeParamRow,
+  NodePillSelect,
+  NodePillInput,
+  NodePillSearchableSelect,
+} from "./node-ui";
 
 type SourceNodeType = Node<FlowNodeData, "source">;
 
@@ -24,14 +31,24 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const sourceMode = data.sourceMode || "video";
   const sourceName = data.sourceName || "";
   const localStream = data.localStream as MediaStream | null | undefined;
-  const onVideoFileUpload = data.onVideoFileUpload as ((file: File) => Promise<boolean>) | undefined;
-  const onSourceModeChange = data.onSourceModeChange as ((mode: string) => void) | undefined;
+  const onVideoFileUpload = data.onVideoFileUpload as
+    | ((file: File) => Promise<boolean>)
+    | undefined;
+  const onSourceModeChange = data.onSourceModeChange as
+    | ((mode: string) => void)
+    | undefined;
   const spoutAvailable = data.spoutAvailable ?? false;
   const ndiAvailable = data.ndiAvailable ?? false;
   const syphonAvailable = data.syphonAvailable ?? false;
-  const onSpoutSourceChange = data.onSpoutSourceChange as ((name: string) => void) | undefined;
-  const onNdiSourceChange = data.onNdiSourceChange as ((identifier: string) => void) | undefined;
-  const onSyphonSourceChange = data.onSyphonSourceChange as ((identifier: string) => void) | undefined;
+  const onSpoutSourceChange = data.onSpoutSourceChange as
+    | ((name: string) => void)
+    | undefined;
+  const onNdiSourceChange = data.onNdiSourceChange as
+    | ((identifier: string) => void)
+    | undefined;
+  const onSyphonSourceChange = data.onSyphonSourceChange as
+    | ((identifier: string) => void)
+    | undefined;
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -69,7 +86,11 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
 
   // Discover Syphon sources
   useEffect(() => {
-    if (sourceMode === "syphon" && syphonAvailable && syphonSources.length === 0) {
+    if (
+      sourceMode === "syphon" &&
+      syphonAvailable &&
+      syphonSources.length === 0
+    ) {
       discoverSyphonSources();
     }
   }, [sourceMode, syphonAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -89,15 +110,23 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   }, [syphonAvailable]);
 
   const handleSourceModeChange = (newMode: string) => {
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
           data: {
             ...n.data,
-            sourceMode: newMode as "video" | "camera" | "spout" | "ndi" | "syphon",
-            sourceName: newMode === "spout" || newMode === "ndi" || newMode === "syphon" ? n.data.sourceName : undefined,
+            sourceMode: newMode as
+              | "video"
+              | "camera"
+              | "spout"
+              | "ndi"
+              | "syphon",
+            sourceName:
+              newMode === "spout" || newMode === "ndi" || newMode === "syphon"
+                ? n.data.sourceName
+                : undefined,
           },
         };
       })
@@ -107,8 +136,8 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
 
   const handleSpoutNameChange = (value: string | number) => {
     const name = String(value);
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -123,8 +152,8 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   };
 
   const handleNdiSourceChange = (identifier: string) => {
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -139,8 +168,8 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   };
 
   const handleSyphonSourceChange = (identifier: string) => {
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -180,8 +209,14 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     return true;
   });
 
-  const ndiOptions = ndiSources.map(s => ({ value: s.identifier, label: s.name }));
-  const syphonOptions = syphonSources.map(s => ({ value: s.identifier, label: s.name }));
+  const ndiOptions = ndiSources.map(s => ({
+    value: s.identifier,
+    label: s.name,
+  }));
+  const syphonOptions = syphonSources.map(s => ({
+    value: s.identifier,
+    label: s.name,
+  }));
 
   return (
     <NodeCard selected={selected}>
@@ -219,7 +254,13 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                   value={sourceName}
                   onChange={handleNdiSourceChange}
                   options={ndiOptions}
-                  placeholder={isDiscoveringNdi ? "Discovering..." : ndiOptions.length === 0 ? "No sources" : "Select source"}
+                  placeholder={
+                    isDiscoveringNdi
+                      ? "Discovering..."
+                      : ndiOptions.length === 0
+                        ? "No sources"
+                        : "Select source"
+                  }
                   disabled={isDiscoveringNdi || !ndiAvailable}
                   className="flex-1"
                 />
@@ -255,7 +296,13 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                   value={sourceName}
                   onChange={handleSyphonSourceChange}
                   options={syphonOptions}
-                  placeholder={isDiscoveringSyphon ? "Discovering..." : syphonOptions.length === 0 ? "No sources" : "Select source"}
+                  placeholder={
+                    isDiscoveringSyphon
+                      ? "Discovering..."
+                      : syphonOptions.length === 0
+                        ? "No sources"
+                        : "Select source"
+                  }
                   disabled={isDiscoveringSyphon || !syphonAvailable}
                   className="flex-1"
                 />
@@ -319,11 +366,14 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
           </div>
         )}
 
-        {!showPreview && sourceMode !== "spout" && sourceMode !== "ndi" && sourceMode !== "syphon" && (
-          <div className="flex items-center justify-center rounded-md bg-black/30 text-[10px] text-[#8c8c8d] flex-1 min-h-[40px]">
-            Waiting for input...
-          </div>
-        )}
+        {!showPreview &&
+          sourceMode !== "spout" &&
+          sourceMode !== "ndi" &&
+          sourceMode !== "syphon" && (
+            <div className="flex items-center justify-center rounded-md bg-black/30 text-[10px] text-[#8c8c8d] flex-1 min-h-[40px]">
+              Waiting for input...
+            </div>
+          )}
       </div>
       <Handle
         type="source"

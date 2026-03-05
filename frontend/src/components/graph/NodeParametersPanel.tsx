@@ -97,15 +97,26 @@ export function NodeParametersPanel({
       return false;
     };
     const propAsRecord = field.prop as unknown as Record<string, unknown>;
-    const anyOfVariants = propAsRecord.anyOf as Record<string, unknown>[] | undefined;
+    const anyOfVariants = propAsRecord.anyOf as
+      | Record<string, unknown>[]
+      | undefined;
 
-    if (isArrayOfNumbers(propAsRecord) || anyOfVariants?.some(v => isArrayOfNumbers(v))) {
+    if (
+      isArrayOfNumbers(propAsRecord) ||
+      anyOfVariants?.some(v => isArrayOfNumbers(v))
+    ) {
       const currentValue = parameterValues[field.key] ?? field.prop.default;
       const label = field.ui.label || field.key;
       return (
         <NodeParamRow key={field.key} label={label}>
           <NodePillListInput
-            value={Array.isArray(currentValue) ? currentValue : (Array.isArray(field.prop.default) ? field.prop.default : [])}
+            value={
+              Array.isArray(currentValue)
+                ? currentValue
+                : Array.isArray(field.prop.default)
+                  ? field.prop.default
+                  : []
+            }
             onChange={value => onParameterChange(nodeId, field.key, value)}
             disabled={disabled}
           />
@@ -132,7 +143,9 @@ export function NodeParametersPanel({
       const label = field.ui.label || field.key;
 
       if (resolvedType === "enum" && field.prop.enum) {
-        const enumValues = Array.isArray(field.prop.enum) ? field.prop.enum : [];
+        const enumValues = Array.isArray(field.prop.enum)
+          ? field.prop.enum
+          : [];
         const options = enumValues.map((opt: unknown) => {
           const optValue = String(opt);
           return { value: optValue, label: formatValue(opt) };
@@ -163,8 +176,14 @@ export function NodeParametersPanel({
       }
 
       if (resolvedType === "number") {
-        const min = typeof field.prop.minimum === "number" ? field.prop.minimum : undefined;
-        const max = typeof field.prop.maximum === "number" ? field.prop.maximum : undefined;
+        const min =
+          typeof field.prop.minimum === "number"
+            ? field.prop.minimum
+            : undefined;
+        const max =
+          typeof field.prop.maximum === "number"
+            ? field.prop.maximum
+            : undefined;
         return (
           <NodeParamRow key={field.key} label={label}>
             <NodePillInput
@@ -184,7 +203,9 @@ export function NodeParametersPanel({
           <NodeParamRow key={field.key} label={label}>
             <NodePillToggle
               checked={Boolean(currentValue ?? field.prop.default ?? false)}
-              onChange={checked => onParameterChange(nodeId, field.key, checked)}
+              onChange={checked =>
+                onParameterChange(nodeId, field.key, checked)
+              }
               disabled={disabled}
             />
           </NodeParamRow>
@@ -201,9 +222,13 @@ export function NodeParametersPanel({
   };
 
   return (
-    <div className={`flex flex-col gap-4 p-4 overflow-y-auto h-full ${NODE_TOKENS.panelBackground}`}>
+    <div
+      className={`flex flex-col gap-4 p-4 overflow-y-auto h-full ${NODE_TOKENS.panelBackground}`}
+    >
       <div>
-        <h3 className="text-sm font-semibold text-[#fafafa] mb-1">{schema.name}</h3>
+        <h3 className="text-sm font-semibold text-[#fafafa] mb-1">
+          {schema.name}
+        </h3>
         <p className={NODE_TOKENS.labelText}>Node: {nodeId}</p>
       </div>
 

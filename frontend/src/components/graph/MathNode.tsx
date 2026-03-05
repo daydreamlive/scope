@@ -1,6 +1,18 @@
-import { Handle, Position, useReactFlow, useEdges, useNodes } from "@xyflow/react";
+import {
+  Handle,
+  Position,
+  useReactFlow,
+  useEdges,
+  useNodes,
+} from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { useEffect, useRef, useLayoutEffect, useState, useCallback } from "react";
+import {
+  useEffect,
+  useRef,
+  useLayoutEffect,
+  useState,
+  useCallback,
+} from "react";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import { buildHandleId } from "../../lib/graphUtils";
 import {
@@ -37,7 +49,7 @@ const UNARY_OPERATIONS = [
 
 const ALL_OPERATIONS = [...BINARY_OPERATIONS, ...UNARY_OPERATIONS];
 
-const UNARY_OPS = new Set(UNARY_OPERATIONS.map((o) => o.value));
+const UNARY_OPS = new Set(UNARY_OPERATIONS.map(o => o.value));
 const COLOR = "#38bdf8"; // sky-400
 
 function isUnaryOp(op: string): boolean {
@@ -106,11 +118,7 @@ function computeResult(
   }
 }
 
-export function MathNode({
-  id,
-  data,
-  selected,
-}: NodeProps<MathNodeType>) {
+export function MathNode({ id, data, selected }: NodeProps<MathNodeType>) {
   const { setNodes } = useReactFlow();
   const edges = useEdges();
   const allNodes = useNodes() as Node<FlowNodeData>[];
@@ -119,17 +127,17 @@ export function MathNode({
 
   // Find edges connected to input handles
   const edgeA = edges.find(
-    (e) => e.target === id && e.targetHandle === buildHandleId("param", "a")
+    e => e.target === id && e.targetHandle === buildHandleId("param", "a")
   );
   const edgeB = !unary
     ? edges.find(
-        (e) => e.target === id && e.targetHandle === buildHandleId("param", "b")
+        e => e.target === id && e.targetHandle === buildHandleId("param", "b")
       )
     : null;
 
   // Get source nodes
-  const sourceNodeA = edgeA ? allNodes.find((n) => n.id === edgeA.source) : null;
-  const sourceNodeB = edgeB ? allNodes.find((n) => n.id === edgeB.source) : null;
+  const sourceNodeA = edgeA ? allNodes.find(n => n.id === edgeA.source) : null;
+  const sourceNodeB = edgeB ? allNodes.find(n => n.id === edgeB.source) : null;
 
   // Extract values
   const valueA = sourceNodeA ? getValueFromNode(sourceNodeA) : null;
@@ -140,8 +148,8 @@ export function MathNode({
 
   // Update currentValue when result changes
   useEffect(() => {
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -155,8 +163,8 @@ export function MathNode({
   }, [id, setNodes, result]);
 
   const handleOperationChange = (newOp: string) => {
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,
@@ -186,11 +194,11 @@ export function MathNode({
     for (const [key, el] of rowRefs.current.entries()) {
       positions[key] = el.offsetTop + el.offsetHeight / 2;
     }
-    setRowPositions((prev) => {
+    setRowPositions(prev => {
       const keys = Object.keys(positions);
       if (
         keys.length === Object.keys(prev).length &&
-        keys.every((k) => Math.abs((prev[k] ?? 0) - positions[k]) < 1)
+        keys.every(k => Math.abs((prev[k] ?? 0) - positions[k]) < 1)
       ) {
         return prev;
       }

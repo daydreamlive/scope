@@ -23,22 +23,25 @@ function getParamTypeColor(type: "string" | "number" | "boolean"): string {
   return PARAM_TYPE_COLORS[type] || "#9ca3af";
 }
 
-export function ValueNode({
-  id,
-  data,
-  selected,
-}: NodeProps<ValueNodeType>) {
+export function ValueNode({ id, data, selected }: NodeProps<ValueNodeType>) {
   const { setNodes } = useReactFlow();
   const valueType = data.valueType || "string";
-  const currentValue = data.value ?? (valueType === "boolean" ? false : valueType === "number" ? 0 : "");
+  const currentValue =
+    data.value ??
+    (valueType === "boolean" ? false : valueType === "number" ? 0 : "");
 
   const title = valueType.charAt(0).toUpperCase() + valueType.slice(1);
   const color = getParamTypeColor(valueType);
-  const dotColorClass = valueType === "string" ? "bg-amber-400" : valueType === "number" ? "bg-sky-400" : "bg-emerald-400";
+  const dotColorClass =
+    valueType === "string"
+      ? "bg-amber-400"
+      : valueType === "number"
+        ? "bg-sky-400"
+        : "bg-emerald-400";
 
   const handleValueChange = (newValue: unknown) => {
-    setNodes((nds) =>
-      nds.map((n) => {
+    setNodes(nds =>
+      nds.map(n => {
         if (n.id !== id) return n;
         return {
           ...n,

@@ -10,11 +10,30 @@ import {
 interface AddNodeModalProps {
   open: boolean;
   onClose: () => void;
-  onSelectNodeType: (type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note" | "output", subType?: string) => void;
+  onSelectNodeType: (
+    type:
+      | "source"
+      | "pipeline"
+      | "sink"
+      | "value"
+      | "control"
+      | "math"
+      | "note"
+      | "output",
+    subType?: string
+  ) => void;
 }
 
 interface NodeCatalogItem {
-  type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note" | "output";
+  type:
+    | "source"
+    | "pipeline"
+    | "sink"
+    | "value"
+    | "control"
+    | "math"
+    | "note"
+    | "output";
   subType?: string;
   name: string;
   description: string;
@@ -23,18 +42,98 @@ interface NodeCatalogItem {
 }
 
 const NODE_CATALOG: NodeCatalogItem[] = [
-  { type: "source", name: "Source", description: "Input node for the workflow", color: "#4ade80", category: "I/O" },
-  { type: "pipeline", name: "Pipeline", description: "Processing pipeline node", color: "#60a5fa", category: "I/O" },
-  { type: "sink", name: "Sink", description: "Output node for the workflow", color: "#fb923c", category: "I/O" },
-  { type: "output", name: "Output", description: "Send video to Spout, NDI, or Syphon receivers", color: "#f87171", category: "I/O" },
-  { type: "value", subType: "string", name: "String", description: "Static text value", color: "#fbbf24", category: "Values" },
-  { type: "value", subType: "number", name: "Number", description: "Static numeric value", color: "#38bdf8", category: "Values" },
-  { type: "value", subType: "boolean", name: "Boolean", description: "True / false value", color: "#34d399", category: "Values" },
-  { type: "control", subType: "float", name: "FloatControl", description: "Animated float output using patterns like sine, bounce, random walk", color: "#38bdf8", category: "Controls" },
-  { type: "control", subType: "int", name: "IntControl", description: "Animated integer output using the same movement patterns as FloatControl", color: "#38bdf8", category: "Controls" },
-  { type: "control", subType: "string", name: "StringControl", description: "Cycles through a list of strings using movement patterns", color: "#fbbf24", category: "Controls" },
-  { type: "math", name: "Math", description: "Perform arithmetic operations on two numeric inputs", color: "#38bdf8", category: "Utility" },
-  { type: "note", name: "Note", description: "Add a text annotation to the graph", color: "#fbbf24", category: "Utility" },
+  {
+    type: "source",
+    name: "Source",
+    description: "Input node for the workflow",
+    color: "#4ade80",
+    category: "I/O",
+  },
+  {
+    type: "pipeline",
+    name: "Pipeline",
+    description: "Processing pipeline node",
+    color: "#60a5fa",
+    category: "I/O",
+  },
+  {
+    type: "sink",
+    name: "Sink",
+    description: "Output node for the workflow",
+    color: "#fb923c",
+    category: "I/O",
+  },
+  {
+    type: "output",
+    name: "Output",
+    description: "Send video to Spout, NDI, or Syphon receivers",
+    color: "#f87171",
+    category: "I/O",
+  },
+  {
+    type: "value",
+    subType: "string",
+    name: "String",
+    description: "Static text value",
+    color: "#fbbf24",
+    category: "Values",
+  },
+  {
+    type: "value",
+    subType: "number",
+    name: "Number",
+    description: "Static numeric value",
+    color: "#38bdf8",
+    category: "Values",
+  },
+  {
+    type: "value",
+    subType: "boolean",
+    name: "Boolean",
+    description: "True / false value",
+    color: "#34d399",
+    category: "Values",
+  },
+  {
+    type: "control",
+    subType: "float",
+    name: "FloatControl",
+    description:
+      "Animated float output using patterns like sine, bounce, random walk",
+    color: "#38bdf8",
+    category: "Controls",
+  },
+  {
+    type: "control",
+    subType: "int",
+    name: "IntControl",
+    description:
+      "Animated integer output using the same movement patterns as FloatControl",
+    color: "#38bdf8",
+    category: "Controls",
+  },
+  {
+    type: "control",
+    subType: "string",
+    name: "StringControl",
+    description: "Cycles through a list of strings using movement patterns",
+    color: "#fbbf24",
+    category: "Controls",
+  },
+  {
+    type: "math",
+    name: "Math",
+    description: "Perform arithmetic operations on two numeric inputs",
+    color: "#38bdf8",
+    category: "Utility",
+  },
+  {
+    type: "note",
+    name: "Note",
+    description: "Add a text annotation to the graph",
+    color: "#fbbf24",
+    category: "Utility",
+  },
 ];
 
 const CATEGORIES = ["All", "I/O", "Values", "Controls", "Utility"];
@@ -100,7 +199,11 @@ function NodeTile({
       {tooltip && (
         <div
           className="fixed z-[9999] pointer-events-none"
-          style={{ left: tooltip.x, top: tooltip.y, transform: "translate(-50%, -100%)" }}
+          style={{
+            left: tooltip.x,
+            top: tooltip.y,
+            transform: "translate(-50%, -100%)",
+          }}
         >
           <div className="px-2.5 py-1.5 rounded-lg bg-[#111] border border-[rgba(119,119,119,0.3)] text-[11px] text-[#ccc] max-w-[180px] text-center shadow-lg">
             {tooltip.text}
@@ -159,20 +262,32 @@ export function AddNodeModal({
       <DialogContent className="!max-w-3xl w-full p-0 overflow-hidden bg-[#1a1a1a] border border-[rgba(119,119,119,0.2)] rounded-2xl">
         <DialogHeader className="sr-only">
           <DialogTitle>Add Node</DialogTitle>
-          <DialogDescription>Select the type of node to add to the workflow</DialogDescription>
+          <DialogDescription>
+            Select the type of node to add to the workflow
+          </DialogDescription>
         </DialogHeader>
 
         <div className="flex flex-col h-[540px]">
           {/* Search bar */}
           <div className="px-6 pt-6 pb-4 border-b border-[rgba(119,119,119,0.12)]">
             <div className="flex items-center gap-3 px-4 py-2.5 bg-[#111] rounded-xl border border-[rgba(119,119,119,0.2)]">
-              <svg className="w-4 h-4 text-[#666] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+              <svg
+                className="w-4 h-4 text-[#666] shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z"
+                />
               </svg>
               <input
                 type="text"
                 value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
+                onChange={e => setSearchText(e.target.value)}
                 placeholder="Search for anything..."
                 className="flex-1 bg-transparent text-sm text-[#fafafa] placeholder:text-[#555] focus:outline-none"
                 autoFocus
@@ -182,7 +297,7 @@ export function AddNodeModal({
 
           {/* Category tabs */}
           <div className="flex items-center gap-2 px-6 py-3 border-b border-[rgba(119,119,119,0.12)]">
-            {CATEGORIES.map((cat) => (
+            {CATEGORIES.map(cat => (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
@@ -205,7 +320,7 @@ export function AddNodeModal({
               </div>
             ) : (
               <div className="grid grid-cols-5 gap-2">
-                {filteredItems.map((item) => (
+                {filteredItems.map(item => (
                   <NodeTile
                     key={`${item.type}-${item.subType || ""}`}
                     item={item}

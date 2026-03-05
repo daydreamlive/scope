@@ -26,12 +26,7 @@ export function CustomEdge({
 
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={edgePath}
-        markerEnd={markerEnd}
-        style={style}
-      />
+      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
       {/* Clickable delete-dot anchored to the midpoint of the edge */}
       <g transform={`translate(${labelX}, ${labelY})`}>
         {/* Invisible larger hit area for easier clicking */}
@@ -39,7 +34,7 @@ export function CustomEdge({
           r={12}
           fill="transparent"
           style={{ pointerEvents: "all", cursor: "pointer" }}
-          onClick={(e) => {
+          onClick={e => {
             e.stopPropagation();
             if (data && typeof data.onDelete === "function") {
               data.onDelete(id);

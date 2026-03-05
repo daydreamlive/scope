@@ -1797,17 +1797,31 @@ export function StreamPage() {
             try {
               const response = await getGraph();
               if (response.graph) {
-                const sourceNode = response.graph.nodes.find(n => n.type === "source");
+                const sourceNode = response.graph.nodes.find(
+                  n => n.type === "source"
+                );
                 if (sourceNode?.source_mode) {
-                  const sourceMode = sourceNode.source_mode as "video" | "camera" | "spout" | "ndi" | "syphon";
+                  const sourceMode = sourceNode.source_mode as
+                    | "video"
+                    | "camera"
+                    | "spout"
+                    | "ndi"
+                    | "syphon";
                   // Sync to useVideoSource
-                  if (sourceMode === "spout" || sourceMode === "ndi" || sourceMode === "syphon") {
+                  if (
+                    sourceMode === "spout" ||
+                    sourceMode === "ndi" ||
+                    sourceMode === "syphon"
+                  ) {
                     // For server-side sources, update settings.inputSource with graph's source_name
                     updateSettings({
                       inputSource: {
                         enabled: true,
                         source_type: sourceMode,
-                        source_name: sourceNode.source_name ?? settings.inputSource?.source_name ?? "",
+                        source_name:
+                          sourceNode.source_name ??
+                          settings.inputSource?.source_name ??
+                          "",
                       },
                     });
                     // Also call switchMode to sync the mode state
@@ -1844,7 +1858,11 @@ export function StreamPage() {
             onVideoFileUpload={handleVideoFileUpload}
             onStartStream={() => handleStartStream()}
             onStopStream={stopStream}
-            onSourceModeChange={(mode) => switchMode(mode as "video" | "camera" | "spout" | "ndi" | "syphon")}
+            onSourceModeChange={mode =>
+              switchMode(
+                mode as "video" | "camera" | "spout" | "ndi" | "syphon"
+              )
+            }
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiAvailable}
             syphonAvailable={syphonAvailable}
