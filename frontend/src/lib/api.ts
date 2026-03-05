@@ -921,3 +921,20 @@ export async function unregisterOscControllerSession(
     // best-effort
   }
 }
+
+export interface OscCommandEnvelope {
+  seq: number;
+  type: "osc_command";
+  key: string;
+  value: unknown;
+}
+
+export async function fetchOscCommands(
+  since: number
+): Promise<{ commands: OscCommandEnvelope[]; latest_seq: number }> {
+  const res = await fetch(`/api/v1/osc/commands?since=${since}`);
+  if (!res.ok) {
+    throw new Error("Failed to fetch OSC commands");
+  }
+  return res.json();
+}

@@ -35,7 +35,7 @@ import type {
   DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { getInputSourceResolution } from "../lib/api";
+import { fetchOscCommands, getInputSourceResolution } from "../lib/api";
 import type { OscCommand } from "../hooks/useUnifiedWebRTC";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
@@ -246,6 +246,7 @@ export function StreamPage() {
 
   // Stable ref for OSC command handler (avoids hook dependency cycles)
   const oscCommandHandlerRef = useRef<(cmd: OscCommand) => void>(() => {});
+  const oscCommandSeqRef = useRef(0);
 
   // Ref to access timeline functions
   const timelineRef = useRef<{
@@ -1191,6 +1192,34 @@ export function StreamPage() {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
+
+  // Poll queued OSC commands when no stream/controller session is active.
+  // This keeps UI controls in sync even while idle.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      if (cancelled) {
+        return;
+      }
+      try {
+        const result = await fetchOscCommands(oscCommandSeqRef.current);
+        oscCommandSeqRef.current = result.latest_seq;
+        for (const cmd of result.commands) {
+          oscCommandHandlerRef.current({ key: cmd.key, value: cmd.value });
+        }
+      } catch (error) {
+        console.debug("[StreamPage] OSC poll failed:", error);
+      }
+    };
+
+    // Poll frequently enough for responsive control without being noisy.
+    const id = window.setInterval(poll, 250);
+    poll();
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, []);
 
   // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {

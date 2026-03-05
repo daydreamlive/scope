@@ -34,6 +34,10 @@ class OSCServer:
         self._pipeline_manager: PipelineManager | None = None
         self._webrtc_manager: WebRTCManager | None = None
         self._controller_session_id: str | None = None
+        # Fallback queue for frontend polling when no controller session is active.
+        self._queued_commands: list[dict[str, Any]] = []
+        self._command_seq: int = 0
+        self._max_queued_commands: int = 500
 
     @property
     def port(self) -> int:
@@ -104,6 +108,24 @@ class OSCServer:
         dispatcher.map("/scope/*", self._handle_osc_message)
         return dispatcher
 
+    def _queue_command(self, key: str, value: Any) -> None:
+        self._command_seq += 1
+        self._queued_commands.append(
+            {
+                "seq": self._command_seq,
+                "type": "osc_command",
+                "key": key,
+                "value": value,
+            }
+        )
+        if len(self._queued_commands) > self._max_queued_commands:
+            self._queued_commands = self._queued_commands[-self._max_queued_commands :]
+
+    def get_commands_since(self, since: int) -> dict[str, Any]:
+        """Return queued OSC command envelopes newer than *since* sequence."""
+        commands = [cmd for cmd in self._queued_commands if cmd["seq"] > since]
+        return {"commands": commands, "latest_seq": self._command_seq}
+
     def _handle_osc_message(self, address: str, *args) -> None:
         """Validate and forward an incoming OSC message to the controller session."""
         parts = address.split("/")
@@ -147,10 +169,12 @@ class OSCServer:
 
         if not self._webrtc_manager:
             logger.debug("OSC message not forwarded – no WebRTC manager")
+            self._queue_command(key, value)
             return
 
         if not self._controller_session_id:
             logger.debug("OSC message not forwarded – no controller session registered")
+            self._queue_command(key, value)
             return
 
         envelope = {
@@ -168,6 +192,7 @@ class OSCServer:
                 self._controller_session_id,
             )
             self._controller_session_id = None
+            self._queue_command(key, value)
 
     async def start(self) -> None:
         dispatcher = self._build_dispatcher()

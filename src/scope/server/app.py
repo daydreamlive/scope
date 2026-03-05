@@ -703,6 +703,15 @@ async def osc_unregister_controller(session_id: str):
     return {"success": True}
 
 
+@app.get("/api/v1/osc/commands")
+async def osc_commands(since: int = Query(0, ge=0)):
+    """Return queued OSC commands newer than the provided sequence number."""
+    srv = get_osc_server()
+    if srv is None:
+        return {"commands": [], "latest_seq": since}
+    return srv.get_commands_since(since)
+
+
 @app.get("/api/v1/osc/docs")
 async def osc_docs_page(
     pm: "PipelineManager" = Depends(get_pipeline_manager),
