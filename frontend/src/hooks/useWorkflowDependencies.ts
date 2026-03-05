@@ -48,6 +48,7 @@ function buildLoRADownloadRequest(
         source: "civitai",
         model_id: prov.model_id,
         version_id: versionId,
+        url: prov.url,
         expected_sha256: lora.sha256,
       };
     }

@@ -37,6 +37,7 @@ import type {
 import { resolveWorkflow } from "../lib/api";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
+import { usePluginsContext } from "../contexts/PluginsContext";
 import type { SettingsState } from "../types";
 import type { TimelinePrompt } from "./PromptTimeline";
 import {
@@ -150,18 +151,19 @@ export function WorkflowImportDialog({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { refresh: refreshLoRAs } = useLoRAsContext();
   const { refreshPipelines } = usePipelinesContext();
+  const { refresh: refreshPlugins } = usePluginsContext();
 
   // -- Re-resolution callback (used by both LoRA downloads and plugin installs)
   const reResolveWorkflow = useCallback(async () => {
     if (!workflow) return;
     try {
-      await Promise.all([refreshPipelines(), refreshLoRAs()]);
+      await Promise.all([refreshPipelines(), refreshLoRAs(), refreshPlugins()]);
       const resolution = await resolveWorkflow(workflow);
       setPlan(resolution);
     } catch (err) {
       console.error("Failed to re-resolve workflow:", err);
     }
-  }, [workflow, refreshPipelines, refreshLoRAs]);
+  }, [workflow, refreshPipelines, refreshLoRAs, refreshPlugins]);
 
   const loras = useLoRADownloads(workflow, reResolveWorkflow);
 
