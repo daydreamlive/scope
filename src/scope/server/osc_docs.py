@@ -158,10 +158,7 @@ def get_osc_paths(
     """
     active_pipeline_ids: list[str] = []
     if pipeline_manager:
-        status = pipeline_manager.get_status_info()
-        pid = status.get("pipeline_id")
-        if pid:
-            active_pipeline_ids.append(pid)
+        active_pipeline_ids = pipeline_manager.get_loaded_pipeline_ids()
 
     pipeline_paths = _collect_pipeline_paths()
 
