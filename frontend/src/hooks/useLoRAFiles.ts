@@ -15,6 +15,8 @@ export function useLoRAFiles(): UseLoRAFilesReturn {
   const [loraFiles, setLoraFiles] = useState<LoRAFileInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const prevCloudConnectedRef = useRef<boolean | null>(null);
+  const loraFilesRef = useRef<LoRAFileInfo[]>(loraFiles);
+  loraFilesRef.current = loraFiles;
 
   const refresh = useCallback(async (): Promise<LoRAFileInfo[]> => {
     setIsLoading(true);
@@ -24,11 +26,11 @@ export function useLoRAFiles(): UseLoRAFilesReturn {
       return response.lora_files;
     } catch (error) {
       console.error("Failed to load LoRA files:", error);
-      return loraFiles;
+      return loraFilesRef.current;
     } finally {
       setIsLoading(false);
     }
-  }, [listLoRAFiles, loraFiles]);
+  }, [listLoRAFiles]);
 
   // Initial load
   useEffect(() => {
