@@ -36,6 +36,7 @@ import type {
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { getInputSourceResolution } from "../lib/api";
+import type { OscCommand } from "../hooks/useUnifiedWebRTC";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -243,6 +244,9 @@ export function StreamPage() {
   >(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
+  // Stable ref for OSC command handler (avoids hook dependency cycles)
+  const oscCommandHandlerRef = useRef<(cmd: OscCommand) => void>(() => {});
+
   // Ref to access timeline functions
   const timelineRef = useRef<{
     getCurrentTimelinePrompt: () => string;
@@ -275,7 +279,12 @@ export function StreamPage() {
     updateVideoTrack,
     sendParameterUpdate,
     sessionId,
-  } = useUnifiedWebRTC();
+  } = useUnifiedWebRTC({
+    onOscCommand: useCallback(
+      (cmd: OscCommand) => oscCommandHandlerRef.current(cmd),
+      []
+    ),
+  });
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
   const isLoading =
@@ -793,6 +802,24 @@ export function StreamPage() {
   const handlePostprocessorSchemaFieldOverrideChange =
     makePipelineOverrideHandler("postprocessor");
 
+  const pipelineHasRuntimeField = useCallback(
+    (pipelineId: string, key: string): boolean => {
+      const props = (
+        pipelines?.[pipelineId]?.configSchema as
+          | {
+              properties?: Record<string, { ui?: { is_load_param?: boolean } }>;
+            }
+          | undefined
+      )?.properties;
+      const field = props?.[key];
+      if (!field) {
+        return false;
+      }
+      return field.ui?.is_load_param === false;
+    },
+    [pipelines]
+  );
+
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
     // Send VACE context scale update to backend if streaming
@@ -1016,6 +1043,123 @@ export function StreamPage() {
   const handleTimelinePlayingChange = (isPlaying: boolean) => {
     setIsTimelinePlaying(isPlaying);
   };
+
+  // Keep the OSC command handler ref in sync with current state/handlers
+  useEffect(() => {
+    oscCommandHandlerRef.current = (cmd: OscCommand) => {
+      const { key, value } = cmd;
+
+      switch (key) {
+        case "prompt": {
+          const prompts: PromptItem[] = [{ text: String(value), weight: 1.0 }];
+          setPromptItems(prompts);
+
+          if (isStreaming && transitionSteps > 0) {
+            handleTransitionSubmit({
+              target_prompts: prompts,
+              num_steps: transitionSteps,
+              temporal_interpolation_method: temporalInterpolationMethod,
+            });
+          } else {
+            handleLivePromptSubmit(prompts);
+          }
+          break;
+        }
+        case "transition_steps":
+          setTransitionSteps(Number(value));
+          break;
+        case "interpolation_method":
+          setInterpolationMethod(value as "linear" | "slerp");
+          break;
+        case "temporal_interpolation_method":
+          setTemporalInterpolationMethod(value as "linear" | "slerp");
+          break;
+        case "noise_scale":
+          handleNoiseScaleChange(Number(value));
+          break;
+        case "noise_controller":
+          handleNoiseControllerChange(Boolean(value));
+          break;
+        case "kv_cache_attention_bias":
+          handleKvCacheAttentionBiasChange(Number(value));
+          break;
+        case "manage_cache":
+          handleManageCacheChange(Boolean(value));
+          break;
+        case "reset_cache":
+          handleResetCache();
+          break;
+        case "vace_context_scale":
+          handleVaceContextScaleChange(Number(value));
+          break;
+        case "paused":
+          updateSettings({ paused: Boolean(value) });
+          sendParameterUpdate({ paused: Boolean(value) });
+          break;
+        case "input_mode":
+          handleInputModeChange(String(value) as InputMode);
+          break;
+        default:
+          // Pipeline-specific runtime params:
+          // update frontend override state first, then forward to backend.
+          if (pipelineHasRuntimeField(settings.pipelineId, key)) {
+            updateSettings({
+              schemaFieldOverrides: {
+                ...(settings.schemaFieldOverrides ?? {}),
+                [key]: value,
+              },
+            });
+          }
+
+          const updateProcessorOverrides = (
+            processorIds: string[] | undefined,
+            currentOverrides:
+              | Record<string, Record<string, unknown>>
+              | undefined,
+            overridesKey:
+              | "preprocessorSchemaFieldOverrides"
+              | "postprocessorSchemaFieldOverrides"
+          ) => {
+            if (!processorIds?.length) {
+              return;
+            }
+            const nextOverrides = { ...(currentOverrides ?? {}) };
+            let changed = false;
+
+            for (const pid of processorIds) {
+              if (!pipelineHasRuntimeField(pid, key)) {
+                continue;
+              }
+              nextOverrides[pid] = {
+                ...(nextOverrides[pid] ?? {}),
+                [key]: value,
+              };
+              changed = true;
+            }
+
+            if (changed) {
+              updateSettings({ [overridesKey]: nextOverrides });
+            }
+          };
+
+          updateProcessorOverrides(
+            settings.preprocessorIds,
+            settings.preprocessorSchemaFieldOverrides,
+            "preprocessorSchemaFieldOverrides"
+          );
+          updateProcessorOverrides(
+            settings.postprocessorIds,
+            settings.postprocessorSchemaFieldOverrides,
+            "postprocessorSchemaFieldOverrides"
+          );
+
+          if (isStreaming) {
+            sendParameterUpdate({ [key]: value } as Record<string, unknown>);
+          }
+          break;
+      }
+    };
+  });
 
   // Handle ESC key to exit Edit mode and return to Append mode
   useEffect(() => {

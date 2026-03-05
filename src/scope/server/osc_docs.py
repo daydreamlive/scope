@@ -470,6 +470,12 @@ function toggle(id) {{
   OSC UDP port: <code>{osc_port}</code>
 </div>
 
+<p class="info" style="margin-top:0.5em;">
+  <strong>Note:</strong> OSC commands are forwarded to the active controller
+  session. A session is automatically registered as the controller when a
+  stream starts in the Scope UI.
+</p>
+
 <h2>Quick Start</h2>
 <pre>
 pip install python-osc

@@ -9,10 +9,17 @@ import {
   sendWebRTCOffer,
   sendIceCandidates,
   getIceServers,
+  registerOscControllerSession,
+  unregisterOscControllerSession,
   type PromptItem,
   type PromptTransition,
 } from "../lib/api";
 import { toast } from "sonner";
+
+export interface OscCommand {
+  key: string;
+  value: unknown;
+}
 
 interface InitialParameters {
   prompts?: string[] | PromptItem[];
@@ -39,6 +46,8 @@ interface InitialParameters {
 interface UseUnifiedWebRTCOptions {
   /** Callback function called when the stream stops on the backend */
   onStreamStop?: () => void;
+  /** Callback for incoming OSC commands forwarded by the backend */
+  onOscCommand?: (cmd: OscCommand) => void;
 }
 
 /**
@@ -153,12 +162,9 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         };
 
         dataChannel.onmessage = event => {
-          console.log("[UnifiedWebRTC] Data channel message:", event.data);
-
           try {
             const data = JSON.parse(event.data);
 
-            // Handle stream stop notification from backend
             if (data.type === "stream_stopped") {
               console.log("[UnifiedWebRTC] Stream stopped by backend");
               setIsStreaming(false);
@@ -178,6 +184,11 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
               }
 
               options?.onStreamStop?.();
+            } else if (data.type === "osc_command") {
+              options?.onOscCommand?.({
+                key: data.key,
+                value: data.value,
+              });
             }
           } catch (error) {
             console.error(
@@ -235,6 +246,17 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           if (pc.connectionState === "connected") {
             setIsConnecting(false);
             setIsStreaming(true);
+
+            // Register this session as the OSC controller
+            if (sessionIdRef.current && !isCloudMode) {
+              registerOscControllerSession(sessionIdRef.current).then(ok => {
+                if (ok) {
+                  console.log(
+                    "[UnifiedWebRTC] Registered as OSC controller session"
+                  );
+                }
+              });
+            }
 
             // Log detailed connection info
             console.log(
@@ -447,26 +469,30 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   );
 
   const sendParameterUpdate = useCallback(
-    (params: {
-      prompts?: string[] | PromptItem[];
-      prompt_interpolation_method?: "linear" | "slerp";
-      transition?: PromptTransition;
-      denoising_step_list?: number[];
-      noise_scale?: number;
-      noise_controller?: boolean;
-      manage_cache?: boolean;
-      reset_cache?: boolean;
-      kv_cache_attention_bias?: number;
-      paused?: boolean;
-      output_sinks?: Record<string, { enabled: boolean; name: string }>;
-      vace_ref_images?: string[];
-      vace_use_input_video?: boolean;
-      vace_context_scale?: number;
-      ctrl_input?: { button: string[]; mouse: [number, number] };
-      images?: string[];
-      first_frame_image?: string;
-      last_frame_image?: string;
-    }) => {
+    (
+      params:
+        | {
+            prompts?: string[] | PromptItem[];
+            prompt_interpolation_method?: "linear" | "slerp";
+            transition?: PromptTransition;
+            denoising_step_list?: number[];
+            noise_scale?: number;
+            noise_controller?: boolean;
+            manage_cache?: boolean;
+            reset_cache?: boolean;
+            kv_cache_attention_bias?: number;
+            paused?: boolean;
+            output_sinks?: Record<string, { enabled: boolean; name: string }>;
+            vace_ref_images?: string[];
+            vace_use_input_video?: boolean;
+            vace_context_scale?: number;
+            ctrl_input?: { button: string[]; mouse: [number, number] };
+            images?: string[];
+            first_frame_image?: string;
+            last_frame_image?: string;
+          }
+        | Record<string, unknown>
+    ) => {
       if (
         dataChannelRef.current &&
         dataChannelRef.current.readyState === "open"
@@ -496,6 +522,11 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   );
 
   const stopStream = useCallback(() => {
+    // Unregister OSC controller (best-effort)
+    if (sessionIdRef.current) {
+      unregisterOscControllerSession(sessionIdRef.current);
+    }
+
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;

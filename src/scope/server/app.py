@@ -677,6 +677,32 @@ async def osc_paths(
     return get_osc_paths(pm)
 
 
+@app.post("/api/v1/osc/controller-session")
+async def osc_register_controller(
+    body: dict,
+):
+    """Register a WebRTC session as the OSC controller."""
+    session_id = body.get("session_id")
+    if not session_id:
+        return {"success": False, "error": "session_id is required"}
+    srv = get_osc_server()
+    if srv is None:
+        return {"success": False, "error": "OSC server not running"}
+    ok = srv.set_controller_session(session_id)
+    if not ok:
+        return {"success": False, "error": "Session not found or not connected"}
+    return {"success": True, "session_id": session_id}
+
+
+@app.delete("/api/v1/osc/controller-session/{session_id}")
+async def osc_unregister_controller(session_id: str):
+    """Unregister a WebRTC session as the OSC controller."""
+    srv = get_osc_server()
+    if srv is not None:
+        srv.clear_controller_session(session_id)
+    return {"success": True}
+
+
 @app.get("/api/v1/osc/docs")
 async def osc_docs_page(
     pm: "PipelineManager" = Depends(get_pipeline_manager),

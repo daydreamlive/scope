@@ -888,3 +888,36 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
 };
+
+// ---------------------------------------------------------------------------
+// OSC controller session
+// ---------------------------------------------------------------------------
+
+export async function registerOscControllerSession(
+  sessionId: string
+): Promise<boolean> {
+  try {
+    const res = await fetch("/api/v1/osc/controller-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ session_id: sessionId }),
+    });
+    if (!res.ok) return false;
+    const data = await res.json();
+    return data.success === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function unregisterOscControllerSession(
+  sessionId: string
+): Promise<void> {
+  try {
+    await fetch(`/api/v1/osc/controller-session/${sessionId}`, {
+      method: "DELETE",
+    });
+  } catch {
+    // best-effort
+  }
+}

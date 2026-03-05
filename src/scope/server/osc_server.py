@@ -21,50 +21,6 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Stored transition settings so that prompt, transition_steps, and
-# interpolation_method OSC messages can arrive independently.
-_transition_steps: int = 4
-_temporal_interpolation_method: str = "linear"
-_interpolation_method: str = "linear"
-
-
-def _transform_osc_param(key: str, value: Any) -> dict[str, Any]:
-    """Map an OSC key/value into the parameter dict expected by the pipeline.
-
-    Most keys pass through unchanged, but some Input & Controls keys need
-    to be restructured into the format the frame processor expects.
-    """
-    global _transition_steps, _temporal_interpolation_method, _interpolation_method
-
-    if key == "prompt":
-        prompt_item = {"text": str(value), "weight": 1.0}
-        if _transition_steps > 0:
-            return {
-                "transition": {
-                    "target_prompts": [prompt_item],
-                    "num_steps": _transition_steps,
-                    "temporal_interpolation_method": _temporal_interpolation_method,
-                },
-            }
-        return {
-            "prompts": [prompt_item],
-            "prompt_interpolation_method": _interpolation_method,
-        }
-
-    if key == "transition_steps":
-        _transition_steps = int(value)
-        return {}
-
-    if key == "interpolation_method":
-        _interpolation_method = str(value)
-        return {}
-
-    if key == "temporal_interpolation_method":
-        _temporal_interpolation_method = str(value)
-        return {}
-
-    return {key: value}
-
 
 class OSCServer:
     """Manages the always-on OSC UDP listener with path validation."""
@@ -77,8 +33,7 @@ class OSCServer:
         self._listening = False
         self._pipeline_manager: PipelineManager | None = None
         self._webrtc_manager: WebRTCManager | None = None
-        # Cached path registry; rebuilt on each message to stay current
-        self._path_cache: dict[str, dict[str, Any]] | None = None
+        self._controller_session_id: str | None = None
 
     @property
     def port(self) -> int:
@@ -92,6 +47,10 @@ class OSCServer:
     def listening(self) -> bool:
         return self._listening
 
+    @property
+    def controller_session_id(self) -> str | None:
+        return self._controller_session_id
+
     def set_managers(
         self,
         pipeline_manager: "PipelineManager",
@@ -99,6 +58,36 @@ class OSCServer:
     ) -> None:
         self._pipeline_manager = pipeline_manager
         self._webrtc_manager = webrtc_manager
+
+    def set_controller_session(self, session_id: str) -> bool:
+        """Designate a WebRTC session as the OSC controller.
+
+        Returns True if the session was registered, False if the session
+        does not exist or its data channel is not open.
+        """
+        if not self._webrtc_manager:
+            return False
+        session = self._webrtc_manager.get_session(session_id)
+        if not session:
+            return False
+        if session.pc.connectionState in ("closed", "failed"):
+            return False
+        self._controller_session_id = session_id
+        logger.info("OSC controller session set to %s", session_id)
+        return True
+
+    def clear_controller_session(self, session_id: str | None = None) -> None:
+        """Remove the controller session designation.
+
+        If *session_id* is given, only clear if it matches the current
+        controller (prevents races when a new session replaces an old one).
+        """
+        if session_id is not None and self._controller_session_id != session_id:
+            return
+        prev = self._controller_session_id
+        self._controller_session_id = None
+        if prev:
+            logger.info("OSC controller session cleared (was %s)", prev)
 
     def _get_known_paths(self) -> dict[str, dict[str, Any]]:
         """Return the current set of known OSC paths, rebuilding each time.
@@ -116,7 +105,7 @@ class OSCServer:
         return dispatcher
 
     def _handle_osc_message(self, address: str, *args) -> None:
-        """Validate and optionally forward an incoming OSC message."""
+        """Validate and forward an incoming OSC message to the controller session."""
         parts = address.split("/")
         if len(parts) < 3:
             logger.info(
@@ -160,12 +149,25 @@ class OSCServer:
             logger.debug("OSC message not forwarded – no WebRTC manager")
             return
 
-        try:
-            params = _transform_osc_param(key, value)
-            if params:
-                self._webrtc_manager.broadcast_parameter_update(params)
-        except Exception:
-            logger.exception("Error forwarding OSC message %s", address)
+        if not self._controller_session_id:
+            logger.debug("OSC message not forwarded – no controller session registered")
+            return
+
+        envelope = {
+            "type": "osc_command",
+            "key": key,
+            "value": value,
+        }
+
+        sent = self._webrtc_manager.send_to_session(
+            self._controller_session_id, envelope
+        )
+        if not sent:
+            logger.warning(
+                "OSC message not delivered – controller session %s unavailable",
+                self._controller_session_id,
+            )
+            self._controller_session_id = None
 
     async def start(self) -> None:
         dispatcher = self._build_dispatcher()
@@ -198,4 +200,5 @@ class OSCServer:
             "listening": self._listening,
             "port": self._port,
             "host": self._host,
+            "controller_session": self._controller_session_id,
         }
