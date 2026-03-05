@@ -1248,8 +1248,11 @@ def resolve_workflow_endpoint(
         models_dir = get_models_dir()
         return resolve_workflow(workflow, plugin_manager, models_dir)
     except Exception as e:
-        logger.error("Error resolving workflow: %s", e)
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        logger.error("Error resolving workflow: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error while resolving workflow dependencies",
+        ) from e
 
 
 @app.get("/api/v1/assets", response_model=AssetsResponse)
