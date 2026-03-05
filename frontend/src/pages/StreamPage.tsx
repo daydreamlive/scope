@@ -35,10 +35,14 @@ import type {
   DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { fetchOscCommands, getInputSourceResolution } from "../lib/api";
-import type { OscCommand } from "../hooks/useUnifiedWebRTC";
+import { getInputSourceResolution } from "../lib/api";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
+
+interface OscCommand {
+  key: string;
+  value: unknown;
+}
 
 // Delay before resetting video reinitialization flag (ms)
 // This allows useVideoSource to detect the flag change and trigger reinitialization
@@ -246,7 +250,6 @@ export function StreamPage() {
 
   // Stable ref for OSC command handler (avoids hook dependency cycles)
   const oscCommandHandlerRef = useRef<(cmd: OscCommand) => void>(() => {});
-  const oscCommandSeqRef = useRef(0);
 
   // Ref to access timeline functions
   const timelineRef = useRef<{
@@ -280,12 +283,7 @@ export function StreamPage() {
     updateVideoTrack,
     sendParameterUpdate,
     sessionId,
-  } = useUnifiedWebRTC({
-    onOscCommand: useCallback(
-      (cmd: OscCommand) => oscCommandHandlerRef.current(cmd),
-      []
-    ),
-  });
+  } = useUnifiedWebRTC();
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
   const isLoading =
@@ -1193,32 +1191,27 @@ export function StreamPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
 
-  // Poll queued OSC commands when no stream/controller session is active.
-  // This keeps UI controls in sync even while idle.
+  // Subscribe to OSC commands via SSE so each update arrives individually
+  // and triggers its own render tick, giving smooth slider movement.
   useEffect(() => {
-    let cancelled = false;
-    const poll = async () => {
-      if (cancelled) {
-        return;
-      }
+    const es = new EventSource("/api/v1/osc/stream");
+
+    es.onmessage = event => {
       try {
-        const result = await fetchOscCommands(oscCommandSeqRef.current);
-        oscCommandSeqRef.current = result.latest_seq;
-        for (const cmd of result.commands) {
-          oscCommandHandlerRef.current({ key: cmd.key, value: cmd.value });
-        }
-      } catch (error) {
-        console.debug("[StreamPage] OSC poll failed:", error);
+        const cmd = JSON.parse(event.data) as OscCommand;
+        oscCommandHandlerRef.current(cmd);
+      } catch (err) {
+        console.debug("[StreamPage] Failed to parse OSC SSE event:", err);
       }
     };
 
-    // Poll frequently enough for responsive control without being noisy.
-    const id = window.setInterval(poll, 250);
-    poll();
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
+    es.onerror = () => {
+      console.debug(
+        "[StreamPage] OSC SSE connection error; browser will retry"
+      );
     };
+
+    return () => es.close();
   }, []);
 
   // Update temporal interpolation defaults and clear prompts when pipeline changes

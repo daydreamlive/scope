@@ -9,17 +9,10 @@ import {
   sendWebRTCOffer,
   sendIceCandidates,
   getIceServers,
-  registerOscControllerSession,
-  unregisterOscControllerSession,
   type PromptItem,
   type PromptTransition,
 } from "../lib/api";
 import { toast } from "sonner";
-
-export interface OscCommand {
-  key: string;
-  value: unknown;
-}
 
 interface InitialParameters {
   prompts?: string[] | PromptItem[];
@@ -46,8 +39,6 @@ interface InitialParameters {
 interface UseUnifiedWebRTCOptions {
   /** Callback function called when the stream stops on the backend */
   onStreamStop?: () => void;
-  /** Callback for incoming OSC commands forwarded by the backend */
-  onOscCommand?: (cmd: OscCommand) => void;
 }
 
 /**
@@ -184,11 +175,6 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
               }
 
               options?.onStreamStop?.();
-            } else if (data.type === "osc_command") {
-              options?.onOscCommand?.({
-                key: data.key,
-                value: data.value,
-              });
             }
           } catch (error) {
             console.error(
@@ -246,17 +232,6 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           if (pc.connectionState === "connected") {
             setIsConnecting(false);
             setIsStreaming(true);
-
-            // Register this session as the OSC controller
-            if (sessionIdRef.current && !isCloudMode) {
-              registerOscControllerSession(sessionIdRef.current).then(ok => {
-                if (ok) {
-                  console.log(
-                    "[UnifiedWebRTC] Registered as OSC controller session"
-                  );
-                }
-              });
-            }
 
             // Log detailed connection info
             console.log(
@@ -522,11 +497,6 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   );
 
   const stopStream = useCallback(() => {
-    // Unregister OSC controller (best-effort)
-    if (sessionIdRef.current) {
-      unregisterOscControllerSession(sessionIdRef.current);
-    }
-
     if (peerConnectionRef.current) {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;

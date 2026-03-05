@@ -10,6 +10,7 @@ as either valid or invalid before being forwarded.
 
 import asyncio
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from pythonosc.dispatcher import Dispatcher
@@ -20,6 +21,9 @@ if TYPE_CHECKING:
     from .webrtc import WebRTCManager
 
 logger = logging.getLogger(__name__)
+
+# How long (seconds) to cache the known-path inventory before rebuilding.
+_PATH_CACHE_TTL = 5.0
 
 
 class OSCServer:
@@ -33,11 +37,11 @@ class OSCServer:
         self._listening = False
         self._pipeline_manager: PipelineManager | None = None
         self._webrtc_manager: WebRTCManager | None = None
-        self._controller_session_id: str | None = None
-        # Fallback queue for frontend polling when no controller session is active.
-        self._queued_commands: list[dict[str, Any]] = []
-        self._command_seq: int = 0
-        self._max_queued_commands: int = 500
+        # SSE subscribers — each is an asyncio.Queue fed by _handle_osc_message.
+        self._sse_queues: list[asyncio.Queue] = []
+        # Cached path inventory to avoid rebuilding on every OSC message.
+        self._known_paths_cache: dict[str, dict[str, Any]] | None = None
+        self._known_paths_cache_time: float = 0.0
 
     @property
     def port(self) -> int:
@@ -51,10 +55,6 @@ class OSCServer:
     def listening(self) -> bool:
         return self._listening
 
-    @property
-    def controller_session_id(self) -> str | None:
-        return self._controller_session_id
-
     def set_managers(
         self,
         pipeline_manager: "PipelineManager",
@@ -62,72 +62,42 @@ class OSCServer:
     ) -> None:
         self._pipeline_manager = pipeline_manager
         self._webrtc_manager = webrtc_manager
+        # Invalidate the path cache when managers change.
+        self._known_paths_cache = None
 
-    def set_controller_session(self, session_id: str) -> bool:
-        """Designate a WebRTC session as the OSC controller.
+    def subscribe(self) -> "asyncio.Queue[dict[str, Any]]":
+        """Register a new SSE subscriber and return its event queue."""
+        q: asyncio.Queue = asyncio.Queue(maxsize=100)
+        self._sse_queues.append(q)
+        return q
 
-        Returns True if the session was registered, False if the session
-        does not exist or its data channel is not open.
-        """
-        if not self._webrtc_manager:
-            return False
-        session = self._webrtc_manager.get_session(session_id)
-        if not session:
-            return False
-        if session.pc.connectionState in ("closed", "failed"):
-            return False
-        self._controller_session_id = session_id
-        logger.info("OSC controller session set to %s", session_id)
-        return True
-
-    def clear_controller_session(self, session_id: str | None = None) -> None:
-        """Remove the controller session designation.
-
-        If *session_id* is given, only clear if it matches the current
-        controller (prevents races when a new session replaces an old one).
-        """
-        if session_id is not None and self._controller_session_id != session_id:
-            return
-        prev = self._controller_session_id
-        self._controller_session_id = None
-        if prev:
-            logger.info("OSC controller session cleared (was %s)", prev)
+    def unsubscribe(self, q: "asyncio.Queue") -> None:
+        """Deregister an SSE subscriber."""
+        try:
+            self._sse_queues.remove(q)
+        except ValueError:
+            pass
 
     def _get_known_paths(self) -> dict[str, dict[str, Any]]:
-        """Return the current set of known OSC paths, rebuilding each time.
+        """Return the known OSC paths, rebuilding from the registry when stale."""
+        now = time.monotonic()
+        if (
+            self._known_paths_cache is None
+            or now - self._known_paths_cache_time > _PATH_CACHE_TTL
+        ):
+            from .osc_docs import get_all_known_paths
 
-        Rebuilding is cheap (just iterates registry metadata) and ensures we
-        always reflect the latest plugins / pipeline changes.
-        """
-        from .osc_docs import get_all_known_paths
-
-        return get_all_known_paths(self._pipeline_manager)
+            self._known_paths_cache = get_all_known_paths(self._pipeline_manager)
+            self._known_paths_cache_time = now
+        return self._known_paths_cache
 
     def _build_dispatcher(self) -> Dispatcher:
         dispatcher = Dispatcher()
         dispatcher.map("/scope/*", self._handle_osc_message)
         return dispatcher
 
-    def _queue_command(self, key: str, value: Any) -> None:
-        self._command_seq += 1
-        self._queued_commands.append(
-            {
-                "seq": self._command_seq,
-                "type": "osc_command",
-                "key": key,
-                "value": value,
-            }
-        )
-        if len(self._queued_commands) > self._max_queued_commands:
-            self._queued_commands = self._queued_commands[-self._max_queued_commands :]
-
-    def get_commands_since(self, since: int) -> dict[str, Any]:
-        """Return queued OSC command envelopes newer than *since* sequence."""
-        commands = [cmd for cmd in self._queued_commands if cmd["seq"] > since]
-        return {"commands": commands, "latest_seq": self._command_seq}
-
     def _handle_osc_message(self, address: str, *args) -> None:
-        """Validate and forward an incoming OSC message to the controller session."""
+        """Validate and forward an incoming OSC message."""
         parts = address.split("/")
         if len(parts) < 3:
             logger.info(
@@ -140,7 +110,6 @@ class OSCServer:
         key = "/".join(parts[2:])
         value = args[0] if len(args) == 1 else list(args)
 
-        # Look up path in current inventory
         known = self._get_known_paths()
         path_info = known.get(key)
 
@@ -152,7 +121,6 @@ class OSCServer:
             )
             return
 
-        # Validate type / range / enum
         from .osc_docs import validate_osc_value
 
         reason = validate_osc_value(path_info, value)
@@ -165,34 +133,19 @@ class OSCServer:
             )
             return
 
-        logger.info("OSC VALID    %s = %r", address, value)
+        # Apply the parameter immediately to all active local sessions so
+        # the pipeline effect takes place without waiting for the frontend
+        # round-trip.
+        if self._webrtc_manager:
+            self._webrtc_manager.broadcast_parameter_update({key: value})
 
-        if not self._webrtc_manager:
-            logger.debug("OSC message not forwarded – no WebRTC manager")
-            self._queue_command(key, value)
-            return
-
-        if not self._controller_session_id:
-            logger.debug("OSC message not forwarded – no controller session registered")
-            self._queue_command(key, value)
-            return
-
-        envelope = {
-            "type": "osc_command",
-            "key": key,
-            "value": value,
-        }
-
-        sent = self._webrtc_manager.send_to_session(
-            self._controller_session_id, envelope
-        )
-        if not sent:
-            logger.warning(
-                "OSC message not delivered – controller session %s unavailable",
-                self._controller_session_id,
-            )
-            self._controller_session_id = None
-            self._queue_command(key, value)
+        # Push to all SSE subscribers so the frontend can sync its UI state.
+        event: dict[str, Any] = {"type": "osc_command", "key": key, "value": value}
+        for q in list(self._sse_queues):
+            try:
+                q.put_nowait(event)
+            except asyncio.QueueFull:
+                pass
 
     async def start(self) -> None:
         dispatcher = self._build_dispatcher()
@@ -200,7 +153,7 @@ class OSCServer:
             self._server = AsyncIOOSCUDPServer(
                 (self._host, self._port),
                 dispatcher,
-                asyncio.get_event_loop(),
+                asyncio.get_running_loop(),
             )
             self._transport, _protocol = await self._server.create_serve_endpoint()
             self._listening = True
@@ -225,5 +178,4 @@ class OSCServer:
             "listening": self._listening,
             "port": self._port,
             "host": self._host,
-            "controller_session": self._controller_session_id,
         }

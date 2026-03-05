@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import io
+import json
 import logging
 import os
 import subprocess
@@ -677,39 +678,38 @@ async def osc_paths(
     return get_osc_paths(pm)
 
 
-@app.post("/api/v1/osc/controller-session")
-async def osc_register_controller(
-    body: dict,
-):
-    """Register a WebRTC session as the OSC controller."""
-    session_id = body.get("session_id")
-    if not session_id:
-        return {"success": False, "error": "session_id is required"}
+@app.get("/api/v1/osc/stream")
+async def osc_sse_stream():
+    """Server-Sent Events stream that pushes OSC commands to the frontend in real time."""
     srv = get_osc_server()
     if srv is None:
-        return {"success": False, "error": "OSC server not running"}
-    ok = srv.set_controller_session(session_id)
-    if not ok:
-        return {"success": False, "error": "Session not found or not connected"}
-    return {"success": True, "session_id": session_id}
+        return Response(content="OSC server not running", status_code=503)
 
+    q = srv.subscribe()
 
-@app.delete("/api/v1/osc/controller-session/{session_id}")
-async def osc_unregister_controller(session_id: str):
-    """Unregister a WebRTC session as the OSC controller."""
-    srv = get_osc_server()
-    if srv is not None:
-        srv.clear_controller_session(session_id)
-    return {"success": True}
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except TimeoutError:
+                    # Keepalive comment — prevents proxy/browser timeout.
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            srv.unsubscribe(q)
 
-
-@app.get("/api/v1/osc/commands")
-async def osc_commands(since: int = Query(0, ge=0)):
-    """Return queued OSC commands newer than the provided sequence number."""
-    srv = get_osc_server()
-    if srv is None:
-        return {"commands": [], "latest_seq": since}
-    return srv.get_commands_since(since)
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/v1/osc/docs")

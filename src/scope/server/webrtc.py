@@ -344,7 +344,7 @@ class WebRTCManager:
                     try:
                         # Parse the JSON message
                         data = json.loads(message)
-                        logger.info(f"Received parameter update: {data}")
+                        logger.debug(f"Received parameter update: {data}")
 
                         # Check for paused parameter and call pause() method on video track
                         if "paused" in data and session.video_track:
@@ -654,27 +654,6 @@ class WebRTCManager:
                 session.video_track.pause(parameters["paused"])
             if session.video_track and hasattr(session.video_track, "frame_processor"):
                 session.video_track.frame_processor.update_parameters(parameters)
-
-    def send_to_session(self, session_id: str, payload: dict) -> bool:
-        """Send a JSON message to a specific session's data channel.
-
-        Returns True if the message was sent, False if session is
-        unavailable or the data channel is not open.
-        """
-        session = self.sessions.get(session_id)
-        if not session:
-            return False
-        if session.pc.connectionState in ("closed", "failed"):
-            return False
-        dc = session.data_channel
-        if not dc or dc.readyState != "open":
-            return False
-        try:
-            dc.send(json.dumps(payload))
-            return True
-        except Exception:
-            logger.exception("Failed to send to session %s", session_id)
-            return False
 
     async def stop(self):
         """Close and cleanup all sessions."""
