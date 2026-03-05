@@ -259,7 +259,16 @@ def resolve_workflow(
     warnings: list[str] = []
     all_pipelines_ok = True
 
-    plugins = plugin_manager.list_plugins_sync()
+    try:
+        plugins = plugin_manager.list_plugins_sync()
+    except Exception:
+        logger.warning(
+            "Failed to list plugins; treating all plugins as missing", exc_info=True
+        )
+        plugins = []
+        warnings.append(
+            "Could not read installed plugins. Plugin status may be inaccurate."
+        )
 
     for wp in workflow.pipelines:
         if wp.source.type == "builtin":

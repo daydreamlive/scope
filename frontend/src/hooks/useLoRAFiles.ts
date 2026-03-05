@@ -18,9 +18,6 @@ export function useLoRAFiles(): UseLoRAFilesReturn {
   const loraFilesRef = useRef<LoRAFileInfo[]>(loraFiles);
   loraFilesRef.current = loraFiles;
 
-  const loraFilesRef = useRef<LoRAFileInfo[]>(loraFiles);
-  loraFilesRef.current = loraFiles;
-
   const refresh = useCallback(async (): Promise<LoRAFileInfo[]> => {
     setIsLoading(true);
     try {
