@@ -285,8 +285,14 @@ export function MIDIProvider({
       const profile = updatedProfiles[selectedProfileIndex];
       if (profile?.mappings[mappingIndex]) {
         const updatedMappings = [...profile.mappings];
-        updatedMappings[mappingIndex] = { ...updatedMappings[mappingIndex], source };
-        updatedProfiles[selectedProfileIndex] = { ...profile, mappings: updatedMappings };
+        updatedMappings[mappingIndex] = {
+          ...updatedMappings[mappingIndex],
+          source,
+        };
+        updatedProfiles[selectedProfileIndex] = {
+          ...profile,
+          mappings: updatedMappings,
+        };
         setMappingProfiles(updatedProfiles);
         saveMappingProfiles(updatedProfiles);
         toast.success("MIDI mapping learned!");
