@@ -47,6 +47,10 @@ interface UseUnifiedWebRTCOptions {
     beat_count: number;
     is_playing: boolean;
   }) => void;
+  /** Callback when a parameter change is scheduled for a beat boundary */
+  onChangeScheduled?: (delayMs: number) => void;
+  /** Callback when a scheduled parameter change has been applied */
+  onChangeApplied?: () => void;
 }
 
 /**
@@ -190,6 +194,12 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
 
             if (data.type === "tempo_update") {
               options?.onTempoUpdate?.(data);
+            }
+            if (data.type === "change_scheduled") {
+              options?.onChangeScheduled?.(data.delay_ms ?? 0);
+            }
+            if (data.type === "change_applied") {
+              options?.onChangeApplied?.();
             }
           } catch (error) {
             console.error(
@@ -478,6 +488,8 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       images?: string[];
       first_frame_image?: string;
       last_frame_image?: string;
+      quantize_mode?: string;
+      lookahead_ms?: number;
     }) => {
       if (
         dataChannelRef.current &&
