@@ -44,7 +44,6 @@ from scope.core.workflows.resolve import (
     WorkflowResolutionPlan,
     resolve_workflow,
 )
-from scope.server.models_config import get_models_dir
 
 from .cloud_proxy import (
     cloud_proxy,
@@ -928,9 +927,11 @@ async def install_lora_file(
         query_params = parse_qs(parsed.query)
         if "token" not in query_params:
             stored_token = get_civitai_token()
+            logger.info(f"Stored CivitAI token: {stored_token}")
             if stored_token:
                 separator = "&" if parsed.query else "?"
                 url = f"{url}{separator}token={stored_token}"
+                logger.info(f"Injected CivitAI token: {url}")
 
     # If connected to cloud, proxy with the (potentially modified) URL
     if cloud_manager.is_connected:
@@ -989,6 +990,7 @@ async def install_lora_file(
 
         # For CivitAI URLs, extract version ID and resolve filename via API
         version_id = None
+        civitai_token = None
         if is_civitai:
             # Extract version ID: check query param first, then path
             query_params = parse_qs(parsed.query)
@@ -1000,13 +1002,16 @@ async def install_lora_file(
                 candidate = path_parts[-1] if path_parts else None
                 if candidate and candidate.isdigit():
                     version_id = candidate
+            civitai_token = query_params.get("token", [None])[0]
 
         if is_civitai and (not filename or "." not in filename):
             if version_id:
                 try:
                     from .lora_downloader import resolve_civitai_metadata
 
-                    dl_url, civitai_filename = resolve_civitai_metadata(version_id)
+                    dl_url, civitai_filename = resolve_civitai_metadata(
+                        version_id, token=civitai_token
+                    )
                     if civitai_filename:
                         filename = civitai_filename
                     if dl_url:
@@ -1208,18 +1213,53 @@ async def delete_lora_file(
 
 
 @app.post("/api/v1/lora/download")
-@cloud_proxy(timeout=60.0)
 async def download_lora_endpoint(
     request: LoRADownloadRequest,
     http_request: Request,
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ) -> LoRADownloadResult:
-    """Download a LoRA from HuggingFace, CivitAI, or a direct URL."""
+    """Download a LoRA from HuggingFace, CivitAI, or a direct URL.
+
+    When cloud mode is active, the CivitAI token is resolved locally and
+    forwarded so the cloud worker can authenticate without its own token.
+    """
     from .lora_downloader import download_lora
+    from .models_config import get_civitai_token
+
+    civitai_token = None
+    if request.source == "civitai":
+        civitai_token = get_civitai_token() or request.civitai_token
+
+    if cloud_manager.is_connected:
+        logger.info("Proxying LoRA download to cloud")
+        body = request.model_dump(exclude_none=True)
+        if civitai_token:
+            body["civitai_token"] = civitai_token
+        try:
+            response = await cloud_manager.api_request(
+                method="POST",
+                path="/api/v1/lora/download",
+                body=body,
+                timeout=300.0,
+            )
+        except Exception as e:
+            logger.error(f"Cloud proxy request failed: {e}")
+            raise HTTPException(
+                status_code=502,
+                detail=f"Cloud request failed: {e}",
+            ) from e
+
+        status = response.get("status", 200)
+        if status >= 400:
+            raise HTTPException(
+                status_code=status,
+                detail=response.get("error", "Cloud request failed"),
+            )
+        return response.get("data", {})
 
     lora_dir = get_lora_dir()
     try:
-        return await download_lora(request, lora_dir)
+        return await download_lora(request, lora_dir, civitai_token=civitai_token)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
