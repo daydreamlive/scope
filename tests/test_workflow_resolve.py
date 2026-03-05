@@ -157,13 +157,14 @@ class TestResolveLoRA:
             pipelines=[make_pipeline(loras=[WorkflowLoRA(filename="test.safetensors")])]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         assert items_by_kind(plan, "lora")[0].status == "ok"
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_missing_no_provenance(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-        (tmp_path / "lora").mkdir()
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
 
         wf = make_workflow(
             pipelines=[
@@ -171,7 +172,7 @@ class TestResolveLoRA:
             ]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
 
         assert plan.can_apply is True  # missing LoRAs don't block
         lora = items_by_kind(plan, "lora")[0]
@@ -181,7 +182,8 @@ class TestResolveLoRA:
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_missing_with_provenance(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-        (tmp_path / "lora").mkdir()
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
 
         wf = make_workflow(
             pipelines=[
@@ -199,7 +201,7 @@ class TestResolveLoRA:
             ]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         lora = items_by_kind(plan, "lora")[0]
         assert lora.status == "missing"
         assert lora.can_auto_resolve is True
@@ -302,7 +304,8 @@ class TestResolveLoRAProvenance:
     def test_missing_lora_civitai_provenance(self, mock_registry, tmp_path):
         """CivitAI provenance generates correct action string."""
         mock_registry.is_registered.return_value = True
-        (tmp_path / "lora").mkdir()
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
 
         wf = make_workflow(
             pipelines=[
@@ -320,7 +323,7 @@ class TestResolveLoRAProvenance:
             ]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         lora = items_by_kind(plan, "lora")[0]
         assert lora.status == "missing"
         assert lora.can_auto_resolve is True
@@ -331,7 +334,8 @@ class TestResolveLoRAProvenance:
     def test_missing_lora_url_provenance_with_url(self, mock_registry, tmp_path):
         """URL provenance with a url field uses that URL in the action."""
         mock_registry.is_registered.return_value = True
-        (tmp_path / "lora").mkdir()
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
 
         wf = make_workflow(
             pipelines=[
@@ -349,7 +353,7 @@ class TestResolveLoRAProvenance:
             ]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         lora = items_by_kind(plan, "lora")[0]
         assert lora.can_auto_resolve is True
         assert "example.com" in lora.action
@@ -358,7 +362,8 @@ class TestResolveLoRAProvenance:
     def test_missing_lora_url_provenance_without_url(self, mock_registry, tmp_path):
         """URL provenance without a url field falls back to generic action."""
         mock_registry.is_registered.return_value = True
-        (tmp_path / "lora").mkdir()
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
 
         wf = make_workflow(
             pipelines=[
@@ -373,7 +378,7 @@ class TestResolveLoRAProvenance:
             ]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         lora = items_by_kind(plan, "lora")[0]
         assert lora.can_auto_resolve is True
         assert lora.action == "Download from source"
@@ -384,7 +389,8 @@ class TestResolveLoRAProvenance:
     ):
         """Local provenance is treated as no provenance (not auto-resolvable)."""
         mock_registry.is_registered.return_value = True
-        (tmp_path / "lora").mkdir()
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
 
         wf = make_workflow(
             pipelines=[
@@ -399,7 +405,7 @@ class TestResolveLoRAProvenance:
             ]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         lora = items_by_kind(plan, "lora")[0]
         assert lora.status == "missing"
         assert lora.can_auto_resolve is False
@@ -570,13 +576,14 @@ class TestPathTraversal:
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_path_traversal_rejected(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-        (tmp_path / "lora").mkdir()
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
 
         wf = make_workflow(
             pipelines=[make_pipeline(loras=[WorkflowLoRA(filename="../../etc/passwd")])]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         lora = items_by_kind(plan, "lora")[0]
         assert lora.status == "missing"
         assert lora.detail == "Invalid LoRA filename"
@@ -595,7 +602,7 @@ class TestPathTraversal:
             ]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         assert items_by_kind(plan, "lora")[0].status == "ok"
 
 
@@ -763,7 +770,7 @@ class TestDegenerateInputs:
             ]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         assert len(items_by_kind(plan, "lora")) == 2
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
@@ -809,7 +816,7 @@ class TestSymlinkAndPathEdgeCases:
             ]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         lora = items_by_kind(plan, "lora")[0]
         assert lora.status == "missing"
         assert lora.detail == "Invalid LoRA filename"
@@ -817,13 +824,14 @@ class TestSymlinkAndPathEdgeCases:
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_absolute_path_in_lora_filename(self, mock_registry, tmp_path):
         mock_registry.is_registered.return_value = True
-        (tmp_path / "lora").mkdir()
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
 
         wf = make_workflow(
             pipelines=[make_pipeline(loras=[WorkflowLoRA(filename="/etc/passwd")])]
         )
 
-        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        plan = resolve_workflow(wf, mock_plugin_manager(), lora_dir)
         lora = items_by_kind(plan, "lora")[0]
         assert lora.status == "missing"
         assert lora.detail == "Invalid LoRA filename"
@@ -832,7 +840,8 @@ class TestSymlinkAndPathEdgeCases:
     def test_lora_filename_with_null_byte(self, mock_registry, tmp_path):
         """Null byte in filename: should reject or handle gracefully."""
         mock_registry.is_registered.return_value = True
-        (tmp_path / "lora").mkdir()
+        lora_dir = tmp_path / "lora"
+        lora_dir.mkdir()
 
         wf = make_workflow(
             pipelines=[
@@ -841,7 +850,7 @@ class TestSymlinkAndPathEdgeCases:
         )
 
         with pytest.raises(ValueError, match="null"):
-            resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+            resolve_workflow(wf, mock_plugin_manager(), lora_dir)
 
     @patch("scope.core.pipelines.registry.PipelineRegistry")
     def test_lora_dir_does_not_exist(self, mock_registry, tmp_path):
