@@ -10,11 +10,11 @@ import {
 interface AddNodeModalProps {
   open: boolean;
   onClose: () => void;
-  onSelectNodeType: (type: "source" | "pipeline" | "sink" | "value" | "control", subType?: string) => void;
+  onSelectNodeType: (type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note", subType?: string) => void;
 }
 
 interface NodeCatalogItem {
-  type: "source" | "pipeline" | "sink" | "value" | "control";
+  type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note";
   subType?: string;
   name: string;
   description: string;
@@ -32,9 +32,11 @@ const NODE_CATALOG: NodeCatalogItem[] = [
   { type: "control", subType: "float", name: "FloatControl", description: "Animated float output using patterns like sine, bounce, random walk", color: "#38bdf8", category: "Controls" },
   { type: "control", subType: "int", name: "IntControl", description: "Animated integer output using the same movement patterns as FloatControl", color: "#38bdf8", category: "Controls" },
   { type: "control", subType: "string", name: "StringControl", description: "Cycles through a list of strings using movement patterns", color: "#fbbf24", category: "Controls" },
+  { type: "math", name: "Math", description: "Perform arithmetic operations on two numeric inputs", color: "#38bdf8", category: "Utility" },
+  { type: "note", name: "Note", description: "Add a text annotation to the graph", color: "#fbbf24", category: "Utility" },
 ];
 
-const CATEGORIES = ["All", "I/O", "Values", "Controls"];
+const CATEGORIES = ["All", "I/O", "Values", "Controls", "Utility"];
 
 interface TooltipState {
   text: string;

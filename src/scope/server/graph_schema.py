@@ -57,6 +57,14 @@ class GraphNode(BaseModel):
         default=None,
         description="Y position in UI canvas (optional, for layout persistence)",
     )
+    w: float | None = Field(
+        default=None,
+        description="Width in UI canvas (optional, for layout persistence)",
+    )
+    h: float | None = Field(
+        default=None,
+        description="Height in UI canvas (optional, for layout persistence)",
+    )
     source_mode: str | None = Field(
         default=None,
         description="Video source mode for source nodes: 'video', 'camera', 'spout', 'ndi'",

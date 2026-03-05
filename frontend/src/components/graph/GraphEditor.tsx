@@ -17,7 +17,8 @@ import { PipelineNode } from "./PipelineNode";
 import { SinkNode } from "./SinkNode";
 import { ValueNode } from "./ValueNode";
 import { ControlNode } from "./ControlNode";
-import { NodeParametersPanel } from "./NodeParametersPanel";
+import { MathNode } from "./MathNode";
+import { NoteNode } from "./NoteNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -45,6 +46,8 @@ const nodeTypes = {
   sink: SinkNode,
   value: ValueNode,
   control: ControlNode,
+  math: MathNode,
+  note: NoteNode,
 };
 
 const edgeTypes = {
@@ -86,6 +89,9 @@ function getEdgeColor(
       const controlType = sourceNode.data.controlType;
       const outputType = controlType === "string" ? "string" : "number";
       return PARAM_TYPE_COLORS[outputType] || "#9ca3af";
+    }
+    if (sourceNode.data.nodeType === "math") {
+      return PARAM_TYPE_COLORS["number"] || "#9ca3af";
     }
     return "#9ca3af";
   }
@@ -509,12 +515,19 @@ export function GraphEditor({
         } else if (sourceNode.data.nodeType === "control") {
           const controlType = sourceNode.data.controlType;
           sourceType = controlType === "string" ? "string" : "number";
+        } else if (sourceNode.data.nodeType === "math") {
+          sourceType = "number";
         }
 
         if (!sourceType) return false;
 
         if (targetParsed.name === "__prompt") {
           return sourceType === "string";
+        }
+
+        // Math nodes accept param:a and param:b inputs (both must be number)
+        if (targetNode.data.nodeType === "math") {
+          return sourceType === "number" && (targetParsed.name === "a" || targetParsed.name === "b");
         }
 
         const targetParam = targetNode.data.parameterInputs?.find(
@@ -746,8 +759,50 @@ export function GraphEditor({
     [existingIds, nodes.length, setNodes]
   );
 
+  const addMathNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      const id = generateNodeId("math", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "math",
+        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        data: {
+          label: "Math",
+          nodeType: "math",
+          mathOp: "add",
+          currentValue: undefined,
+          parameterOutputs: [{
+            name: "value",
+            type: "number",
+            defaultValue: 0,
+          }],
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes]
+  );
+
+  const addNoteNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      const id = generateNodeId("note", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "note",
+        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        data: {
+          label: "Note",
+          nodeType: "note",
+          noteText: "",
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes]
+  );
+
   const handleNodeTypeSelect = useCallback(
-    (type: "source" | "pipeline" | "sink" | "value" | "control", subType?: string) => {
+    (type: "source" | "pipeline" | "sink" | "value" | "control" | "math" | "note", subType?: string) => {
       if (!pendingNodePosition) return;
 
       switch (type) {
@@ -770,11 +825,17 @@ export function GraphEditor({
             addControlNode(subType, pendingNodePosition);
           }
           break;
+        case "math":
+          addMathNode(pendingNodePosition);
+          break;
+        case "note":
+          addNoteNode(pendingNodePosition);
+          break;
       }
 
       setPendingNodePosition(null);
     },
-    [pendingNodePosition, addSourceNode, addPipelineNode, addSinkNode, addValueNode, addControlNode]
+    [pendingNodePosition, addSourceNode, addPipelineNode, addSinkNode, addValueNode, addControlNode, addMathNode, addNoteNode]
   );
 
   const handleDeleteNode = useCallback(
@@ -826,7 +887,7 @@ export function GraphEditor({
     const throttleMs = 100;
 
     for (const node of nodes) {
-      if (node.data.nodeType !== "value" && node.data.nodeType !== "control") continue;
+      if (node.data.nodeType !== "value" && node.data.nodeType !== "control" && node.data.nodeType !== "math") continue;
 
       const connected = findConnectedPipelineParams(node.id, edges, nodes);
       if (connected.length === 0) continue;
@@ -834,13 +895,13 @@ export function GraphEditor({
       let value: unknown;
       if (node.data.nodeType === "value") {
         value = node.data.value;
-      } else if (node.data.nodeType === "control") {
+      } else if (node.data.nodeType === "control" || node.data.nodeType === "math") {
         value = node.data.currentValue;
       }
 
       if (value === undefined) continue;
 
-      if (node.data.nodeType === "control") {
+      if (node.data.nodeType === "control" || node.data.nodeType === "math") {
         const now = Date.now();
         const lastTime = lastForwardTimeRef.current[node.id] || 0;
         if (now - lastTime < throttleMs) continue;
@@ -857,6 +918,39 @@ export function GraphEditor({
       }
     }
   }, [nodes, edges, findConnectedPipelineParams, resolveBackendId]);
+
+  // Keyboard shortcut: Tab to open Add Node modal at viewport center
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "Tab") return;
+
+      const activeElement = document.activeElement;
+      const isInputElement = activeElement?.tagName === "INPUT" ||
+                             activeElement?.tagName === "TEXTAREA" ||
+                             activeElement?.tagName === "SELECT";
+
+      if (isInputElement) return;
+
+      e.preventDefault();
+
+      if (!reactFlowInstanceRef.current) return;
+
+      // Get viewport center
+      const centerX = window.innerWidth / 2;
+      const centerY = window.innerHeight / 2;
+
+      const flowPosition = reactFlowInstanceRef.current.screenToFlowPosition({
+        x: centerX,
+        y: centerY,
+      });
+
+      setPendingNodePosition(flowPosition);
+      setShowAddNodeModal(true);
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const handleClear = useCallback(async () => {
     try {
@@ -976,11 +1070,6 @@ export function GraphEditor({
     setStatus("Graph exported");
   }, [nodes, edges]);
 
-  const selectedNode = nodes.find(n => n.id === selectedNodeId);
-  const selectedPipelineId =
-    selectedNode?.data.nodeType === "pipeline"
-      ? (selectedNode.data.pipelineId as string | null)
-      : null;
 
   return (
     <div className="flex h-full w-full">
@@ -1117,18 +1206,6 @@ export function GraphEditor({
         </div>
       </div>
 
-      {selectedNodeId && selectedPipelineId && (
-        <div className={`w-72 border-l ${NODE_TOKENS.panelBorder} ${NODE_TOKENS.panelBackground} overflow-y-auto`}>
-          <NodeParametersPanel
-            pipelineId={selectedPipelineId}
-            nodeId={selectedNodeId}
-            pipelineSchemas={pipelineSchemas}
-            parameterValues={nodeParams[selectedNodeId] || {}}
-            onParameterChange={handleNodeParameterChange}
-            isStreaming={isStreaming}
-          />
-        </div>
-      )}
     </div>
   );
 }
