@@ -57,4 +57,3 @@ export function getEdgeColor(
 
   return HANDLE_COLORS.video;
 }
-

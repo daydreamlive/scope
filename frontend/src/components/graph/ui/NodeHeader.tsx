@@ -18,4 +18,3 @@ export function NodeHeader({
     </div>
   );
 }
-

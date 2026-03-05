@@ -15,4 +15,3 @@ export function NodePill({ children, className = "" }: NodePillProps) {
     </div>
   );
 }
-

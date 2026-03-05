@@ -24,4 +24,3 @@ export const NODE_TOKENS = {
     "px-3 py-1.5 text-xs font-medium rounded-lg bg-[#2a2a2a] border border-[rgba(119,119,119,0.35)] text-[#fafafa] hover:bg-[#2a2a2a]/80 transition-colors",
   toolbarStatus: "text-xs text-[#8c8c8d] ml-2",
 } as const;
-

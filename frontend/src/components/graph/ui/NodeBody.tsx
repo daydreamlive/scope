@@ -20,4 +20,3 @@ export function NodeBody({
     </div>
   );
 }
-

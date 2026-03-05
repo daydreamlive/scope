@@ -347,4 +347,3 @@ export function useNodeFactories({
     handleDeleteNode,
   };
 }
-

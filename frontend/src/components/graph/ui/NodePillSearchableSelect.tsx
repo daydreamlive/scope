@@ -141,4 +141,3 @@ export function NodePillSearchableSelect({
     </div>
   );
 }
-

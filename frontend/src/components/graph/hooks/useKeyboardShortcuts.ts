@@ -42,4 +42,3 @@ export function useKeyboardShortcuts(
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [reactFlowInstanceRef, setPendingNodePosition, setShowAddNodeModal]);
 }
-
