@@ -1,0 +1,214 @@
+name: Build Electron Preview
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  build-windows:
+    name: Build Windows Preview
+    runs-on: windows-latest
+    env:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+      AZURE_TRUSTED_SIGNING_ACCOUNT_NAME: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+      AZURE_CERTIFICATE_PROFILE_NAME: ${{ secrets.AZURE_CERTIFICATE_PROFILE_NAME }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: 'npm'
+          cache-dependency-path: |
+            app/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Install app dependencies
+        working-directory: ./app
+        run: npm ci
+
+      - name: Build application
+        working-directory: ./app
+        run: npm run compile
+
+      - name: Build Electron app (Windows)
+        working-directory: ./app
+        run: npm run dist:win
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          SCOPE_CLOUD_APP_ID: daydream/scope-app/ws
+
+      - name: Sign files with Azure Trusted Signing
+        if: env.AZURE_CLIENT_ID != ''
+        uses: azure/trusted-signing-action@v0
+        with:
+          azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
+          endpoint: ${{ secrets.AZURE_ENDPOINT }}
+          trusted-signing-account-name: ${{ secrets.AZURE_TRUSTED_SIGNING_ACCOUNT_NAME }}
+          certificate-profile-name: ${{ secrets.AZURE_CERTIFICATE_PROFILE_NAME }}
+          files-folder: ${{ github.workspace }}\app\dist
+          files-folder-filter: exe
+          file-digest: SHA256
+          timestamp-rfc3161: http://timestamp.acs.microsoft.com
+          timestamp-digest: SHA256
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-preview-artifacts
+          path: app/dist/DaydreamScope-Setup.exe
+          retention-days: 7
+          if-no-files-found: error
+
+  build-macos:
+    name: Build macOS Preview
+    runs-on: macos-latest
+    env:
+      MACOS_SIGNING_IDENTITY: ${{ secrets.CI_MACOS_CERTIFICATE_ID }}
+      MACOS_SIGNING_CERT: ${{ secrets.CI_MACOS_CERTIFICATE_BASE64 }}
+      MACOS_SIGNING_CERT_PASSWORD: ${{ secrets.CI_MACOS_CERTIFICATE_PASSWORD }}
+      MACOS_NOTARIZATION_USERNAME: ${{ secrets.CI_MACOS_NOTARIZATION_USER }}
+      MACOS_NOTARIZATION_PASSWORD: ${{ secrets.CI_MACOS_NOTARIZATION_PASSWORD }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: 'npm'
+          cache-dependency-path: |
+            app/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ./frontend
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ./frontend
+        run: npm run build
+
+      - name: Install app dependencies
+        working-directory: ./app
+        run: npm ci
+
+      - name: Build application
+        working-directory: ./app
+        run: npm run compile
+
+      - name: Import Apple Developer ID certificate
+        if: env.MACOS_SIGNING_CERT != ''
+        run: |
+          # Create a temporary keychain
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
+
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+          security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+          # Import certificate
+          CERT_PATH=$RUNNER_TEMP/certificate.p12
+          echo "$MACOS_SIGNING_CERT" | base64 --decode > "$CERT_PATH"
+          security import "$CERT_PATH" \
+            -P "$MACOS_SIGNING_CERT_PASSWORD" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "$KEYCHAIN_PATH"
+          rm "$CERT_PATH"
+
+          # Set keychain to be searched first
+          security list-keychain -d user -s "$KEYCHAIN_PATH" login.keychain-db
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
+
+      - name: Build Electron app (macOS)
+        working-directory: ./app
+        run: npm run dist:mac
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          SCOPE_CLOUD_APP_ID: daydream/scope-app/ws
+          CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.MACOS_SIGNING_CERT != '' }}
+
+      - name: Clean up keychain
+        if: always()
+        run: |
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
+          if [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-preview-artifacts
+          path: app/dist/DaydreamScope-arm64.dmg
+          retention-days: 7
+          if-no-files-found: error
+
+  publish-preview:
+    name: Publish Preview Release
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-preview-artifacts
+          path: artifacts/
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-preview-artifacts
+          path: artifacts/
+
+      - name: Delete existing preview release
+        run: gh release delete preview --cleanup-tag --yes --repo ${{ github.repository }} || true
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+
+      - name: Create preview release
+        run: |
+          gh release create preview \
+            --repo ${{ github.repository }} \
+            --target ${{ github.sha }} \
+            --title "Preview Build" \
+            --notes "Preview build from \`main\` branch ($(date -u '+%Y-%m-%d %H:%M UTC')).
+
+          Commit: ${{ github.sha }}
+
+          **These builds include \`SCOPE_CLOUD_APP_ID=daydream/scope-app/ws\`.**
+
+          > This is an automated preview — not a versioned release. Do not use for production." \
+            --prerelease \
+            artifacts/DaydreamScope-Setup.exe \
+            artifacts/DaydreamScope-arm64.dmg
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
