@@ -1,4 +1,4 @@
-import { Download } from "lucide-react";
+import { Download, Share2 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
   Dialog,
@@ -62,11 +62,11 @@ export function ExportDialog({
             variant="outline"
             className="w-full justify-start gap-3 px-4 py-6"
           >
-            <Download className="h-4 w-4" />
+            <Share2 className="h-4 w-4" />
             <div className="flex flex-col items-start">
-              <span className="font-semibold">Save Timeline</span>
+              <span className="font-semibold">Export Workflow</span>
               <span className="text-xs text-muted-foreground">
-                Downloads JSON to default Downloads folder
+                Save pipeline settings, LoRAs, and timeline as a shareable file
               </span>
             </div>
           </Button>
