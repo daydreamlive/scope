@@ -349,12 +349,12 @@ export function WorkflowImportDialog({
   );
   const installablePlugins = missingPlugins?.filter(i => i.can_auto_resolve);
 
-  const hasUnresolvedLoRAs = missingLoRAs?.some(
-    i => loras.downloads[i.name] !== "done"
-  );
-  const hasUnresolvedPlugins = missingPlugins?.some(
-    i => plugins.installs[i.name] !== "done"
-  );
+  const hasUnresolvedDeps = plan?.items.some(i => {
+    if (i.status !== "missing") return false;
+    if (i.kind === "lora") return loras.downloads[i.name] !== "done";
+    if (i.kind === "plugin") return plugins.installs[i.name] !== "done";
+    return true; // pipeline or other kinds — always unresolved if missing
+  });
 
   // -----------------------------------------------------------------------
   // Render
@@ -581,8 +581,7 @@ export function WorkflowImportDialog({
               disabled={
                 loras.someDownloading ||
                 plugins.someInstalling ||
-                hasUnresolvedLoRAs ||
-                hasUnresolvedPlugins
+                hasUnresolvedDeps
               }
             >
               Load Workflow
