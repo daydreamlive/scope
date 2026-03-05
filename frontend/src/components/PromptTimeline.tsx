@@ -584,7 +584,7 @@ export function PromptTimeline({
               size="sm"
               variant="outline"
             >
-              <Download className="h-4 w-4 mr-1" />
+              <Upload className="h-4 w-4 mr-1" />
               Export
             </Button>
             <ExportDialog
@@ -607,7 +607,7 @@ export function PromptTimeline({
               variant="outline"
               disabled={disabled || isStreaming || isLoading || isDownloading}
             >
-              <Upload className="h-4 w-4 mr-1" />
+              <Download className="h-4 w-4 mr-1" />
               Import
             </Button>
             <Button
