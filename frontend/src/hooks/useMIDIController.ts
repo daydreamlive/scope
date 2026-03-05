@@ -14,6 +14,7 @@ export interface MIDIControllerConfig {
   currentNoiseController?: boolean;
   currentManageCache?: boolean;
   onSwitchPrompt?: (index: number) => void;
+  onParameterActivity?: (paramId: string) => void;
 }
 
 export function useMIDIController(
@@ -30,6 +31,7 @@ export function useMIDIController(
     currentNoiseController,
     currentManageCache,
     onSwitchPrompt,
+    onParameterActivity,
   } = config || {};
 
   const [midiAccess, setMidiAccess] = useState<MIDIAccess | null>(null);
@@ -60,6 +62,7 @@ export function useMIDIController(
   const onDenoisingStepsChangeRef = useRef(onDenoisingStepsChange);
   const onLearnCompleteRef = useRef(onLearnComplete);
   const onSwitchPromptRef = useRef(onSwitchPrompt);
+  const onParameterActivityRef = useRef(onParameterActivity);
 
   sendParameterUpdateRef.current = sendParameterUpdate;
   enabledRef.current = enabled;
@@ -68,6 +71,7 @@ export function useMIDIController(
   onDenoisingStepsChangeRef.current = onDenoisingStepsChange;
   onLearnCompleteRef.current = onLearnComplete;
   onSwitchPromptRef.current = onSwitchPrompt;
+  onParameterActivityRef.current = onParameterActivity;
 
   const updateDeviceList = useCallback((access: MIDIAccess) => {
     const inputs: MIDIInput[] = [];
@@ -162,6 +166,8 @@ export function useMIDIController(
         if (command !== 0xb0 || noteOrCC !== source.midi_cc) continue;
         if (!mapping.target.parameter) continue;
 
+        const notifyActivity = onParameterActivityRef.current;
+
         // Boolean params sent via CC: treat as toggle on press, ignore release
         if (BOOLEAN_PARAMS.includes(mapping.target.parameter)) {
           const ccKey = `cc_${source.midi_cc}_ch${source.channel}`;
@@ -172,6 +178,7 @@ export function useMIDIController(
               const cur = toggleStatesRef.current.get(key) ?? false;
               toggleStatesRef.current.set(key, !cur);
               sendParameterUpdate({ [key]: !cur });
+              notifyActivity?.(key);
             }
             lastCCStateRef.current.set(ccKey, value);
           } else {
@@ -209,6 +216,7 @@ export function useMIDIController(
 
           onDenoisingStepsChange(steps);
           sendParameterUpdate({ denoising_step_list: steps });
+          notifyActivity?.(`denoising_step_list[${idx}]`);
           continue;
         }
 
@@ -219,6 +227,7 @@ export function useMIDIController(
         sendParameterUpdate({
           [mapping.target.parameter]: min + normalized * (max - min),
         });
+        notifyActivity?.(mapping.target.parameter);
         continue;
       }
 
@@ -257,12 +266,15 @@ export function useMIDIController(
 
         if (!(isNoteOn || isCCPress)) continue;
 
+        const notifyAct = onParameterActivityRef.current;
+
         if (mapping.type === "toggle") {
           if (!mapping.target.parameter) continue;
           const key = mapping.target.parameter;
           const cur = toggleStatesRef.current.get(key) ?? false;
           toggleStatesRef.current.set(key, !cur);
           sendParameterUpdate({ [key]: !cur });
+          notifyAct?.(key);
         } else if (mapping.type === "trigger") {
           const target = mapping.target;
 
@@ -304,6 +316,7 @@ export function useMIDIController(
             ((enumStatesRef.current.get(key) ?? 0) + 1) % values.length;
           enumStatesRef.current.set(key, nextIdx);
           sendParameterUpdate({ [key]: values[nextIdx] });
+          notifyAct?.(key);
         }
       }
     }

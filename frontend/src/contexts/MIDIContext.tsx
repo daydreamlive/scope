@@ -82,6 +82,8 @@ interface MIDIContextValue {
   ) => string | null;
   deleteMapping: (index: number) => void;
   clearAllMappings: () => void;
+  activeParameters: Set<string>;
+  markParameterActive: (paramId: string) => void;
 }
 
 const MIDIContext = createContext<MIDIContextValue | null>(null);
@@ -118,8 +120,43 @@ export function MIDIProvider({
   const learningTimeoutRef = useRef<number | null>(null);
   const learningMappingIndexRef = useRef<number | null>(null);
 
+  const [activeParameters, setActiveParameters] = useState<Set<string>>(
+    new Set()
+  );
+  const activeTimersRef = useRef<Map<string, number>>(new Map());
+
+  const markParameterActive = useCallback((paramId: string) => {
+    setActiveParameters(prev => {
+      const next = new Set(prev);
+      next.add(paramId);
+      return next;
+    });
+    const existing = activeTimersRef.current.get(paramId);
+    if (existing) clearTimeout(existing);
+    activeTimersRef.current.set(
+      paramId,
+      window.setTimeout(() => {
+        activeTimersRef.current.delete(paramId);
+        setActiveParameters(prev => {
+          const next = new Set(prev);
+          next.delete(paramId);
+          return next;
+        });
+      }, 300)
+    );
+  }, []);
+
   useEffect(() => {
     localStorage.setItem(MIDI_ENABLED_KEY, midiEnabled.toString());
+    if (!midiEnabled) {
+      setMappingMode(false);
+      setLearningParameter(null);
+      if (learningTimeoutRef.current) {
+        clearTimeout(learningTimeoutRef.current);
+        learningTimeoutRef.current = null;
+      }
+      learningMappingIndexRef.current = null;
+    }
   }, [midiEnabled]);
   useEffect(() => {
     if (selectedDeviceId)
@@ -381,6 +418,7 @@ export function MIDIProvider({
     currentNoiseController,
     currentManageCache,
     onSwitchPrompt,
+    onParameterActivity: markParameterActive,
   });
 
   useEffect(() => {
@@ -425,6 +463,8 @@ export function MIDIProvider({
     getMappedSource,
     deleteMapping,
     clearAllMappings,
+    activeParameters,
+    markParameterActive,
   };
 
   return <MIDIContext.Provider value={value}>{children}</MIDIContext.Provider>;

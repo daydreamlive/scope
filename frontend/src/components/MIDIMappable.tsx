@@ -27,10 +27,12 @@ export function MIDIMappable({
 }: MIDIMappableProps) {
   const {
     isMappingMode,
+    setMappingMode,
     learningParameter,
     startLearning,
     cancelLearning,
     getMappedSource,
+    activeParameters,
   } = useMIDI();
 
   const [justMapped, setJustMapped] = useState(false);
@@ -49,6 +51,7 @@ export function MIDIMappable({
       : null;
 
   const isMapped = mappedSource !== null;
+  const isActive = activeParameters.has(paramId);
 
   const handleClick = (e: React.MouseEvent) => {
     if (disabled) return;
@@ -88,7 +91,7 @@ export function MIDIMappable({
     <div
       className={cn(
         "relative",
-        isMappingMode && !disabled && "cursor-pointer",
+        isMappingMode && !disabled && "cursor-pointer p-1.5",
         className
       )}
       onClick={handleClick}
@@ -99,7 +102,11 @@ export function MIDIMappable({
             "absolute inset-0 z-10 rounded-md border-2 transition-all",
             isLearning
               ? "border-blue-500 bg-blue-500/10 animate-pulse"
-              : "border-blue-400/50 bg-blue-400/5 hover:border-blue-400 hover:bg-blue-400/10"
+              : isMapped && isActive
+                ? "border-green-400 bg-green-400/20"
+                : isMapped
+                  ? "border-green-400/50 bg-green-400/5 hover:border-green-400 hover:bg-green-400/10"
+                  : "border-blue-400/50 bg-blue-400/5 hover:border-blue-400 hover:bg-blue-400/10"
           )}
           style={{ pointerEvents: "auto" }}
         >
@@ -118,10 +125,22 @@ export function MIDIMappable({
       )}
 
       {isMapped && !isMappingMode && (
-        <div
-          className="absolute -top-0.5 -right-0.5 z-10 w-1.5 h-1.5 rounded-full bg-blue-500"
-          title={`Mapped to ${mappedSource}`}
-        />
+        <>
+          {isActive && (
+            <div className="absolute top-0 right-0 z-10 w-2 h-2 rounded-full bg-green-500/60 animate-ping" />
+          )}
+          <div
+            className={cn(
+              "absolute top-0 right-0 z-10 w-2 h-2 rounded-full transition-colors duration-150 cursor-pointer",
+              isActive ? "bg-green-500" : "bg-blue-500"
+            )}
+            title={`Mapped to ${mappedSource}`}
+            onClick={e => {
+              e.stopPropagation();
+              setMappingMode(true);
+            }}
+          />
+        </>
       )}
 
       <div className={cn(isMappingMode && !disabled && "pointer-events-none")}>
