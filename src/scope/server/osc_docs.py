@@ -322,7 +322,6 @@ def render_osc_docs_html(
     data = get_osc_paths(pipeline_manager)
     active_groups: dict[str, list] = data["active"]
     available_groups: dict[str, list] = data["available"]
-    active_ids = ", ".join(data["active_pipeline_ids"]) or "none"
 
     active_html_parts: list[str] = []
     for i, (source, paths) in enumerate(active_groups.items()):
@@ -471,8 +470,7 @@ function toggle(id) {{
 <p class="subtitle">Auto-generated from current app state. Refresh to update.</p>
 
 <div class="info">
-  OSC UDP port: <code>{osc_port}</code> &middot;
-  Active pipeline(s): <code>{html.escape(active_ids)}</code>
+  OSC UDP port: <code>{osc_port}</code>
 </div>
 
 <h2>Quick Start</h2>
