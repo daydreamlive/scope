@@ -83,6 +83,15 @@ class PipelineManager:
                 )
             return self._pipeline
 
+    def get_loaded_pipeline_ids(self) -> list[str]:
+        """Return the IDs of all currently loaded pipelines (thread-safe)."""
+        with self._lock:
+            return [
+                pid
+                for pid, status in self._pipeline_statuses.items()
+                if status == PipelineStatus.LOADED
+            ]
+
     def get_pipeline_by_id(self, pipeline_id: str):
         """Get a pipeline instance by ID (thread-safe).
 
