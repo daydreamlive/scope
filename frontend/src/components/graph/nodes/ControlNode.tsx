@@ -1,8 +1,8 @@
 import { Handle, Position, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
-import type { FlowNodeData } from "../../lib/graphUtils";
-import { buildHandleId } from "../../lib/graphUtils";
+import type { FlowNodeData } from "../../../lib/graphUtils";
+import { buildHandleId } from "../../../lib/graphUtils";
 import {
   NodeCard,
   NodeBody,
@@ -11,7 +11,7 @@ import {
   NodePillSelect,
   NodePill,
   NODE_TOKENS,
-} from "./node-ui";
+} from "../ui";
 
 type ControlNodeType = Node<FlowNodeData, "control">;
 

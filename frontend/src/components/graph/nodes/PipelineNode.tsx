@@ -1,8 +1,8 @@
 import { useRef, useCallback, useState, useLayoutEffect } from "react";
 import { Handle, Position, useEdges } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../lib/graphUtils";
-import { buildHandleId } from "../../lib/graphUtils";
+import type { FlowNodeData } from "../../../lib/graphUtils";
+import { buildHandleId } from "../../../lib/graphUtils";
 import {
   NodeCard,
   NodeHeader,
@@ -15,7 +15,7 @@ import {
   NodePillToggle,
   NodePillTextarea,
   NODE_TOKENS,
-} from "./node-ui";
+} from "../ui";
 
 type PipelineNodeType = Node<FlowNodeData, "pipeline">;
 

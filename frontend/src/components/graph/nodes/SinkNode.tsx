@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../lib/graphUtils";
-import { NodeCard, NodeHeader } from "./node-ui";
+import type { FlowNodeData } from "../../../lib/graphUtils";
+import { NodeCard, NodeHeader } from "../ui";
 
 type SinkNodeType = Node<FlowNodeData, "sink">;
 

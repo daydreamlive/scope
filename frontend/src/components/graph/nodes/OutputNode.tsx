@@ -1,6 +1,6 @@
 import { Handle, Position, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../lib/graphUtils";
+import type { FlowNodeData } from "../../../lib/graphUtils";
 import {
   NodeCard,
   NodeHeader,
@@ -8,7 +8,7 @@ import {
   NodePillSelect,
   NodePillInput,
   NodePillToggle,
-} from "./node-ui";
+} from "../ui";
 
 type OutputNodeType = Node<FlowNodeData, "output">;
 

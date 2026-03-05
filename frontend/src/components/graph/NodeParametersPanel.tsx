@@ -16,7 +16,7 @@ import {
   NodePillListInput,
   NodeSection,
   NODE_TOKENS,
-} from "./node-ui";
+} from "./ui";
 
 interface NodeParametersPanelProps {
   pipelineId: string | null;

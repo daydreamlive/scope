@@ -1,8 +1,8 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { Handle, Position, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../lib/graphUtils";
-import { getInputSourceSources, type DiscoveredSource } from "../../lib/api";
+import type { FlowNodeData } from "../../../lib/graphUtils";
+import { getInputSourceSources, type DiscoveredSource } from "../../../lib/api";
 import {
   NodeCard,
   NodeHeader,
@@ -10,7 +10,7 @@ import {
   NodePillSelect,
   NodePillInput,
   NodePillSearchableSelect,
-} from "./node-ui";
+} from "../ui";
 
 type SourceNodeType = Node<FlowNodeData, "source">;
 

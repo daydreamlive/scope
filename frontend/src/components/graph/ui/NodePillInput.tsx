@@ -1,0 +1,117 @@
+import { useRef, useCallback } from "react";
+import { NODE_TOKENS } from "./tokens";
+
+interface NodePillInputProps {
+  type: "text" | "number";
+  value: string | number;
+  onChange: (value: string | number) => void;
+  disabled?: boolean;
+  placeholder?: string;
+  min?: number;
+  max?: number;
+  className?: string;
+}
+
+export function NodePillInput({
+  type,
+  value,
+  onChange,
+  disabled = false,
+  placeholder,
+  min,
+  max,
+  className = "",
+}: NodePillInputProps) {
+  const inputRef = useRef<HTMLInputElement>(null);
+  const dragRef = useRef<{
+    startX: number;
+    startValue: number;
+    hasDragged: boolean;
+  } | null>(null);
+
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (type === "number") {
+      const numValue = Number(e.target.value);
+      if (!Number.isNaN(numValue)) {
+        onChange(numValue);
+      }
+    } else {
+      onChange(e.target.value);
+    }
+  };
+
+  const clampValue = useCallback(
+    (v: number) => {
+      let clamped = v;
+      if (min !== undefined) clamped = Math.max(min, clamped);
+      if (max !== undefined) clamped = Math.min(max, clamped);
+      return clamped;
+    },
+    [min, max]
+  );
+
+  const handleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (type !== "number" || disabled) return;
+      if (document.activeElement === inputRef.current) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      dragRef.current = {
+        startX: e.clientX,
+        startValue: Number(value) || 0,
+        hasDragged: false,
+      };
+
+      const sensitivity =
+        min !== undefined && max !== undefined ? (max - min) / 300 : 0.5;
+
+      const onMove = (ev: MouseEvent) => {
+        if (!dragRef.current) return;
+        const dx = ev.clientX - dragRef.current.startX;
+        if (!dragRef.current.hasDragged && Math.abs(dx) < 3) return;
+        dragRef.current.hasDragged = true;
+        const newVal = clampValue(
+          dragRef.current.startValue + dx * sensitivity
+        );
+        onChange(
+          sensitivity >= 1
+            ? Math.round(newVal)
+            : Math.round(newVal * 1000) / 1000
+        );
+      };
+
+      const onUp = () => {
+        document.removeEventListener("mousemove", onMove);
+        document.removeEventListener("mouseup", onUp);
+        if (!dragRef.current?.hasDragged) {
+          inputRef.current?.focus();
+          inputRef.current?.select();
+        }
+        dragRef.current = null;
+      };
+
+      document.addEventListener("mousemove", onMove);
+      document.addEventListener("mouseup", onUp);
+    },
+    [type, disabled, value, min, max, clampValue, onChange]
+  );
+
+  const isNumber = type === "number";
+
+  return (
+    <input
+      ref={inputRef}
+      type={type}
+      value={value}
+      onChange={handleChange}
+      onMouseDown={isNumber ? handleMouseDown : undefined}
+      disabled={disabled}
+      placeholder={placeholder}
+      min={min}
+      max={max}
+      className={`${NODE_TOKENS.pillInput} ${isNumber ? NODE_TOKENS.pillInputNumber : NODE_TOKENS.pillInputText} ${isNumber && !disabled ? "cursor-ew-resize focus:cursor-text" : ""} ${isNumber ? "nodrag" : ""} ${className}`}
+    />
+  );
+}
+

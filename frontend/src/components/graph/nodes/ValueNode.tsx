@@ -1,7 +1,7 @@
 import { Handle, Position, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../lib/graphUtils";
-import { buildHandleId } from "../../lib/graphUtils";
+import type { FlowNodeData } from "../../../lib/graphUtils";
+import { buildHandleId } from "../../../lib/graphUtils";
 import {
   NodeCard,
   NodeHeader,
@@ -9,7 +9,7 @@ import {
   NodeParamRow,
   NodePillInput,
   NodePillToggle,
-} from "./node-ui";
+} from "../ui";
 
 type ValueNodeType = Node<FlowNodeData, "value">;
 

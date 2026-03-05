@@ -13,8 +13,8 @@ import {
   useState,
   useCallback,
 } from "react";
-import type { FlowNodeData } from "../../lib/graphUtils";
-import { buildHandleId } from "../../lib/graphUtils";
+import type { FlowNodeData } from "../../../lib/graphUtils";
+import { buildHandleId } from "../../../lib/graphUtils";
 import {
   NodeCard,
   NodeHeader,
@@ -23,7 +23,7 @@ import {
   NodePillSelect,
   NodePill,
   NODE_TOKENS,
-} from "./node-ui";
+} from "../ui";
 
 type MathNodeType = Node<FlowNodeData, "math">;
 

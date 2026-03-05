@@ -1,7 +1,7 @@
 import { useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../lib/graphUtils";
-import { NodeCard, NodeHeader, NODE_TOKENS } from "./node-ui";
+import type { FlowNodeData } from "../../../lib/graphUtils";
+import { NodeCard, NodeHeader, NODE_TOKENS } from "../ui";
 
 type NoteNodeType = Node<FlowNodeData, "note">;
 
