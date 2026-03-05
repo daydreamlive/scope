@@ -118,6 +118,7 @@ export function StreamPage() {
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
+    skipNextModeReset,
   } = useStreamState();
 
   // Derive NDI and Syphon input availability from dynamic input sources list
@@ -1471,7 +1472,24 @@ export function StreamPage() {
       importedTimeline: TimelinePrompt[],
       promptState: WorkflowPromptState | null
     ) => {
+      // Prevent the auto-mode-reset effect from overriding the workflow's inputMode
+      if (importedSettings.pipelineId) {
+        skipNextModeReset(importedSettings.pipelineId);
+      }
+
       updateSettings(importedSettings);
+
+      // Trigger video source reinitialization if the workflow uses video mode
+      if (
+        importedSettings.inputMode === "video" &&
+        settings.inputMode !== "video"
+      ) {
+        setShouldReinitializeVideo(true);
+        setTimeout(
+          () => setShouldReinitializeVideo(false),
+          VIDEO_REINITIALIZE_DELAY_MS
+        );
+      }
 
       if (timelineRef.current) {
         timelineRef.current.loadPrompts(importedTimeline);
@@ -1485,7 +1503,7 @@ export function StreamPage() {
         setTemporalInterpolationMethod(promptState.temporalInterpolationMethod);
       }
     },
-    [updateSettings]
+    [updateSettings, skipNextModeReset, settings.inputMode]
   );
 
   return (
