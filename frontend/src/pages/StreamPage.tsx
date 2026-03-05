@@ -34,6 +34,7 @@ import type {
   LoRAConfig,
   LoraMergeStrategy,
   DownloadProgress,
+  SettingsState,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
 import { getInputSourceResolution } from "../lib/api";
@@ -152,6 +153,12 @@ export function StreamPage() {
   // Prompt state - use unified default prompts based on mode
   const initialMode =
     settings.inputMode || getPipelineDefaultMode(settings.pipelineId);
+  const [, setIsChangePending] = useState(false);
+
+  // Ref to access latest settings without re-creating sendParameterUpdate on every change
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
     { text: getDefaultPromptForMode(initialMode), weight: 100 },
   ]);
@@ -287,11 +294,109 @@ export function StreamPage() {
     startStream,
     stopStream,
     updateVideoTrack,
-    sendParameterUpdate,
+    sendParameterUpdate: sendParameterUpdateWebRTC,
     sessionId,
   } = useUnifiedWebRTC({
     onTempoUpdate: updateTempoFromNotification,
+    onChangeScheduled: () => setIsChangePending(true),
+    onChangeApplied: () => setIsChangePending(false),
   });
+
+  // Whether beat-quantized output gating is active
+  const isQuantizeActive =
+    isStreaming &&
+    tempoState.enabled &&
+    (settings.quantizeMode || "none") !== "none";
+
+  // Wrapper for sendParameterUpdate that also syncs frontend state.
+  // Uses settingsRef to avoid depending on the full `settings` object,
+  // which would cause this callback (and dependent useEffects) to
+  // re-fire on every settings change, flooding the backend with
+  // unnecessary parameter messages.
+  const sendParameterUpdate = useCallback(
+    (params: Record<string, unknown>) => {
+      // Auto-flag discrete params for beat-quantized gating
+      if (isQuantizeActive) {
+        const NEVER_QUANTIZE = new Set([
+          "paused",
+          "quantize_mode",
+          "lookahead_ms",
+          "_quantized",
+          "prompt_interpolation_method",
+        ]);
+        const hasDiscrete = Object.entries(params).some(([key, value]) => {
+          if (NEVER_QUANTIZE.has(key)) return false;
+          return (
+            typeof value === "boolean" ||
+            typeof value === "string" ||
+            key === "prompts" ||
+            key === "reset_cache"
+          );
+        });
+        if (hasDiscrete) {
+          params = { ...params, _quantized: true };
+        }
+      }
+
+      // Send to backend via WebRTC
+      sendParameterUpdateWebRTC(params);
+
+      // Also update frontend state for known parameters
+      const settingsUpdate: Partial<SettingsState> = {};
+
+      if (params.noise_scale !== undefined) {
+        settingsUpdate.noiseScale = params.noise_scale as number;
+      }
+      if (params.noise_controller !== undefined) {
+        settingsUpdate.noiseController = params.noise_controller as boolean;
+      }
+      if (params.manage_cache !== undefined) {
+        settingsUpdate.manageCache = params.manage_cache as boolean;
+      }
+      if (params.kv_cache_attention_bias !== undefined) {
+        settingsUpdate.kvCacheAttentionBias =
+          params.kv_cache_attention_bias as number;
+      }
+      if (params.vace_context_scale !== undefined) {
+        settingsUpdate.vaceContextScale = params.vace_context_scale as number;
+      }
+
+      // Sync any remaining params to schemaFieldOverrides (for plugin parameters)
+      const knownKeys = new Set([
+        "noise_scale",
+        "noise_controller",
+        "manage_cache",
+        "kv_cache_attention_bias",
+        "vace_context_scale",
+        "denoising_step_list",
+        "reset_cache",
+        "paused",
+        "prompts",
+        "quantize_mode",
+        "lookahead_ms",
+        "_quantized",
+      ]);
+      const overrideUpdates: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(params)) {
+        if (!knownKeys.has(k)) {
+          overrideUpdates[k] = v;
+        }
+      }
+      if (Object.keys(overrideUpdates).length > 0) {
+        const current = settingsRef.current;
+        settingsUpdate.schemaFieldOverrides = {
+          ...(current.schemaFieldOverrides ?? {}),
+          ...overrideUpdates,
+        };
+      }
+
+      // Update settings if any mappings were found
+      if (Object.keys(settingsUpdate).length > 0) {
+        updateSettings(settingsUpdate);
+      }
+    },
+    [sendParameterUpdateWebRTC, updateSettings, isQuantizeActive]
+  );
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
   const isLoading =
@@ -1045,6 +1150,23 @@ export function StreamPage() {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
+
+  // Send quantize_mode and lookahead_ms to backend when settings change.
+  // Uses sendParameterUpdateWebRTC directly to avoid depending on the
+  // wrapper (which would re-fire this effect on unrelated changes).
+  useEffect(() => {
+    if (isStreaming) {
+      sendParameterUpdateWebRTC({
+        quantize_mode: settings.quantizeMode || "none",
+        lookahead_ms: settings.lookaheadMs ?? 0,
+      });
+    }
+  }, [
+    settings.quantizeMode,
+    settings.lookaheadMs,
+    isStreaming,
+    sendParameterUpdateWebRTC,
+  ]);
 
   // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {
@@ -1857,6 +1979,14 @@ export function StreamPage() {
             onTempoDisable={disableTempoSync}
             onTempoSetBpm={setTempoSessionBpm}
             onTempoRefreshSources={refreshTempoSources}
+            quantizeMode={settings.quantizeMode || "none"}
+            onQuantizeModeChange={mode =>
+              updateSettings({
+                quantizeMode: mode as SettingsState["quantizeMode"],
+              })
+            }
+            lookaheadMs={settings.lookaheadMs ?? 0}
+            onLookaheadMsChange={ms => updateSettings({ lookaheadMs: ms })}
           />
         </div>
       </div>

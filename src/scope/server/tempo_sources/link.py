@@ -53,6 +53,7 @@ class LinkTempoSource(TempoSource):
     async def start(self) -> None:
         loop = asyncio.get_running_loop()
         self._link = Link(self._initial_bpm, loop)
+        self._link.quantum = self._beats_per_bar
         self._link.enabled = True
 
         self._poll_task = asyncio.ensure_future(self._poll_loop())

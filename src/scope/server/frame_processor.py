@@ -9,6 +9,7 @@ import torch
 from aiortc.mediastreams import VideoFrame
 
 from .kafka_publisher import publish_event
+from .parameter_scheduler import ParameterScheduler
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
 
@@ -58,6 +59,15 @@ class FrameProcessor:
         self.pipeline_manager = pipeline_manager
         self.cloud_manager = cloud_manager
         self.tempo_sync = tempo_sync
+
+        # Parameter scheduler for beat-synced parameter changes
+        self.parameter_scheduler: ParameterScheduler | None = (
+            ParameterScheduler(
+                tempo_sync, self.update_parameters, notification_callback
+            )
+            if tempo_sync is not None
+            else None
+        )
 
         # Session ID for Kafka event tracking
         self.session_id = session_id or str(uuid.uuid4())
@@ -600,8 +610,22 @@ class FrameProcessor:
             logger.warning(f"Could not get pipeline dimensions: {e}")
             return 512, 512
 
+    def schedule_quantized_update(self, params: dict):
+        """Schedule params to be applied at the next beat boundary."""
+        if self.parameter_scheduler is not None:
+            self.parameter_scheduler.schedule(params)
+        else:
+            self.update_parameters(params)
+
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
+        # Intercept quantize_mode and lookahead_ms, route to scheduler
+        if self.parameter_scheduler is not None:
+            if "quantize_mode" in parameters:
+                self.parameter_scheduler.quantize_mode = parameters.pop("quantize_mode")
+            if "lookahead_ms" in parameters:
+                self.parameter_scheduler.lookahead_ms = parameters.pop("lookahead_ms")
+
         # Handle generic output sinks config
         if "output_sinks" in parameters:
             sinks_config = parameters.pop("output_sinks")
