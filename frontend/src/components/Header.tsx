@@ -184,6 +184,8 @@ export function Header({
         open={pluginsOpen}
         onClose={handlePluginsClose}
         initialPluginPath={initialPluginPath}
+        disabled={cloudDisabled || isConnecting}
+        cloudConnected={isConnected}
       />
 
       <SettingsDialog

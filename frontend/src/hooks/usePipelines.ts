@@ -29,6 +29,7 @@ export function usePipelines() {
         transformed[id] = {
           name: schema.name,
           about: schema.description,
+          version: schema.version,
           supportedModes: schema.supported_modes as InputMode[],
           defaultMode: schema.default_mode as InputMode,
           supportsPrompts: schema.supports_prompts,

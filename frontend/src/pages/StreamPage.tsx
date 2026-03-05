@@ -6,6 +6,9 @@ import { SettingsPanel } from "../components/SettingsPanel";
 import { OutputsPanel } from "../components/OutputsPanel";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
+import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
+import { WorkflowImportDialog } from "../components/WorkflowImportDialog";
+import type { WorkflowPromptState } from "../lib/workflowSettings";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { LogPanel } from "../components/LogPanel";
@@ -131,6 +134,7 @@ export function StreamPage() {
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
+    skipNextModeReset,
   } = useStreamState();
 
   // Derive NDI and Syphon input availability from dynamic input sources list
@@ -248,6 +252,10 @@ export function StreamPage() {
   >(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
+  // Workflow export/import dialog state
+  const [showWorkflowExport, setShowWorkflowExport] = useState(false);
+  const [showWorkflowImport, setShowWorkflowImport] = useState(false);
+
   // Stable ref for OSC command handler (avoids hook dependency cycles)
   const oscCommandHandlerRef = useRef<(cmd: OscCommand) => void>(() => {});
 
@@ -259,6 +267,7 @@ export function StreamPage() {
     clearTimeline: () => void;
     resetPlayhead: () => void;
     resetTimelineCompletely: () => void;
+    loadPrompts: (prompts: TimelinePrompt[]) => void;
     getPrompts: () => TimelinePrompt[];
     getCurrentTime: () => number;
     getIsPlaying: () => boolean;
@@ -1651,6 +1660,47 @@ export function StreamPage() {
     }
   };
 
+  // Handle workflow import: load settings, timeline, and prompt state
+  const handleWorkflowLoad = useCallback(
+    (
+      importedSettings: Partial<typeof settings>,
+      importedTimeline: TimelinePrompt[],
+      promptState: WorkflowPromptState | null
+    ) => {
+      // Prevent the auto-mode-reset effect from overriding the workflow's inputMode
+      if (importedSettings.pipelineId) {
+        skipNextModeReset(importedSettings.pipelineId);
+      }
+
+      updateSettings(importedSettings);
+
+      // Trigger video source reinitialization if the workflow uses video mode
+      if (
+        importedSettings.inputMode === "video" &&
+        settings.inputMode !== "video"
+      ) {
+        setShouldReinitializeVideo(true);
+        setTimeout(
+          () => setShouldReinitializeVideo(false),
+          VIDEO_REINITIALIZE_DELAY_MS
+        );
+      }
+
+      if (timelineRef.current) {
+        timelineRef.current.loadPrompts(importedTimeline);
+      }
+
+      // Restore active prompt state
+      if (promptState) {
+        setPromptItems(promptState.promptItems);
+        setInterpolationMethod(promptState.interpolationMethod);
+        setTransitionSteps(promptState.transitionSteps);
+        setTemporalInterpolationMethod(promptState.temporalInterpolationMethod);
+      }
+    },
+    [updateSettings, skipNextModeReset, settings.inputMode]
+  );
+
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
@@ -1908,11 +1958,8 @@ export function StreamPage() {
               isCollapsed={isTimelineCollapsed}
               onCollapseToggle={setIsTimelineCollapsed}
               externalSelectedPromptId={externalSelectedPromptId}
-              settings={settings}
-              onSettingsImport={updateSettings}
               onPlayPauseRef={timelinePlayPauseRef}
               onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
-              onResetCache={handleResetCache}
               onTimelinePromptsChange={handleTimelinePromptsChange}
               onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
               onTimelinePlayingChange={handleTimelinePlayingChange}
@@ -1925,6 +1972,8 @@ export function StreamPage() {
               onSaveGeneration={handleSaveGeneration}
               isRecording={isRecording}
               onRecordingToggle={() => setIsRecording(prev => !prev)}
+              onWorkflowExport={() => setShowWorkflowExport(true)}
+              onWorkflowImport={() => setShowWorkflowImport(true)}
             />
           </div>
         </div>
@@ -2056,6 +2105,27 @@ export function StreamPage() {
           }}
         />
       )}
+
+      {/* Workflow Export Dialog */}
+      <WorkflowExportDialog
+        open={showWorkflowExport}
+        onClose={() => setShowWorkflowExport(false)}
+        settings={settings}
+        timelinePrompts={timelinePrompts}
+        promptState={{
+          promptItems,
+          interpolationMethod,
+          transitionSteps,
+          temporalInterpolationMethod,
+        }}
+      />
+
+      {/* Workflow Import Dialog */}
+      <WorkflowImportDialog
+        open={showWorkflowImport}
+        onClose={() => setShowWorkflowImport(false)}
+        onLoad={handleWorkflowLoad}
+      />
     </div>
   );
 }

@@ -185,7 +185,7 @@ async def download_lora(
         hf_filename=request.hf_filename,
         model_id=request.model_id,
         version_id=request.version_id,
-        url=request.url if request.source == "url" else None,
+        url=request.url,
     )
     add_manifest_entry(lora_dir, relative_filename, provenance, sha256, size_bytes)
 

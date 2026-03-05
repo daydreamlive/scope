@@ -1,4 +1,10 @@
 import type { IceServersResponse, ModelStatusResponse } from "../types";
+import type {
+  ScopeWorkflow,
+  WorkflowResolutionPlan,
+  LoRADownloadRequest,
+  LoRADownloadResult,
+} from "./workflowApi";
 import { fetchFalCdnToken } from "./auth";
 
 export interface PromptItem {
@@ -341,11 +347,22 @@ export const fetchCurrentLogs = async (): Promise<string> => {
   return logsText;
 };
 
+export interface LoRAProvenance {
+  source: "huggingface" | "civitai" | "url" | "local";
+  repo_id?: string | null;
+  hf_filename?: string | null;
+  model_id?: string | null;
+  version_id?: string | null;
+  url?: string | null;
+}
+
 export interface LoRAFileInfo {
   name: string;
   path: string;
   size_mb: number;
   folder?: string | null;
+  sha256?: string | null;
+  provenance?: LoRAProvenance | null;
 }
 
 export interface LoRAFilesResponse {
@@ -887,4 +904,38 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+};
+
+// ---------------------------------------------------------------------------
+// Workflow
+// ---------------------------------------------------------------------------
+
+export const resolveWorkflow = async (
+  workflow: ScopeWorkflow
+): Promise<WorkflowResolutionPlan> => {
+  const response = await fetch("/api/v1/workflow/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(workflow),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+export const downloadLoRA = async (
+  request: LoRADownloadRequest
+): Promise<LoRADownloadResult> => {
+  const response = await fetch("/api/v1/lora/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
 };
