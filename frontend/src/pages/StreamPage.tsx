@@ -1800,9 +1800,9 @@ export function StreamPage() {
               if (response.graph) {
                 const sourceNode = response.graph.nodes.find(n => n.type === "source");
                 if (sourceNode?.source_mode) {
-                  const sourceMode = sourceNode.source_mode as "video" | "camera" | "spout" | "ndi";
+                  const sourceMode = sourceNode.source_mode as "video" | "camera" | "spout" | "ndi" | "syphon";
                   // Sync to useVideoSource
-                  if (sourceMode === "spout" || sourceMode === "ndi") {
+                  if (sourceMode === "spout" || sourceMode === "ndi" || sourceMode === "syphon") {
                     // For server-side sources, update settings.inputSource with graph's source_name
                     updateSettings({
                       inputSource: {
@@ -1845,11 +1845,13 @@ export function StreamPage() {
             onVideoFileUpload={handleVideoFileUpload}
             onStartStream={() => handleStartStream()}
             onStopStream={stopStream}
-            onSourceModeChange={(mode) => switchMode(mode as "video" | "camera" | "spout" | "ndi")}
+            onSourceModeChange={(mode) => switchMode(mode as "video" | "camera" | "spout" | "ndi" | "syphon")}
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiAvailable}
+            syphonAvailable={syphonAvailable}
             onSpoutSourceChange={handleSpoutSourceChange}
             onNdiSourceChange={handleNdiSourceChange}
+            onSyphonSourceChange={handleSyphonSourceChange}
           />
           {hasAvailableOutputs && (
             <OutputsPanel
@@ -1881,7 +1883,7 @@ export function StreamPage() {
               canStartStream={
                 settings.inputMode === "text"
                   ? !isInitializing
-                  : mode === "spout" || mode === "ndi"
+                  : mode === "spout" || mode === "ndi" || mode === "syphon"
                     ? !isInitializing
                     : !!localStream && !isInitializing
               }
@@ -1922,8 +1924,15 @@ export function StreamPage() {
               onInputModeChange={handleInputModeChange}
               spoutAvailable={spoutAvailable}
               ndiAvailable={ndiAvailable}
+              syphonAvailable={syphonAvailable}
               selectedNdiSource={settings.inputSource?.source_name ?? ""}
               onNdiSourceChange={handleNdiSourceChange}
+              selectedSyphonSource={
+                settings.inputSource?.source_type === "syphon"
+                  ? (settings.inputSource?.source_name ?? "")
+                  : ""
+              }
+              onSyphonSourceChange={handleSyphonSourceChange}
               vaceEnabled={
                 settings.vaceEnabled ??
                 (pipelines?.[settings.pipelineId]?.supportsVACE &&
@@ -2169,10 +2178,6 @@ export function StreamPage() {
               }
               inputMode={settings.inputMode}
               supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-              outputSinks={settings.outputSinks}
-              onOutputSinkChange={handleOutputSinkChange}
-              spoutAvailable={spoutAvailable}
-              ndiAvailable={ndiOutputAvailable}
               vaceEnabled={
                 settings.vaceEnabled ??
                 (pipelines?.[settings.pipelineId]?.supportsVACE &&

@@ -67,11 +67,11 @@ class GraphNode(BaseModel):
     )
     source_mode: str | None = Field(
         default=None,
-        description="Video source mode for source nodes: 'video', 'camera', 'spout', 'ndi'",
+        description="Video source mode for source nodes: 'video', 'camera', 'spout', 'ndi', 'syphon'",
     )
     source_name: str | None = Field(
         default=None,
-        description="Source name/identifier for Spout/NDI sources (sender name for Spout, source identifier for NDI)",
+        description="Source name/identifier for Spout/NDI/Syphon sources (sender name for Spout, source identifier for NDI/Syphon)",
     )
 
 

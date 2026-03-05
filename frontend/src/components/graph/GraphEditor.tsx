@@ -125,8 +125,10 @@ interface GraphEditorProps {
   onSourceModeChange?: (mode: string) => void;
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
+  syphonAvailable?: boolean;
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
+  onSyphonSourceChange?: (identifier: string) => void;
 }
 
 export function GraphEditor({
@@ -144,8 +146,10 @@ export function GraphEditor({
   onSourceModeChange,
   spoutAvailable = false,
   ndiAvailable = false,
+  syphonAvailable = false,
   onSpoutSourceChange,
   onNdiSourceChange,
+  onSyphonSourceChange,
 }: GraphEditorProps) {
   const [nodes, setNodes, onNodesChange] = useNodesState<Node<FlowNodeData>>(
     []
@@ -249,6 +253,9 @@ export function GraphEditor({
   const onNdiSourceChangeRef = useRef(onNdiSourceChange);
   onNdiSourceChangeRef.current = onNdiSourceChange;
 
+  const onSyphonSourceChangeRef = useRef(onSyphonSourceChange);
+  onSyphonSourceChangeRef.current = onSyphonSourceChange;
+
   const onGraphChangeRef = useRef(onGraphChange);
   onGraphChangeRef.current = onGraphChange;
 
@@ -326,8 +333,10 @@ export function GraphEditor({
               onSourceModeChange: onSourceModeChangeRef.current,
               spoutAvailable,
               ndiAvailable,
+              syphonAvailable,
               onSpoutSourceChange: onSpoutSourceChangeRef.current,
               onNdiSourceChange: onNdiSourceChangeRef.current,
+              onSyphonSourceChange: onSyphonSourceChangeRef.current,
             },
           };
         }
@@ -340,7 +349,7 @@ export function GraphEditor({
         return n;
       })
     );
-  }, [availablePipelineIds, portsMap, handlePipelineSelect, setNodes, pipelineSchemas, handleNodeParameterChange, localStream, remoteStream, spoutAvailable, ndiAvailable]);
+  }, [availablePipelineIds, portsMap, handlePipelineSelect, setNodes, pipelineSchemas, handleNodeParameterChange, localStream, remoteStream, spoutAvailable, ndiAvailable, syphonAvailable]);
 
   // Sync nodeParams to pipeline node parameterValues
   useEffect(() => {
@@ -401,8 +410,10 @@ export function GraphEditor({
                 onSourceModeChange: onSourceModeChangeRef.current,
                 spoutAvailable,
                 ndiAvailable,
+                syphonAvailable,
                 onSpoutSourceChange: onSpoutSourceChangeRef.current,
                 onNdiSourceChange: onNdiSourceChangeRef.current,
+                onSyphonSourceChange: onSyphonSourceChangeRef.current,
               },
             };
           }
@@ -1019,8 +1030,10 @@ export function GraphEditor({
                   onSourceModeChange,
                   spoutAvailable,
                   ndiAvailable,
+                  syphonAvailable,
                   onSpoutSourceChange,
                   onNdiSourceChange,
+                  onSyphonSourceChange,
                 },
               };
             }

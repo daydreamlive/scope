@@ -71,8 +71,8 @@ export interface FlowNodeData {
   mathOp?: "add" | "subtract" | "multiply" | "divide" | "mod" | "min" | "max" | "power" | "abs" | "negate" | "sqrt" | "floor" | "ceil" | "round";
   /** For note nodes: the note text content */
   noteText?: string;
-  /** For source nodes: video source mode (video, camera, spout, ndi) */
-  sourceMode?: "video" | "camera" | "spout" | "ndi";
+  /** For source nodes: video source mode (video, camera, spout, ndi, syphon) */
+  sourceMode?: "video" | "camera" | "spout" | "ndi" | "syphon";
   /** For source nodes: source name/identifier for Spout/NDI (sender name for Spout, identifier for NDI) */
   sourceName?: string;
   /** For source nodes: local video preview stream (camera or file) */
@@ -85,10 +85,14 @@ export interface FlowNodeData {
   spoutAvailable?: boolean;
   /** For source nodes: whether NDI is available */
   ndiAvailable?: boolean;
+  /** For source nodes: whether Syphon is available (macOS) */
+  syphonAvailable?: boolean;
   /** For source nodes: callback when Spout receiver name changes */
   onSpoutSourceChange?: (name: string) => void;
   /** For source nodes: callback when NDI source changes */
   onNdiSourceChange?: (identifier: string) => void;
+  /** For source nodes: callback when Syphon source changes */
+  onSyphonSourceChange?: (identifier: string) => void;
   /** For sink nodes: remote output stream */
   remoteStream?: MediaStream | null;
   /** For pipeline nodes: whether the selected pipeline supports prompts */
@@ -259,7 +263,7 @@ export function graphConfigToFlow(
       data: {
         label: n.id,
         nodeType: "source",
-        sourceMode: n.source_mode as "video" | "camera" | "spout" | "ndi" | undefined,
+        sourceMode: n.source_mode as "video" | "camera" | "spout" | "ndi" | "syphon" | undefined,
         sourceName: n.source_name ?? undefined,
       },
     });
