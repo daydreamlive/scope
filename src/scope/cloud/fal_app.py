@@ -364,9 +364,7 @@ def _get_git_sha() -> str:
             text=True,
             check=True,
         )
-        tag = result.stdout.strip()[:7] + "-cloud"
-        print(f"Deploying with tag: {tag}")
-        return tag
+        return result.stdout.strip()[:7] + "-cloud"
     except Exception as e:
         print(f"Warning: Could not get git SHA: {e}")
         return "unknown"

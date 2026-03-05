@@ -153,12 +153,9 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         };
 
         dataChannel.onmessage = event => {
-          console.log("[UnifiedWebRTC] Data channel message:", event.data);
-
           try {
             const data = JSON.parse(event.data);
 
-            // Handle stream stop notification from backend
             if (data.type === "stream_stopped") {
               console.log("[UnifiedWebRTC] Stream stopped by backend");
               setIsStreaming(false);
@@ -447,26 +444,30 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   );
 
   const sendParameterUpdate = useCallback(
-    (params: {
-      prompts?: string[] | PromptItem[];
-      prompt_interpolation_method?: "linear" | "slerp";
-      transition?: PromptTransition;
-      denoising_step_list?: number[];
-      noise_scale?: number;
-      noise_controller?: boolean;
-      manage_cache?: boolean;
-      reset_cache?: boolean;
-      kv_cache_attention_bias?: number;
-      paused?: boolean;
-      output_sinks?: Record<string, { enabled: boolean; name: string }>;
-      vace_ref_images?: string[];
-      vace_use_input_video?: boolean;
-      vace_context_scale?: number;
-      ctrl_input?: { button: string[]; mouse: [number, number] };
-      images?: string[];
-      first_frame_image?: string;
-      last_frame_image?: string;
-    }) => {
+    (
+      params:
+        | {
+            prompts?: string[] | PromptItem[];
+            prompt_interpolation_method?: "linear" | "slerp";
+            transition?: PromptTransition;
+            denoising_step_list?: number[];
+            noise_scale?: number;
+            noise_controller?: boolean;
+            manage_cache?: boolean;
+            reset_cache?: boolean;
+            kv_cache_attention_bias?: number;
+            paused?: boolean;
+            output_sinks?: Record<string, { enabled: boolean; name: string }>;
+            vace_ref_images?: string[];
+            vace_use_input_video?: boolean;
+            vace_context_scale?: number;
+            ctrl_input?: { button: string[]; mouse: [number, number] };
+            images?: string[];
+            first_frame_image?: string;
+            last_frame_image?: string;
+          }
+        | Record<string, unknown>
+    ) => {
       if (
         dataChannelRef.current &&
         dataChannelRef.current.readyState === "open"

@@ -8,6 +8,7 @@ import { ReportBugDialog } from "./ReportBugDialog";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
 import { useLoRAsContext } from "@/contexts/LoRAsContext";
 import { LoRAsTab } from "./settings/LoRAsTab";
+import { OscTab } from "./settings/OscTab";
 import { installLoRAFile, deleteLoRAFile } from "@/lib/api";
 import { useServerInfoContext } from "@/contexts/ServerInfoContext";
 import { toast } from "sonner";
@@ -15,7 +16,7 @@ import { toast } from "sonner";
 interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
-  initialTab?: "general" | "account" | "api-keys" | "loras";
+  initialTab?: "general" | "account" | "api-keys" | "loras" | "osc";
   onPipelinesRefresh?: () => Promise<unknown>;
   cloudDisabled?: boolean;
 }
@@ -146,6 +147,12 @@ export function SettingsDialog({
             >
               LoRAs
             </TabsTrigger>
+            <TabsTrigger
+              value="osc"
+              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+            >
+              OSC
+            </TabsTrigger>
           </TabsList>
           <div className="w-px bg-border self-stretch" />
           <div className="flex-1 min-w-0 p-4 pt-10 h-[40vh] overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
@@ -181,6 +188,9 @@ export function SettingsDialog({
                 isInstalling={isInstallingLoRA}
                 deletingLoRAs={deletingLoRAs}
               />
+            </TabsContent>
+            <TabsContent value="osc" className="mt-0">
+              <OscTab isActive={open && activeTab === "osc"} />
             </TabsContent>
           </div>
         </Tabs>
