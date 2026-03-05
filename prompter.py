@@ -4,6 +4,7 @@ HOST = "127.0.0.1"
 PORT = 8000
 OSC_ADDRESS = "/scope/text"
 
+
 def main():
     client = SimpleUDPClient(HOST, PORT)
     print(f"Connected to OSC at {HOST}:{PORT}")
@@ -26,6 +27,7 @@ def main():
         except KeyboardInterrupt:
             print("\nInterrupted. Exiting.")
             break
+
 
 if __name__ == "__main__":
     main()

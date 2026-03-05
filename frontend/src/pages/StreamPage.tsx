@@ -1125,7 +1125,7 @@ export function StreamPage() {
           }
           break;
         }
-        default:
+        default: {
           // Pipeline-specific runtime params:
           // update frontend override state first, then forward to backend.
           if (pipelineHasRuntimeField(settings.pipelineId, key)) {
@@ -1183,6 +1183,7 @@ export function StreamPage() {
             sendParameterUpdate({ [key]: value } as Record<string, unknown>);
           }
           break;
+        }
       }
     };
   });
