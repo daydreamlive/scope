@@ -43,13 +43,13 @@ class WorkflowLoRA(BaseModel, extra="ignore"):
 
 class WorkflowPipelineSource(BaseModel, extra="ignore"):
     type: Literal["builtin", "pypi", "git", "local"]
-    plugin_name: str | None = None
+    plugin_name: str | None = Field(default=None, min_length=1)
     plugin_version: str | None = None
     package_spec: str | None = None
 
 
 class WorkflowPipeline(BaseModel, extra="ignore"):
-    pipeline_id: str
+    pipeline_id: str = Field(min_length=1)
     source: WorkflowPipelineSource
     loras: list[WorkflowLoRA] = Field(default=[], max_length=100)
 
@@ -152,8 +152,15 @@ def _check_plugin_version(
     installed_version: str | None,
     workflow_version: str | None,
 ) -> ResolutionItem:
-    if not workflow_version or not installed_version:
+    if not workflow_version:
         return ResolutionItem(kind="plugin", name=plugin_name, status="ok")
+    if not installed_version:
+        return ResolutionItem(
+            kind="plugin",
+            name=plugin_name,
+            status="ok",
+            detail=f"Could not verify version (no version metadata for {plugin_name})",
+        )
     try:
         if Version(installed_version) < Version(workflow_version):
             return ResolutionItem(
@@ -252,7 +259,17 @@ def resolve_workflow(
     warnings: list[str] = []
     all_pipelines_ok = True
 
-    plugins = plugin_manager.list_plugins_sync()
+    try:
+        plugins = plugin_manager.list_plugins_sync()
+    except Exception:
+        logger.warning(
+            "Failed to list plugins; treating all plugins as missing", exc_info=True
+        )
+        plugins = []
+        warnings.append(
+            "Could not read installed plugins. Plugin status may be inaccurate."
+        )
+
     lora_dir = models_dir / "lora"
 
     for wp in workflow.pipelines:

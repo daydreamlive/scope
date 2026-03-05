@@ -1081,11 +1081,24 @@ async def install_lora_file(
             )
         )
 
-        provenance = LoRAProvenance(
-            source=source,
-            url=clean_url,
-            version_id=version_id if is_civitai else None,
-        )
+        # Parse structured fields from URLs so downstream downloads can use
+        # authenticated paths (hf_hub_url for HF, version API for CivitAI).
+        extra: dict = {}
+        if source == "huggingface":
+            hf_parts = [p for p in _parsed.path.split("/") if p]
+            if len(hf_parts) >= 5 and hf_parts[2] in ("resolve", "blob"):
+                extra["repo_id"] = f"{hf_parts[0]}/{hf_parts[1]}"
+                extra["hf_filename"] = "/".join(hf_parts[4:])
+        elif source == "civitai":
+            civ_query = parse_qs(_parsed.query)
+            if "modelVersionId" in civ_query:
+                extra["version_id"] = civ_query["modelVersionId"][0]
+            else:
+                civ_parts = _parsed.path.rstrip("/").split("/")
+                if civ_parts and civ_parts[-1].isdigit():
+                    extra["version_id"] = civ_parts[-1]
+
+        provenance = LoRAProvenance(source=source, url=clean_url, **extra)
         entry = add_manifest_entry(
             lora_dir, relative_key, provenance, sha256, size_bytes
         )
