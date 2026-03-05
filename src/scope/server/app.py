@@ -1003,6 +1003,11 @@ async def install_lora_file(
                 if candidate and candidate.isdigit():
                     version_id = candidate
             civitai_token = query_params.get("token", [None])[0]
+            logger.info(
+                f"CivitAI resolve: version_id={version_id}, "
+                f"token_from_url={'yes' if civitai_token else 'no'}, "
+                f"filename={filename}"
+            )
 
         if is_civitai and (not filename or "." not in filename):
             if version_id:
