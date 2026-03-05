@@ -194,9 +194,9 @@ jobs:
             | **Commit** | \`${shortSha}\` |
 
             ### Testing
-            Connect to this preview deployment by running this on your branch:
+            Connect to this preview deployment by setting the fal endpoint in your client:
             \`\`\`
-            uv run build && SCOPE_CLOUD_APP_ID="${falAppId}/ws" uv run daydream-scope
+            FAL_WS_URL=${falWsUrl}
             \`\`\`
 
             🧪 E2E tests will run automatically against this deployment.

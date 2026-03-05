@@ -109,11 +109,6 @@ export class ScopePythonProcessService implements PythonProcessService {
         // When set, the server will exit with code 42 on restart instead of
         // using os.execv, allowing us to maintain PID tracking.
         DAYDREAM_SCOPE_MANAGED: '1',
-        // Baked in at build time via vite.main.config.ts `define`.
-        // Runtime env takes precedence so CLI overrides still work.
-        ...((process.env.SCOPE_CLOUD_APP_ID === undefined && __SCOPE_CLOUD_APP_ID__)
-          ? { SCOPE_CLOUD_APP_ID: __SCOPE_CLOUD_APP_ID__ }
-          : {}),
       },
     });
 

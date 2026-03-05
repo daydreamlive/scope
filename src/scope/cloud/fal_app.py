@@ -12,10 +12,8 @@ Based on:
 import asyncio
 import json
 import os
-import queue
 import shutil
 import subprocess as _subprocess
-import threading
 import time
 import uuid
 from typing import Any
@@ -165,88 +163,6 @@ class KafkaPublisher:
 kafka_publisher: KafkaPublisher | None = None
 
 
-class LogBroadcaster:
-    """Thread-safe broadcaster that fans out subprocess log lines to async subscribers.
-
-    Uses stdlib queue.Queue (thread-safe) instead of asyncio.Queue, since publish()
-    is called from a background thread. The async forwarder polls via get_nowait().
-    """
-
-    def __init__(self, max_queue_size: int = 200):
-        self._queue_class = queue
-        self._subscribers: dict[str, queue.Queue] = {}
-        self._lock = threading.Lock()
-        self._max_queue_size = max_queue_size
-
-    def publish(self, line: str) -> None:
-        """Called from the subprocess reader thread to broadcast a log line."""
-        with self._lock:
-            for q in self._subscribers.values():
-                try:
-                    q.put_nowait(line)
-                except self._queue_class.Full:
-                    # Subscriber is slow — drop the line to avoid backpressure
-                    pass
-
-    def subscribe(self, connection_id: str) -> queue.Queue[str]:
-        """Subscribe to log lines. Returns a thread-safe Queue for the caller to drain."""
-        q: queue.Queue[str] = queue.Queue(maxsize=self._max_queue_size)
-        with self._lock:
-            self._subscribers[connection_id] = q
-        return q
-
-    def unsubscribe(self, connection_id: str) -> None:
-        """Remove a subscriber."""
-        with self._lock:
-            self._subscribers.pop(connection_id, None)
-
-
-# Global log broadcaster — populated once subprocess starts
-log_broadcaster = LogBroadcaster()
-
-# Loggers whose INFO/DEBUG lines are skipped from WebSocket streaming.
-# ERROR/WARNING from these loggers are still forwarded.
-_CLOUD_LOG_SKIP_LOGGERS_DEFAULT = {
-    "scope.server.kafka_publisher",
-}
-
-_cloud_log_skip_loggers: set[str] = set()
-
-
-def _init_cloud_log_skip_loggers() -> set[str]:
-    skip = set(_CLOUD_LOG_SKIP_LOGGERS_DEFAULT)
-    extra = os.environ.get("CLOUD_LOG_SKIP_LOGGERS", "")
-    for name in extra.split(","):
-        name = name.strip()
-        if name:
-            skip.add(name)
-    return skip
-
-
-def _should_forward_log(line: str) -> bool:
-    """Decide whether a subprocess log line should be forwarded over WebSocket.
-
-    Always forwards ERROR/WARNING. Skips INFO/DEBUG from loggers in the skip list.
-    Lines that don't match the standard log format are forwarded as-is (safety net).
-    """
-    global _cloud_log_skip_loggers
-    if not _cloud_log_skip_loggers:
-        _cloud_log_skip_loggers = _init_cloud_log_skip_loggers()
-
-    # Always forward errors and warnings
-    if " - ERROR - " in line or " - WARNING - " in line:
-        return True
-
-    # Parse logger name: "YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - msg"
-    parts = line.split(" - ", 3)
-    if len(parts) >= 3:
-        logger_name = parts[1].strip()
-        if logger_name in _cloud_log_skip_loggers:
-            return False
-
-    return True
-
-
 ASSETS_DIR_PATH = "~/.daydream-scope/assets"
 # Connection timeout settings
 MAX_CONNECTION_DURATION_SECONDS = (
@@ -365,6 +281,7 @@ class ScopeApp(fal.App, keep_alive=300):
         """
         import os
         import subprocess
+        import threading
         import time
 
         print(f"Starting Scope container setup... (version: {GIT_SHA})")
@@ -402,19 +319,11 @@ class ScopeApp(fal.App, keep_alive=300):
         except Exception as e:
             print(f"Failed to install daydream-scope[kafka]: {e}")
 
-        # Ensure VERBOSE_LOGGING is not set so noisy third-party loggers
-        # (aiortc, uvicorn.access) stay at WARNING level
-        scope_env.pop("VERBOSE_LOGGING", None)
-
-        # Force unbuffered stdout in subprocess so log lines arrive immediately
-        # (Python uses block buffering when stdout is a pipe, not a tty)
-        scope_env["PYTHONUNBUFFERED"] = "1"
-
-        # Start the scope server in a background thread with captured output
+        # Start the scope server in a background thread
         def start_server():
             print("Starting Scope server...")
             try:
-                process = subprocess.Popen(
+                result = subprocess.run(
                     [
                         "uv",
                         "run",
@@ -426,24 +335,13 @@ class ScopeApp(fal.App, keep_alive=300):
                         "8000",
                     ],
                     env=scope_env,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    text=True,
-                    bufsize=1,  # Line-buffered
                 )
-                # Read stdout line by line and broadcast to WebSocket subscribers
-                for line in process.stdout:
-                    line = line.rstrip("\n")
-                    if line:
-                        print(line)  # Echo to fal container logs
-                        log_broadcaster.publish(line)
-
-                process.wait()
-                if process.returncode == 0:
+                # Log when process exits (regardless of exit code)
+                if result.returncode == 0:
                     print("Scope server process exited normally (exit code 0)")
                 else:
                     print(
-                        f"❌ Scope server process exited with code {process.returncode}"
+                        f"❌ Scope server process exited with code {result.returncode}"
                     )
             except Exception as e:
                 print(f"❌ Failed to start Scope server: {e}")
@@ -538,37 +436,6 @@ class ScopeApp(fal.App, keep_alive=300):
                 await ws.send_json(payload)
             except (RuntimeError, WebSocketDisconnect):
                 pass
-
-        async def forward_logs_to_client():
-            """Forward subprocess log lines to WebSocket client in batches.
-
-            Uses stdlib queue.Queue (thread-safe) polled via asyncio.sleep,
-            since the publisher runs in a background thread.
-            """
-            LOG_BATCH_LIMIT = 50
-            POLL_INTERVAL = 0.5  # seconds
-            q = log_broadcaster.subscribe(connection_id)
-            try:
-                while True:
-                    batch = []
-                    # Drain all available lines (non-blocking)
-                    while len(batch) < LOG_BATCH_LIMIT:
-                        try:
-                            line = q.get_nowait()
-                            if _should_forward_log(line):
-                                batch.append(line)
-                        except queue.Empty:
-                            break
-
-                    if batch:
-                        await safe_send_json({"type": "logs", "lines": batch})
-                    else:
-                        # No lines available — yield to event loop before next poll
-                        await asyncio.sleep(POLL_INTERVAL)
-            except asyncio.CancelledError:
-                pass
-            finally:
-                log_broadcaster.unsubscribe(connection_id)
 
         async def check_max_duration_exceeded() -> bool:
             """Check if connection has exceeded max duration. Returns True if should close."""
@@ -962,9 +829,6 @@ class ScopeApp(fal.App, keep_alive=300):
                     "error": f"Unknown message type: {msg_type}",
                 }
 
-        # Log forwarder task — started after user_id is validated
-        log_forwarder_task: asyncio.Task | None = None
-
         # Main message loop
         try:
             while True:
@@ -996,14 +860,6 @@ class ScopeApp(fal.App, keep_alive=300):
                 response = await handle_message(payload)
                 if response:
                     await safe_send_json(response)
-                    # Start log forwarding once user is authenticated
-                    if (
-                        response.get("type") == "user_id_set"
-                        and log_forwarder_task is None
-                    ):
-                        log_forwarder_task = asyncio.create_task(
-                            forward_logs_to_client()
-                        )
 
         except WebSocketDisconnect:
             print(f"[{log_prefix()}] WebSocket disconnected")
@@ -1011,14 +867,6 @@ class ScopeApp(fal.App, keep_alive=300):
             print(f"[{log_prefix()}] WebSocket error ({type(e).__name__}): {e}")
             await safe_send_json({"type": "error", "error": f"{type(e).__name__}: {e}"})
         finally:
-            # Cancel log forwarder task
-            if log_forwarder_task is not None:
-                log_forwarder_task.cancel()
-                try:
-                    await log_forwarder_task
-                except asyncio.CancelledError:
-                    pass
-
             # Publish websocket disconnected event
             if kafka_publisher and kafka_publisher.is_running:
                 end_time = time.time()

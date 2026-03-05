@@ -39,6 +39,12 @@ from scope.core.lora.manifest import (
     load_manifest,
     save_manifest,
 )
+from scope.core.workflows.resolve import (
+    WorkflowRequest,
+    WorkflowResolutionPlan,
+    resolve_workflow,
+)
+from scope.server.models_config import get_models_dir
 
 from .cloud_proxy import (
     cloud_proxy,
@@ -157,17 +163,6 @@ if os.getenv("VERBOSE_LOGGING"):
     logging.getLogger("uvicorn.access").setLevel(logging.INFO)
     logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
-
-# Set INFO for the cloud log re-emitter so cloud lines reach console and file
-logging.getLogger("scope.cloud").setLevel(logging.INFO)
-
-# Allow suppressing noisy loggers via env var (comma-separated logger names)
-# e.g. SCOPE_LOG_QUIET_LOGGERS=scope.server.frame_processor,scope.core.pipelines.longlive
-_quiet_loggers = os.getenv("SCOPE_LOG_QUIET_LOGGERS", "")
-for _logger_name in _quiet_loggers.split(","):
-    _logger_name = _logger_name.strip()
-    if _logger_name:
-        logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
 # Select pipeline depending on the "PIPELINE" environment variable
 PIPELINE = os.getenv("PIPELINE", None)
@@ -681,7 +676,9 @@ async def handle_webrtc_offer(
     try:
         # If connected to cloud, use cloud mode (video flows through backend)
         if cloud_manager.is_connected:
-            logger.info("Using relay mode - video will flow through backend to cloud")
+            logger.info(
+                "[CLOUD] Using relay mode - video will flow through backend to cloud"
+            )
             return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
 
         # Local mode: ensure pipeline is loaded before proceeding
@@ -973,18 +970,22 @@ async def install_lora_file(
         if not filename:
             filename = unquote(parsed.path.split("/")[-1])
 
-        # For CivitAI URLs, resolve filename via API if path doesn't have one
-        if is_civitai and (not filename or "." not in filename):
+        # For CivitAI URLs, extract version ID and resolve filename via API
+        version_id = None
+        if is_civitai:
             # Extract version ID: check query param first, then path
             query_params = parse_qs(parsed.query)
-            version_id = None
             if "modelVersionId" in query_params:
                 version_id = query_params["modelVersionId"][0]
             else:
                 # Fall back to last path segment (e.g. /api/download/models/<version_id>)
                 path_parts = parsed.path.rstrip("/").split("/")
-                version_id = path_parts[-1] if path_parts else None
-            if version_id and version_id.isdigit():
+                candidate = path_parts[-1] if path_parts else None
+                if candidate and candidate.isdigit():
+                    version_id = candidate
+
+        if is_civitai and (not filename or "." not in filename):
+            if version_id:
                 try:
                     from .lora_downloader import resolve_civitai_metadata
 
@@ -1080,7 +1081,24 @@ async def install_lora_file(
             )
         )
 
-        provenance = LoRAProvenance(source=source, url=clean_url)
+        # Parse structured fields from URLs so downstream downloads can use
+        # authenticated paths (hf_hub_url for HF, version API for CivitAI).
+        extra: dict = {}
+        if source == "huggingface":
+            hf_parts = [p for p in _parsed.path.split("/") if p]
+            if len(hf_parts) >= 5 and hf_parts[2] in ("resolve", "blob"):
+                extra["repo_id"] = f"{hf_parts[0]}/{hf_parts[1]}"
+                extra["hf_filename"] = "/".join(hf_parts[4:])
+        elif source == "civitai":
+            civ_query = parse_qs(_parsed.query)
+            if "modelVersionId" in civ_query:
+                extra["version_id"] = civ_query["modelVersionId"][0]
+            else:
+                civ_parts = _parsed.path.rstrip("/").split("/")
+                if civ_parts and civ_parts[-1].isdigit():
+                    extra["version_id"] = civ_parts[-1]
+
+        provenance = LoRAProvenance(source=source, url=clean_url, **extra)
         entry = add_manifest_entry(
             lora_dir, relative_key, provenance, sha256, size_bytes
         )
@@ -1206,6 +1224,32 @@ async def tag_lora_provenance(
     size_bytes = file_path.stat().st_size
 
     return add_manifest_entry(lora_dir, filename, provenance, sha256, size_bytes)
+
+
+# ---------------------------------------------------------------------------
+# Workflow resolve
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/workflow/resolve", response_model=WorkflowResolutionPlan)
+def resolve_workflow_endpoint(
+    workflow: WorkflowRequest,
+):
+    """Resolve workflow dependencies and return a resolution plan.
+
+    This is side-effect-free: no installs, no downloads.  The request
+    body uses ``extra="ignore"`` so the frontend can send the full
+    workflow JSON; the backend only reads the fields it needs.
+    """
+    from scope.core.plugins import get_plugin_manager
+
+    try:
+        plugin_manager = get_plugin_manager()
+        models_dir = get_models_dir()
+        return resolve_workflow(workflow, plugin_manager, models_dir)
+    except Exception as e:
+        logger.error("Error resolving workflow: %s", e)
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/v1/assets", response_model=AssetsResponse)
@@ -1910,39 +1954,6 @@ async def get_current_logs():
     except Exception as e:
         logger.error(f"Error retrieving log file: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@app.get("/api/v1/logs/tail")
-async def tail_logs(
-    lines: int = Query(default=200, ge=1, le=1000),
-    since_offset: int = Query(default=0, ge=0),
-):
-    """Get recent log lines, optionally only new content since a byte offset.
-
-    Returns JSON with "lines" (list of strings) and "offset" (byte offset for next poll).
-    """
-    log_file_path = get_most_recent_log_file()
-    if log_file_path is None or not log_file_path.exists():
-        return {"lines": [], "offset": 0}
-
-    file_size = log_file_path.stat().st_size
-
-    if since_offset > 0 and since_offset >= file_size:
-        return {"lines": [], "offset": file_size}
-
-    if since_offset > 0 and since_offset < file_size:
-        # Read only new content since last offset
-        with open(log_file_path, encoding="utf-8", errors="replace") as f:
-            f.seek(since_offset)
-            new_content = f.read()
-            new_lines = [ln for ln in new_content.splitlines() if ln.strip()]
-            return {"lines": new_lines[-lines:], "offset": file_size}
-
-    # No offset or offset beyond file: return last N lines
-    with open(log_file_path, encoding="utf-8", errors="replace") as f:
-        all_lines = f.readlines()
-        tail = [ln.rstrip() for ln in all_lines[-lines:] if ln.strip()]
-        return {"lines": tail, "offset": file_size}
 
 
 # Plugin Management API Endpoints
