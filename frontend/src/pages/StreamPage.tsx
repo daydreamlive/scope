@@ -1099,6 +1099,24 @@ export function StreamPage() {
         case "input_mode":
           handleInputModeChange(String(value) as InputMode);
           break;
+        case "denoising_step_list": {
+          const steps = (Array.isArray(value) ? value : [value])
+            .map(v => Number(v))
+            .filter(v => Number.isFinite(v))
+            .map(v => Math.trunc(v));
+          if (steps.length > 0) {
+            handleDenoisingStepsChange(steps);
+            // Some schema-driven UIs surface denoising as "denoising_steps".
+            // Keep that override in sync so controls visibly update.
+            updateSettings({
+              schemaFieldOverrides: {
+                ...(settings.schemaFieldOverrides ?? {}),
+                denoising_steps: steps,
+              },
+            });
+          }
+          break;
+        }
         default:
           // Pipeline-specific runtime params:
           // update frontend override state first, then forward to backend.

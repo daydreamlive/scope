@@ -48,6 +48,11 @@ _RUNTIME_PARAMS: list[dict[str, Any]] = [
         "description": "Temporal interpolation method for transitions between prompts",
         "enum": ["linear", "slerp"],
     },
+    {
+        "key": "denoising_step_list",
+        "type": "integer_list",
+        "description": "Denoising schedule list (e.g. [700, 500])",
+    },
     # -- Generation controls --
     {
         "key": "noise_scale",
@@ -100,6 +105,7 @@ _TYPE_VALIDATORS: dict[str, set[type]] = {
     "bool": {bool, int, float},
     "boolean": {bool, int, float},
     "string": {str},
+    "integer_list": {list},
 }
 
 
@@ -208,6 +214,21 @@ def validate_osc_value(path_info: dict[str, Any], value: Any) -> str | None:
     Returns None on success, or a human-readable reason string on failure.
     """
     expected_type = path_info.get("type", "any")
+    if expected_type == "integer_list":
+        if not isinstance(value, list):
+            return (
+                f"type mismatch: expected {expected_type}, got {type(value).__name__}"
+            )
+        if not value:
+            return "value must be a non-empty list"
+        for i, item in enumerate(value):
+            if not isinstance(item, int):
+                return (
+                    "type mismatch: expected integer_list, got "
+                    f"item {i} of type {type(item).__name__}"
+                )
+        return None
+
     accepted = _TYPE_VALIDATORS.get(expected_type)
     if accepted and type(value) not in accepted:
         return f"type mismatch: expected {expected_type}, got {type(value).__name__}"
@@ -249,6 +270,8 @@ def _example_value(path: dict[str, Any]) -> str:
         lo = path.get("min", 0)
         hi = path.get("max", 100)
         return str((lo + hi) // 2)
+    if ptype == "integer_list":
+        return "[700, 500]"
     if ptype == "string":
         key = path.get("key", "")
         if key == "prompt":
