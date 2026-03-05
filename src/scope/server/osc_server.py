@@ -3,11 +3,14 @@
 The server binds a UDP socket on the configured API port (TCP and UDP can coexist
 on the same port number). It runs for the full application lifetime and dispatches
 incoming OSC messages to the active pipeline's parameter update path.
+
+Every received message is validated against the known path inventory and logged
+as either valid or invalid before being forwarded.
 """
 
 import asyncio
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import AsyncIOOSCUDPServer
@@ -18,9 +21,53 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Stored transition settings so that prompt, transition_steps, and
+# interpolation_method OSC messages can arrive independently.
+_transition_steps: int = 4
+_temporal_interpolation_method: str = "linear"
+_interpolation_method: str = "linear"
+
+
+def _transform_osc_param(key: str, value: Any) -> dict[str, Any]:
+    """Map an OSC key/value into the parameter dict expected by the pipeline.
+
+    Most keys pass through unchanged, but some Input & Controls keys need
+    to be restructured into the format the frame processor expects.
+    """
+    global _transition_steps, _temporal_interpolation_method, _interpolation_method
+
+    if key == "prompt":
+        prompt_item = {"text": str(value), "weight": 1.0}
+        if _transition_steps > 0:
+            return {
+                "transition": {
+                    "target_prompts": [prompt_item],
+                    "num_steps": _transition_steps,
+                    "temporal_interpolation_method": _temporal_interpolation_method,
+                },
+            }
+        return {
+            "prompts": [prompt_item],
+            "prompt_interpolation_method": _interpolation_method,
+        }
+
+    if key == "transition_steps":
+        _transition_steps = int(value)
+        return {}
+
+    if key == "interpolation_method":
+        _interpolation_method = str(value)
+        return {}
+
+    if key == "temporal_interpolation_method":
+        _temporal_interpolation_method = str(value)
+        return {}
+
+    return {key: value}
+
 
 class OSCServer:
-    """Manages the always-on OSC UDP listener."""
+    """Manages the always-on OSC UDP listener with path validation."""
 
     def __init__(self, host: str, port: int):
         self._host = host
@@ -30,6 +77,8 @@ class OSCServer:
         self._listening = False
         self._pipeline_manager: PipelineManager | None = None
         self._webrtc_manager: WebRTCManager | None = None
+        # Cached path registry; rebuilt on each message to stay current
+        self._path_cache: dict[str, dict[str, Any]] | None = None
 
     @property
     def port(self) -> int:
@@ -51,31 +100,70 @@ class OSCServer:
         self._pipeline_manager = pipeline_manager
         self._webrtc_manager = webrtc_manager
 
+    def _get_known_paths(self) -> dict[str, dict[str, Any]]:
+        """Return the current set of known OSC paths, rebuilding each time.
+
+        Rebuilding is cheap (just iterates registry metadata) and ensures we
+        always reflect the latest plugins / pipeline changes.
+        """
+        from .osc_docs import get_all_known_paths
+
+        return get_all_known_paths(self._pipeline_manager)
+
     def _build_dispatcher(self) -> Dispatcher:
         dispatcher = Dispatcher()
         dispatcher.map("/scope/*", self._handle_osc_message)
         return dispatcher
 
     def _handle_osc_message(self, address: str, *args) -> None:
-        """Route an incoming OSC message to active WebRTC sessions as a parameter update."""
-        if not self._webrtc_manager:
-            logger.debug("OSC message ignored – no WebRTC manager available")
-            return
-
+        """Validate and optionally forward an incoming OSC message."""
         parts = address.split("/")
-        # address is e.g. "/scope/noise_scale" → key = "noise_scale"
-        # or "/scope/some_plugin/param" → key = "some_plugin/param"
         if len(parts) < 3:
-            logger.warning("OSC address too short: %s", address)
+            logger.info(
+                "OSC INVALID  %s  reason=address too short  args=%r",
+                address,
+                args,
+            )
             return
 
         key = "/".join(parts[2:])
         value = args[0] if len(args) == 1 else list(args)
 
-        logger.debug("OSC → %s = %r", key, value)
+        # Look up path in current inventory
+        known = self._get_known_paths()
+        path_info = known.get(key)
+
+        if path_info is None:
+            logger.info(
+                "OSC INVALID  %s = %r  reason=unknown path",
+                address,
+                value,
+            )
+            return
+
+        # Validate type / range / enum
+        from .osc_docs import validate_osc_value
+
+        reason = validate_osc_value(path_info, value)
+        if reason:
+            logger.info(
+                "OSC INVALID  %s = %r  reason=%s",
+                address,
+                value,
+                reason,
+            )
+            return
+
+        logger.info("OSC VALID    %s = %r", address, value)
+
+        if not self._webrtc_manager:
+            logger.debug("OSC message not forwarded – no WebRTC manager")
+            return
 
         try:
-            self._webrtc_manager.broadcast_parameter_update({key: value})
+            params = _transform_osc_param(key, value)
+            if params:
+                self._webrtc_manager.broadcast_parameter_update(params)
         except Exception:
             logger.exception("Error forwarding OSC message %s", address)
 
@@ -92,7 +180,9 @@ class OSCServer:
             logger.info("OSC server listening on udp://%s:%d", self._host, self._port)
         except Exception:
             logger.exception(
-                "Failed to start OSC server on udp://%s:%d", self._host, self._port
+                "Failed to start OSC server on udp://%s:%d",
+                self._host,
+                self._port,
             )
 
     async def stop(self) -> None:

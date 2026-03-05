@@ -18,6 +18,37 @@ logger = logging.getLogger(__name__)
 # Runtime params that are useful to control via OSC (from schema.Parameters).
 # We curate this list to exclude structural params like pipeline_ids.
 _RUNTIME_PARAMS: list[dict[str, Any]] = [
+    # -- Input & Controls --
+    {
+        "key": "prompt",
+        "type": "string",
+        "description": "Set the prompt text (creates a single prompt with weight 1.0)",
+    },
+    {
+        "key": "input_mode",
+        "type": "string",
+        "description": "Switch input mode",
+        "enum": ["text", "video"],
+    },
+    {
+        "key": "transition_steps",
+        "type": "integer",
+        "description": "Number of generation steps to transition between prompts (0 = instant)",
+        "min": 0,
+    },
+    {
+        "key": "interpolation_method",
+        "type": "string",
+        "description": "Spatial interpolation method for blending multiple prompts",
+        "enum": ["linear", "slerp"],
+    },
+    {
+        "key": "temporal_interpolation_method",
+        "type": "string",
+        "description": "Temporal interpolation method for transitions between prompts",
+        "enum": ["linear", "slerp"],
+    },
+    # -- Generation controls --
     {
         "key": "noise_scale",
         "type": "float",
@@ -61,6 +92,16 @@ _RUNTIME_PARAMS: list[dict[str, Any]] = [
     },
 ]
 
+# Maps OSC type strings to the python-osc argument types accepted for validation
+_TYPE_VALIDATORS: dict[str, set[type]] = {
+    "float": {int, float},
+    "number": {int, float},
+    "integer": {int},
+    "bool": {bool, int, float},
+    "boolean": {bool, int, float},
+    "string": {str},
+}
+
 
 def _extract_osc_paths_from_schema(
     config_schema: dict,
@@ -91,20 +132,10 @@ def _extract_osc_paths_from_schema(
     return paths
 
 
-def get_osc_paths(
-    pipeline_manager: "PipelineManager | None",
-) -> dict[str, Any]:
-    """Build the full OSC path inventory split into *active* and *available* sections."""
+def _collect_pipeline_paths() -> dict[str, list[dict[str, Any]]]:
+    """Collect per-pipeline runtime paths from the registry."""
     from scope.core.pipelines.registry import PipelineRegistry
 
-    active_pipeline_ids: list[str] = []
-    if pipeline_manager:
-        status = pipeline_manager.get_status_info()
-        pid = status.get("pipeline_id")
-        if pid:
-            active_pipeline_ids.append(pid)
-
-    # Collect per-pipeline runtime paths
     pipeline_paths: dict[str, list[dict[str, Any]]] = {}
     for pid in PipelineRegistry.list_pipelines():
         config_class = PipelineRegistry.get_config_class(pid)
@@ -115,28 +146,121 @@ def get_osc_paths(
         paths = _extract_osc_paths_from_schema(config_schema, pid)
         if paths:
             pipeline_paths[pid] = paths
+    return pipeline_paths
 
-    # Build active / available split
-    active_paths: list[dict[str, Any]] = []
-    available_paths: list[dict[str, Any]] = []
+
+def get_osc_paths(
+    pipeline_manager: "PipelineManager | None",
+) -> dict[str, Any]:
+    """Build the full OSC path inventory split into *active* and *available* sections.
+
+    Each section is a dict mapping source names to lists of path entries.
+    """
+    active_pipeline_ids: list[str] = []
+    if pipeline_manager:
+        status = pipeline_manager.get_status_info()
+        pid = status.get("pipeline_id")
+        if pid:
+            active_pipeline_ids.append(pid)
+
+    pipeline_paths = _collect_pipeline_paths()
+
+    # Build active / available split, grouped by source
+    active_groups: dict[str, list[dict[str, Any]]] = {}
+    available_groups: dict[str, list[dict[str, Any]]] = {}
 
     # Runtime params are always "active"
+    runtime_list: list[dict[str, Any]] = []
     for p in _RUNTIME_PARAMS:
-        active_paths.append({**p, "osc_address": f"/scope/{p['key']}"})
+        runtime_list.append({**p, "osc_address": f"/scope/{p['key']}"})
+    active_groups["Runtime"] = runtime_list
 
     for pid, paths in pipeline_paths.items():
-        target = active_paths if pid in active_pipeline_ids else available_paths
+        target = active_groups if pid in active_pipeline_ids else available_groups
+        group: list[dict[str, Any]] = []
         for p in paths:
-            target.append({**p, "osc_address": f"/scope/{p['key']}"})
+            group.append({**p, "osc_address": f"/scope/{p['key']}"})
+        target[pid] = group
 
     return {
-        "active": active_paths,
-        "available": available_paths,
+        "active": active_groups,
+        "available": available_groups,
         "active_pipeline_ids": active_pipeline_ids,
     }
 
 
-def _path_row_html(path: dict[str, Any]) -> str:
+def get_all_known_paths(
+    pipeline_manager: "PipelineManager | None",
+) -> dict[str, dict[str, Any]]:
+    """Return a flat dict mapping every known OSC key to its path metadata.
+
+    Used by the OSC server for validating incoming messages.
+    """
+    data = get_osc_paths(pipeline_manager)
+    result: dict[str, dict[str, Any]] = {}
+    for groups in (data["active"], data["available"]):
+        for paths in groups.values():
+            for p in paths:
+                result[p["key"]] = p
+    return result
+
+
+def validate_osc_value(path_info: dict[str, Any], value: Any) -> str | None:
+    """Check whether *value* is acceptable for the given path.
+
+    Returns None on success, or a human-readable reason string on failure.
+    """
+    expected_type = path_info.get("type", "any")
+    accepted = _TYPE_VALIDATORS.get(expected_type)
+    if accepted and type(value) not in accepted:
+        return f"type mismatch: expected {expected_type}, got {type(value).__name__}"
+
+    if isinstance(value, (int, float)):
+        lo = path_info.get("min")
+        hi = path_info.get("max")
+        if lo is not None and value < lo:
+            return f"value {value} below minimum {lo}"
+        if hi is not None and value > hi:
+            return f"value {value} above maximum {hi}"
+
+    enum_values = path_info.get("enum")
+    if enum_values is not None and value not in enum_values:
+        return f"value {value!r} not in allowed values {enum_values}"
+
+    return None
+
+
+# ---------------------------------------------------------------------------
+# HTML rendering helpers
+# ---------------------------------------------------------------------------
+
+
+def _example_value(path: dict[str, Any]) -> str:
+    """Pick a representative example value for Python code snippets."""
+    ptype = path.get("type", "any")
+    enum_vals = path.get("enum")
+    if enum_vals:
+        return repr(enum_vals[0])
+    if ptype in ("float", "number"):
+        lo = path.get("min", 0.0)
+        hi = path.get("max", 1.0)
+        mid = round((lo + hi) / 2, 2)
+        return str(mid)
+    if ptype in ("bool", "boolean"):
+        return "True"
+    if ptype == "integer":
+        lo = path.get("min", 0)
+        hi = path.get("max", 100)
+        return str((lo + hi) // 2)
+    if ptype == "string":
+        key = path.get("key", "")
+        if key == "prompt":
+            return '"a beautiful sunset over the ocean"'
+        return '"example"'
+    return "0.5"
+
+
+def _path_row_html(path: dict[str, Any], osc_port: int, row_id: str) -> str:
     addr = html.escape(path["osc_address"])
     ptype = html.escape(str(path.get("type", "")))
     desc = html.escape(path.get("description", ""))
@@ -148,15 +272,45 @@ def _path_row_html(path: dict[str, Any]) -> str:
     if "enum" in path:
         constraints.append(f"values: {path['enum']}")
     constraint_str = html.escape(", ".join(constraints)) if constraints else ""
-    pid = html.escape(path.get("pipeline_id", "runtime"))
+
+    example_val = _example_value(path)
+    example_code = html.escape(
+        f"from pythonosc.udp_client import SimpleUDPClient\n\n"
+        f'client = SimpleUDPClient("127.0.0.1", {osc_port})\n'
+        f'client.send_message("{path["osc_address"]}", {example_val})'
+    )
+
     return (
-        f"<tr>"
+        f'<tr class="path-row" onclick="toggle(\'{row_id}\')">'
         f"<td class='addr'><code>{addr}</code></td>"
         f"<td>{ptype}</td>"
         f"<td>{desc}</td>"
         f"<td>{constraint_str}</td>"
-        f"<td>{pid}</td>"
+        f'<td class="chevron">&#9654;</td>'
+        f"</tr>\n"
+        f'<tr id="{row_id}" class="example-row" style="display:none">'
+        f'<td colspan="5"><pre>{example_code}</pre></td>'
         f"</tr>"
+    )
+
+
+def _render_source_group(
+    source_name: str,
+    paths: list[dict[str, Any]],
+    osc_port: int,
+    id_prefix: str,
+) -> str:
+    """Render a source header + table for a group of paths."""
+    rows = "\n".join(
+        _path_row_html(p, osc_port, f"{id_prefix}-{i}") for i, p in enumerate(paths)
+    )
+    escaped_name = html.escape(source_name)
+    return (
+        f'<h3 class="source-header">{escaped_name}</h3>\n'
+        f"<table><thead><tr>"
+        f"<th>OSC Address</th><th>Type</th><th>Description</th>"
+        f"<th>Constraints</th><th></th>"
+        f"</tr></thead><tbody>\n{rows}\n</tbody></table>"
     )
 
 
@@ -166,9 +320,29 @@ def render_osc_docs_html(
 ) -> str:
     """Render a self-contained HTML page documenting all current OSC paths."""
     data = get_osc_paths(pipeline_manager)
-    active_rows = "\n".join(_path_row_html(p) for p in data["active"])
-    available_rows = "\n".join(_path_row_html(p) for p in data["available"])
+    active_groups: dict[str, list] = data["active"]
+    available_groups: dict[str, list] = data["available"]
     active_ids = ", ".join(data["active_pipeline_ids"]) or "none"
+
+    active_html_parts: list[str] = []
+    for i, (source, paths) in enumerate(active_groups.items()):
+        active_html_parts.append(_render_source_group(source, paths, osc_port, f"a{i}"))
+    active_html = (
+        "\n".join(active_html_parts)
+        if active_html_parts
+        else ('<p class="empty">No active paths (no pipeline loaded).</p>')
+    )
+
+    available_html_parts: list[str] = []
+    for i, (source, paths) in enumerate(available_groups.items()):
+        available_html_parts.append(
+            _render_source_group(source, paths, osc_port, f"v{i}")
+        )
+    available_html = (
+        "\n".join(available_html_parts)
+        if available_html_parts
+        else ('<p class="empty">No additional paths available.</p>')
+    )
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -202,10 +376,17 @@ def render_osc_docs_html(
     padding-bottom: .4rem;
     border-bottom: 1px solid var(--border);
   }}
+  h3.source-header {{
+    font-size: .95rem;
+    color: var(--accent);
+    margin: 1.25rem 0 .5rem;
+    font-weight: 600;
+  }}
   table {{
     width: 100%;
     border-collapse: collapse;
     font-size: .85rem;
+    margin-bottom: 1rem;
   }}
   th, td {{
     text-align: left;
@@ -219,6 +400,37 @@ def render_osc_docs_html(
     padding: .15rem .4rem;
     border-radius: 3px;
     font-size: .85em;
+  }}
+  .path-row {{
+    cursor: pointer;
+    transition: background .15s;
+  }}
+  .path-row:hover {{
+    background: var(--surface);
+  }}
+  .path-row td.chevron {{
+    color: var(--muted);
+    font-size: .7rem;
+    text-align: center;
+    width: 2rem;
+    transition: transform .2s;
+  }}
+  .path-row.expanded td.chevron {{
+    transform: rotate(90deg);
+  }}
+  .example-row td {{
+    padding: 0 .75rem .75rem;
+    border-bottom: 1px solid var(--border);
+  }}
+  .example-row pre {{
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: .75rem 1rem;
+    overflow-x: auto;
+    font-size: .8rem;
+    margin: 0;
+    color: var(--text);
   }}
   .info {{
     background: var(--surface);
@@ -240,6 +452,19 @@ def render_osc_docs_html(
     font-size: .82rem;
   }}
 </style>
+<script>
+function toggle(id) {{
+  var row = document.getElementById(id);
+  var trigger = row.previousElementSibling;
+  if (row.style.display === "none") {{
+    row.style.display = "table-row";
+    trigger.classList.add("expanded");
+  }} else {{
+    row.style.display = "none";
+    trigger.classList.remove("expanded");
+  }}
+}}
+</script>
 </head>
 <body>
 <h1>Daydream Scope &mdash; OSC Reference</h1>
@@ -256,16 +481,21 @@ pip install python-osc
 
 from pythonosc.udp_client import SimpleUDPClient
 client = SimpleUDPClient("127.0.0.1", {osc_port})
+
+# Set a prompt
+client.send_message("/scope/prompt", "a beautiful sunset over the ocean")
+
+# Adjust noise scale
 client.send_message("/scope/noise_scale", 0.5)
 </pre>
 
 <h2>Active Now</h2>
-<p class="subtitle">Controls for the currently loaded pipeline chain and global runtime parameters.</p>
-{"<table><thead><tr><th>OSC Address</th><th>Type</th><th>Description</th><th>Constraints</th><th>Source</th></tr></thead><tbody>" + active_rows + "</tbody></table>" if active_rows else '<p class="empty">No active paths (no pipeline loaded).</p>'}
+<p class="subtitle">Controls for the currently loaded pipeline chain and global runtime parameters. Click a row to see example code.</p>
+{active_html}
 
 <h2>Available</h2>
-<p class="subtitle">Controls for other installed pipelines / plugins (not currently active).</p>
-{"<table><thead><tr><th>OSC Address</th><th>Type</th><th>Description</th><th>Constraints</th><th>Source</th></tr></thead><tbody>" + available_rows + "</tbody></table>" if available_rows else '<p class="empty">No additional paths available.</p>'}
+<p class="subtitle">Controls for other installed pipelines / plugins (not currently active). Click a row to see example code.</p>
+{available_html}
 
 </body>
 </html>"""
