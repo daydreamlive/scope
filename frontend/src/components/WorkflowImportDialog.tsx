@@ -349,6 +349,13 @@ export function WorkflowImportDialog({
   );
   const installablePlugins = missingPlugins?.filter(i => i.can_auto_resolve);
 
+  const hasUnresolvedLoRAs = missingLoRAs?.some(
+    i => loras.downloads[i.name] !== "done"
+  );
+  const hasUnresolvedPlugins = missingPlugins?.some(
+    i => plugins.installs[i.name] !== "done"
+  );
+
   // -----------------------------------------------------------------------
   // Render
   // -----------------------------------------------------------------------
@@ -571,7 +578,12 @@ export function WorkflowImportDialog({
           {step === "review" && (
             <Button
               onClick={handleLoad}
-              disabled={loras.someDownloading || plugins.someInstalling}
+              disabled={
+                loras.someDownloading ||
+                plugins.someInstalling ||
+                hasUnresolvedLoRAs ||
+                hasUnresolvedPlugins
+              }
             >
               Load Workflow
             </Button>
