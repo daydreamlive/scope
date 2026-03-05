@@ -13,21 +13,15 @@
 // Schema types (frontend-owned — the backend ignores extra fields)
 // ---------------------------------------------------------------------------
 
-export interface WorkflowLoRAProvenance {
-  source: "huggingface" | "civitai" | "url" | "local";
-  repo_id?: string | null;
-  hf_filename?: string | null;
-  model_id?: string | null;
-  version_id?: string | null;
-  url?: string | null;
-}
+import type { LoRAProvenance } from "./api";
+export type { LoRAProvenance as WorkflowLoRAProvenance } from "./api";
 
 export interface WorkflowLoRA {
   id?: string | null;
   filename: string;
   weight: number;
   merge_mode: string;
-  provenance?: WorkflowLoRAProvenance | null;
+  provenance?: LoRAProvenance | null;
   sha256?: string | null;
 }
 

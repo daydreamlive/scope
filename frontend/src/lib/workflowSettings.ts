@@ -18,7 +18,6 @@ import type {
   WorkflowPipeline,
   WorkflowPipelineSource,
   WorkflowLoRA,
-  WorkflowLoRAProvenance,
   WorkflowTimeline,
   WorkflowTimelineEntry,
   ScopeWorkflow,
@@ -34,6 +33,10 @@ export interface WorkflowPromptState {
   transitionSteps: number;
   temporalInterpolationMethod: "linear" | "slerp";
 }
+
+/** Strip prompt arrays down to just {text, weight}. */
+const toPromptItems = (prompts: { text: string; weight: number }[]) =>
+  prompts.map(p => ({ text: p.text, weight: p.weight }));
 
 // ---------------------------------------------------------------------------
 // Centralized param mapping: single source of truth for camelCase <-> snake_case
@@ -164,13 +167,14 @@ function buildWorkflowLoRAs(
     }
     if (matched?.provenance) {
       const p = matched.provenance;
-      const prov: WorkflowLoRAProvenance = { source: p.source };
-      if (p.repo_id != null) prov.repo_id = p.repo_id;
-      if (p.hf_filename != null) prov.hf_filename = p.hf_filename;
-      if (p.model_id != null) prov.model_id = p.model_id;
-      if (p.version_id != null) prov.version_id = p.version_id;
-      if (p.url != null) prov.url = p.url;
-      result.provenance = prov;
+      result.provenance = {
+        source: p.source,
+        ...(p.repo_id != null && { repo_id: p.repo_id }),
+        ...(p.hf_filename != null && { hf_filename: p.hf_filename }),
+        ...(p.model_id != null && { model_id: p.model_id }),
+        ...(p.version_id != null && { version_id: p.version_id }),
+        ...(p.url != null && { url: p.url }),
+      };
     }
 
     return result;
@@ -298,7 +302,7 @@ export function buildScopeWorkflow(
     timeline: buildWorkflowTimeline(timelinePrompts),
     prompts:
       promptState.promptItems.length > 0
-        ? promptState.promptItems.map(p => ({ text: p.text, weight: p.weight }))
+        ? toPromptItems(promptState.promptItems)
         : undefined,
     interpolation_method: promptState.interpolationMethod,
     transition_steps: promptState.transitionSteps,
@@ -324,7 +328,7 @@ function buildWorkflowTimeline(
     .map(p => {
       // Build the prompts array; fall back to the single `text` field
       const wPrompts = p.prompts?.length
-        ? p.prompts.map(pp => ({ text: pp.text, weight: pp.weight }))
+        ? toPromptItems(p.prompts)
         : p.text
           ? [{ text: p.text, weight: 1.0 }]
           : [];
@@ -505,9 +509,7 @@ export function workflowTimelineToPrompts(
       startTime: entry.start_time,
       endTime: entry.end_time,
       prompts:
-        entry.prompts.length > 0
-          ? entry.prompts.map(p => ({ text: p.text, weight: p.weight }))
-          : undefined,
+        entry.prompts.length > 0 ? toPromptItems(entry.prompts) : undefined,
       transitionSteps: entry.transition_steps ?? undefined,
       temporalInterpolationMethod:
         entry.temporal_interpolation_method ?? undefined,
@@ -544,10 +546,7 @@ export function workflowToPromptState(
   if (firstEntry && firstEntry.prompts.length > 0) {
     return {
       ...base,
-      promptItems: firstEntry.prompts.map(p => ({
-        text: p.text,
-        weight: p.weight,
-      })),
+      promptItems: toPromptItems(firstEntry.prompts),
     };
   }
 
@@ -555,10 +554,7 @@ export function workflowToPromptState(
   if (workflow.prompts && workflow.prompts.length > 0) {
     return {
       ...base,
-      promptItems: workflow.prompts.map(p => ({
-        text: p.text,
-        weight: p.weight,
-      })),
+      promptItems: toPromptItems(workflow.prompts),
     };
   }
 

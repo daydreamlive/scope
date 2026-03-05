@@ -50,6 +50,7 @@ import {
   useLoRADownloads,
   usePluginInstalls,
 } from "../hooks/useWorkflowDependencies";
+import { DependencyStatusIndicator } from "./DependencyStatusIndicator";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -217,78 +218,78 @@ export function WorkflowImportDialog({
     plugins.reset();
     setValidating(false);
     onClose();
-  }, [onClose, loras, plugins]);
+  }, [onClose, loras.reset, plugins.reset]);
 
   // -----------------------------------------------------------------------
   // File selection and validation
   // -----------------------------------------------------------------------
 
-  const handleFileSelect = useCallback(async (file: File) => {
-    try {
-      setValidating(true);
-      const text = await file.text();
-      let parsed: ScopeWorkflow;
+  const handleFileSelect = useCallback(
+    async (file: File) => {
       try {
-        parsed = JSON.parse(text);
-      } catch {
-        toast.error("Invalid JSON file");
-        setValidating(false);
-        return;
-      }
+        setValidating(true);
+        const text = await file.text();
+        let parsed: ScopeWorkflow;
+        try {
+          parsed = JSON.parse(text);
+        } catch {
+          toast.error("Invalid JSON file");
+          return;
+        }
 
-      if (parsed.format !== "scope-workflow") {
-        toast.error("Not a Scope workflow file", {
-          description: 'Expected format: "scope-workflow"',
+        if (parsed.format !== "scope-workflow") {
+          toast.error("Not a Scope workflow file", {
+            description: 'Expected format: "scope-workflow"',
+          });
+          return;
+        }
+
+        if (
+          !parsed.metadata ||
+          typeof parsed.metadata.name !== "string" ||
+          !Array.isArray(parsed.pipelines) ||
+          parsed.pipelines.length === 0
+        ) {
+          toast.error("Malformed workflow file", {
+            description: "Missing required fields: metadata or pipelines",
+          });
+          return;
+        }
+
+        setWorkflow(parsed);
+
+        const resolution = await resolveWorkflow(parsed);
+        setPlan(resolution);
+
+        // Initialize dependency states from resolution items
+        loras.initialize(
+          resolution.items
+            .filter(i => i.kind === "lora" && i.status === "missing")
+            .map(i => i.name)
+        );
+        plugins.initialize(
+          resolution.items
+            .filter(
+              i =>
+                i.kind === "plugin" &&
+                i.status === "missing" &&
+                i.can_auto_resolve
+            )
+            .map(i => i.name)
+        );
+
+        setStep("review");
+      } catch (err) {
+        console.error("Workflow validation failed:", err);
+        toast.error("Validation failed", {
+          description: err instanceof Error ? err.message : String(err),
         });
+      } finally {
         setValidating(false);
-        return;
       }
-
-      if (
-        !parsed.metadata ||
-        typeof parsed.metadata.name !== "string" ||
-        !Array.isArray(parsed.pipelines) ||
-        parsed.pipelines.length === 0
-      ) {
-        toast.error("Malformed workflow file", {
-          description: "Missing required fields: metadata or pipelines",
-        });
-        setValidating(false);
-        return;
-      }
-
-      setWorkflow(parsed);
-
-      const resolution = await resolveWorkflow(parsed);
-      setPlan(resolution);
-
-      // Initialize dependency states from resolution items
-      loras.initialize(
-        resolution.items
-          .filter(i => i.kind === "lora" && i.status === "missing")
-          .map(i => i.name)
-      );
-      plugins.initialize(
-        resolution.items
-          .filter(
-            i =>
-              i.kind === "plugin" &&
-              i.status === "missing" &&
-              i.can_auto_resolve
-          )
-          .map(i => i.name)
-      );
-
-      setStep("review");
-    } catch (err) {
-      console.error("Workflow validation failed:", err);
-      toast.error("Validation failed", {
-        description: err instanceof Error ? err.message : String(err),
-      });
-    } finally {
-      setValidating(false);
-    }
-  }, []);
+    },
+    [loras.initialize, plugins.initialize]
+  );
 
   const handleDrop = useCallback(
     (e: React.DragEvent) => {
@@ -453,29 +454,14 @@ export function WorkflowImportDialog({
                       item.status === "missing" &&
                       item.can_auto_resolve && (
                         <div className="mt-1">
-                          {loras.downloads[item.name] === "done" ? (
-                            <span className="text-xs text-green-500 flex items-center gap-1">
-                              <CheckCircle2 className="h-3 w-3" />
-                              Downloaded
-                            </span>
-                          ) : loras.downloads[item.name] === "downloading" ? (
-                            <span className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              Downloading...
-                            </span>
-                          ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 text-xs px-2"
-                              onClick={() => loras.downloadOne(item.name)}
-                            >
-                              <Download className="h-3 w-3 mr-1" />
-                              {loras.downloads[item.name] === "error"
-                                ? "Retry"
-                                : "Download"}
-                            </Button>
-                          )}
+                          <DependencyStatusIndicator
+                            status={loras.downloads[item.name]}
+                            activeStatus="downloading"
+                            doneLabel="Downloaded"
+                            activeLabel="Downloading..."
+                            idleLabel="Download"
+                            onAction={() => loras.downloadOne(item.name)}
+                          />
                           <LoRAProvenanceLabel
                             workflow={workflow}
                             filename={item.name}
@@ -488,29 +474,14 @@ export function WorkflowImportDialog({
                       item.status === "missing" &&
                       item.can_auto_resolve && (
                         <div className="mt-1">
-                          {plugins.installs[item.name] === "done" ? (
-                            <span className="text-xs text-green-500 flex items-center gap-1">
-                              <CheckCircle2 className="h-3 w-3" />
-                              Installed
-                            </span>
-                          ) : plugins.installs[item.name] === "installing" ? (
-                            <span className="text-xs text-muted-foreground flex items-center gap-1">
-                              <Loader2 className="h-3 w-3 animate-spin" />
-                              Installing...
-                            </span>
-                          ) : (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-6 text-xs px-2"
-                              onClick={() => plugins.installOne(item.name)}
-                            >
-                              <Download className="h-3 w-3 mr-1" />
-                              {plugins.installs[item.name] === "error"
-                                ? "Retry"
-                                : "Install"}
-                            </Button>
-                          )}
+                          <DependencyStatusIndicator
+                            status={plugins.installs[item.name]}
+                            activeStatus="installing"
+                            doneLabel="Installed"
+                            activeLabel="Installing..."
+                            idleLabel="Install"
+                            onAction={() => plugins.installOne(item.name)}
+                          />
                         </div>
                       )}
                   </div>

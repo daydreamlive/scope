@@ -2,7 +2,7 @@
  * Hooks for managing LoRA downloads and plugin installs during workflow import.
  */
 
-import { useState, useCallback } from "react";
+import { useCallback } from "react";
 import { toast } from "sonner";
 import type {
   ScopeWorkflow,
@@ -15,6 +15,7 @@ import {
   restartServer,
   waitForServer,
 } from "../lib/api";
+import { useDependencyTracker } from "./useDependencyTracker";
 
 // ---------------------------------------------------------------------------
 // LoRA downloads
@@ -78,20 +79,8 @@ export function useLoRADownloads(
   workflow: ScopeWorkflow | null,
   onDownloadComplete?: () => void | Promise<void>
 ) {
-  const [downloads, setDownloads] = useState<
-    Record<string, LoRADownloadStatus>
-  >({});
-
-  const initialize = useCallback(
-    (missingFilenames: string[]) => {
-      const initial: Record<string, LoRADownloadStatus> = {};
-      for (const name of missingFilenames) {
-        initial[name] = "idle";
-      }
-      setDownloads(initial);
-    },
-    [setDownloads]
-  );
+  const { statuses, initialize, setStatus, getPending, reset, someActive } =
+    useDependencyTracker("downloading");
 
   const downloadOne = useCallback(
     async (filename: string) => {
@@ -108,42 +97,34 @@ export function useLoRADownloads(
         return;
       }
 
-      setDownloads(prev => ({ ...prev, [filename]: "downloading" }));
+      setStatus(filename, "downloading");
       try {
         await downloadLoRA(req);
-        setDownloads(prev => ({ ...prev, [filename]: "done" }));
+        setStatus(filename, "done");
         toast.success(`Downloaded ${filename}`);
         if (onDownloadComplete) await onDownloadComplete();
       } catch (err) {
-        setDownloads(prev => ({ ...prev, [filename]: "error" }));
+        setStatus(filename, "error");
         toast.error(`Failed to download ${filename}`, {
           description: err instanceof Error ? err.message : String(err),
         });
       }
     },
-    [workflow, onDownloadComplete]
+    [workflow, onDownloadComplete, setStatus]
   );
 
   const downloadAll = useCallback(async () => {
-    const pending = Object.entries(downloads)
-      .filter(([, s]) => s === "idle" || s === "error")
-      .map(([name]) => name);
+    const pending = getPending();
     await Promise.allSettled(pending.map(f => downloadOne(f)));
-  }, [downloads, downloadOne]);
-
-  const reset = useCallback(() => setDownloads({}), []);
-
-  const someDownloading = Object.values(downloads).some(
-    s => s === "downloading"
-  );
+  }, [getPending, downloadOne]);
 
   return {
-    downloads,
+    downloads: statuses as Record<string, LoRADownloadStatus>,
     initialize,
     downloadOne,
     downloadAll,
     reset,
-    someDownloading,
+    someDownloading: someActive,
   };
 }
 
@@ -170,20 +151,8 @@ export function usePluginInstalls(
   onRestartComplete?: () => void | Promise<void>,
   confirmInstall?: (installSpec: string) => Promise<boolean>
 ) {
-  const [installs, setInstalls] = useState<Record<string, PluginInstallStatus>>(
-    {}
-  );
-
-  const initialize = useCallback(
-    (pluginNames: string[]) => {
-      const initial: Record<string, PluginInstallStatus> = {};
-      for (const name of pluginNames) {
-        initial[name] = "idle";
-      }
-      setInstalls(initial);
-    },
-    [setInstalls]
-  );
+  const { statuses, initialize, setStatus, getPending, reset, someActive } =
+    useDependencyTracker("installing");
 
   const doRestartServer = useCallback(async () => {
     toast.info("Restarting server to load new plugins...", {
@@ -216,47 +185,41 @@ export function usePluginInstalls(
         if (!confirmed) return;
       }
 
-      setInstalls(prev => ({ ...prev, [pluginName]: "installing" }));
+      setStatus(pluginName, "installing");
       try {
         const result = await installPlugin({ package: installSpec });
         if (!result.success) {
           throw new Error(result.message || "Installation failed");
         }
-        setInstalls(prev => ({ ...prev, [pluginName]: "done" }));
+        setStatus(pluginName, "done");
         toast.success(`Installed ${pluginName}`);
         if (!skipRestart) {
           await doRestartServer();
         }
       } catch (err) {
-        setInstalls(prev => ({ ...prev, [pluginName]: "error" }));
+        setStatus(pluginName, "error");
         toast.error(`Failed to install ${pluginName}`, {
           description: err instanceof Error ? err.message : String(err),
         });
       }
     },
-    [workflow, doRestartServer]
+    [workflow, doRestartServer, confirmInstall, setStatus]
   );
 
   const installAll = useCallback(async () => {
-    const pending = Object.entries(installs)
-      .filter(([, s]) => s === "idle" || s === "error")
-      .map(([name]) => name);
+    const pending = getPending();
     await Promise.allSettled(
       pending.map(name => installOne(name, { skipRestart: true }))
     );
     await doRestartServer();
-  }, [installs, installOne, doRestartServer]);
-
-  const reset = useCallback(() => setInstalls({}), []);
-
-  const someInstalling = Object.values(installs).some(s => s === "installing");
+  }, [getPending, installOne, doRestartServer]);
 
   return {
-    installs,
+    installs: statuses as Record<string, PluginInstallStatus>,
     initialize,
     installOne,
     installAll,
     reset,
-    someInstalling,
+    someInstalling: someActive,
   };
 }

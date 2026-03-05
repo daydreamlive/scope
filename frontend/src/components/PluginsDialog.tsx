@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { PluginsTab } from "./settings/PluginsTab";
@@ -50,17 +50,21 @@ export function PluginsDialog({
   const [activeTab, setActiveTab] = useState("installed");
   const isModifyingPluginsRef = useRef(false);
 
-  const plugins: InstalledPlugin[] = pluginInfos.map(p => ({
-    name: p.name,
-    version: p.version,
-    author: p.author,
-    description: p.description,
-    source: p.source,
-    editable: p.editable,
-    latest_version: p.latest_version,
-    update_available: p.update_available,
-    package_spec: p.package_spec,
-  }));
+  const plugins: InstalledPlugin[] = useMemo(
+    () =>
+      pluginInfos.map(p => ({
+        name: p.name,
+        version: p.version,
+        author: p.author,
+        description: p.description,
+        source: p.source,
+        editable: p.editable,
+        latest_version: p.latest_version,
+        update_available: p.update_available,
+        package_spec: p.package_spec,
+      })),
+    [pluginInfos]
+  );
 
   useEffect(() => {
     if (open && initialPluginPath) {
