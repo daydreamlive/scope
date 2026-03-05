@@ -512,7 +512,7 @@ class WebRTCManager:
                 def on_data_channel_message(message):
                     try:
                         data = json.loads(message)
-                        logger.info(f"Parameter update: {data}")
+                        logger.debug(f"Parameter update: {data}")
 
                         # Forward parameters to cloud
                         cloud_track.update_parameters(data)
