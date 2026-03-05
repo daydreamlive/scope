@@ -927,11 +927,9 @@ async def install_lora_file(
         query_params = parse_qs(parsed.query)
         if "token" not in query_params:
             stored_token = get_civitai_token()
-            logger.info(f"Stored CivitAI token: {stored_token}")
             if stored_token:
                 separator = "&" if parsed.query else "?"
                 url = f"{url}{separator}token={stored_token}"
-                logger.info(f"Injected CivitAI token: {url}")
 
     # If connected to cloud, proxy with the (potentially modified) URL
     if cloud_manager.is_connected:
