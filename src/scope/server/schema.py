@@ -251,6 +251,10 @@ class HardwareInfoResponse(BaseModel):
         default=False,
         description="Whether NDI SDK is available for output",
     )
+    syphon_available: bool = Field(
+        default=False,
+        description="Whether Syphon is available for output (macOS only)",
+    )
 
 
 class PipelineStatusEnum(str, Enum):
@@ -490,6 +494,10 @@ class PipelineStatusResponse(BaseModel):
     )
     error: str | None = Field(
         default=None, description="Error message if status is error"
+    )
+    loading_stage: str | None = Field(
+        default=None,
+        description="Current loading substage (e.g., 'Loading diffusion model...')",
     )
 
 
@@ -754,6 +762,10 @@ class CloudStatusResponse(BaseModel):
     error: str | None = Field(
         default=None,
         description="Error message if the last connection attempt failed",
+    )
+    connect_stage: str | None = Field(
+        default=None,
+        description="Current substage during connection (e.g., 'Connecting to cloud...')",
     )
     webrtc_connected: bool = Field(
         default=False,

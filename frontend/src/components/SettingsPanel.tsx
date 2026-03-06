@@ -43,7 +43,6 @@ import type {
   PipelineId,
   LoRAConfig,
   LoraMergeStrategy,
-  SettingsState,
   InputMode,
   PipelineInfo,
 } from "../types";
@@ -315,14 +314,6 @@ interface SettingsPanelProps {
   inputMode?: InputMode;
   // Whether this pipeline supports noise controls in video mode (schema-derived)
   supportsNoiseControls?: boolean;
-  // Output sinks
-  outputSinks?: SettingsState["outputSinks"];
-  onOutputSinkChange?: (
-    sinkType: string,
-    config: { enabled: boolean; name: string }
-  ) => void;
-  spoutAvailable?: boolean;
-  ndiAvailable?: boolean;
   // VACE settings
   vaceEnabled?: boolean;
   onVaceEnabledChange?: (enabled: boolean) => void;
@@ -390,10 +381,6 @@ export function SettingsPanel({
   loraMergeStrategy = "permanent_merge",
   inputMode,
   supportsNoiseControls = false,
-  outputSinks,
-  onOutputSinkChange,
-  spoutAvailable = false,
-  ndiAvailable = false,
   vaceEnabled = true,
   onVaceEnabledChange,
   vaceUseInputVideo = true,
@@ -1198,106 +1185,6 @@ export function SettingsPanel({
             </>
           );
         })()}
-
-        {/* Spout Output */}
-        {spoutAvailable && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label="Spout Output"
-                tooltip="Send video to Spout-compatible apps (Windows) like TouchDesigner, Resolume, OBS."
-                className="text-sm font-medium"
-              />
-              <Toggle
-                pressed={outputSinks?.spout?.enabled ?? false}
-                onPressedChange={enabled => {
-                  onOutputSinkChange?.("spout", {
-                    enabled,
-                    name: outputSinks?.spout?.name ?? "ScopeOut",
-                  });
-                }}
-                variant="outline"
-                size="sm"
-                className="h-7"
-              >
-                {outputSinks?.spout?.enabled ? "ON" : "OFF"}
-              </Toggle>
-            </div>
-
-            {outputSinks?.spout?.enabled && (
-              <div className="flex items-center gap-3">
-                <LabelWithTooltip
-                  label="Sender Name"
-                  tooltip="The name visible to Spout receivers."
-                  className="text-xs text-muted-foreground whitespace-nowrap"
-                />
-                <Input
-                  type="text"
-                  value={outputSinks?.spout?.name ?? "ScopeOut"}
-                  onChange={e => {
-                    onOutputSinkChange?.("spout", {
-                      enabled: outputSinks?.spout?.enabled ?? false,
-                      name: e.target.value,
-                    });
-                  }}
-                  disabled={isStreaming}
-                  className="h-8 text-sm flex-1"
-                  placeholder="ScopeOut"
-                />
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* NDI Output */}
-        {ndiAvailable && (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label={PARAMETER_METADATA.ndiSender.label}
-                tooltip={PARAMETER_METADATA.ndiSender.tooltip}
-                className="text-sm font-medium"
-              />
-              <Toggle
-                pressed={outputSinks?.ndi?.enabled ?? false}
-                onPressedChange={enabled => {
-                  onOutputSinkChange?.("ndi", {
-                    enabled,
-                    name: outputSinks?.ndi?.name ?? "Scope",
-                  });
-                }}
-                variant="outline"
-                size="sm"
-                className="h-7"
-              >
-                {outputSinks?.ndi?.enabled ? "ON" : "OFF"}
-              </Toggle>
-            </div>
-
-            {outputSinks?.ndi?.enabled && (
-              <div className="flex items-center gap-3">
-                <LabelWithTooltip
-                  label="Sender Name"
-                  tooltip="The name visible to NDI receivers on the network."
-                  className="text-xs text-muted-foreground whitespace-nowrap"
-                />
-                <Input
-                  type="text"
-                  value={outputSinks?.ndi?.name ?? "Scope"}
-                  onChange={e => {
-                    onOutputSinkChange?.("ndi", {
-                      enabled: outputSinks?.ndi?.enabled ?? false,
-                      name: e.target.value,
-                    });
-                  }}
-                  disabled={isStreaming}
-                  className="h-8 text-sm flex-1"
-                  placeholder="Scope"
-                />
-              </div>
-            )}
-          </div>
-        )}
       </CardContent>
     </Card>
   );

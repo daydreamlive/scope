@@ -1,6 +1,6 @@
 # Using NDI
 
-Scope supports real-time, low-latency video over IP via [NDI (Network Device Interface)](https://ndi.video/). Unlike [Spout](https://github.com/daydreamlive/scope/blob/main/docs/spout.md) which is limited to sharing between applications on the same machine, NDI works across the local network — you can send and receive video between different computers.
+Scope supports real-time, low-latency video over IP via [NDI (Network Device Interface)](https://ndi.video/). Unlike [Spout](spout.md) (Windows) and [Syphon](syphon.md) (macOS) which are limited to sharing between applications on the same machine, NDI works across the local network — you can send and receive video between different computers.
 
 > [!IMPORTANT]
 > The [NDI SDK / NDI Tools](https://ndi.video/tools/) must be installed on the machine running Scope. NDI works on Windows, macOS, and Linux.

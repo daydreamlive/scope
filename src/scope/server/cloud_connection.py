@@ -66,6 +66,7 @@ class CloudConnectionManager:
         self._connecting = False
         self._connect_task: asyncio.Task | None = None
         self._connect_error: str | None = None
+        self._connect_stage: str | None = None
 
         # Last close info (for reporting to frontend)
         self._last_close_code: int | None = None
@@ -143,6 +144,7 @@ class CloudConnectionManager:
         # Build WebSocket URL
         ws_url = self._build_ws_url()
         logger.info(f"Connecting to cloud WebSocket: {ws_url.split('?')[0]}...")
+        self._connect_stage = "Connecting to cloud..."
 
         # Create session and connect
         self._session = aiohttp.ClientSession()
@@ -162,6 +164,7 @@ class CloudConnectionManager:
             raise RuntimeError(f"Failed to connect to cloud WebSocket: {e}") from e
 
         # Wait for "ready" message
+        self._connect_stage = "Starting cloud server..."
         try:
             msg = await asyncio.wait_for(self.ws.receive(), timeout=180.0)
             if msg.type == aiohttp.WSMsgType.TEXT:
@@ -195,6 +198,7 @@ class CloudConnectionManager:
             ) from None
 
         logger.info(f"Cloud server ready (connection_id: {self._connection_id})")
+        self._connect_stage = None
         self._connected = True
         self._stats["connected_at"] = time.time()
         self._stats["last_activity_at"] = time.time()
@@ -249,6 +253,7 @@ class CloudConnectionManager:
             except Exception as e:
                 self._connecting = False
                 self._connect_error = str(e)
+                self._connect_stage = None
                 logger.error(f"Background cloud connection failed: {e}")
                 self._publish_cloud_error(
                     str(e), type(e).__name__, error_type="cloud_connection_failed"
@@ -289,24 +294,30 @@ class CloudConnectionManager:
                     # Get close code and reason from the WebSocket
                     close_code = self.ws.close_code if self.ws else None
                     # Try to get close reason from message data or ws object
-                    close_reason = None
+                    close_frame_reason = None
                     if msg.data:
-                        close_reason = str(msg.data)
+                        close_frame_reason = str(msg.data)
                     elif msg.extra:
-                        close_reason = str(msg.extra)
+                        close_frame_reason = str(msg.extra)
 
-                    # Store for status reporting to frontend
+                    # Store close code
                     self._last_close_code = close_code
-                    self._last_close_reason = close_reason
+                    # Only update reason if we don't already have one from an error message
+                    # (error messages sent before close are more reliable than close frame reason)
+                    if close_frame_reason and not self._last_close_reason:
+                        self._last_close_reason = close_frame_reason
+
+                    # Use the captured reason (from error message or close frame)
+                    effective_reason = self._last_close_reason
 
                     logger.warning(
-                        f"Cloud WebSocket closed (code={close_code}, reason={close_reason})"
+                        f"Cloud WebSocket closed (code={close_code}, reason={effective_reason})"
                     )
 
                     # Publish error if this was an unexpected close
                     if not self._stop_event.is_set():
                         self._publish_cloud_error(
-                            f"Cloud WebSocket closed unexpectedly (code={close_code}, reason={close_reason})",
+                            f"Cloud WebSocket closed unexpectedly (code={close_code}, reason={effective_reason})",
                             "CloudWebSocketClosed",
                             error_type="cloud_websocket_closed",
                             extra_error_fields={"close_code": close_code},
@@ -332,8 +343,19 @@ class CloudConnectionManager:
 
     async def _handle_message(self, data: dict) -> None:
         """Handle incoming WebSocket message."""
-        request_id = data.get("request_id")
+        msg_type = data.get("type")
 
+        # Capture error messages (often sent right before connection close)
+        # The close frame's reason field is unreliable through proxies, so we
+        # store the error from the message to have it when the close event fires
+        if msg_type == "error":
+            error_msg = data.get("error", "Unknown error")
+            error_code = data.get("code")
+            logger.warning(f"Cloud error message: {error_msg} (code={error_code})")
+            self._last_close_reason = error_msg
+            return
+
+        request_id = data.get("request_id")
         if request_id and request_id in self._pending_requests:
             # This is a response to a pending request
             future = self._pending_requests.pop(request_id)
@@ -342,7 +364,26 @@ class CloudConnectionManager:
         else:
             # Unsolicited message (e.g., notifications)
             msg_type = data.get("type")
-            logger.debug(f"Received unsolicited message: {msg_type}")
+            if msg_type == "logs":
+                self._handle_cloud_logs(data)
+            else:
+                logger.debug(f"Received unsolicited message: {msg_type}")
+
+    def _handle_cloud_logs(self, data: dict) -> None:
+        """Re-emit cloud server log lines into local Python logging."""
+        cloud_logger = logging.getLogger("scope.cloud")
+        lines = data.get("lines", [])
+        for line in lines:
+            # Parse log level from the formatted line
+            # Format: "YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - message"
+            level = logging.INFO
+            if " - ERROR - " in line:
+                level = logging.ERROR
+            elif " - WARNING - " in line:
+                level = logging.WARNING
+            elif " - DEBUG - " in line:
+                level = logging.DEBUG
+            cloud_logger.log(level, "%s", line)
 
     async def send_and_wait(
         self,
@@ -405,7 +446,7 @@ class CloudConnectionManager:
         """
         self._stats["api_requests_sent"] += 1
         self._stats["last_activity_at"] = time.time()
-        logger.info(f"[CLOUD] API request: {method} {path}")
+        logger.info(f"API request: {method} {path}")
 
         message = {
             "type": "api",
@@ -419,23 +460,23 @@ class CloudConnectionManager:
 
         # Check for error in response
         if response.get("type") == "error":
-            logger.error(f"[CLOUD] API request failed: {response.get('error')}")
+            logger.error(f"API request failed: {response.get('error')}")
             raise RuntimeError(response.get("error", "Unknown error"))
 
         self._stats["api_requests_successful"] += 1
         status = response.get("status", 200)
-        logger.info(f"[CLOUD] API response: {status} for {method} {path}")
+        logger.info(f"API response: {status} for {method} {path}")
 
         return response
 
     async def webrtc_get_ice_servers(self) -> dict:
         """Get ICE servers from cloud-hosted scope backend."""
-        logger.info("[CLOUD] Fetching ICE servers from cloud")
+        logger.info("Fetching ICE servers from cloud")
         self._stats["last_activity_at"] = time.time()
         response = await self.send_and_wait({"type": "get_ice_servers"})
         ice_servers = response.get("data", {})
         logger.info(
-            f"[CLOUD] Got {len(ice_servers.get('iceServers', []))} ICE servers from cloud"
+            f"Got {len(ice_servers.get('iceServers', []))} ICE servers from cloud"
         )
         return ice_servers
 
@@ -453,7 +494,7 @@ class CloudConnectionManager:
         self._stats["webrtc_offers_sent"] += 1
         self._stats["last_activity_at"] = time.time()
         logger.info(
-            f"[CLOUD] Sending WebRTC offer to cloud (offer #{self._stats['webrtc_offers_sent']})"
+            f"Sending WebRTC offer to cloud (offer #{self._stats['webrtc_offers_sent']})"
         )
 
         message: dict[str, Any] = {
@@ -464,7 +505,7 @@ class CloudConnectionManager:
         if initial_parameters:
             message["initialParameters"] = initial_parameters
             logger.info(
-                f"[CLOUD] Offer includes initial parameters: {list(initial_parameters.keys())}"
+                f"Offer includes initial parameters: {list(initial_parameters.keys())}"
             )
         if self._user_id:
             message["user_id"] = self._user_id
@@ -472,14 +513,14 @@ class CloudConnectionManager:
         response = await self.send_and_wait(message, timeout=30.0)
 
         if response.get("type") == "error":
-            logger.error(f"[CLOUD] WebRTC offer failed: {response.get('error')}")
+            logger.error(f"WebRTC offer failed: {response.get('error')}")
             raise RuntimeError(response.get("error", "Offer failed"))
 
         self._stats["webrtc_offers_successful"] += 1
         session_id = response.get("sessionId")
-        logger.info(f"[CLOUD] WebRTC offer successful! Session ID: {session_id}")
+        logger.info(f"WebRTC offer successful! Session ID: {session_id}")
         logger.info(
-            f"[CLOUD] Stats: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']} offers successful"
+            f"Stats: {self._stats['webrtc_offers_successful']}/{self._stats['webrtc_offers_sent']} offers successful"
         )
 
         return {
@@ -498,13 +539,9 @@ class CloudConnectionManager:
         self._stats["last_activity_at"] = time.time()
 
         if candidate:
-            logger.debug(
-                f"[CLOUD] Sending ICE candidate to cloud for session {session_id}"
-            )
+            logger.debug(f"Sending ICE candidate to cloud for session {session_id}")
         else:
-            logger.info(
-                f"[CLOUD] Sending end-of-candidates signal for session {session_id}"
-            )
+            logger.info(f"Sending end-of-candidates signal for session {session_id}")
 
         message = {
             "type": "icecandidate",
@@ -515,7 +552,7 @@ class CloudConnectionManager:
 
         if self._stats["webrtc_ice_candidates_sent"] % 5 == 0:
             logger.info(
-                f"[CLOUD] Sent {self._stats['webrtc_ice_candidates_sent']} ICE candidates total"
+                f"Sent {self._stats['webrtc_ice_candidates_sent']} ICE candidates total"
             )
 
     async def disconnect(self) -> None:
@@ -523,6 +560,7 @@ class CloudConnectionManager:
         # Clear background connection state
         self._connecting = False
         self._connect_error = None
+        self._connect_stage = None
         if self._connect_task is not None and not self._connect_task.done():
             self._connect_task.cancel()
             try:
@@ -578,13 +616,14 @@ class CloudConnectionManager:
             raise RuntimeError("Must be connected to cloud.ai WebSocket first")
 
         if self._webrtc_client is not None:
-            logger.info("[CLOUD-RTC] WebRTC already active, stopping first")
+            logger.info("WebRTC already active, stopping first")
             await self.stop_webrtc()
 
         # Import here to avoid circular imports
         from .cloud_webrtc_client import CloudWebRTCClient
 
-        logger.info("[CLOUD-RTC] Starting WebRTC connection to cloud.ai...")
+        logger.info("Starting WebRTC connection to cloud.ai...")
+        self._connect_stage = "Setting up video stream..."
         self._webrtc_client = CloudWebRTCClient(self)
 
         # Register frame callback to update stats and forward to subscribers
@@ -592,19 +631,21 @@ class CloudConnectionManager:
 
         try:
             await self._webrtc_client.connect(initial_parameters)
-            logger.info("[CLOUD-RTC] WebRTC connection established")
+            self._connect_stage = None
+            logger.info("WebRTC connection established")
         except Exception as e:
-            logger.error(f"[CLOUD-RTC] Failed to start WebRTC: {e}")
+            self._connect_stage = None
+            logger.error(f"Failed to start WebRTC: {e}")
             self._webrtc_client = None
             raise
 
     async def stop_webrtc(self) -> None:
         """Stop the WebRTC connection to cloud.ai."""
         if self._webrtc_client is not None:
-            logger.info("[CLOUD-RTC] Stopping WebRTC connection...")
+            logger.info("Stopping WebRTC connection...")
             await self._webrtc_client.disconnect()
             self._webrtc_client = None
-            logger.info("[CLOUD-RTC] WebRTC connection stopped")
+            logger.info("WebRTC connection stopped")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a video frame to cloud.ai for processing.
@@ -632,7 +673,7 @@ class CloudConnectionManager:
         if self._webrtc_client is not None and self._webrtc_client.is_connected:
             self._webrtc_client.send_parameters(params)
         else:
-            logger.warning("[CLOUD-RTC] Cannot send parameters - WebRTC not connected")
+            logger.warning("Cannot send parameters - WebRTC not connected")
 
     def add_frame_callback(self, callback: Callable[[VideoFrame], None]) -> None:
         """Register a callback to receive processed frames from cloud.ai.
@@ -656,7 +697,7 @@ class CloudConnectionManager:
             try:
                 callback(frame)
             except Exception as e:
-                logger.error(f"[CLOUD-RTC] Error in frame callback: {e}")
+                logger.error(f"Error in frame callback: {e}")
 
     @property
     def cloud_session_id(self) -> str | None:
@@ -684,6 +725,7 @@ class CloudConnectionManager:
             "connected": self.is_connected,
             "connecting": self._connecting,
             "error": self._connect_error,
+            "connect_stage": self._connect_stage,
             "app_id": self.app_id if self.is_connected else None,
             "connection_id": self._connection_id if self.is_connected else None,
             "webrtc_connected": self.webrtc_connected,
@@ -717,7 +759,7 @@ class CloudConnectionManager:
     def print_stats(self) -> None:
         """Print current stats to logger."""
         if not self.is_connected:
-            logger.info("[CLOUD] Not connected to cloud")
+            logger.info("Not connected to cloud")
             return
 
         uptime = 0
@@ -725,7 +767,7 @@ class CloudConnectionManager:
             uptime = time.time() - self._stats["connected_at"]
 
         logger.info("=" * 50)
-        logger.info("[CLOUD] Cloud Connection Stats")
+        logger.info("Cloud Connection Stats")
         logger.info("=" * 50)
         logger.info(f"  App ID: {self.app_id}")
         logger.info(f"  Uptime: {uptime:.1f}s")

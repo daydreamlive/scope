@@ -6,6 +6,10 @@ import { IPC_CHANNELS } from '../types/ipc';
 import { SERVER_CONFIG } from '../utils/config';
 import { logger, getLogPath } from '../utils/logger';
 
+export type DeepLinkActionData =
+  | { action: 'install-plugin'; package: string }
+  | { action: 'install-workflow'; id: string };
+
 // Constants
 const WINDOW_CONFIG = {
   MAIN: { width: 1400, height: 900 },
@@ -59,7 +63,9 @@ export class ScopeElectronAppService {
     if (isWindows) {
       return this.getIconPath('icon.ico');
     }
-    const trayIconPath = this.getIconPath('tray-icon.png');
+    // Use Template naming convention for macOS - this enables automatic light/dark mode handling
+    // macOS will automatically use trayIconTemplate@2x.png for Retina displays
+    const trayIconPath = this.getIconPath('trayIconTemplate.png');
     const fallbackIconPath = this.getIconPath('icon.png');
     return fs.existsSync(trayIconPath) ? trayIconPath : fallbackIconPath;
   }
@@ -402,7 +408,7 @@ export class ScopeElectronAppService {
     this.sendIPC(IPC_CHANNELS.SERVER_ERROR, error);
   }
 
-  sendDeepLinkAction(data: { action: string; package: string }): void {
+  sendDeepLinkAction(data: DeepLinkActionData): void {
     this.sendIPC(IPC_CHANNELS.DEEP_LINK_ACTION, data);
   }
 

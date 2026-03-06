@@ -33,12 +33,12 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         TAE_ARTIFACT,
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
-            repo_id="Wan-AI/Wan2.1-T2V-14B",
+            repo_id="daydreamlive/Wan2.1-T2V-14B",
             files=["config.json"],
         ),
         HuggingfaceRepoArtifact(
-            repo_id="krea/krea-realtime-video",
-            files=["krea-realtime-video-14b.safetensors"],
+            repo_id="daydreamlive/krea-realtime-video",
+            files=["config.json", "krea-realtime-video-14b.safetensors"],
         ),
     ]
 

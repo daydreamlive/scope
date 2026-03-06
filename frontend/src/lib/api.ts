@@ -1,4 +1,11 @@
 import type { IceServersResponse, ModelStatusResponse } from "../types";
+import type {
+  ScopeWorkflow,
+  WorkflowResolutionPlan,
+  LoRADownloadRequest,
+  LoRADownloadResult,
+} from "./workflowApi";
+import { fetchFalCdnToken } from "./auth";
 
 export interface PromptItem {
   text: string;
@@ -50,6 +57,7 @@ export interface PipelineStatusResponse {
   // Optional list of loaded LoRA adapters, provided by backend when available.
   loaded_lora_adapters?: { path: string; scale: number }[];
   error?: string;
+  loading_stage?: string | null;
 }
 
 export const getIceServers = async (): Promise<IceServersResponse> => {
@@ -207,6 +215,7 @@ export interface HardwareInfoResponse {
   vram_gb: number | null;
   spout_available: boolean;
   ndi_available: boolean;
+  syphon_available: boolean;
 }
 
 export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
@@ -339,11 +348,22 @@ export const fetchCurrentLogs = async (): Promise<string> => {
   return logsText;
 };
 
+export interface LoRAProvenance {
+  source: "huggingface" | "civitai" | "url" | "local";
+  repo_id?: string | null;
+  hf_filename?: string | null;
+  model_id?: string | null;
+  version_id?: string | null;
+  url?: string | null;
+}
+
 export interface LoRAFileInfo {
   name: string;
   path: string;
   size_mb: number;
   folder?: string | null;
+  sha256?: string | null;
+  provenance?: LoRAProvenance | null;
 }
 
 export interface LoRAFilesResponse {
@@ -386,10 +406,8 @@ export const installLoRAFile = async (
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Install LoRA failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
   }
 
   const result = await response.json();
@@ -452,11 +470,22 @@ export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
   const fileContent = await file.arrayBuffer();
   const filename = encodeURIComponent(file.name);
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/octet-stream",
+  };
+
+  try {
+    const cdnToken = await fetchFalCdnToken();
+    headers["X-Fal-CDN-Token"] = cdnToken.token;
+    headers["X-Fal-CDN-Token-Type"] = cdnToken.token_type;
+    headers["X-Fal-CDN-Base-URL"] = cdnToken.base_url;
+  } catch (e) {
+    console.warn("uploadAsset: failed to fetch CDN token, upload may fail:", e);
+  }
+
   const response = await fetch(`/api/v1/assets?filename=${filename}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/octet-stream",
-    },
+    headers,
     body: fileContent,
   });
 
@@ -874,4 +903,74 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+};
+
+// ---------------------------------------------------------------------------
+// Workflow
+// ---------------------------------------------------------------------------
+
+export const resolveWorkflow = async (
+  workflow: ScopeWorkflow
+): Promise<WorkflowResolutionPlan> => {
+  const response = await fetch("/api/v1/workflow/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(workflow),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+export const downloadLoRA = async (
+  request: LoRADownloadRequest
+): Promise<LoRADownloadResult> => {
+  const response = await fetch("/api/v1/lora/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// Daydream API – workflow import from community hub
+// ---------------------------------------------------------------------------
+
+const DAYDREAM_API_BASE =
+  (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
+  "https://api.daydream.live";
+
+export const fetchDaydreamWorkflow = async (
+  workflowId: string
+): Promise<ScopeWorkflow> => {
+  const response = await fetch(
+    `${DAYDREAM_API_BASE}/v1/workflows/${encodeURIComponent(workflowId)}`
+  );
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(`Failed to fetch workflow: ${detail}`);
+  }
+  const data = await response.json();
+
+  const workflow: ScopeWorkflow | undefined = data.workflowData;
+  if (
+    !workflow ||
+    workflow.format !== "scope-workflow" ||
+    !workflow.metadata?.name ||
+    !Array.isArray(workflow.pipelines) ||
+    workflow.pipelines.length === 0
+  ) {
+    throw new Error(
+      "The fetched workflow is missing required data (workflowData, metadata, or pipelines)."
+    );
+  }
+
+  return workflow;
 };

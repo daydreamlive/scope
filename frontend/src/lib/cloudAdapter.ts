@@ -70,6 +70,7 @@ export class CloudAdapter {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private messageHandlers: Set<MessageHandler> = new Set();
+  private logHandlers: Set<(lines: string[]) => void> = new Set();
 
   // Current WebRTC session ID (set after offer/answer exchange)
   private currentSessionId: string | null = null;
@@ -199,6 +200,14 @@ export class CloudAdapter {
     return () => this.messageHandlers.delete(handler);
   }
 
+  /**
+   * Add a handler for cloud server log lines
+   */
+  onLogs(handler: (lines: string[]) => void): () => void {
+    this.logHandlers.add(handler);
+    return () => this.logHandlers.delete(handler);
+  }
+
   private handleMessage(message: ApiResponse): void {
     // Handle response to pending request
     if (message.request_id && this.pendingRequests.has(message.request_id)) {
@@ -228,6 +237,19 @@ export class CloudAdapter {
       message.type === "icecandidate_ack"
     ) {
       // These are handled by specific pending requests
+      return;
+    }
+
+    // Handle cloud server log lines
+    if (message.type === "logs") {
+      const lines = (message as unknown as { lines: string[] }).lines;
+      for (const handler of this.logHandlers) {
+        try {
+          handler(lines);
+        } catch (error) {
+          console.error("[CloudAdapter] Log handler error:", error);
+        }
+      }
       return;
     }
 

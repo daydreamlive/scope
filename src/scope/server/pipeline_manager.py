@@ -51,6 +51,17 @@ class PipelineManager:
         self._pipelines: dict[str, Any] = {}  # pipeline_id -> pipeline instance
         self._pipeline_statuses: dict[str, PipelineStatus] = {}  # pipeline_id -> status
         self._pipeline_load_params: dict[str, dict] = {}  # pipeline_id -> load_params
+        self._load_events: dict[
+            str, threading.Event
+        ] = {}  # pipeline_id -> load completion event
+
+        # Loading stage for frontend display (e.g., "Loading diffusion model...")
+        self._loading_stage: str | None = None
+
+    def set_loading_stage(self, stage: str | None) -> None:
+        """Set the current loading stage (thread-safe)."""
+        with self._lock:
+            self._loading_stage = stage
 
     @property
     def status(self) -> PipelineStatus:
@@ -79,6 +90,15 @@ class PipelineManager:
                     f"Pipeline not available. Status: {self._status.value}"
                 )
             return self._pipeline
+
+    def get_loaded_pipeline_ids(self) -> list[str]:
+        """Return the IDs of all currently loaded pipelines (thread-safe)."""
+        with self._lock:
+            return [
+                pid
+                for pid, status in self._pipeline_statuses.items()
+                if status == PipelineStatus.LOADED
+            ]
 
     def get_pipeline_by_id(self, pipeline_id: str):
         """Get a pipeline instance by ID (thread-safe).
@@ -177,13 +197,44 @@ class PipelineManager:
                 )
                 return True
 
-            # If already loading, wait
+            # If already loading, wait for it to complete
             if self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADING:
-                logger.info(f"Pipeline {pipeline_id} already loading by another thread")
-                return False
+                logger.info(
+                    f"Pipeline {pipeline_id} already loading by another thread, waiting..."
+                )
+                load_event = self._load_events.get(pipeline_id)
+                if load_event:
+                    # Release lock while waiting
+                    self._lock.release()
+                    try:
+                        # Wait up to 5 minutes for load to complete
+                        load_event.wait(timeout=300)
+                    finally:
+                        self._lock.acquire()
 
-            # Mark as loading
+                    # Check if pipeline is now loaded
+                    if (
+                        self._pipeline_statuses.get(pipeline_id)
+                        == PipelineStatus.LOADED
+                    ):
+                        logger.info(f"Pipeline {pipeline_id} loaded by another thread")
+                        return True
+                    else:
+                        logger.warning(
+                            f"Pipeline {pipeline_id} load by another thread did not succeed, "
+                            f"status: {self._pipeline_statuses.get(pipeline_id)}"
+                        )
+                        return False
+                else:
+                    # No event found (shouldn't happen), fall through to load
+                    logger.warning(
+                        f"Pipeline {pipeline_id} marked as LOADING but no event found"
+                    )
+
+            # Mark as loading and create event for waiters
             self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADING
+            load_event = threading.Event()
+            self._load_events[pipeline_id] = load_event
 
         # Release lock during slow loading operation
         logger.info(f"Loading pipeline: {pipeline_id}")
@@ -202,13 +253,20 @@ class PipelineManager:
 
         try:
             # Load the pipeline synchronously
-            pipeline = self._load_pipeline_implementation(pipeline_id, load_params)
+            self.set_loading_stage("Initializing pipeline...")
+            pipeline = self._load_pipeline_implementation(
+                pipeline_id, load_params, stage_callback=self.set_loading_stage
+            )
 
             # Hold lock while updating state
+            self.set_loading_stage(None)
             with self._lock:
                 self._pipelines[pipeline_id] = pipeline
                 self._pipeline_load_params[pipeline_id] = load_params or {}
                 self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADED
+                # Signal waiters that load is complete
+                if pipeline_id in self._load_events:
+                    self._load_events[pipeline_id].set()
 
             logger.info(f"Pipeline {pipeline_id} loaded successfully")
 
@@ -231,6 +289,7 @@ class PipelineManager:
             return True
 
         except Exception as e:
+            self.set_loading_stage(None)
             from .models_config import get_models_dir
 
             models_dir = get_models_dir()
@@ -247,6 +306,9 @@ class PipelineManager:
                     del self._pipelines[pipeline_id]
                 if pipeline_id in self._pipeline_load_params:
                     del self._pipeline_load_params[pipeline_id]
+                # Signal waiters that load is complete (even though it failed)
+                if pipeline_id in self._load_events:
+                    self._load_events[pipeline_id].set()
 
             # Publish error event for pipeline load failure
             publish_event(
@@ -352,6 +414,7 @@ class PipelineManager:
                 "load_params": load_params,
                 "loaded_lora_adapters": loaded_lora_adapters,
                 "error": combined_error,
+                "loading_stage": self._loading_stage,
             }
 
     async def get_pipeline_async(self):
@@ -637,7 +700,10 @@ class PipelineManager:
         )
 
     def _load_pipeline_implementation(
-        self, pipeline_id: str, load_params: dict | None = None
+        self,
+        pipeline_id: str,
+        load_params: dict | None = None,
+        stage_callback=None,
     ):
         """Synchronous pipeline loading (runs in thread executor)."""
         from scope.core.pipelines.registry import PipelineRegistry
@@ -664,6 +730,8 @@ class PipelineManager:
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
             # Plugin pipeline - use schema defaults merged with load_params
             logger.info(f"Loading plugin pipeline: {pipeline_id}")
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
             config_class = pipeline_class.get_config_class()
             # Get defaults from schema fields
             schema_defaults = {}
@@ -730,6 +798,7 @@ class PipelineManager:
                 quantization=quantization,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
+                stage_callback=stage_callback,
             )
             logger.info("StreamDiffusionV2 pipeline initialized")
             return pipeline
@@ -820,6 +889,7 @@ class PipelineManager:
                 quantization=quantization,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
+                stage_callback=stage_callback,
             )
             logger.info("LongLive pipeline initialized")
             return pipeline
@@ -890,6 +960,7 @@ class PipelineManager:
                 ),
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
+                stage_callback=stage_callback,
             )
             logger.info("krea-realtime-video pipeline initialized")
             return pipeline
@@ -948,6 +1019,7 @@ class PipelineManager:
                 quantization=quantization,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
+                stage_callback=stage_callback,
             )
             logger.info("RewardForcing pipeline initialized")
             return pipeline
@@ -1003,12 +1075,16 @@ class PipelineManager:
                 quantization=quantization,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
+                stage_callback=stage_callback,
             )
             logger.info("MemFlow pipeline initialized")
             return pipeline
 
         elif pipeline_id == "video-depth-anything":
             from scope.core.pipelines import VideoDepthAnythingPipeline
+
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
 
             # Create config from load_params
             config = OmegaConf.create({})
@@ -1045,6 +1121,9 @@ class PipelineManager:
         elif pipeline_id == "controller-viz":
             from scope.core.pipelines import ControllerVisualizerPipeline
 
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
+
             # Use load parameters for resolution, default to 512x512
             height = 512
             width = 512
@@ -1062,6 +1141,9 @@ class PipelineManager:
             return pipeline
         elif pipeline_id == "rife":
             from scope.core.pipelines import RIFEPipeline
+
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
 
             # Create minimal config - RIFE pipeline handles its own model paths via artifacts
             config = OmegaConf.create({})
@@ -1085,6 +1167,9 @@ class PipelineManager:
         elif pipeline_id == "scribble":
             from scope.core.pipelines import ScribblePipeline
 
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
+
             pipeline = ScribblePipeline(
                 device=get_device(),
                 dtype=torch.float16,
@@ -1093,6 +1178,9 @@ class PipelineManager:
             return pipeline
         elif pipeline_id == "gray":
             from scope.core.pipelines import GrayPipeline
+
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
 
             pipeline = GrayPipeline(
                 device=get_device(),
@@ -1103,6 +1191,9 @@ class PipelineManager:
         elif pipeline_id == "optical-flow":
             from scope.core.pipelines import OpticalFlowPipeline
             from scope.core.pipelines.optical_flow.schema import OpticalFlowConfig
+
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
 
             # Create config with schema defaults, overridden by load_params
             params = load_params or {}

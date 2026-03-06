@@ -42,6 +42,7 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         quantization: Quantization | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
+        stage_callback=None,
     ):
         from .modules.causal_model import CausalWanModel
 
@@ -64,6 +65,8 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         # Load generator with VACE support via upfront loading
         # Strategy: Load base model, wrap with VACE (if enabled), then apply LoRA
         # (VACE loaded before LoRA to ensure correct wrapper ordering)
+        if stage_callback:
+            stage_callback("Loading diffusion model...")
         start = time.time()
         generator = WanDiffusionWrapper(
             CausalWanModel,
@@ -108,6 +111,8 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         else:
             generator = generator.to(device=device, dtype=dtype)
 
+        if stage_callback:
+            stage_callback("Loading text encoder...")
         start = time.time()
         text_encoder = WanTextEncoderWrapper(
             model_name=base_model_name,
@@ -120,6 +125,8 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         text_encoder = text_encoder.to(device=device)
 
         # Load VAE using create_vae factory (supports multiple VAE types)
+        if stage_callback:
+            stage_callback("Loading VAE...")
         vae_type = getattr(config, "vae_type", "wan")
         start = time.time()
         vae = create_vae(
@@ -130,6 +137,8 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         vae = vae.to(device=device, dtype=dtype)
 
         # Create components config
+        if stage_callback:
+            stage_callback("Initializing pipeline...")
         components_config = {}
         components_config.update(model_config)
         components_config["device"] = device

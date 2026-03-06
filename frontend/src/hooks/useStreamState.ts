@@ -322,6 +322,12 @@ export function useStreamState() {
   // Track previous pipelineId so we only reset inputMode when the pipeline actually changes
   const prevPipelineIdRef = useRef<string | null>(null);
 
+  // Allow callers (e.g. workflow import) to pre-set the ref so the auto-reset
+  // useEffect below does not override an explicitly chosen inputMode.
+  const skipNextModeReset = useCallback((pipelineId: string) => {
+    prevPipelineIdRef.current = pipelineId;
+  }, []);
+
   // Update inputMode when schemas first load or pipeline changes
   useEffect(() => {
     if (pipelineSchemas) {
@@ -414,6 +420,7 @@ export function useStreamState() {
   // Derive output sink availability from hardware info
   const spoutAvailable = hardwareInfo?.spout_available ?? false;
   const ndiOutputAvailable = hardwareInfo?.ndi_available ?? false;
+  const syphonOutputAvailable = hardwareInfo?.syphon_available ?? false;
 
   return {
     systemMetrics,
@@ -430,8 +437,10 @@ export function useStreamState() {
     supportsNoiseControls,
     spoutAvailable,
     ndiOutputAvailable,
+    syphonOutputAvailable,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
+    skipNextModeReset,
   };
 }

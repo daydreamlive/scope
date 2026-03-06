@@ -1,8 +1,13 @@
+// Discriminated union for deep-link action payloads
+export type DeepLinkActionData =
+  | { action: "install-plugin"; package: string }
+  | { action: "install-workflow"; id: string };
+
 // Electron preload exposes scope API on window
 interface ScopeAPI {
   browseDirectory?: (title: string) => Promise<string | null>;
   onDeepLinkAction?: (
-    callback: (data: { action: string; package: string }) => void
+    callback: (data: DeepLinkActionData) => void
   ) => () => void;
 }
 
@@ -110,6 +115,7 @@ export interface PipelineInfo {
   about: string;
   projectUrl?: string;
   docsUrl?: string;
+  version?: string;
   modified?: boolean;
   defaultPrompt?: string;
   estimatedVram?: number;

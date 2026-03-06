@@ -79,9 +79,14 @@ interface InputAndControlsPanelProps {
   spoutAvailable?: boolean;
   // Whether NDI is available (NDI SDK installed on server)
   ndiAvailable?: boolean;
+  // Whether Syphon is available (macOS only)
+  syphonAvailable?: boolean;
   // Currently selected NDI source identifier
   selectedNdiSource?: string;
   onNdiSourceChange?: (identifier: string) => void;
+  // Currently selected Syphon source identifier
+  selectedSyphonSource?: string;
+  onSyphonSourceChange?: (identifier: string) => void;
   // VACE reference images (only shown when VACE is enabled)
   vaceEnabled?: boolean;
   refImages?: string[];
@@ -148,8 +153,11 @@ export function InputAndControlsPanel({
   onInputModeChange,
   spoutAvailable = false,
   ndiAvailable = false,
+  syphonAvailable = false,
   selectedNdiSource = "",
   onNdiSourceChange,
+  selectedSyphonSource = "",
+  onSyphonSourceChange,
   vaceEnabled = true,
   refImages = [],
   onRefImagesChange,
@@ -196,6 +204,42 @@ export function InputAndControlsPanel({
   useEffect(() => {
     setIsStreamLoaded(false);
   }, [ndiStreamUrl]);
+
+  // Syphon source discovery
+  const [syphonSources, setSyphonSources] = useState<DiscoveredSource[]>([]);
+  const [isDiscoveringSyphon, setIsDiscoveringSyphon] = useState(false);
+
+  const discoverSyphonSources = useCallback(async () => {
+    setIsDiscoveringSyphon(true);
+    try {
+      const result = await getInputSourceSources("syphon");
+      setSyphonSources(result.sources);
+    } catch (e) {
+      console.error("Failed to discover Syphon sources:", e);
+      setSyphonSources([]);
+    } finally {
+      setIsDiscoveringSyphon(false);
+    }
+  }, []);
+
+  // Live MJPEG preview URL for Syphon (always shown when a source is selected)
+  // Use higher FPS for Syphon since it's local GPU sharing with minimal overhead
+  const syphonStreamUrl =
+    mode === "syphon" && selectedSyphonSource
+      ? getInputSourceStreamUrl("syphon", selectedSyphonSource, 15)
+      : null;
+  const [isSyphonStreamLoaded, setIsSyphonStreamLoaded] = useState(false);
+
+  useEffect(() => {
+    setIsSyphonStreamLoaded(false);
+  }, [syphonStreamUrl]);
+
+  // Auto-discover Syphon sources when switching to Syphon mode
+  useEffect(() => {
+    if (mode === "syphon" && syphonAvailable) {
+      discoverSyphonSources();
+    }
+  }, [mode, syphonAvailable, discoverSyphonSources]);
 
   // Auto-discover NDI sources when switching to NDI mode
   useEffect(() => {
@@ -317,14 +361,14 @@ export function InputAndControlsPanel({
               <ToggleGroupItem
                 value="video"
                 aria-label="Video file"
-                disabled={isStreaming && mode === "ndi"}
+                disabled={isStreaming && (mode === "ndi" || mode === "syphon")}
               >
                 File
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="camera"
                 aria-label="Camera"
-                disabled={isStreaming && mode === "ndi"}
+                disabled={isStreaming && (mode === "ndi" || mode === "syphon")}
               >
                 Camera
               </ToggleGroupItem>
@@ -332,7 +376,9 @@ export function InputAndControlsPanel({
                 <ToggleGroupItem
                   value="spout"
                   aria-label="Spout Receiver"
-                  disabled={isStreaming && mode === "ndi"}
+                  disabled={
+                    isStreaming && (mode === "ndi" || mode === "syphon")
+                  }
                 >
                   Spout
                 </ToggleGroupItem>
@@ -344,6 +390,15 @@ export function InputAndControlsPanel({
                   disabled={isStreaming && mode !== "ndi"}
                 >
                   NDI
+                </ToggleGroupItem>
+              )}
+              {syphonAvailable && (
+                <ToggleGroupItem
+                  value="syphon"
+                  aria-label="Syphon"
+                  disabled={isStreaming && mode !== "syphon"}
+                >
+                  Syphon
                 </ToggleGroupItem>
               )}
             </ToggleGroup>
@@ -452,6 +507,71 @@ export function InputAndControlsPanel({
                   className="h-8 text-sm flex-1"
                   placeholder="TDSyphonSpoutOut"
                 />
+              </div>
+            ) : mode === "syphon" ? (
+              /* Syphon Source Picker */
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Select
+                    value={selectedSyphonSource}
+                    onValueChange={value => onSyphonSourceChange?.(value)}
+                    disabled={isStreaming || isDiscoveringSyphon}
+                  >
+                    <SelectTrigger className="flex-1 min-w-0 h-8 text-sm [&>span]:truncate">
+                      <SelectValue
+                        placeholder={
+                          isDiscoveringSyphon
+                            ? "Discovering..."
+                            : syphonSources.length === 0
+                              ? "No sources found"
+                              : "Select Syphon source"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {syphonSources.map(source => (
+                        <SelectItem
+                          key={source.identifier}
+                          value={source.identifier}
+                        >
+                          {source.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={discoverSyphonSources}
+                    disabled={isStreaming || isDiscoveringSyphon}
+                    title="Refresh Syphon sources"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${isDiscoveringSyphon ? "animate-spin" : ""}`}
+                    />
+                  </Button>
+                </div>
+                {/* Live Syphon preview (MJPEG stream) */}
+                {selectedSyphonSource && (
+                  <div className="relative rounded-md overflow-hidden border border-border bg-muted min-w-0">
+                    {syphonStreamUrl ? (
+                      <img
+                        src={syphonStreamUrl}
+                        alt="Syphon source preview"
+                        className="block w-full h-auto object-contain"
+                        onLoad={() => setIsSyphonStreamLoaded(true)}
+                        onError={() => setIsSyphonStreamLoaded(false)}
+                      />
+                    ) : null}
+                    {!isSyphonStreamLoaded && (
+                      <div className="flex items-center justify-center h-20 text-xs text-muted-foreground">
+                        <RefreshCw className="h-4 w-4 animate-spin mr-1.5" />
+                        Connecting...
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             ) : (
               /* Video/Camera Input Preview */

@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import io
+import json
 import logging
 import os
 import subprocess
@@ -31,9 +32,24 @@ if TYPE_CHECKING:
     from .schema import PluginInfo
     from .webrtc import WebRTCManager
 
+from scope.core.lora.manifest import (
+    LoRAManifestEntry,
+    LoRAProvenance,
+    add_manifest_entry,
+    compute_sha256,
+    load_manifest,
+    save_manifest,
+)
+from scope.core.workflows.resolve import (
+    WorkflowRequest,
+    WorkflowResolutionPlan,
+    resolve_workflow,
+)
+
 from .cloud_proxy import (
     cloud_proxy,
     get_hardware_info_from_cloud,
+    proxy_with_body,
     recording_download_cloud_path,
     upload_asset_to_cloud,
 )
@@ -57,6 +73,7 @@ from .logs_config import (
     get_logs_dir,
     get_most_recent_log_file,
 )
+from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
 from .models_config import (
     ensure_models_dir,
     get_assets_dir,
@@ -148,6 +165,17 @@ if os.getenv("VERBOSE_LOGGING"):
     logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
 
+# Set INFO for the cloud log re-emitter so cloud lines reach console and file
+logging.getLogger("scope.cloud").setLevel(logging.INFO)
+
+# Allow suppressing noisy loggers via env var (comma-separated logger names)
+# e.g. SCOPE_LOG_QUIET_LOGGERS=scope.server.frame_processor,scope.core.pipelines.longlive
+_quiet_loggers = os.getenv("SCOPE_LOG_QUIET_LOGGERS", "")
+for _logger_name in _quiet_loggers.split(","):
+    _logger_name = _logger_name.strip()
+    if _logger_name:
+        logging.getLogger(_logger_name).setLevel(logging.WARNING)
+
 # Select pipeline depending on the "PIPELINE" environment variable
 PIPELINE = os.getenv("PIPELINE", None)
 
@@ -238,6 +266,8 @@ server_start_time = time.time()
 cloud_connection_manager = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
 kafka_publisher = None
+# Global OSC server instance
+osc_server = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -262,7 +292,12 @@ async def lifespan(app: FastAPI):
     from .webrtc import WebRTCManager
 
     # Startup
-    global webrtc_manager, pipeline_manager, cloud_connection_manager, kafka_publisher
+    global \
+        webrtc_manager, \
+        pipeline_manager, \
+        cloud_connection_manager, \
+        kafka_publisher, \
+        osc_server
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -313,9 +348,39 @@ async def lifespan(app: FastAPI):
             kafka_publisher = None
             logger.warning("Kafka publisher failed to start")
 
+    # Start OSC UDP server on the same port as the HTTP API
+    from .osc_server import OSCServer
+
+    osc_host = os.getenv("SCOPE_HOST", "0.0.0.0")
+    osc_port = int(os.getenv("SCOPE_PORT", "8000"))
+    osc_server = OSCServer(osc_host, osc_port)
+    osc_server.set_managers(pipeline_manager, webrtc_manager)
+    await osc_server.start()
+
+    # Syphon server discovery (macOS only): create the ObjC singleton and do
+    # an initial NSRunLoop pump so servers are available when the UI first loads.
+    # Subsequent refreshes pump on demand in the list_input_sources endpoint.
+    if sys.platform == "darwin":
+        try:
+            from .syphon.receiver import (
+                drain_notifications,
+                ensure_directory_initialized,
+            )
+
+            ensure_directory_initialized()
+            drain_notifications(0.1)
+            logger.info("Syphon directory initialized")
+        except Exception:
+            logger.debug("Syphon not available, skipping directory init")
+
     yield
 
     # Shutdown
+    if osc_server:
+        logger.info("Shutting down OSC server...")
+        await osc_server.stop()
+        logger.info("OSC server shutdown complete")
+
     if webrtc_manager:
         logger.info("Shutting down WebRTC manager...")
         await webrtc_manager.stop()
@@ -353,6 +418,12 @@ def get_cloud_connection_manager() -> "CloudConnectionManager":
     return cloud_connection_manager
 
 
+def get_osc_server():
+    """Dependency to get OSC server instance."""
+
+    return osc_server
+
+
 app = FastAPI(
     lifespan=lifespan,
     title="Scope",
@@ -371,7 +442,11 @@ app.add_middleware(
 
 
 @app.get("/health", response_model=HealthResponse)
-async def health_check():
+@cloud_proxy()
+async def health_check(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Health check endpoint."""
     return HealthResponse(
         status="healthy",
@@ -383,7 +458,11 @@ async def health_check():
 
 
 @app.post("/api/v1/restart")
-async def restart_server():
+@cloud_proxy(timeout=30.0)
+async def restart_server(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Restart the server process.
 
     This endpoint is called after plugin install/uninstall to ensure
@@ -588,6 +667,78 @@ async def get_pipeline_schemas(
     return PipelineSchemasResponse(pipelines=pipelines)
 
 
+# ---------------------------------------------------------------------------
+# OSC endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/osc/status")
+async def osc_status():
+    """Return current OSC server status (port, listening state)."""
+
+    srv = get_osc_server()
+    if srv is None:
+        return {"enabled": False, "listening": False, "port": None, "host": None}
+    return srv.status()
+
+
+@app.get("/api/v1/osc/paths")
+async def osc_paths(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Return all OSC paths split into active / available sections."""
+    from .osc_docs import get_osc_paths
+
+    return get_osc_paths(pm)
+
+
+@app.get("/api/v1/osc/stream")
+async def osc_sse_stream():
+    """Server-Sent Events stream that pushes OSC commands to the frontend in real time."""
+    srv = get_osc_server()
+    if srv is None:
+        return Response(content="OSC server not running", status_code=503)
+
+    q = srv.subscribe()
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except TimeoutError:
+                    # Keepalive comment — prevents proxy/browser timeout.
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            srv.unsubscribe(q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/v1/osc/docs")
+async def osc_docs_page(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Serve a self-contained HTML reference page for OSC control."""
+    from .osc_docs import render_osc_docs_html
+
+    srv = get_osc_server()
+    port = srv.port if srv else 8000
+    html_content = render_osc_docs_html(pm, port)
+    return Response(content=html_content, media_type="text/html")
+
+
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
 async def get_ice_servers(
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
@@ -644,9 +795,7 @@ async def handle_webrtc_offer(
     try:
         # If connected to cloud, use cloud mode (video flows through backend)
         if cloud_manager.is_connected:
-            logger.info(
-                "[CLOUD] Using relay mode - video will flow through backend to cloud"
-            )
+            logger.info("Using relay mode - video will flow through backend to cloud")
             return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
 
         # Local mode: ensure pipeline is loaded before proceeding
@@ -784,6 +933,8 @@ class LoRAFileInfo(BaseModel):
     path: str
     size_mb: float
     folder: str | None = None
+    sha256: str | None = None
+    provenance: LoRAProvenance | None = None
 
 
 class LoRAFilesResponse(BaseModel):
@@ -803,26 +954,33 @@ async def list_lora_files(
     When cloud mode is active, lists LoRA files from the cloud server instead.
     """
 
-    def process_lora_file(file_path: Path, lora_dir: Path) -> LoRAFileInfo:
+    def process_lora_file(
+        file_path: Path, lora_dir: Path, manifest_entries: dict
+    ) -> LoRAFileInfo:
         """Extract LoRA file metadata."""
         size_mb = file_path.stat().st_size / (1024 * 1024)
         relative_path = file_path.relative_to(lora_dir)
         folder = (
             str(relative_path.parent) if relative_path.parent != Path(".") else None
         )
+        rel_key = relative_path.as_posix()
+        entry = manifest_entries.get(rel_key)
         return LoRAFileInfo(
             name=file_path.stem,
             path=str(file_path),
             size_mb=round(size_mb, 2),
             folder=folder,
+            sha256=entry.sha256 if entry else None,
+            provenance=entry.provenance if entry else None,
         )
 
     try:
         lora_dir = get_lora_dir()
+        manifest = load_manifest(lora_dir)
         lora_files: list[LoRAFileInfo] = []
 
         for file_path in iter_files(lora_dir, LORA_EXTENSIONS):
-            lora_files.append(process_lora_file(file_path, lora_dir))
+            lora_files.append(process_lora_file(file_path, lora_dir, manifest.entries))
 
         lora_files.sort(key=lambda x: (x.folder or "", x.name))
         return LoRAFilesResponse(lora_files=lora_files)
@@ -873,39 +1031,13 @@ async def install_lora_file(
             if stored_token:
                 separator = "&" if parsed.query else "?"
                 url = f"{url}{separator}token={stored_token}"
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="CivitAI requires an API token for programmatic downloads. "
-                    "Add your CivitAI API key in Settings > API Keys. "
-                    "Get your API key at https://civitai.com/user/account",
-                )
 
     # If connected to cloud, proxy with the (potentially modified) URL
     if cloud_manager.is_connected:
-        logger.info("Proxying LoRA install to cloud")
         body = {"url": url, "filename": request.filename}
-        try:
-            response = await cloud_manager.api_request(
-                method="POST",
-                path="/api/v1/loras",
-                body=body,
-                timeout=300.0,
-            )
-        except Exception as e:
-            logger.error(f"Cloud proxy request failed: {e}")
-            raise HTTPException(
-                status_code=502,
-                detail=f"Cloud request failed: {e}",
-            ) from e
-
-        status = response.get("status", 200)
-        if status >= 400:
-            raise HTTPException(
-                status_code=status,
-                detail=response.get("error", "Cloud request failed"),
-            )
-        return response.get("data", {})
+        return await proxy_with_body(
+            cloud_manager, "POST", "/api/v1/loras", body, timeout=300.0
+        )
 
     # Local installation
     import re
@@ -935,6 +1067,45 @@ async def install_lora_file(
         filename = request.filename
         if not filename:
             filename = unquote(parsed.path.split("/")[-1])
+
+        # For CivitAI URLs, extract version ID and resolve filename via API
+        version_id = None
+        civitai_token = None
+        if is_civitai:
+            # Extract version ID: check query param first, then path
+            query_params = parse_qs(parsed.query)
+            if "modelVersionId" in query_params:
+                version_id = query_params["modelVersionId"][0]
+            else:
+                # Fall back to last path segment (e.g. /api/download/models/<version_id>)
+                path_parts = parsed.path.rstrip("/").split("/")
+                candidate = path_parts[-1] if path_parts else None
+                if candidate and candidate.isdigit():
+                    version_id = candidate
+            civitai_token = query_params.get("token", [None])[0]
+            logger.info(
+                f"CivitAI resolve: version_id={version_id}, "
+                f"token_from_url={'yes' if civitai_token else 'no'}, "
+                f"filename={filename}"
+            )
+
+        if is_civitai and (not filename or "." not in filename):
+            if version_id:
+                try:
+                    from .lora_downloader import resolve_civitai_metadata
+
+                    dl_url, civitai_filename = resolve_civitai_metadata(
+                        version_id, token=civitai_token
+                    )
+                    if civitai_filename:
+                        filename = civitai_filename
+                    if dl_url:
+                        url = dl_url
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e)) from e
+                except Exception as e:
+                    logger.warning(f"Failed to resolve CivitAI metadata: {e}")
+
         # If still no filename (or it doesn't look like a file), try Content-Disposition
         if not filename or "." not in filename:
             # Use streaming GET instead of HEAD (some servers return 403 for HEAD)
@@ -989,15 +1160,66 @@ async def install_lora_file(
             )
 
         # Install in a thread to avoid blocking the event loop
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, http_get, url, dest_path)
 
-        size_mb = dest_path.stat().st_size / (1024 * 1024)
+        # Update manifest with provenance
+        sha256 = await loop.run_in_executor(None, compute_sha256, dest_path)
+        size_bytes = dest_path.stat().st_size
+        relative_key = dest_path.relative_to(lora_dir).as_posix()
+
+        source: str
+        if is_civitai:
+            source = "civitai"
+        elif hostname == "huggingface.co" or hostname.endswith(".huggingface.co"):
+            source = "huggingface"
+        else:
+            source = "url"
+
+        # Strip sensitive query params (e.g. CivitAI API token) before persisting
+        from urllib.parse import urlencode, urlunparse
+        from urllib.parse import urlparse as _urlparse
+
+        _parsed = _urlparse(url)
+        clean_params = {
+            k: v for k, v in parse_qs(_parsed.query).items() if k.lower() != "token"
+        }
+        clean_url = urlunparse(
+            _parsed._replace(
+                query=urlencode(clean_params, doseq=True) if clean_params else ""
+            )
+        )
+
+        # Parse structured fields from URLs so downstream downloads can use
+        # authenticated paths (hf_hub_url for HF, version API for CivitAI).
+        extra: dict = {}
+        if source == "huggingface":
+            hf_parts = [p for p in _parsed.path.split("/") if p]
+            if len(hf_parts) >= 5 and hf_parts[2] in ("resolve", "blob"):
+                extra["repo_id"] = f"{hf_parts[0]}/{hf_parts[1]}"
+                extra["hf_filename"] = "/".join(hf_parts[4:])
+        elif source == "civitai":
+            civ_query = parse_qs(_parsed.query)
+            if "modelVersionId" in civ_query:
+                extra["version_id"] = civ_query["modelVersionId"][0]
+            else:
+                civ_parts = _parsed.path.rstrip("/").split("/")
+                if civ_parts and civ_parts[-1].isdigit():
+                    extra["version_id"] = civ_parts[-1]
+
+        provenance = LoRAProvenance(source=source, url=clean_url, **extra)
+        entry = add_manifest_entry(
+            lora_dir, relative_key, provenance, sha256, size_bytes
+        )
+
+        size_mb = size_bytes / (1024 * 1024)
         file_info = LoRAFileInfo(
             name=dest_path.stem,
             path=str(dest_path),
             size_mb=round(size_mb, 2),
             folder=None,
+            sha256=sha256,
+            provenance=entry.provenance,
         )
 
         return LoRAInstallResponse(
@@ -1058,6 +1280,13 @@ async def delete_lora_file(
         found_path.unlink()
         logger.info(f"Deleted LoRA file: {found_path}")
 
+        # Remove from manifest if present
+        manifest = load_manifest(lora_dir)
+        relative_key = found_path.relative_to(lora_dir).as_posix()
+        if relative_key in manifest.entries:
+            del manifest.entries[relative_key]
+            save_manifest(lora_dir, manifest)
+
         return LoRADeleteResponse(
             success=True,
             message=f"Successfully deleted '{name}'",
@@ -1068,6 +1297,93 @@ async def delete_lora_file(
     except Exception as e:
         logger.error(f"delete_lora_file: Error deleting LoRA: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/lora/download")
+async def download_lora_endpoint(
+    request: LoRADownloadRequest,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+) -> LoRADownloadResult:
+    """Download a LoRA from HuggingFace, CivitAI, or a direct URL.
+
+    When cloud mode is active, the CivitAI token is resolved locally and
+    forwarded so the cloud worker can authenticate without its own token.
+    """
+    from .lora_downloader import download_lora
+    from .models_config import get_civitai_token
+
+    civitai_token = None
+    if request.source == "civitai":
+        civitai_token = get_civitai_token() or request.civitai_token
+
+    if cloud_manager.is_connected:
+        body = request.model_dump(exclude_none=True)
+        if civitai_token:
+            body["civitai_token"] = civitai_token
+        return await proxy_with_body(
+            cloud_manager, "POST", "/api/v1/lora/download", body, timeout=300.0
+        )
+
+    lora_dir = get_lora_dir()
+    try:
+        return await download_lora(request, lora_dir, civitai_token=civitai_token)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"download_lora: Error downloading LoRA: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.put("/api/v1/lora/{filename:path}/provenance")
+async def tag_lora_provenance(
+    filename: str,
+    provenance: LoRAProvenance,
+) -> LoRAManifestEntry:
+    """Retroactively tag a local LoRA with provenance info."""
+    lora_dir = get_lora_dir()
+    file_path = (lora_dir / filename).resolve()
+    if not file_path.is_relative_to(lora_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"LoRA file '{filename}' not found")
+
+    sha256 = compute_sha256(file_path)
+    size_bytes = file_path.stat().st_size
+
+    return add_manifest_entry(lora_dir, filename, provenance, sha256, size_bytes)
+
+
+# ---------------------------------------------------------------------------
+# Workflow resolve
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/workflow/resolve", response_model=WorkflowResolutionPlan)
+@cloud_proxy()
+async def resolve_workflow_endpoint(
+    workflow: WorkflowRequest,
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Resolve workflow dependencies and return a resolution plan.
+
+    This is side-effect-free: no installs, no downloads.  The request
+    body uses ``extra="ignore"`` so the frontend can send the full
+    workflow JSON; the backend only reads the fields it needs.
+    """
+    from scope.core.plugins import get_plugin_manager
+
+    try:
+        plugin_manager = get_plugin_manager()
+        lora_dir = get_lora_dir()
+
+        return resolve_workflow(workflow, plugin_manager, lora_dir)
+    except Exception as e:
+        logger.error("Error resolving workflow: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error while resolving workflow dependencies",
+        ) from e
 
 
 @app.get("/api/v1/assets", response_model=AssetsResponse)
@@ -1188,6 +1504,9 @@ async def upload_asset(
                 filename,
                 content_type,
                 asset_type,
+                fal_cdn_token=request.headers.get("X-Fal-CDN-Token"),
+                fal_cdn_token_type=request.headers.get("X-Fal-CDN-Token-Type"),
+                fal_cdn_base_url=request.headers.get("X-Fal-CDN-Base-URL"),
             )
 
         # Local mode: save to local assets directory
@@ -1383,6 +1702,18 @@ def is_ndi_output_available() -> bool:
     return is_available()
 
 
+def is_syphon_output_available() -> bool:
+    """Check if Syphon is available for output."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        import syphon  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
 _source_discovery_cache: dict[str, tuple[float, list]] = {}
 _SOURCE_DISCOVERY_TTL = 10  # seconds
 
@@ -1427,7 +1758,7 @@ async def list_input_source_types():
 
 
 @app.get("/api/v1/input-sources/{source_type}/sources")
-def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
+async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
     """List discovered sources for a given input source type."""
     source_class = _resolve_input_source_class(source_type)
 
@@ -1438,11 +1769,23 @@ def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
         if time.monotonic() - ts < _SOURCE_DISCOVERY_TTL:
             return {"source_type": source_type, "sources": sources}
 
-    try:
+    # Syphon discovery requires pumping NSRunLoop on the main thread.
+    # async handlers run on the event-loop (main) thread, so pump here.
+    if source_type == "syphon" and sys.platform == "darwin":
+        try:
+            from .syphon.receiver import drain_notifications
+
+            drain_notifications(0.1)
+        except Exception:
+            logger.debug("Failed to pump Syphon run loop", exc_info=True)
+
+    event_loop = asyncio.get_event_loop()
+
+    def _discover():
         instance = source_class()
         try:
             discovered = instance.list_sources(timeout_ms=timeout_ms)
-            sources = [
+            return [
                 {
                     "name": s.name,
                     "identifier": s.identifier,
@@ -1450,10 +1793,13 @@ def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
                 }
                 for s in discovered
             ]
-            _source_discovery_cache[source_type] = (time.monotonic(), sources)
-            return {"source_type": source_type, "sources": sources}
         finally:
             instance.close()
+
+    try:
+        sources = await event_loop.run_in_executor(None, _discover)
+        _source_discovery_cache[source_type] = (time.monotonic(), sources)
+        return {"source_type": source_type, "sources": sources}
     except HTTPException:
         raise
     except Exception as e:
@@ -1569,6 +1915,7 @@ async def get_hardware_info(
                 cloud_manager,
                 is_spout_available(),
                 is_ndi_output_available(),
+                is_syphon_output_available(),
             )
 
         # Local mode: get local hardware info
@@ -1585,6 +1932,7 @@ async def get_hardware_info(
             vram_gb=vram_gb,
             spout_available=is_spout_available(),
             ndi_available=is_ndi_output_available(),
+            syphon_available=is_syphon_output_available(),
         )
     except HTTPException:
         raise
@@ -1742,6 +2090,39 @@ async def get_current_logs():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/v1/logs/tail")
+async def tail_logs(
+    lines: int = Query(default=200, ge=1, le=1000),
+    since_offset: int = Query(default=0, ge=0),
+):
+    """Get recent log lines, optionally only new content since a byte offset.
+
+    Returns JSON with "lines" (list of strings) and "offset" (byte offset for next poll).
+    """
+    log_file_path = get_most_recent_log_file()
+    if log_file_path is None or not log_file_path.exists():
+        return {"lines": [], "offset": 0}
+
+    file_size = log_file_path.stat().st_size
+
+    if since_offset > 0 and since_offset >= file_size:
+        return {"lines": [], "offset": file_size}
+
+    if since_offset > 0 and since_offset < file_size:
+        # Read only new content since last offset
+        with open(log_file_path, encoding="utf-8", errors="replace") as f:
+            f.seek(since_offset)
+            new_content = f.read()
+            new_lines = [ln for ln in new_content.splitlines() if ln.strip()]
+            return {"lines": new_lines[-lines:], "offset": file_size}
+
+    # No offset or offset beyond file: return last N lines
+    with open(log_file_path, encoding="utf-8", errors="replace") as f:
+        all_lines = f.readlines()
+        tail = [ln.rstrip() for ln in all_lines[-lines:] if ln.strip()]
+        return {"lines": tail, "offset": file_size}
+
+
 # Plugin Management API Endpoints
 
 
@@ -1773,8 +2154,16 @@ def _convert_plugin_dict_to_info(plugin_dict: dict) -> "PluginInfo":
 
 
 @app.get("/api/v1/plugins")
-async def list_plugins():
-    """List all installed plugins with metadata."""
+@cloud_proxy()
+async def list_plugins(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """List all installed plugins with metadata.
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import get_plugin_manager
 
     from .schema import FailedPluginInfoSchema, PluginListResponse
@@ -1804,11 +2193,17 @@ async def list_plugins():
 
 
 @app.post("/api/v1/plugins")
+@cloud_proxy(timeout=60.0)
 async def install_plugin(
-    request: Request,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Install a plugin from PyPI, git URL, or local path."""
+    """Install a plugin from PyPI, git URL, or local path.
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import (
         PluginDependencyError,
         PluginInstallError,
@@ -1819,7 +2214,7 @@ async def install_plugin(
     from .schema import PluginInstallRequest, PluginInstallResponse
 
     # Parse request body
-    body = await request.json()
+    body = await http_request.json()
     install_request = PluginInstallRequest(**body)
 
     logger.info(f"Installing plugin: {install_request.package}")
@@ -1887,11 +2282,18 @@ async def install_plugin(
 
 
 @app.delete("/api/v1/plugins/{name}")
+@cloud_proxy(timeout=60.0)
 async def uninstall_plugin(
     name: str,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Uninstall a plugin, cleaning up loaded pipelines."""
+    """Uninstall a plugin, cleaning up loaded pipelines.
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import (
         PluginInstallError,
         PluginNotFoundError,
@@ -1937,12 +2339,18 @@ async def uninstall_plugin(
 
 
 @app.post("/api/v1/plugins/{name}/reload")
+@cloud_proxy(timeout=60.0)
 async def reload_plugin(
     name: str,
-    request: Request,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Reload an editable plugin for development (without server restart)."""
+    """Reload an editable plugin for development (without server restart).
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import (
         PluginInUseError,
         PluginNotEditableError,
@@ -1953,7 +2361,7 @@ async def reload_plugin(
     from .schema import PluginReloadRequest, PluginReloadResponse
 
     # Parse request body
-    body = await request.json()
+    body = await http_request.json()
     reload_request = PluginReloadRequest(**body)
 
     try:
@@ -2197,6 +2605,10 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
         PipelineRegistry,  # noqa: F401 - imported for side effects (registry initialization)
     )
 
+    # Propagate host/port so lifespan can read them (e.g. for OSC UDP bind)
+    os.environ["SCOPE_HOST"] = host
+    os.environ["SCOPE_PORT"] = str(port)
+
     # Configure static file serving
     configure_static_files()
 
@@ -2212,6 +2624,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
             port=port,
             reload=reload,
             log_config=None,  # Use our logging config, don't override it
+            timeout_graceful_shutdown=1,
         )
         server = uvicorn.Server(config)
 
@@ -2239,6 +2652,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
             port=port,
             reload=reload,
             log_config=None,  # Use our logging config, don't override it
+            timeout_graceful_shutdown=1,
         )
 
 

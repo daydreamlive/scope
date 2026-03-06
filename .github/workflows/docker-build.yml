@@ -18,10 +18,27 @@ on:
 
 jobs:
   build-and-push:
+    name: build ${{ matrix.variant }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: write
+    outputs:
+      short_sha: ${{ steps.meta.outputs.short_sha }}
+      pr_number: ${{ steps.meta.outputs.pr_number }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: standard
+            suffix: ''
+            dockerfile: Dockerfile
+            description: Daydream Scope
+          - variant: cloud
+            suffix: '-cloud'
+            dockerfile: Dockerfile.cloud
+            description: Daydream Scope (Cloud)
 
     steps:
       - name: Checkout code
@@ -59,51 +76,314 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Set build metadata
+        id: meta
+        run: |
+          if [ "${{ github.event_name }}" == "pull_request" ]; then
+            echo "short_sha=$(echo '${{ github.event.pull_request.head.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
+            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
+          else
+            echo "short_sha=$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
+            echo "pr_number=" >> $GITHUB_OUTPUT
+          fi
+
       - name: Set image tag
         id: tag
         run: |
           DOCKERHUB="daydreamlive/scope"
           GHCR="ghcr.io/daydreamlive/scope"
+          SUFFIX="${{ matrix.suffix }}"
 
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             # Manual dispatch: use provided version + latest
             VERSION="${{ github.event.inputs.version }}"
-            TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
-            TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
+            TAGS="$DOCKERHUB:$VERSION$SUFFIX,$DOCKERHUB:latest$SUFFIX"
+            TAGS="$TAGS,$GHCR:$VERSION$SUFFIX,$GHCR:latest$SUFFIX"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
             # Git tag: extract version (e.g., v0.1.0 -> 0.1.0) + latest
             VERSION_TAG="${{ github.ref_name }}"
             VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
-            TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
-            TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
+            TAGS="$DOCKERHUB:$VERSION$SUFFIX,$DOCKERHUB:latest$SUFFIX"
+            TAGS="$TAGS,$GHCR:$VERSION$SUFFIX,$GHCR:latest$SUFFIX"
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
             # Main branch
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            TAGS="$DOCKERHUB:main,$DOCKERHUB:$SHORT_SHA"
-            TAGS="$TAGS,$GHCR:main,$GHCR:$SHORT_SHA"
+            TAGS="$DOCKERHUB:main$SUFFIX,$DOCKERHUB:$SHORT_SHA$SUFFIX"
+            TAGS="$TAGS,$GHCR:main$SUFFIX,$GHCR:$SHORT_SHA$SUFFIX"
           elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
             # Runpod serverless branch
-            TAGS="$DOCKERHUB:runpod-serverless"
-            TAGS="$TAGS,$GHCR:runpod-serverless"
+            TAGS="$DOCKERHUB:runpod-serverless$SUFFIX"
+            TAGS="$TAGS,$GHCR:runpod-serverless$SUFFIX"
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
             # Pull request: use sanitized branch name + short SHA
             BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
             SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-            TAGS="$DOCKERHUB:$BRANCH_TAG,$DOCKERHUB:$SHORT_SHA"
-            TAGS="$TAGS,$GHCR:$BRANCH_TAG,$GHCR:$SHORT_SHA"
+            TAGS="$DOCKERHUB:$BRANCH_TAG$SUFFIX,$DOCKERHUB:$SHORT_SHA$SUFFIX"
+            TAGS="$TAGS,$GHCR:$BRANCH_TAG$SUFFIX,$GHCR:$SHORT_SHA$SUFFIX"
           fi
           echo "tags=$TAGS" >> $GITHUB_OUTPUT
 
-      - name: Build and push Docker image
+      - name: Build and push ${{ matrix.variant }} image
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ${{ matrix.dockerfile }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.tag.outputs.tags }}
           labels: |
             org.opencontainers.image.source=https://github.com/daydreamlive/scope
-            org.opencontainers.image.description=Daydream Scope
+            org.opencontainers.image.description=${{ matrix.description }}
             org.opencontainers.image.licenses=MIT
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.variant }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
+
+  deploy-pr:
+    needs: build-and-push
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    outputs:
+      fal_app_id: ${{ steps.deploy.outputs.fal_app_id }}
+      fal_ws_url: ${{ steps.deploy.outputs.fal_ws_url }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install fal
+        run: pip install fal
+
+      - name: Deploy to fal (PR environment)
+        id: deploy
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+        run: |
+          PR_NUMBER="${{ needs.build-and-push.outputs.pr_number }}"
+
+          APP_NAME="scope-pr-${PR_NUMBER}"
+
+          echo "Deploying PR #${PR_NUMBER} to fal as ${APP_NAME}"
+
+          fal deploy \
+            --app-name "$APP_NAME" \
+            --env preview \
+            --auth public \
+            src/scope/cloud/fal_app.py 2>&1 | tee deploy_output.txt
+
+          FAL_APP_ID="daydream/${APP_NAME}--preview"
+          FAL_WS_URL="wss://fal.run/${FAL_APP_ID}/ws"
+
+          echo "fal_app_id=${FAL_APP_ID}" >> $GITHUB_OUTPUT
+          echo "fal_ws_url=${FAL_WS_URL}" >> $GITHUB_OUTPUT
+
+          echo "Deployed to: ${FAL_APP_ID}"
+          echo "WebSocket URL: ${FAL_WS_URL}"
+
+      - name: Comment on PR with deployment info
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ github.event.pull_request.number }};
+            const falAppId = '${{ steps.deploy.outputs.fal_app_id }}';
+            const falWsUrl = '${{ steps.deploy.outputs.fal_ws_url }}';
+            const shortSha = '${{ needs.build-and-push.outputs.short_sha }}';
+
+            const body = `## 🚀 fal.ai Preview Deployment
+
+            | | |
+            |---|---|
+            | **App ID** | \`${falAppId}\` |
+            | **WebSocket** | \`${falWsUrl}\` |
+            | **Commit** | \`${shortSha}\` |
+
+            ### Testing
+            Connect to this preview deployment by running this on your branch:
+            \`\`\`
+            uv run build && SCOPE_CLOUD_APP_ID="${falAppId}/ws" uv run daydream-scope
+            \`\`\`
+
+            🧪 E2E tests will run automatically against this deployment.
+            `;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+
+            const existingComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('fal.ai Preview Deployment')
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body
+              });
+            }
+
+  e2e-test:
+    needs: deploy-pr
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install uv
+        run: pip install uv
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: e2e/package-lock.json
+
+      - name: Install E2E test dependencies
+        working-directory: e2e
+        run: npm ci
+
+      - name: Install Playwright browsers
+        working-directory: e2e
+        run: npx playwright install --with-deps chromium
+
+      - name: Build Scope app
+        env:
+          VITE_DAYDREAM_API_KEY: ${{ secrets.E2ES_DAYDREAM_API_KEY }}
+          VITE_DAYDREAM_AUTH_URL: https://app.daydream.monster/sign-in/local
+          VITE_DAYDREAM_API_BASE: https://api.daydream.monster
+        run: |
+          echo "Building Scope with API key auth..."
+          uv run build
+
+      - name: Start Scope app
+        env:
+          SCOPE_CLOUD_APP_ID: ${{ needs.deploy-pr.outputs.fal_app_id }}
+        run: |
+          echo "Starting Scope with cloud app ID: $SCOPE_CLOUD_APP_ID"
+          uv run daydream-scope &
+
+          echo "Waiting for localhost:8000 to be ready..."
+          MAX_ATTEMPTS=60
+          ATTEMPT=0
+
+          while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+            ATTEMPT=$((ATTEMPT + 1))
+            if curl -s http://localhost:8000 > /dev/null 2>&1; then
+              echo "App is ready at localhost:8000"
+              break
+            fi
+            echo "Attempt $ATTEMPT/$MAX_ATTEMPTS - waiting..."
+            sleep 2
+          done
+
+          if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+            echo "App did not start in time"
+            exit 1
+          fi
+
+      - name: Run Playwright tests
+        working-directory: e2e
+        run: npx playwright test
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-report-pr-${{ needs.build-and-push.outputs.pr_number }}
+          path: e2e/playwright-report/
+          retention-days: 30
+
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: test-artifacts-pr-${{ needs.build-and-push.outputs.pr_number }}
+          path: e2e/test-results/
+          retention-days: 30
+
+      - name: Comment test results on PR
+        if: always()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prNumber = ${{ github.event.pull_request.number }};
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const conclusion = '${{ job.status }}';
+
+            const statusEmoji = conclusion === 'success' ? '✅' : '❌';
+            const statusText = conclusion === 'success' ? 'passed' : 'failed';
+
+            const body = `## ${statusEmoji} E2E Tests ${statusText}
+
+            | | |
+            |---|---|
+            | **Status** | ${statusText} |
+            | **fal App** | \`${{ needs.deploy-pr.outputs.fal_app_id }}\` |
+            | **Run** | [View logs](${runUrl}) |
+
+            ### Test Artifacts
+            Check the workflow run for screenshots${conclusion !== 'success' ? ', traces, and failure details' : ''}.
+            `;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+
+            const existingComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('E2E Tests')
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body
+              });
+            }

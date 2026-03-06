@@ -25,7 +25,7 @@ export function Header({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
-    "general" | "account" | "api-keys" | "loras"
+    "general" | "account" | "api-keys" | "loras" | "osc"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
 
@@ -36,12 +36,21 @@ export function Header({
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
 
+  // Only show "connection lost" after we've seen a successful connection this session
+  const hasBeenConnectedRef = useRef(false);
+
   // Track previous connection state to detect transitions for pipeline refresh
   const prevConnectedRef = useRef(false);
 
   // Detect unexpected disconnection and show toast
   useEffect(() => {
+    if (isConnected) {
+      hasBeenConnectedRef.current = true;
+      lastNotifiedCloseCodeRef.current = null;
+    }
+
     if (
+      hasBeenConnectedRef.current &&
       lastCloseCode !== null &&
       lastCloseCode !== lastNotifiedCloseCodeRef.current
     ) {
@@ -49,15 +58,10 @@ export function Header({
         `[Header] Cloud WebSocket closed unexpectedly (code=${lastCloseCode}, reason=${lastCloseReason})`
       );
       toast.error("Cloud connection lost", {
-        description: `WebSocket closed (code: ${lastCloseCode}${lastCloseReason ? `, reason: ${lastCloseReason}` : ""})`,
+        description: `WebSocket closed ${lastCloseReason ? `(${lastCloseReason})` : ""}`,
         duration: 10000,
       });
       lastNotifiedCloseCodeRef.current = lastCloseCode;
-    }
-
-    // Reset the notified close code when connected (so we can show it again if it disconnects later)
-    if (isConnected) {
-      lastNotifiedCloseCodeRef.current = null;
     }
   }, [lastCloseCode, lastCloseReason, isConnected]);
 
@@ -88,7 +92,12 @@ export function Header({
         setPluginsOpen(true);
       } else {
         setInitialTab(
-          openSettingsTab as "general" | "account" | "api-keys" | "loras"
+          openSettingsTab as
+            | "general"
+            | "account"
+            | "api-keys"
+            | "loras"
+            | "osc"
         );
         setSettingsOpen(true);
       }
@@ -125,9 +134,9 @@ export function Header({
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
-            size="icon"
+            size="sm"
             onClick={handleCloudIconClick}
-            className={`hover:opacity-80 transition-opacity h-8 w-8 ${
+            className={`hover:opacity-80 transition-opacity h-8 gap-1.5 px-2 ${
               isConnected
                 ? "text-green-500 opacity-80"
                 : isConnecting
@@ -143,12 +152,19 @@ export function Header({
             }
           >
             {isConnected ? (
-              <Cloud className="h-5 w-5" />
+              <Cloud className="h-4 w-4" />
             ) : isConnecting ? (
-              <Cloud className="h-5 w-5 animate-pulse" />
+              <Cloud className="h-4 w-4 animate-pulse" />
             ) : (
-              <CloudOff className="h-5 w-5" />
+              <CloudOff className="h-4 w-4" />
             )}
+            <span className="text-xs font-medium">
+              {isConnected
+                ? "Connected"
+                : isConnecting
+                  ? "Connecting..."
+                  : "Disconnected"}
+            </span>
           </Button>
           <Button
             variant="ghost"
@@ -175,6 +191,8 @@ export function Header({
         open={pluginsOpen}
         onClose={handlePluginsClose}
         initialPluginPath={initialPluginPath}
+        disabled={cloudDisabled || isConnecting}
+        cloudConnected={isConnected}
       />
 
       <SettingsDialog

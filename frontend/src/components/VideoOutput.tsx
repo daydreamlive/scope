@@ -10,6 +10,8 @@ interface VideoOutputProps {
   isCloudConnecting?: boolean;
   isConnecting?: boolean;
   pipelineError?: string | null;
+  cloudConnectStage?: string | null;
+  pipelineLoadingStage?: string | null;
   isPlaying?: boolean;
   isDownloading?: boolean;
   onPlayPauseToggle?: () => void;
@@ -32,6 +34,8 @@ export function VideoOutput({
   isCloudConnecting = false,
   isConnecting = false,
   pipelineError: _pipelineError = null,
+  cloudConnectStage = null,
+  pipelineLoadingStage = null,
   isPlaying = true,
   isDownloading = false,
   onPlayPauseToggle,
@@ -206,12 +210,16 @@ export function VideoOutput({
         ) : isCloudConnecting ? (
           <div className="text-center text-muted-foreground text-lg">
             <Spinner size={24} className="mx-auto mb-3" />
-            <p>Connecting to cloud...</p>
+            <p key={cloudConnectStage} className="animate-fade-in">
+              {cloudConnectStage || "Connecting to cloud..."}
+            </p>
           </div>
         ) : isPipelineLoading ? (
           <div className="text-center text-muted-foreground text-lg">
             <Spinner size={24} className="mx-auto mb-3" />
-            <p>Loading...</p>
+            <p key={pipelineLoadingStage} className="animate-fade-in">
+              {pipelineLoadingStage || "Loading pipeline..."}
+            </p>
           </div>
         ) : isConnecting ? (
           <div className="text-center text-muted-foreground text-lg">
@@ -226,6 +234,8 @@ export function VideoOutput({
               onClick={onStartStream}
               size="lg"
               variant="themed"
+              data-testid="start-stream-button"
+              aria-label="Start stream"
             />
           </div>
         )}

@@ -3,10 +3,15 @@ import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
+import { OutputsPanel } from "../components/OutputsPanel";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
+import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
+import { WorkflowImportDialog } from "../components/WorkflowImportDialog";
+import type { WorkflowPromptState } from "../lib/workflowSettings";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
+import { LogPanel } from "../components/LogPanel";
 import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
@@ -17,6 +22,7 @@ import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { useApi } from "../hooks/useApi";
 import { useCloudContext } from "../lib/cloudContext";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import { useLogStream } from "../hooks/useLogStream";
 import { getDefaultPromptForMode } from "../data/pipelines";
 import {
   adjustResolutionForPipeline,
@@ -32,9 +38,15 @@ import type {
   DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { getInputSourceResolution } from "../lib/api";
+import { getInputSourceResolution, fetchDaydreamWorkflow } from "../lib/api";
+import type { ScopeWorkflow } from "../lib/workflowApi";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
+
+interface OscCommand {
+  key: string;
+  value: unknown;
+}
 
 // Delay before resetting video reinitialization flag (ms)
 // This allows useVideoSource to detect the flag change and trigger reinitialization
@@ -82,10 +94,20 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
+    connectStage,
   } = useCloudStatus();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
+
+  // Log stream for the log panel
+  const {
+    logs,
+    isOpen: isLogPanelOpen,
+    toggle: toggleLogPanel,
+    clearLogs,
+    unreadCount: logUnreadCount,
+  } = useLogStream();
 
   // Show loading state while connecting to cloud
   useEffect(() => {
@@ -110,15 +132,22 @@ export function StreamPage() {
     supportsNoiseControls,
     spoutAvailable,
     ndiOutputAvailable,
+    syphonOutputAvailable,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
+    skipNextModeReset,
   } = useStreamState();
 
-  // Derive NDI input availability from dynamic input sources list
+  // Derive NDI and Syphon input availability from dynamic input sources list
   const ndiAvailable = availableInputSources.some(
     s => s.source_id === "ndi" && s.available
   );
+  const syphonAvailable = availableInputSources.some(
+    s => s.source_id === "syphon" && s.available
+  );
+  const hasAvailableOutputs =
+    spoutAvailable || ndiOutputAvailable || syphonOutputAvailable;
 
   // Combined refresh function for pipeline schemas, pipelines list, and hardware info
   const handlePipelinesRefresh = useCallback(async () => {
@@ -225,6 +254,36 @@ export function StreamPage() {
   >(null);
   const [downloadError, setDownloadError] = useState<string | null>(null);
 
+  // Workflow export/import dialog state
+  const [showWorkflowExport, setShowWorkflowExport] = useState(false);
+  const [showWorkflowImport, setShowWorkflowImport] = useState(false);
+  const [preloadedWorkflow, setPreloadedWorkflow] =
+    useState<ScopeWorkflow | null>(null);
+
+  // Handle install-workflow deep links from Electron
+  useEffect(() => {
+    if (!window.scope?.onDeepLinkAction) return;
+    return window.scope.onDeepLinkAction(data => {
+      if (data.action !== "install-workflow") return;
+      const workflowId = data.id;
+      toast.info("Fetching workflow...");
+      fetchDaydreamWorkflow(workflowId)
+        .then(workflow => {
+          setPreloadedWorkflow(workflow);
+          setShowWorkflowImport(true);
+        })
+        .catch(err => {
+          console.error("Failed to fetch workflow from deep link:", err);
+          toast.error("Failed to import workflow", {
+            description: err instanceof Error ? err.message : String(err),
+          });
+        });
+    });
+  }, []);
+
+  // Stable ref for OSC command handler (avoids hook dependency cycles)
+  const oscCommandHandlerRef = useRef<(cmd: OscCommand) => void>(() => {});
+
   // Ref to access timeline functions
   const timelineRef = useRef<{
     getCurrentTimelinePrompt: () => string;
@@ -233,6 +292,7 @@ export function StreamPage() {
     clearTimeline: () => void;
     resetPlayhead: () => void;
     resetTimelineCompletely: () => void;
+    loadPrompts: (prompts: TimelinePrompt[]) => void;
     getPrompts: () => TimelinePrompt[];
     getCurrentTime: () => number;
     getIsPlaying: () => boolean;
@@ -244,6 +304,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
+    loadingStage,
   } = usePipeline();
 
   // WebRTC for streaming (unified hook works in both local and cloud modes)
@@ -775,6 +836,24 @@ export function StreamPage() {
   const handlePostprocessorSchemaFieldOverrideChange =
     makePipelineOverrideHandler("postprocessor");
 
+  const pipelineHasRuntimeField = useCallback(
+    (pipelineId: string, key: string): boolean => {
+      const props = (
+        pipelines?.[pipelineId]?.configSchema as
+          | {
+              properties?: Record<string, { ui?: { is_load_param?: boolean } }>;
+            }
+          | undefined
+      )?.properties;
+      const field = props?.[key];
+      if (!field) {
+        return false;
+      }
+      return field.ui?.is_load_param === false;
+    },
+    [pipelines]
+  );
+
   const handleVaceContextScaleChange = (scale: number) => {
     updateSettings({ vaceContextScale: scale });
     // Send VACE context scale update to backend if streaming
@@ -885,6 +964,14 @@ export function StreamPage() {
           source_name: settings.inputSource?.source_name ?? "",
         },
       });
+    } else if (newMode === "syphon") {
+      updateSettings({
+        inputSource: {
+          enabled: true,
+          source_type: "syphon",
+          source_name: settings.inputSource?.source_name ?? "",
+        },
+      });
     } else {
       updateSettings({
         inputSource: { enabled: false, source_type: "", source_name: "" },
@@ -918,6 +1005,33 @@ export function StreamPage() {
       });
     } catch (e) {
       console.warn("Could not probe NDI source resolution:", e);
+    }
+  };
+
+  // Handle Syphon source selection — probe resolution and update pipeline dimensions
+  const handleSyphonSourceChange = async (identifier: string) => {
+    updateSettings({
+      inputSource: {
+        enabled: true,
+        source_type: "syphon",
+        source_name: identifier,
+      },
+    });
+
+    try {
+      const { width, height } = await getInputSourceResolution(
+        "syphon",
+        identifier
+      );
+      updateSettings({
+        resolution: capResolution(
+          { width, height },
+          settings.pipelineId,
+          settings.inputMode
+        ),
+      });
+    } catch (e) {
+      console.warn("Could not probe Syphon source resolution:", e);
     }
   };
 
@@ -964,6 +1078,142 @@ export function StreamPage() {
     setIsTimelinePlaying(isPlaying);
   };
 
+  // Keep the OSC command handler ref in sync with current state/handlers
+  useEffect(() => {
+    oscCommandHandlerRef.current = (cmd: OscCommand) => {
+      const { key, value } = cmd;
+
+      switch (key) {
+        case "prompt": {
+          const prompts: PromptItem[] = [{ text: String(value), weight: 1.0 }];
+          setPromptItems(prompts);
+
+          if (isStreaming && transitionSteps > 0) {
+            handleTransitionSubmit({
+              target_prompts: prompts,
+              num_steps: transitionSteps,
+              temporal_interpolation_method: temporalInterpolationMethod,
+            });
+          } else {
+            handleLivePromptSubmit(prompts);
+          }
+          break;
+        }
+        case "transition_steps":
+          setTransitionSteps(Number(value));
+          break;
+        case "interpolation_method":
+          setInterpolationMethod(value as "linear" | "slerp");
+          break;
+        case "temporal_interpolation_method":
+          setTemporalInterpolationMethod(value as "linear" | "slerp");
+          break;
+        case "noise_scale":
+          handleNoiseScaleChange(Number(value));
+          break;
+        case "noise_controller":
+          handleNoiseControllerChange(Boolean(value));
+          break;
+        case "kv_cache_attention_bias":
+          handleKvCacheAttentionBiasChange(Number(value));
+          break;
+        case "manage_cache":
+          handleManageCacheChange(Boolean(value));
+          break;
+        case "reset_cache":
+          handleResetCache();
+          break;
+        case "vace_context_scale":
+          handleVaceContextScaleChange(Number(value));
+          break;
+        case "paused":
+          updateSettings({ paused: Boolean(value) });
+          sendParameterUpdate({ paused: Boolean(value) });
+          break;
+        case "input_mode":
+          handleInputModeChange(String(value) as InputMode);
+          break;
+        case "denoising_step_list": {
+          const steps = (Array.isArray(value) ? value : [value])
+            .map(v => Number(v))
+            .filter(v => Number.isFinite(v))
+            .map(v => Math.trunc(v));
+          if (steps.length > 0) {
+            handleDenoisingStepsChange(steps);
+            // Some schema-driven UIs surface denoising as "denoising_steps".
+            // Keep that override in sync so controls visibly update.
+            updateSettings({
+              schemaFieldOverrides: {
+                ...(settings.schemaFieldOverrides ?? {}),
+                denoising_steps: steps,
+              },
+            });
+          }
+          break;
+        }
+        default: {
+          // Pipeline-specific runtime params:
+          // update frontend override state first, then forward to backend.
+          if (pipelineHasRuntimeField(settings.pipelineId, key)) {
+            updateSettings({
+              schemaFieldOverrides: {
+                ...(settings.schemaFieldOverrides ?? {}),
+                [key]: value,
+              },
+            });
+          }
+
+          const updateProcessorOverrides = (
+            processorIds: string[] | undefined,
+            currentOverrides:
+              | Record<string, Record<string, unknown>>
+              | undefined,
+            overridesKey:
+              | "preprocessorSchemaFieldOverrides"
+              | "postprocessorSchemaFieldOverrides"
+          ) => {
+            if (!processorIds?.length) {
+              return;
+            }
+            const nextOverrides = { ...(currentOverrides ?? {}) };
+            let changed = false;
+
+            for (const pid of processorIds) {
+              if (!pipelineHasRuntimeField(pid, key)) {
+                continue;
+              }
+              nextOverrides[pid] = {
+                ...(nextOverrides[pid] ?? {}),
+                [key]: value,
+              };
+              changed = true;
+            }
+
+            if (changed) {
+              updateSettings({ [overridesKey]: nextOverrides });
+            }
+          };
+
+          updateProcessorOverrides(
+            settings.preprocessorIds,
+            settings.preprocessorSchemaFieldOverrides,
+            "preprocessorSchemaFieldOverrides"
+          );
+          updateProcessorOverrides(
+            settings.postprocessorIds,
+            settings.postprocessorSchemaFieldOverrides,
+            "postprocessorSchemaFieldOverrides"
+          );
+
+          if (isStreaming) {
+            sendParameterUpdate({ [key]: value } as Record<string, unknown>);
+          }
+          break;
+        }
+      }
+    };
+  });
+
   // Handle ESC key to exit Edit mode and return to Append mode
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -976,6 +1226,29 @@ export function StreamPage() {
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
+
+  // Subscribe to OSC commands via SSE so each update arrives individually
+  // and triggers its own render tick, giving smooth slider movement.
+  useEffect(() => {
+    const es = new EventSource("/api/v1/osc/stream");
+
+    es.onmessage = event => {
+      try {
+        const cmd = JSON.parse(event.data) as OscCommand;
+        oscCommandHandlerRef.current(cmd);
+      } catch (err) {
+        console.debug("[StreamPage] Failed to parse OSC SSE event:", err);
+      }
+    };
+
+    es.onerror = () => {
+      console.debug(
+        "[StreamPage] OSC SSE connection error; browser will retry"
+      );
+    };
+
+    return () => es.close();
+  }, []);
 
   // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {
@@ -1246,7 +1519,9 @@ export function StreamPage() {
         mode === "spout" && settings.inputSource?.source_type === "spout";
       const isNdiMode =
         mode === "ndi" && settings.inputSource?.source_type === "ndi";
-      const isServerSideInput = isSpoutMode || isNdiMode;
+      const isSyphonMode =
+        mode === "syphon" && settings.inputSource?.source_type === "syphon";
+      const isServerSideInput = isSpoutMode || isNdiMode || isSyphonMode;
 
       // Only send video stream for pipelines that need video input (not in Spout/NDI mode)
       const streamToSend =
@@ -1412,6 +1687,47 @@ export function StreamPage() {
     }
   };
 
+  // Handle workflow import: load settings, timeline, and prompt state
+  const handleWorkflowLoad = useCallback(
+    (
+      importedSettings: Partial<typeof settings>,
+      importedTimeline: TimelinePrompt[],
+      promptState: WorkflowPromptState | null
+    ) => {
+      // Prevent the auto-mode-reset effect from overriding the workflow's inputMode
+      if (importedSettings.pipelineId) {
+        skipNextModeReset(importedSettings.pipelineId);
+      }
+
+      updateSettings(importedSettings);
+
+      // Trigger video source reinitialization if the workflow uses video mode
+      if (
+        importedSettings.inputMode === "video" &&
+        settings.inputMode !== "video"
+      ) {
+        setShouldReinitializeVideo(true);
+        setTimeout(
+          () => setShouldReinitializeVideo(false),
+          VIDEO_REINITIALIZE_DELAY_MS
+        );
+      }
+
+      if (timelineRef.current) {
+        timelineRef.current.loadPrompts(importedTimeline);
+      }
+
+      // Restore active prompt state
+      if (promptState) {
+        setPromptItems(promptState.promptItems);
+        setInterpolationMethod(promptState.interpolationMethod);
+        setTransitionSteps(promptState.transitionSteps);
+        setTemporalInterpolationMethod(promptState.temporalInterpolationMethod);
+      }
+    },
+    [updateSettings, skipNextModeReset, settings.inputMode]
+  );
+
   return (
     <div className="h-screen flex flex-col bg-background">
       {/* Header */}
@@ -1425,9 +1741,9 @@ export function StreamPage() {
       {/* Main Content Area */}
       <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
         {/* Left Panel - Input & Controls */}
-        <div className="w-1/5">
+        <div className="w-1/5 flex flex-col gap-3 min-h-0">
           <InputAndControlsPanel
-            className="h-full"
+            className="flex-1 min-h-0"
             pipelines={pipelines}
             localStream={localStream}
             isInitializing={isInitializing}
@@ -1440,7 +1756,7 @@ export function StreamPage() {
             canStartStream={
               settings.inputMode === "text"
                 ? !isInitializing
-                : mode === "spout" || mode === "ndi"
+                : mode === "spout" || mode === "ndi" || mode === "syphon"
                   ? !isInitializing
                   : !!localStream && !isInitializing
             }
@@ -1478,8 +1794,15 @@ export function StreamPage() {
             onInputModeChange={handleInputModeChange}
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiAvailable}
+            syphonAvailable={syphonAvailable}
             selectedNdiSource={settings.inputSource?.source_name ?? ""}
             onNdiSourceChange={handleNdiSourceChange}
+            selectedSyphonSource={
+              settings.inputSource?.source_type === "syphon"
+                ? (settings.inputSource?.source_name ?? "")
+                : ""
+            }
+            onSyphonSourceChange={handleSyphonSourceChange}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&
@@ -1515,6 +1838,17 @@ export function StreamPage() {
               }
             }}
           />
+          {hasAvailableOutputs && (
+            <OutputsPanel
+              className="flex-shrink-0"
+              outputSinks={settings.outputSinks}
+              onOutputSinkChange={handleOutputSinkChange}
+              spoutAvailable={spoutAvailable}
+              ndiAvailable={ndiOutputAvailable}
+              syphonAvailable={syphonOutputAvailable}
+              isStreaming={isStreaming}
+            />
+          )}
         </div>
 
         {/* Center Panel - Video Output + Timeline */}
@@ -1526,6 +1860,8 @@ export function StreamPage() {
               remoteStream={remoteStream}
               isPipelineLoading={isPipelineLoading}
               isCloudConnecting={isCloudConnecting}
+              cloudConnectStage={connectStage}
+              pipelineLoadingStage={loadingStage}
               isConnecting={isConnecting}
               pipelineError={pipelineError}
               isPlaying={!settings.paused}
@@ -1651,11 +1987,8 @@ export function StreamPage() {
               isCollapsed={isTimelineCollapsed}
               onCollapseToggle={setIsTimelineCollapsed}
               externalSelectedPromptId={externalSelectedPromptId}
-              settings={settings}
-              onSettingsImport={updateSettings}
               onPlayPauseRef={timelinePlayPauseRef}
               onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
-              onResetCache={handleResetCache}
               onTimelinePromptsChange={handleTimelinePromptsChange}
               onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
               onTimelinePlayingChange={handleTimelinePlayingChange}
@@ -1668,14 +2001,16 @@ export function StreamPage() {
               onSaveGeneration={handleSaveGeneration}
               isRecording={isRecording}
               onRecordingToggle={() => setIsRecording(prev => !prev)}
+              onWorkflowExport={() => setShowWorkflowExport(true)}
+              onWorkflowImport={() => setShowWorkflowImport(true)}
             />
           </div>
         </div>
 
-        {/* Right Panel - Settings */}
-        <div className="w-1/5 flex flex-col gap-3">
+        {/* Right Panel - Parameters */}
+        <div className="w-1/5 flex flex-col gap-3 min-h-0">
           <SettingsPanel
-            className="flex-1 min-h-0 overflow-auto"
+            className="flex-1 min-h-0"
             pipelines={pipelines}
             pipelineId={settings.pipelineId}
             onPipelineIdChange={handlePipelineIdChange}
@@ -1720,10 +2055,6 @@ export function StreamPage() {
             loraMergeStrategy={settings.loraMergeStrategy ?? "permanent_merge"}
             inputMode={settings.inputMode}
             supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-            outputSinks={settings.outputSinks}
-            onOutputSinkChange={handleOutputSinkChange}
-            spoutAvailable={spoutAvailable}
-            ndiAvailable={ndiOutputAvailable}
             vaceEnabled={
               settings.vaceEnabled ??
               (pipelines?.[settings.pipelineId]?.supportsVACE &&
@@ -1768,8 +2099,22 @@ export function StreamPage() {
         </div>
       </div>
 
+      {/* Log Panel */}
+      <LogPanel
+        logs={logs}
+        isOpen={isLogPanelOpen}
+        onClose={toggleLogPanel}
+        onClear={clearLogs}
+      />
+
       {/* Status Bar */}
-      <StatusBar fps={webrtcStats.fps} bitrate={webrtcStats.bitrate} />
+      <StatusBar
+        fps={webrtcStats.fps}
+        bitrate={webrtcStats.bitrate}
+        onLogToggle={toggleLogPanel}
+        isLogOpen={isLogPanelOpen}
+        logUnreadCount={logUnreadCount}
+      />
 
       {/* Download Dialog */}
       {pipelinesNeedingModels.length > 0 && (
@@ -1789,6 +2134,31 @@ export function StreamPage() {
           }}
         />
       )}
+
+      {/* Workflow Export Dialog */}
+      <WorkflowExportDialog
+        open={showWorkflowExport}
+        onClose={() => setShowWorkflowExport(false)}
+        settings={settings}
+        timelinePrompts={timelinePrompts}
+        promptState={{
+          promptItems,
+          interpolationMethod,
+          transitionSteps,
+          temporalInterpolationMethod,
+        }}
+      />
+
+      {/* Workflow Import Dialog */}
+      <WorkflowImportDialog
+        open={showWorkflowImport}
+        onClose={() => {
+          setShowWorkflowImport(false);
+          setPreloadedWorkflow(null);
+        }}
+        onLoad={handleWorkflowLoad}
+        initialWorkflow={preloadedWorkflow}
+      />
     </div>
   );
 }

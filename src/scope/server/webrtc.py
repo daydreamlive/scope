@@ -344,7 +344,7 @@ class WebRTCManager:
                     try:
                         # Parse the JSON message
                         data = json.loads(message)
-                        logger.info(f"Received parameter update: {data}")
+                        logger.debug(f"Received parameter update: {data}")
 
                         # Check for paused parameter and call pause() method on video track
                         if "paused" in data and session.video_track:
@@ -433,7 +433,7 @@ class WebRTCManager:
                 initial_parameters = request.initialParameters.model_dump(
                     exclude_none=True
                 )
-            logger.info(f"[CLOUD] Received offer with parameters: {initial_parameters}")
+            logger.info(f"Received offer with parameters: {initial_parameters}")
 
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
@@ -466,13 +466,11 @@ class WebRTCManager:
             # Store relay for cleanup
             session.relay = relay
 
-            logger.info(f"[CLOUD] Created session: {session.id}")
+            logger.info(f"Created session: {session.id}")
 
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
-                logger.info(
-                    f"[CLOUD] Track received: {track.kind} for session {session.id}"
-                )
+                logger.info(f"Track received: {track.kind} for session {session.id}")
                 if track.kind == "video":
                     # Set the browser's video track as the source for the relay
                     cloud_track.set_source_track(track)
@@ -480,7 +478,7 @@ class WebRTCManager:
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
                 logger.info(
-                    f"[CLOUD] Connection state: {pc.connectionState} for session {session.id}"
+                    f"Connection state: {pc.connectionState} for session {session.id}"
                 )
                 if pc.connectionState == "failed":
                     _publish_connection_error(
@@ -501,28 +499,28 @@ class WebRTCManager:
             @pc.on("iceconnectionstatechange")
             async def on_iceconnectionstatechange():
                 logger.info(
-                    f"[CLOUD] ICE state: {pc.iceConnectionState} for session {session.id}"
+                    f"ICE state: {pc.iceConnectionState} for session {session.id}"
                 )
 
             # Handle data channel for parameter updates
             @pc.on("datachannel")
             def on_data_channel(data_channel):
-                logger.info(f"[CLOUD] Data channel: {data_channel.label}")
+                logger.info(f"Data channel: {data_channel.label}")
                 session.data_channel = data_channel
 
                 @data_channel.on("message")
                 def on_data_channel_message(message):
                     try:
                         data = json.loads(message)
-                        logger.info(f"[CLOUD] Parameter update: {data}")
+                        logger.debug(f"Parameter update: {data}")
 
                         # Forward parameters to cloud
                         cloud_track.update_parameters(data)
 
                     except json.JSONDecodeError as e:
-                        logger.error(f"[CLOUD] Failed to parse message: {e}")
+                        logger.error(f"Failed to parse message: {e}")
                     except Exception as e:
-                        logger.error(f"[CLOUD] Error handling message: {e}")
+                        logger.error(f"Error handling message: {e}")
 
             # Set remote description (the offer)
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
@@ -551,7 +549,7 @@ class WebRTCManager:
             }
 
         except Exception as e:
-            logger.error(f"[CLOUD] Error handling offer: {e}")
+            logger.error(f"Error handling offer: {e}")
             _publish_connection_error(
                 session.id if "session" in locals() else None,
                 request.connection_id,
@@ -646,6 +644,16 @@ class WebRTCManager:
         except Exception as e:
             logger.error(f"Failed to add ICE candidate to session {session_id}: {e}")
             raise ValueError(f"Invalid ICE candidate: {e}") from e
+
+    def broadcast_parameter_update(self, parameters: dict) -> None:
+        """Send a parameter update to all active sessions (e.g. from OSC)."""
+        for session in self.sessions.values():
+            if session.pc.connectionState in ("closed", "failed"):
+                continue
+            if "paused" in parameters and session.video_track:
+                session.video_track.pause(parameters["paused"])
+            if session.video_track and hasattr(session.video_track, "frame_processor"):
+                session.video_track.frame_processor.update_parameters(parameters)
 
     async def stop(self):
         """Close and cleanup all sessions."""
