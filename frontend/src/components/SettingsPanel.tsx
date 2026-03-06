@@ -121,6 +121,7 @@ function PluginConfigFields({
                 : undefined
             }
             enumValues={enumValues}
+            midiMappable={isRuntimeParam}
           />
         );
       })}
@@ -789,6 +790,7 @@ export function SettingsPanel({
                             : undefined
                         }
                         enumValues={enumValues}
+                        midiMappable={isRuntimeParam}
                       />
                     );
                   })

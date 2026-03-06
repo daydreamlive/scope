@@ -23,6 +23,7 @@ import type {
   PrimitiveFieldType,
 } from "../lib/schemaSettings";
 import { inferPrimitiveFieldType } from "../lib/schemaSettings";
+import { MIDIMappable } from "./MIDIMappable";
 
 export interface BaseFieldProps {
   fieldKey: string;
@@ -304,6 +305,8 @@ export interface SchemaPrimitiveFieldProps extends BaseFieldProps {
   fieldType?: PrimitiveFieldType;
   /** Enum options from schema $defs when field uses $ref */
   enumValues?: string[];
+  /** Whether this field should be MIDI-mappable (for runtime parameters) */
+  midiMappable?: boolean;
 }
 
 /**
@@ -321,6 +324,7 @@ export function SchemaPrimitiveField({
   tooltip,
   fieldType,
   enumValues,
+  midiMappable = false,
 }: SchemaPrimitiveFieldProps) {
   const resolvedType: PrimitiveFieldType | null =
     fieldType ?? inferPrimitiveFieldType(prop);
@@ -336,18 +340,56 @@ export function SchemaPrimitiveField({
     tooltip: (tooltip ?? prop.description) as string | undefined,
   };
 
-  switch (resolvedType) {
-    case "text":
-      return <TextField key={fieldKey} {...base} />;
-    case "number":
-      return <NumberField key={fieldKey} {...base} />;
-    case "slider":
-      return <SliderField key={fieldKey} {...base} />;
-    case "toggle":
-      return <ToggleField key={fieldKey} {...base} />;
-    case "enum":
-      return <EnumField key={fieldKey} {...base} enumValues={enumValues} />;
-    default:
-      return null;
+  // Determine MIDI mapping type and metadata
+  let mappingType: "continuous" | "toggle" | "enum_cycle" | undefined;
+  let range: { min: number; max: number } | undefined;
+  let enumVals: string[] | undefined;
+
+  if (midiMappable) {
+    if (resolvedType === "toggle") {
+      mappingType = "toggle";
+    } else if (resolvedType === "enum") {
+      mappingType = "enum_cycle";
+      enumVals = enumValues ?? (prop.enum as string[]) ?? undefined;
+    } else if (resolvedType === "slider" || resolvedType === "number") {
+      mappingType = "continuous";
+      const min = typeof prop.minimum === "number" ? prop.minimum : 0;
+      const max = typeof prop.maximum === "number" ? prop.maximum : 100;
+      range = { min, max };
+    }
   }
+
+  const fieldComponent = (() => {
+    switch (resolvedType) {
+      case "text":
+        return <TextField key={fieldKey} {...base} />;
+      case "number":
+        return <NumberField key={fieldKey} {...base} />;
+      case "slider":
+        return <SliderField key={fieldKey} {...base} />;
+      case "toggle":
+        return <ToggleField key={fieldKey} {...base} />;
+      case "enum":
+        return <EnumField key={fieldKey} {...base} enumValues={enumValues} />;
+      default:
+        return null;
+    }
+  })();
+
+  if (!fieldComponent) return null;
+
+  if (midiMappable && mappingType) {
+    return (
+      <MIDIMappable
+        parameterId={fieldKey}
+        mappingType={mappingType}
+        range={range}
+        enumValues={enumVals}
+      >
+        {fieldComponent}
+      </MIDIMappable>
+    );
+  }
+
+  return fieldComponent;
 }

@@ -956,6 +956,7 @@ export function InputAndControlsPanel({
                       label={ui.label}
                       fieldType={primitiveType}
                       enumValues={enumValues}
+                      midiMappable={isRuntimeParam}
                     />
                   );
                 })}

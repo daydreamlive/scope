@@ -7,7 +7,9 @@ interface MIDIMappableProps {
   parameterId?: string;
   arrayIndex?: number;
   actionId?: string;
-  mappingType?: "continuous" | "toggle" | "trigger";
+  mappingType?: "continuous" | "toggle" | "trigger" | "enum_cycle";
+  range?: { min: number; max: number };
+  enumValues?: string[];
   className?: string;
   disabled?: boolean;
 }
@@ -18,6 +20,8 @@ export function MIDIMappable({
   arrayIndex,
   actionId,
   mappingType,
+  range,
+  enumValues,
   className,
   disabled = false,
 }: MIDIMappableProps) {
@@ -51,7 +55,7 @@ export function MIDIMappable({
       e.preventDefault();
       e.stopPropagation();
       if (parameterId || actionId) {
-        startLearning(parameterId || "", arrayIndex, actionId, mappingType);
+        startLearning(parameterId || "", arrayIndex, actionId, mappingType, range, enumValues);
       }
     }
   };
