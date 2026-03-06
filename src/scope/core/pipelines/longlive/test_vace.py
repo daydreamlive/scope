@@ -491,7 +491,7 @@ def main():
     print("Initializing pipeline...")
 
     vace_path = str(
-        get_model_file_path("Wan2.1-VACE-1.3B/diffusion_pytorch_model.safetensors")
+        get_model_file_path("WanVideo_comfy/Wan2_1-VACE_module_1_3B_bf16.safetensors")
     )
 
     pipeline_config = OmegaConf.create(
