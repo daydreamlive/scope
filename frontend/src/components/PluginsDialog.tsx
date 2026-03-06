@@ -264,6 +264,7 @@ export function PluginsDialog({
                   .filter((s): s is string => !!s)}
                 isInstalling={isInstalling}
                 disabled={disabled}
+                cloudConnected={cloudConnected}
               />
             </TabsContent>
           </div>
