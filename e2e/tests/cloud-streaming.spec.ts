@@ -21,7 +21,9 @@ test.describe("Cloud Streaming", () => {
 
     // Navigate to the app (running at localhost:8000)
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await expect(
+      page.locator("h1", { hasText: "Daydream Scope" })
+    ).toBeVisible({ timeout: 15000 });
 
     // Take screenshot after initial load — app loads directly into the streaming interface
     await page.screenshot({ path: "test-results/01-initial-load.png" });
