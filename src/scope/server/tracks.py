@@ -60,20 +60,36 @@ class VideoProcessingTrack(MediaStreamTrack):
 
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
+        consecutive_errors = 0
+        max_consecutive_errors = 10
         while self.input_task_running:
             try:
                 input_frame = await self.track.recv()
+                consecutive_errors = 0
 
                 # Store raw VideoFrame for later processing (tracks input FPS internally)
                 self.frame_processor.put(input_frame)
 
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                # Stop the input loop on connection errors to avoid spam
-                logger.error(f"Error in input loop, stopping: {e}")
+            except MediaStreamError:
+                logger.info("Source track ended")
                 self.input_task_running = False
                 break
+            except Exception as e:
+                consecutive_errors += 1
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.error(
+                        f"Error in input loop, stopping after "
+                        f"{consecutive_errors} consecutive errors: {e}"
+                    )
+                    self.input_task_running = False
+                    break
+                logger.warning(
+                    f"Transient error in input loop "
+                    f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+                )
+                await asyncio.sleep(0.01)
 
     # Copied from https://github.com/livepeer/fastworld/blob/e649ef788cd33d78af6d8e1da915cd933761535e/backend/track.py#L267
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
