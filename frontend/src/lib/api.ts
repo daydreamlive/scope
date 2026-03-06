@@ -939,3 +939,39 @@ export const downloadLoRA = async (
   }
   return response.json();
 };
+
+// ---------------------------------------------------------------------------
+// Daydream API – workflow import from community hub
+// ---------------------------------------------------------------------------
+
+const DAYDREAM_API_BASE =
+  (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
+  "https://api.daydream.live";
+
+export const fetchDaydreamWorkflow = async (
+  workflowId: string
+): Promise<ScopeWorkflow> => {
+  const response = await fetch(
+    `${DAYDREAM_API_BASE}/v1/workflows/${encodeURIComponent(workflowId)}`
+  );
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(`Failed to fetch workflow: ${detail}`);
+  }
+  const data = await response.json();
+
+  const workflow: ScopeWorkflow | undefined = data.workflowData;
+  if (
+    !workflow ||
+    workflow.format !== "scope-workflow" ||
+    !workflow.metadata?.name ||
+    !Array.isArray(workflow.pipelines) ||
+    workflow.pipelines.length === 0
+  ) {
+    throw new Error(
+      "The fetched workflow is missing required data (workflowData, metadata, or pipelines)."
+    );
+  }
+
+  return workflow;
+};

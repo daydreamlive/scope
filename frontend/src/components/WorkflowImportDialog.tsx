@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import {
   CheckCircle2,
   XCircle,
@@ -66,6 +66,7 @@ interface WorkflowImportDialogProps {
     timelinePrompts: TimelinePrompt[],
     promptState: WorkflowPromptState | null
   ) => void;
+  initialWorkflow?: ScopeWorkflow | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -144,6 +145,7 @@ export function WorkflowImportDialog({
   open,
   onClose,
   onLoad,
+  initialWorkflow,
 }: WorkflowImportDialogProps) {
   const [step, setStep] = useState<ImportStep>("select");
   const [workflow, setWorkflow] = useState<ScopeWorkflow | null>(null);
@@ -219,6 +221,59 @@ export function WorkflowImportDialog({
     setValidating(false);
     onClose();
   }, [onClose, loras.reset, plugins.reset]);
+
+  // -----------------------------------------------------------------------
+  // Auto-resolve when opened with a preloaded workflow (e.g. from deeplink)
+  // -----------------------------------------------------------------------
+
+  useEffect(() => {
+    if (!open || !initialWorkflow) return;
+
+    let cancelled = false;
+    (async () => {
+      try {
+        setValidating(true);
+        setWorkflow(initialWorkflow);
+
+        const resolution = await resolveWorkflow(initialWorkflow);
+        if (cancelled) return;
+        setPlan(resolution);
+
+        loras.initialize(
+          resolution.items
+            .filter(i => i.kind === "lora" && i.status === "missing")
+            .map(i => i.name)
+        );
+        plugins.initialize(
+          resolution.items
+            .filter(
+              i =>
+                i.kind === "plugin" &&
+                i.status === "missing" &&
+                i.can_auto_resolve
+            )
+            .map(i => i.name)
+        );
+
+        setStep("review");
+      } catch (err) {
+        if (cancelled) return;
+        console.error("Workflow resolution failed:", err);
+        toast.error("Failed to resolve workflow", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+        handleClose();
+      } finally {
+        if (!cancelled) setValidating(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+    // Only re-run when the dialog opens with a new initialWorkflow reference
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, initialWorkflow]);
 
   // -----------------------------------------------------------------------
   // File selection and validation
