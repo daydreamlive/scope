@@ -22,7 +22,6 @@ import type {
 import { getInputSourceSources, getInputSourceStreamUrl } from "../lib/api";
 import type { ExtensionMode, InputMode, PipelineInfo } from "../types";
 import { PromptInput } from "./PromptInput";
-import { PromptSlots } from "./PromptSlots";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
 import { ImageManager } from "./ImageManager";
@@ -57,11 +56,6 @@ interface InputAndControlsPanelProps {
   onPromptsChange: (prompts: PromptItem[]) => void;
   onPromptsSubmit: (prompts: PromptItem[]) => void;
   onTransitionSubmit: (transition: PromptTransition) => void;
-  // Prompt slots (alternative to single prompt input)
-  promptSlots?: Array<{ text: string }>;
-  activePromptSlotIndex?: number;
-  onPromptSlotsChange?: (slots: Array<{ text: string }>) => void;
-  onActivePromptSlotChange?: (index: number) => void;
   interpolationMethod: "linear" | "slerp";
   onInterpolationMethodChange: (method: "linear" | "slerp") => void;
   temporalInterpolationMethod: "linear" | "slerp";
@@ -140,10 +134,6 @@ export function InputAndControlsPanel({
   onPromptsChange,
   onPromptsSubmit,
   onTransitionSubmit,
-  promptSlots,
-  activePromptSlotIndex,
-  onPromptSlotsChange,
-  onActivePromptSlotChange,
   interpolationMethod,
   onInterpolationMethodChange,
   temporalInterpolationMethod,
@@ -826,25 +816,6 @@ export function InputAndControlsPanel({
                       pipeline?.defaultSpatialInterpolationMethod
                     }
                   />
-                ) : // Show PromptSlots if promptSlots prop is provided, otherwise show PromptInput
-                promptSlots &&
-                  activePromptSlotIndex !== undefined &&
-                  onPromptSlotsChange &&
-                  onActivePromptSlotChange ? (
-                  <PromptSlots
-                    slots={promptSlots}
-                    activeSlotIndex={activePromptSlotIndex}
-                    onSlotsChange={onPromptSlotsChange}
-                    onActiveSlotChange={onActivePromptSlotChange}
-                    disabled={
-                      (_isTimelinePlaying &&
-                        !isVideoPaused &&
-                        !isAtEndOfTimeline()) ||
-                      (!selectedTimelinePrompt &&
-                        isVideoPaused &&
-                        !isAtEndOfTimeline())
-                    }
-                  />
                 ) : (
                   <PromptInput
                     prompts={prompts}
@@ -880,6 +851,7 @@ export function InputAndControlsPanel({
                     }
                   />
                 )}
+
               </div>
             );
           })()}

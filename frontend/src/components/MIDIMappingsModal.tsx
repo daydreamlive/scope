@@ -29,11 +29,11 @@ function formatControllerInfo(mapping: MIDIMapping): string {
 function formatTargetInfo(mapping: MIDIMapping): string {
   if (mapping.target.action) {
     const actionNames: Record<string, string> = {
-      switch_prompt: "Switch Prompt",
-      switch_prompt_0: "Switch Prompt 0",
-      switch_prompt_1: "Switch Prompt 1",
-      switch_prompt_2: "Switch Prompt 2",
-      switch_prompt_3: "Switch Prompt 3",
+      switch_prompt: "Solo Prompt",
+      switch_prompt_0: "Solo Prompt 1",
+      switch_prompt_1: "Solo Prompt 2",
+      switch_prompt_2: "Solo Prompt 3",
+      switch_prompt_3: "Solo Prompt 4",
       reset_cache: "Reset Cache",
       toggle_pause: "Toggle Pause",
       add_denoising_step: "Add Denoising Step",
@@ -43,6 +43,9 @@ function formatTargetInfo(mapping: MIDIMapping): string {
   }
   if (mapping.target.parameter) {
     const paramName = mapping.target.parameter;
+    if (paramName === "prompt_weight" && mapping.target.arrayIndex !== undefined) {
+      return `Prompt Blend ${mapping.target.arrayIndex + 1}`;
+    }
     if (mapping.target.arrayIndex !== undefined) {
       return `${paramName}[${mapping.target.arrayIndex}]`;
     }

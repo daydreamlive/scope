@@ -16,6 +16,7 @@ export interface MIDIControllerConfig {
   currentNoiseController?: boolean;
   currentManageCache?: boolean;
   onSwitchPrompt?: (index: number) => void;
+  onPromptWeightChange?: (index: number, weight: number) => void;
   onParameterActivity?: (paramId: string) => void;
   onPlayPauseToggle?: () => void;
   onFirstFrameAndResetCache?: () => void;
@@ -35,6 +36,7 @@ export function useMIDIController(
     currentNoiseController,
     currentManageCache,
     onSwitchPrompt,
+    onPromptWeightChange,
     onParameterActivity,
     onPlayPauseToggle,
     onFirstFrameAndResetCache,
@@ -72,6 +74,7 @@ export function useMIDIController(
   const onDenoisingStepsChangeRef = useRef(onDenoisingStepsChange);
   const onLearnCompleteRef = useRef(onLearnComplete);
   const onSwitchPromptRef = useRef(onSwitchPrompt);
+  const onPromptWeightChangeRef = useRef(onPromptWeightChange);
   const onParameterActivityRef = useRef(onParameterActivity);
   const onPlayPauseToggleRef = useRef(onPlayPauseToggle);
   const onFirstFrameAndResetCacheRef = useRef(onFirstFrameAndResetCache);
@@ -83,6 +86,7 @@ export function useMIDIController(
   onDenoisingStepsChangeRef.current = onDenoisingStepsChange;
   onLearnCompleteRef.current = onLearnComplete;
   onSwitchPromptRef.current = onSwitchPrompt;
+  onPromptWeightChangeRef.current = onPromptWeightChange;
   onParameterActivityRef.current = onParameterActivity;
   onPlayPauseToggleRef.current = onPlayPauseToggle;
   onFirstFrameAndResetCacheRef.current = onFirstFrameAndResetCache;
@@ -268,6 +272,21 @@ export function useMIDIController(
             denoising_step_list: steps,
           });
           notifyActivity?.(`denoising_step_list[${idx}]`);
+          continue;
+        }
+
+        if (
+          mapping.target.parameter === "prompt_weight" &&
+          mapping.target.arrayIndex !== undefined
+        ) {
+          const idx = mapping.target.arrayIndex;
+          const min = mapping.range?.min ?? 0;
+          const max = mapping.range?.max ?? 100;
+          const normalized = value / 127.0;
+          const mappedWeight = Math.round(min + normalized * (max - min));
+
+          onPromptWeightChangeRef.current?.(idx, mappedWeight);
+          notifyActivity?.(`prompt_weight[${idx}]`);
           continue;
         }
 

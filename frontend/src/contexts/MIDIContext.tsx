@@ -96,6 +96,7 @@ interface MIDIProviderProps {
   currentNoiseController?: boolean;
   currentManageCache?: boolean;
   onSwitchPrompt?: (index: number) => void;
+  onPromptWeightChange?: (index: number, weight: number) => void;
   onPlayPauseToggle?: () => void;
   onFirstFrameAndResetCache?: () => void;
 }
@@ -108,6 +109,7 @@ export function MIDIProvider({
   currentNoiseController,
   currentManageCache,
   onSwitchPrompt,
+  onPromptWeightChange,
   onPlayPauseToggle,
   onFirstFrameAndResetCache,
 }: MIDIProviderProps) {
@@ -430,6 +432,7 @@ export function MIDIProvider({
     currentNoiseController,
     currentManageCache,
     onSwitchPrompt,
+    onPromptWeightChange,
     onParameterActivity: markParameterActive,
     onPlayPauseToggle,
     onFirstFrameAndResetCache,

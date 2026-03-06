@@ -164,16 +164,6 @@ export function StreamPage() {
   // Prompt state - use unified default prompts based on mode
   const initialMode =
     settings.inputMode || getPipelineDefaultMode(settings.pipelineId);
-  // Prompt slots: up to 4 prompts that can be switched between
-  const [promptSlots, setPromptSlots] = useState<Array<{ text: string }>>([
-    { text: getDefaultPromptForMode(initialMode) },
-    { text: "" },
-    { text: "" },
-    { text: "" },
-  ]);
-  const [activePromptSlotIndex, setActivePromptSlotIndex] = useState(0);
-
-  // Legacy promptItems for compatibility with existing components
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
     { text: getDefaultPromptForMode(initialMode), weight: 100 },
   ]);
@@ -447,6 +437,15 @@ export function StreamPage() {
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
     setPromptItems(prompts);
   };
+
+  const buildSoloPromptItems = useCallback(
+    (index: number) =>
+      promptItems.map((prompt, promptIndex) => ({
+        ...prompt,
+        weight: promptIndex === index ? 100 : 0,
+      })),
+    [promptItems]
+  );
 
   const handleTransitionSubmit = (transition: PromptTransition) => {
     setPromptItems(transition.target_prompts);
@@ -1106,7 +1105,7 @@ export function StreamPage() {
     }
   };
 
-  const handleLivePromptSubmit = (prompts: PromptItem[]) => {
+  const handleLivePromptSubmit = useCallback((prompts: PromptItem[]) => {
     // Use the timeline ref to submit the prompt
     if (timelineRef.current) {
       timelineRef.current.submitLivePrompt(prompts);
@@ -1119,7 +1118,68 @@ export function StreamPage() {
       prompt_interpolation_method: interpolationMethod,
       denoising_step_list: settings.denoisingSteps || [700, 500],
     });
-  };
+  }, [interpolationMethod, sendParameterUpdate, settings.denoisingSteps]);
+
+  const handleMidiPromptSolo = useCallback(
+    (index: number) => {
+      if (index < 0 || index >= promptItems.length) return;
+
+      const newPromptItems = buildSoloPromptItems(index);
+      setPromptItems(newPromptItems);
+
+      if (isStreaming) {
+        handleLivePromptSubmit(newPromptItems);
+      }
+    },
+    [buildSoloPromptItems, handleLivePromptSubmit, isStreaming, promptItems.length]
+  );
+
+  const handleMidiPromptWeightChange = useCallback(
+    (index: number, weight: number) => {
+      if (index < 0 || index >= promptItems.length) return;
+
+      const nextPromptItems = [...promptItems];
+      const remainingWeight = 100 - weight;
+      const otherWeightsSum = promptItems.reduce(
+        (sum, prompt, promptIndex) =>
+          promptIndex === index ? sum : sum + prompt.weight,
+        0
+      );
+
+      nextPromptItems[index] = { ...nextPromptItems[index], weight };
+
+      if (promptItems.length > 1) {
+        if (otherWeightsSum > 0) {
+          nextPromptItems.forEach((prompt, promptIndex) => {
+            if (promptIndex !== index) {
+              const proportion = promptItems[promptIndex].weight / otherWeightsSum;
+              nextPromptItems[promptIndex] = {
+                ...prompt,
+                weight: remainingWeight * proportion,
+              };
+            }
+          });
+        } else {
+          const evenWeight = remainingWeight / (promptItems.length - 1);
+          nextPromptItems.forEach((prompt, promptIndex) => {
+            if (promptIndex !== index) {
+              nextPromptItems[promptIndex] = {
+                ...prompt,
+                weight: evenWeight,
+              };
+            }
+          });
+        }
+      }
+
+      setPromptItems(nextPromptItems);
+
+      if (isStreaming) {
+        handleLivePromptSubmit(nextPromptItems);
+      }
+    },
+    [handleLivePromptSubmit, isStreaming, promptItems]
+  );
 
   const handleTimelinePromptEdit = (prompt: TimelinePrompt | null) => {
     setSelectedTimelinePrompt(prompt);
@@ -1806,19 +1866,8 @@ export function StreamPage() {
       onDenoisingStepsChange={handleDenoisingStepsChange}
       currentNoiseController={settings.noiseController}
       currentManageCache={settings.manageCache}
-      onSwitchPrompt={index => {
-        if (index >= 0 && index < promptSlots.length) {
-          setActivePromptSlotIndex(index);
-          // Update promptItems to reflect the active slot
-          const activePrompt = promptSlots[index];
-          const newPromptItems = [{ text: activePrompt.text, weight: 100 }];
-          setPromptItems(newPromptItems);
-          // Update timeline and backend if streaming
-          if (isStreaming) {
-            handleLivePromptSubmit(newPromptItems);
-          }
-        }
-      }}
+      onSwitchPrompt={handleMidiPromptSolo}
+      onPromptWeightChange={handleMidiPromptWeightChange}
       onPlayPauseToggle={handlePlayPauseToggle}
       onFirstFrameAndResetCache={() => {
         handleSendExtensionFrames();
@@ -1973,31 +2022,6 @@ export function StreamPage() {
               onPromptsChange={setPromptItems}
               onPromptsSubmit={handlePromptsSubmit}
               onTransitionSubmit={handleTransitionSubmit}
-              promptSlots={promptSlots}
-              activePromptSlotIndex={activePromptSlotIndex}
-              onPromptSlotsChange={slots => {
-                setPromptSlots(slots);
-                // Sync active slot to promptItems
-                if (slots[activePromptSlotIndex]?.text) {
-                  setPromptItems([
-                    { text: slots[activePromptSlotIndex].text, weight: 100 },
-                  ]);
-                }
-              }}
-              onActivePromptSlotChange={index => {
-                setActivePromptSlotIndex(index);
-                // Update promptItems to reflect the active slot
-                if (promptSlots[index]?.text) {
-                  const newPromptItems = [
-                    { text: promptSlots[index].text, weight: 100 },
-                  ];
-                  setPromptItems(newPromptItems);
-                  // Update timeline and backend if streaming
-                  if (isStreaming) {
-                    handleLivePromptSubmit(newPromptItems);
-                  }
-                }
-              }}
               interpolationMethod={interpolationMethod}
               onInterpolationMethodChange={setInterpolationMethod}
               temporalInterpolationMethod={temporalInterpolationMethod}

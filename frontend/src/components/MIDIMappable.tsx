@@ -11,6 +11,8 @@ interface MIDIMappableProps {
   range?: { min: number; max: number };
   enumValues?: string[];
   className?: string;
+  mappingModeClassName?: string;
+  overlayClassName?: string;
   disabled?: boolean;
 }
 
@@ -23,6 +25,8 @@ export function MIDIMappable({
   range,
   enumValues,
   className,
+  mappingModeClassName,
+  overlayClassName,
   disabled = false,
 }: MIDIMappableProps) {
   const {
@@ -96,14 +100,26 @@ export function MIDIMappable({
       className={cn(
         "relative",
         isMappingMode && !disabled && "cursor-pointer p-1.5",
+        isMappingMode && !disabled && mappingModeClassName,
         className
       )}
       onClick={handleClick}
     >
+      {isLearning && (
+        <div className="pointer-events-none absolute right-full top-1/2 z-30 mr-3 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap rounded-md border border-blue-500/40 bg-background/95 px-2 py-1 text-xs font-medium text-blue-400 shadow-sm">
+          <div className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+            <span className="h-1.5 w-1.5 rounded-full bg-blue-400/80 animate-pulse [animation-delay:150ms]" />
+          </div>
+          <span>Listening for MIDI input</span>
+        </div>
+      )}
+
       {isMappingMode && !disabled && (
         <div
           className={cn(
             "absolute inset-0 z-10 rounded-md border-2 transition-all",
+            overlayClassName,
             isLearning
               ? "border-blue-500 bg-blue-500/10 animate-pulse"
               : isMapped && isActive
@@ -113,19 +129,16 @@ export function MIDIMappable({
                   : "border-blue-400/50 bg-blue-400/5 hover:border-blue-400 hover:bg-blue-400/10"
           )}
           style={{ pointerEvents: "auto" }}
-        >
-          {isLearning && (
-            <div className="absolute inset-0 flex items-center justify-center bg-blue-500/80 rounded-md">
-              <span className="text-xs font-semibold text-white">
-                Waiting for MIDI...
-              </span>
-            </div>
-          )}
-        </div>
+        />
       )}
 
       {justMapped && (
-        <div className="absolute inset-0 z-20 rounded-md border-2 border-green-500 bg-green-500/20 animate-pulse" />
+        <div
+          className={cn(
+            "absolute inset-0 z-20 rounded-md border-2 border-green-500 bg-green-500/20 animate-pulse",
+            overlayClassName
+          )}
+        />
       )}
 
       {isMapped && !isMappingMode && (
