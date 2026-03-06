@@ -19,7 +19,11 @@ interface AddNodeModalProps {
       | "control"
       | "math"
       | "note"
-      | "output",
+      | "output"
+      | "slider"
+      | "knobs"
+      | "xypad"
+      | "tuple",
     subType?: string
   ) => void;
 }
@@ -33,7 +37,11 @@ interface NodeCatalogItem {
     | "control"
     | "math"
     | "note"
-    | "output";
+    | "output"
+    | "slider"
+    | "knobs"
+    | "xypad"
+    | "tuple";
   subType?: string;
   name: string;
   description: string;
@@ -134,9 +142,37 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#fbbf24",
     category: "Utility",
   },
+  {
+    type: "slider",
+    name: "Slider",
+    description: "Horizontal slider for a single numeric value with min/max/step",
+    color: "#a78bfa",
+    category: "UI",
+  },
+  {
+    type: "knobs",
+    name: "Knobs",
+    description: "Multi-knob console with dynamic add/remove and per-knob range",
+    color: "#f472b6",
+    category: "UI",
+  },
+  {
+    type: "xypad",
+    name: "XY Pad",
+    description: "2D touch pad outputting X and Y values for two-axis control",
+    color: "#38bdf8",
+    category: "UI",
+  },
+  {
+    type: "tuple",
+    name: "Tuple",
+    description: "Dynamic list of numbers with ordering constraints (e.g. denoising steps)",
+    color: "#fb923c",
+    category: "UI",
+  },
 ];
 
-const CATEGORIES = ["All", "I/O", "Values", "Controls", "Utility"];
+const CATEGORIES = ["All", "I/O", "Values", "Controls", "UI", "Utility"];
 
 interface TooltipState {
   text: string;

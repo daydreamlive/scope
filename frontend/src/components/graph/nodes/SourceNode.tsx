@@ -58,7 +58,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const [isDiscoveringSyphon, setIsDiscoveringSyphon] = useState(false);
 
   useEffect(() => {
-    if (videoRef.current && localStream) {
+    if (videoRef.current && localStream instanceof MediaStream) {
       videoRef.current.srcObject = localStream;
     }
   }, [localStream]);

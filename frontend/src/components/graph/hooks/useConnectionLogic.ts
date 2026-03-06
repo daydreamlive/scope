@@ -79,7 +79,8 @@ export function useConnectionLogic(
 
         if (!sourceNode || !targetNode) return false;
 
-        let sourceType: "string" | "number" | "boolean" | undefined;
+        // Determine source output type
+        let sourceType: "string" | "number" | "boolean" | "list_number" | undefined;
 
         if (sourceNode.data.nodeType === "value") {
           sourceType = sourceNode.data.valueType;
@@ -88,6 +89,14 @@ export function useConnectionLogic(
           sourceType = controlType === "string" ? "string" : "number";
         } else if (sourceNode.data.nodeType === "math") {
           sourceType = "number";
+        } else if (
+          sourceNode.data.nodeType === "slider" ||
+          sourceNode.data.nodeType === "knobs" ||
+          sourceNode.data.nodeType === "xypad"
+        ) {
+          sourceType = "number";
+        } else if (sourceNode.data.nodeType === "tuple") {
+          sourceType = "list_number";
         }
 
         if (!sourceType) return false;
@@ -104,12 +113,35 @@ export function useConnectionLogic(
           );
         }
 
+        // UI node input handles accept specific types
+        if (
+          targetNode.data.nodeType === "slider" ||
+          targetNode.data.nodeType === "knobs" ||
+          targetNode.data.nodeType === "xypad"
+        ) {
+          return sourceType === "number";
+        }
+        if (targetNode.data.nodeType === "tuple") {
+          // Array-level input (param:value) accepts list_number or number
+          if (targetParsed.name === "value") {
+            return sourceType === "list_number" || sourceType === "number";
+          }
+          // Per-row inputs (param:row_N) accept individual numbers
+          if (targetParsed.name.startsWith("row_")) {
+            return sourceType === "number";
+          }
+          return false;
+        }
+
         const targetParam = targetNode.data.parameterInputs?.find(
           p => p.name === targetParsed.name
         );
         if (!targetParam) return false;
 
         if (targetParam.type === "list_number" && sourceType === "number") {
+          return true;
+        }
+        if (targetParam.type === "list_number" && sourceType === "list_number") {
           return true;
         }
 

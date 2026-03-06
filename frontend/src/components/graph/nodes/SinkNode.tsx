@@ -15,7 +15,7 @@ export function SinkNode({ data, selected }: NodeProps<SinkNodeType>) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
-    if (videoRef.current && remoteStream) {
+    if (videoRef.current && remoteStream instanceof MediaStream) {
       videoRef.current.srcObject = remoteStream;
     }
   }, [remoteStream]);

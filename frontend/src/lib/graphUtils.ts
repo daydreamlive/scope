@@ -43,7 +43,11 @@ export interface FlowNodeData {
     | "control"
     | "math"
     | "note"
-    | "output";
+    | "output"
+    | "slider"
+    | "knobs"
+    | "xypad"
+    | "tuple";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -131,6 +135,41 @@ export interface FlowNodeData {
   promptText?: string;
   /** For pipeline nodes: callback when prompt text changes */
   onPromptChange?: (nodeId: string, text: string) => void;
+
+  /* ── Slider node fields ── */
+  /** For slider nodes: minimum value */
+  sliderMin?: number;
+  /** For slider nodes: maximum value */
+  sliderMax?: number;
+  /** For slider nodes: step size */
+  sliderStep?: number;
+
+  /* ── Knobs node fields ── */
+  /** For knobs nodes: array of knob definitions */
+  knobs?: Array<{ label: string; min: number; max: number; value: number }>;
+
+  /* ── XY Pad node fields ── */
+  padMinX?: number;
+  padMaxX?: number;
+  padMinY?: number;
+  padMaxY?: number;
+  padX?: number;
+  padY?: number;
+
+  /* ── Tuple node fields ── */
+  /** For tuple nodes: the array of values */
+  tupleValues?: number[];
+  /** For tuple nodes: minimum for each value */
+  tupleMin?: number;
+  /** For tuple nodes: maximum for each value */
+  tupleMax?: number;
+  /** For tuple nodes: step for each value */
+  tupleStep?: number;
+  /** For tuple nodes: whether to enforce ordering */
+  tupleEnforceOrder?: boolean;
+  /** For tuple nodes: ordering direction */
+  tupleOrderDirection?: "asc" | "desc";
+
   [key: string]: unknown;
 }
 
@@ -305,13 +344,13 @@ export function graphConfigToFlow(
       data: {
         label: n.id,
         nodeType: "source",
-        sourceMode: n.source_mode as
+        sourceMode: (n.source_mode as
           | "video"
           | "camera"
           | "spout"
           | "ndi"
           | "syphon"
-          | undefined,
+          | undefined) ?? "video",
         sourceName: n.source_name ?? undefined,
       },
     });
@@ -438,6 +477,10 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "math",
   "note",
   "output",
+  "slider",
+  "knobs",
+  "xypad",
+  "tuple",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
@@ -631,7 +674,7 @@ export function linearGraphFromSettings(
 ): GraphConfig {
   const allIds = [...preprocessorIds, pipelineId, ...postprocessorIds];
   const nodes: GraphNode[] = [
-    { id: "input", type: "source" },
+    { id: "input", type: "source", source_mode: "video" },
     ...allIds.map(pid => ({
       id: pid,
       type: "pipeline" as const,

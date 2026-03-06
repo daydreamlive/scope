@@ -1,4 +1,4 @@
-import { type ReactNode, useState, useRef, useLayoutEffect } from "react";
+import { type ReactNode, useState, useRef, useEffect } from "react";
 import { NodeResizer } from "@xyflow/react";
 import { NODE_TOKENS } from "./tokens";
 
@@ -19,11 +19,29 @@ export function NodeCard({
   const measureRef = useRef<HTMLDivElement>(null);
   const [minH, setMinH] = useState(60);
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     if (!autoMinHeight || !measureRef.current) return;
-    const h = measureRef.current.offsetHeight;
-    setMinH(prev => (Math.abs(h - prev) > 1 ? h : prev));
-  });
+
+    const el = measureRef.current;
+
+    const measure = () => {
+      // Use scrollHeight for natural content height
+      const h = el.scrollHeight;
+      setMinH(prev => (Math.abs(h - prev) > 2 ? h : prev));
+    };
+
+    // Measure
+    measure();
+
+    // Watch for size changes
+    // ResizeObserver fires when the element's dimensions change, so we
+    // don't need `children` as a dependency (which would cause infinite
+    // loops since JSX children are new objects on every render).
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+
+    return () => ro.disconnect();
+  }, [autoMinHeight]);
 
   return (
     <div

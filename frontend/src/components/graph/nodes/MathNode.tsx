@@ -14,7 +14,7 @@ import {
   useCallback,
 } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
-import { buildHandleId } from "../../../lib/graphUtils";
+import { buildHandleId, parseHandleId } from "../../../lib/graphUtils";
 import {
   NodeCard,
   NodeHeader,
@@ -58,7 +58,10 @@ function isUnaryOp(op: string): boolean {
   return UNARY_OPS.has(op);
 }
 
-function getValueFromNode(node: Node<FlowNodeData>): number | null {
+function getValueFromNode(
+  node: Node<FlowNodeData>,
+  sourceHandleId?: string | null
+): number | null {
   if (node.data.nodeType === "value") {
     const val = node.data.value;
     if (typeof val === "number") return val;
@@ -67,6 +70,28 @@ function getValueFromNode(node: Node<FlowNodeData>): number | null {
   if (node.data.nodeType === "control" || node.data.nodeType === "math") {
     const val = node.data.currentValue;
     if (typeof val === "number") return val;
+    return null;
+  }
+  if (node.data.nodeType === "slider") {
+    const val = node.data.value;
+    if (typeof val === "number") return val;
+    return null;
+  }
+  if (node.data.nodeType === "knobs") {
+    const knobs = node.data.knobs;
+    if (!knobs || !sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    const idx = parseInt(parsed.name.replace("knob_", ""), 10);
+    if (isNaN(idx) || idx >= knobs.length) return null;
+    return knobs[idx].value;
+  }
+  if (node.data.nodeType === "xypad") {
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    if (parsed.name === "x") return node.data.padX ?? null;
+    if (parsed.name === "y") return node.data.padY ?? null;
     return null;
   }
   return null;
@@ -79,7 +104,7 @@ function computeResult(
 ): number | null {
   if (a === null) return null;
 
-  // Unary operations only need A
+  // Unary ops
   switch (op) {
     case "abs":
       return Math.abs(a);
@@ -99,7 +124,7 @@ function computeResult(
       return a + 0.0; // identity — ensures float representation
   }
 
-  // Binary operations need both A and B
+  // Binary ops
   if (b === null) return null;
 
   switch (op) {
@@ -131,7 +156,7 @@ export function MathNode({ id, data, selected }: NodeProps<MathNodeType>) {
   const operation = data.mathOp || "add";
   const unary = isUnaryOp(operation);
 
-  // Find edges connected to input handles
+  // Find input edges
   const edgeA = edges.find(
     e => e.target === id && e.targetHandle === buildHandleId("param", "a")
   );
@@ -146,13 +171,17 @@ export function MathNode({ id, data, selected }: NodeProps<MathNodeType>) {
   const sourceNodeB = edgeB ? allNodes.find(n => n.id === edgeB.source) : null;
 
   // Extract values
-  const valueA = sourceNodeA ? getValueFromNode(sourceNodeA) : null;
-  const valueB = sourceNodeB ? getValueFromNode(sourceNodeB) : null;
+  const valueA = sourceNodeA
+    ? getValueFromNode(sourceNodeA, edgeA?.sourceHandle)
+    : null;
+  const valueB = sourceNodeB
+    ? getValueFromNode(sourceNodeB, edgeB?.sourceHandle)
+    : null;
 
-  // Compute result
+  // Compute
   const result = computeResult(operation, valueA, valueB);
 
-  // Update currentValue when result changes
+  // Update currentValue
   useEffect(() => {
     setNodes(nds =>
       nds.map(n => {

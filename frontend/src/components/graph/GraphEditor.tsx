@@ -16,6 +16,10 @@ import { ControlNode } from "./nodes/ControlNode";
 import { MathNode } from "./nodes/MathNode";
 import { NoteNode } from "./nodes/NoteNode";
 import { OutputNode } from "./nodes/OutputNode";
+import { SliderNode } from "./nodes/SliderNode";
+import { KnobsNode } from "./nodes/KnobsNode";
+import { XYPadNode } from "./nodes/XYPadNode";
+import { TupleNode } from "./nodes/TupleNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -38,6 +42,10 @@ const nodeTypes = {
   math: MathNode,
   note: NoteNode,
   output: OutputNode,
+  slider: SliderNode,
+  knobs: KnobsNode,
+  xypad: XYPadNode,
+  tuple: TupleNode,
 };
 
 const edgeTypes = {
@@ -100,7 +108,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(funct
   ndiOutputAvailable = false,
   syphonOutputAvailable = false,
 }, ref) {
-  // --- Core graph state, pipeline schemas, load/save, import/export ---
+  // Graph state
   const {
     nodes,
     setNodes,
@@ -147,10 +155,10 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(funct
     }
   );
 
-  // Expose refreshGraph to parent via ref
+  // Expose refreshGraph
   useImperativeHandle(ref, () => ({ refreshGraph }), [refreshGraph]);
 
-  // --- Context menu & add-node modal state ---
+  // Context menu & add-node modal
   const [contextMenu, setContextMenu] = useState<{
     x: number;
     y: number;
@@ -169,7 +177,113 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(funct
     Edge
   > | null>(null);
 
-  // --- Connection logic ---
+  // Right-click: drag = box-select, click = context menu
+  const [selectionRect, setSelectionRect] = useState<{
+    x1: number; y1: number; x2: number; y2: number;
+  } | null>(null);
+
+  const handleRightMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      if (e.button !== 2) return; // only right-click
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      const startTarget = e.target as HTMLElement;
+      let isDrag = false;
+
+      // Close existing context menu
+      setContextMenu(null);
+
+      const handleMove = (me: MouseEvent) => {
+        const dx = me.clientX - startX;
+        const dy = me.clientY - startY;
+        if (!isDrag && Math.sqrt(dx * dx + dy * dy) > 5) {
+          isDrag = true;
+        }
+        if (isDrag) {
+          setSelectionRect({
+            x1: startX,
+            y1: startY,
+            x2: me.clientX,
+            y2: me.clientY,
+          });
+        }
+      };
+
+      const handleUp = (me: MouseEvent) => {
+        window.removeEventListener("mousemove", handleMove);
+        window.removeEventListener("mouseup", handleUp);
+
+        if (isDrag) {
+          // Box selection
+          const rf = reactFlowInstanceRef.current;
+          if (rf) {
+            const start = rf.screenToFlowPosition({ x: startX, y: startY });
+            const end = rf.screenToFlowPosition({
+              x: me.clientX,
+              y: me.clientY,
+            });
+
+            const minX = Math.min(start.x, end.x);
+            const maxX = Math.max(start.x, end.x);
+            const minY = Math.min(start.y, end.y);
+            const maxY = Math.max(start.y, end.y);
+
+            setNodes(nds =>
+              nds.map(n => {
+                const w = n.measured?.width ?? n.width ?? 200;
+                const h = n.measured?.height ?? n.height ?? 100;
+                const overlaps =
+                  n.position.x < maxX &&
+                  n.position.x + w > minX &&
+                  n.position.y < maxY &&
+                  n.position.y + h > minY;
+                return n.selected === overlaps
+                  ? n
+                  : { ...n, selected: overlaps };
+              })
+            );
+          }
+        } else {
+          // Show context menu
+          const nodeEl = startTarget.closest(".react-flow__node");
+          if (nodeEl) {
+            const nodeId = nodeEl.getAttribute("data-id");
+            if (nodeId) {
+              setContextMenu({
+                x: startX,
+                y: startY,
+                type: "node",
+                nodeId,
+              });
+            }
+          } else {
+            const rf = reactFlowInstanceRef.current;
+            if (rf) {
+              const position = rf.screenToFlowPosition({
+                x: startX,
+                y: startY,
+              });
+              setPendingNodePosition(position);
+              setContextMenu({
+                x: startX,
+                y: startY,
+                type: "pane",
+              });
+            }
+          }
+        }
+
+        setSelectionRect(null);
+      };
+
+      window.addEventListener("mousemove", handleMove);
+      window.addEventListener("mouseup", handleUp);
+    },
+    [setNodes, setPendingNodePosition]
+  );
+
+  // Connection logic
   const {
     isValidConnection,
     onConnect,
@@ -177,7 +291,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(funct
     findConnectedPipelineParams,
   } = useConnectionLogic(nodes, setEdges, handleEdgeDelete);
 
-  // --- Node factories ---
+  // Node factories
   const { handleNodeTypeSelect, handleDeleteNode } = useNodeFactories({
     nodes,
     setNodes,
@@ -194,69 +308,50 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(funct
     setPendingNodePosition,
   });
 
-  // --- Value forwarding (value/control/math → pipeline params) ---
+  // Value forwarding
   useValueForwarding(
     nodes,
     edges,
     findConnectedPipelineParams,
     resolveBackendId,
     isStreamingRef,
-    onNodeParamChangeRef
+    onNodeParamChangeRef,
+    setNodes
   );
 
-  // --- Output sink sync ---
+  // Output sink sync
   useOutputSinkSync(nodes, onOutputSinkChangeRef);
 
-  // --- Keyboard shortcuts ---
+  // Keyboard shortcuts
   useKeyboardShortcuts(
     reactFlowInstanceRef,
     setPendingNodePosition,
-    setShowAddNodeModal
+    setShowAddNodeModal,
+    nodes,
+    edges,
+    setNodes,
+    setEdges
   );
 
-  // --- Context menu handlers ---
-  const onPaneContextMenu = useCallback(
+  // Context menu suppression
+  const suppressContextMenu = useCallback(
     (event: MouseEvent | React.MouseEvent<Element, MouseEvent>) => {
       event.preventDefault();
-      if (!reactFlowInstanceRef.current) return;
-
-      const clientX =
-        event instanceof MouseEvent ? event.clientX : event.clientX;
-      const clientY =
-        event instanceof MouseEvent ? event.clientY : event.clientY;
-
-      const position = reactFlowInstanceRef.current.screenToFlowPosition({
-        x: clientX,
-        y: clientY,
-      });
-
-      setPendingNodePosition(position);
-      setContextMenu({
-        x: clientX,
-        y: clientY,
-        type: "pane",
-      });
     },
     []
   );
 
-  const onNodeContextMenu = useCallback(
-    (event: React.MouseEvent, node: Node<FlowNodeData>) => {
+  const suppressNodeContextMenu = useCallback(
+    (event: React.MouseEvent, _node: Node<FlowNodeData>) => {
       event.preventDefault();
-      setContextMenu({
-        x: event.clientX,
-        y: event.clientY,
-        type: "node",
-        nodeId: node.id,
-      });
     },
     []
   );
 
-  // --- File input ref for import ---
+  // File input ref
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- Render ---
+  // Render
   return (
     <div className="flex h-full w-full">
       <div className="flex flex-col flex-1">
@@ -364,7 +459,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(funct
           </button>
         </div>
 
-        <div className="flex-1 relative">
+        <div className="flex-1 relative" onMouseDown={handleRightMouseDown}>
           <ReactFlow
             nodes={nodes}
             edges={edges}
@@ -382,8 +477,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(funct
               setSelectedNodeId(null);
               setContextMenu(null);
             }}
-            onPaneContextMenu={onPaneContextMenu}
-            onNodeContextMenu={onNodeContextMenu}
+            onPaneContextMenu={suppressContextMenu}
+            onNodeContextMenu={suppressNodeContextMenu}
             nodeTypes={nodeTypes}
             edgeTypes={edgeTypes}
             colorMode="dark"
@@ -432,6 +527,23 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(funct
             }}
             onSelectNodeType={handleNodeTypeSelect}
           />
+
+          {/* Right-click drag selection rectangle */}
+          {selectionRect && (
+            <div
+              style={{
+                position: "fixed",
+                left: Math.min(selectionRect.x1, selectionRect.x2),
+                top: Math.min(selectionRect.y1, selectionRect.y2),
+                width: Math.abs(selectionRect.x2 - selectionRect.x1),
+                height: Math.abs(selectionRect.y2 - selectionRect.y1),
+                border: "1px solid rgba(59, 130, 246, 0.5)",
+                backgroundColor: "rgba(59, 130, 246, 0.08)",
+                pointerEvents: "none",
+                zIndex: 9999,
+              }}
+            />
+          )}
         </div>
       </div>
     </div>

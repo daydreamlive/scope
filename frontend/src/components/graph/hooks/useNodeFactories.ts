@@ -220,6 +220,104 @@ export function useNodeFactories({
     [existingIds, nodes.length, setNodes]
   );
 
+  const addSliderNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      const id = generateNodeId("slider", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "slider",
+        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        data: {
+          label: "Slider",
+          nodeType: "slider",
+          sliderMin: 0,
+          sliderMax: 1,
+          sliderStep: 0.01,
+          value: 0.5,
+          parameterOutputs: [{ name: "value", type: "number", defaultValue: 0.5 }],
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes]
+  );
+
+  const addKnobsNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      const id = generateNodeId("knobs", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "knobs",
+        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        data: {
+          label: "Knobs",
+          nodeType: "knobs",
+          knobs: [
+            { label: "Knob 1", min: 0, max: 1, value: 0 },
+            { label: "Knob 2", min: 0, max: 1, value: 0 },
+          ],
+          parameterOutputs: [
+            { name: "knob_0", type: "number", defaultValue: 0 },
+            { name: "knob_1", type: "number", defaultValue: 0 },
+          ],
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes]
+  );
+
+  const addXYPadNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      const id = generateNodeId("xypad", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "xypad",
+        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        data: {
+          label: "XY Pad",
+          nodeType: "xypad",
+          padMinX: 0,
+          padMaxX: 1,
+          padMinY: 0,
+          padMaxY: 1,
+          padX: 0.5,
+          padY: 0.5,
+          parameterOutputs: [
+            { name: "x", type: "number", defaultValue: 0.5 },
+            { name: "y", type: "number", defaultValue: 0.5 },
+          ],
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes]
+  );
+
+  const addTupleNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      const id = generateNodeId("tuple", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "tuple",
+        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        data: {
+          label: "Tuple",
+          nodeType: "tuple",
+          tupleValues: [999, 800, 600],
+          tupleMin: 0,
+          tupleMax: 1000,
+          tupleStep: 1,
+          tupleEnforceOrder: true,
+          tupleOrderDirection: "desc",
+          parameterOutputs: [{ name: "value", type: "list_number", defaultValue: [999, 800, 600] }],
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes]
+  );
+
   const addOutputNode = useCallback(
     (position?: { x: number; y: number }) => {
       const defaultType = spoutOutputAvailable
@@ -269,7 +367,11 @@ export function useNodeFactories({
         | "control"
         | "math"
         | "note"
-        | "output",
+        | "output"
+        | "slider"
+        | "knobs"
+        | "xypad"
+        | "tuple",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;
@@ -311,6 +413,18 @@ export function useNodeFactories({
         case "output":
           addOutputNode(pendingNodePosition);
           break;
+        case "slider":
+          addSliderNode(pendingNodePosition);
+          break;
+        case "knobs":
+          addKnobsNode(pendingNodePosition);
+          break;
+        case "xypad":
+          addXYPadNode(pendingNodePosition);
+          break;
+        case "tuple":
+          addTupleNode(pendingNodePosition);
+          break;
       }
 
       setPendingNodePosition(null);
@@ -325,6 +439,10 @@ export function useNodeFactories({
       addMathNode,
       addNoteNode,
       addOutputNode,
+      addSliderNode,
+      addKnobsNode,
+      addXYPadNode,
+      addTupleNode,
       setPendingNodePosition,
     ]
   );

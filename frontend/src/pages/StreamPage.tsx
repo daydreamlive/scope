@@ -1372,8 +1372,9 @@ export function StreamPage() {
         pipelineIds.push(...settings.postprocessorIds);
       }
 
-      // In graph mode, extract pipeline IDs from the graph's pipeline nodes
+      // In graph mode, extract pipeline IDs and source mode from the graph
       // instead of using the perform-mode settings
+      let graphSourceMode: string | null = null;
       if (graphMode) {
         try {
           const graphResponse = await getGraph();
@@ -1387,6 +1388,17 @@ export function StreamPage() {
               pipelineIds.length = 0;
               pipelineIds.push(...graphPipelineIds);
               pipelineIdToUse = graphPipelineIds[0];
+            }
+
+            // Extract source mode from the graph's source node so we use
+            // the graph's input mode (e.g. "video") instead of the perform-mode setting.
+            // Default to "video" if a source node exists but has no explicit mode
+            // (matches the SourceNode UI default).
+            const sourceNode = graphResponse.graph.nodes.find(
+              n => n.type === "source"
+            );
+            if (sourceNode) {
+              graphSourceMode = sourceNode.source_mode || "video";
             }
           }
         } catch (err) {
@@ -1455,9 +1467,13 @@ export function StreamPage() {
       // Always load pipeline with current parameters - backend will handle the rest
       console.log(`Loading ${pipelineIdToUse} pipeline...`);
 
-      // Determine current input mode
-      const currentMode =
+      // Determine current input mode – in graph mode, prefer the source node's
+      // mode so the backend receives the correct input_mode (e.g. "video")
+      let currentMode =
         settings.inputMode || getPipelineDefaultMode(pipelineIdToUse) || "text";
+      if (graphMode && graphSourceMode) {
+        currentMode = graphSourceMode as InputMode;
+      }
 
       // Use settings.resolution if available, otherwise fall back to videoResolution
       let resolution = settings.resolution || videoResolution;
@@ -1827,36 +1843,41 @@ export function StreamPage() {
                 const sourceNode = response.graph.nodes.find(
                   n => n.type === "source"
                 );
-                if (sourceNode?.source_mode) {
-                  const sourceMode = sourceNode.source_mode as
-                    | "video"
-                    | "camera"
-                    | "spout"
-                    | "ndi"
-                    | "syphon";
-                  // Sync to useVideoSource
-                  if (
-                    sourceMode === "spout" ||
-                    sourceMode === "ndi" ||
-                    sourceMode === "syphon"
-                  ) {
-                    // For server-side sources, update settings.inputSource with graph's source_name
-                    updateSettings({
-                      inputSource: {
-                        enabled: true,
-                        source_type: sourceMode,
-                        source_name:
-                          sourceNode.source_name ??
-                          settings.inputSource?.source_name ??
-                          "",
-                      },
-                    });
-                    // Also call switchMode to sync the mode state
-                    switchMode(sourceMode);
-                  } else {
-                    // For browser-side sources (video, camera), just switch mode
-                    switchMode(sourceMode);
-                  }
+                // Default to "video" if source node has no explicit mode
+                const sourceMode = (sourceNode?.source_mode || "video") as
+                  | "video"
+                  | "camera"
+                  | "spout"
+                  | "ndi"
+                  | "syphon";
+
+                // Sync inputMode setting so perform mode reflects the graph's choice
+                const inputMode: InputMode =
+                  sourceMode === "video" || sourceMode === "camera"
+                    ? "video"
+                    : "video"; // server-side sources still use "video" inputMode
+                updateSettings({ inputMode });
+
+                // Sync to useVideoSource
+                if (
+                  sourceMode === "spout" ||
+                  sourceMode === "ndi" ||
+                  sourceMode === "syphon"
+                ) {
+                  // For server-side sources, update settings.inputSource with graph's source_name
+                  updateSettings({
+                    inputSource: {
+                      enabled: true,
+                      source_type: sourceMode,
+                      source_name:
+                        sourceNode?.source_name ??
+                        settings.inputSource?.source_name ??
+                        "",
+                    },
+                  });
+                  switchMode(sourceMode);
+                } else {
+                  switchMode(sourceMode);
                 }
               }
             } catch {

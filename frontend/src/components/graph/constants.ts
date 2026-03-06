@@ -41,6 +41,20 @@ export function getEdgeColor(
     if (sourceNode.data.nodeType === "math") {
       return PARAM_TYPE_COLORS["number"] || "#9ca3af";
     }
+    if (sourceNode.data.nodeType === "slider") {
+      return "#a78bfa"; // violet-400
+    }
+    if (sourceNode.data.nodeType === "knobs") {
+      return "#f472b6"; // pink-400
+    }
+    if (sourceNode.data.nodeType === "xypad") {
+      // Color based on which handle (x = sky, y = green)
+      if (parsed.name === "y") return "#4ade80";
+      return "#38bdf8";
+    }
+    if (sourceNode.data.nodeType === "tuple") {
+      return "#fb923c"; // orange-400
+    }
     return "#9ca3af";
   }
 

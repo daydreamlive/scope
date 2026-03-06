@@ -170,7 +170,21 @@ export function PipelineNode({
             >
               <NodeParamRow label={param.label || param.name}>
                 {isConnected ? (
-                  <NodePill className="opacity-50">Connected</NodePill>
+                  <NodePill className="opacity-50">
+                    {param.type === "boolean"
+                      ? currentValue !== undefined
+                        ? String(Boolean(currentValue))
+                        : "—"
+                      : currentValue !== undefined
+                        ? param.type === "number"
+                          ? typeof currentValue === "number"
+                            ? Number.isInteger(currentValue)
+                              ? currentValue
+                              : currentValue.toFixed(3)
+                            : String(currentValue)
+                          : String(currentValue)
+                        : "—"}
+                  </NodePill>
                 ) : param.type === "string" ? (
                   param.enum ? (
                     <NodePillSelect
@@ -227,9 +241,16 @@ export function PipelineNode({
               ref={setRowRef(`param:${param.name}`)}
             >
               {isConnected ? (
-                <NodeParamRow label={param.label || param.name}>
-                  <NodePill className="opacity-50">Connected</NodePill>
-                </NodeParamRow>
+                <div className="flex flex-col gap-1">
+                  <p className={`${NODE_TOKENS.labelText} text-[10px]`}>
+                    {param.label || param.name}
+                  </p>
+                  <NodePill className="opacity-50">
+                    {values.length > 0
+                      ? `[${values.map(v => (Number.isInteger(v) ? v : v.toFixed(2))).join(", ")}]`
+                      : "—"}
+                  </NodePill>
+                </div>
               ) : (
                 <div className="flex flex-col gap-1">
                   <p className={`${NODE_TOKENS.labelText} text-[10px]`}>
@@ -264,7 +285,9 @@ export function PipelineNode({
                 Prompt
               </p>
               {isPromptConnected ? (
-                <NodePill className="opacity-50">Connected</NodePill>
+                <NodePill className="opacity-50 break-all">
+                  {promptText || "—"}
+                </NodePill>
               ) : (
                 <NodePillTextarea
                   value={promptText}

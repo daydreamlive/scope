@@ -187,7 +187,7 @@ export function useGraphState(
     Record<string, Record<string, unknown>>
   >({});
 
-  // Stable refs for callbacks
+  // Callback refs
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
@@ -223,7 +223,7 @@ export function useGraphState(
 
   const initialLoadDone = useRef(false);
 
-  // Resolve node ID for backend communication
+  // Resolve backend node ID
   const resolveBackendId = useCallback((nodeId: string): string => {
     return nodeId;
   }, []);
@@ -294,7 +294,7 @@ export function useGraphState(
     [setEdges]
   );
 
-  // Fetch pipeline schemas on mount
+  // Fetch pipeline schemas
   useEffect(() => {
     getPipelineSchemas()
       .then(schemas => {
@@ -307,7 +307,7 @@ export function useGraphState(
       });
   }, []);
 
-  // Build enrichment deps object
+  // Build enrichment deps
   const enrichDeps: EnrichNodesDeps = {
     availablePipelineIds,
     portsMap,
@@ -332,7 +332,11 @@ export function useGraphState(
     handleEdgeDelete,
   };
 
-  // Enrich nodes when dependencies change
+  // Keep latest enrichDeps in ref
+  const enrichDepsRef = useRef(enrichDeps);
+  enrichDepsRef.current = enrichDeps;
+
+  // Enrich nodes
   useEffect(() => {
     if (availablePipelineIds.length === 0) return;
     setNodes(nds => enrichNodes(nds, enrichDeps));
@@ -354,7 +358,7 @@ export function useGraphState(
     availability.syphonOutputAvailable,
   ]);
 
-  // Sync nodeParams to pipeline node parameterValues
+  // Sync nodeParams
   useEffect(() => {
     setNodes(nds =>
       nds.map(n => {
@@ -375,7 +379,7 @@ export function useGraphState(
     );
   }, [nodeParams, setNodes]);
 
-  // Reload graph from backend (shared by initial load and manual refresh)
+  // Reload graph from backend
   const loadGraphFromBackend = useCallback(() => {
     if (Object.keys(portsMap).length === 0) return;
 
@@ -386,7 +390,8 @@ export function useGraphState(
             response.graph,
             portsMap
           );
-          const enriched = enrichNodes(flowNodes, enrichDeps);
+          // Use ref for latest enrichDeps
+          const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
           setNodes(enriched);
           setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
           setGraphSource(response.source);
@@ -404,19 +409,19 @@ export function useGraphState(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portsMap]);
 
-  // Load graph from backend on mount / when portsMap changes
+  // Load graph on mount
   useEffect(() => {
     loadGraphFromBackend();
   }, [loadGraphFromBackend]);
 
-  // Notify parent on graph changes
+  // Notify parent
   useEffect(() => {
     if (!initialLoadDone.current) return;
     if (nodes.length === 0 && edges.length === 0) return;
     onGraphChangeRef.current?.();
   }, [nodes, edges]);
 
-  // Auto-save graph to backend (debounced)
+  // Auto-save graph
   useEffect(() => {
     if (!initialLoadDone.current) return;
     if (nodes.length === 0 && edges.length === 0) return;
@@ -470,7 +475,7 @@ export function useGraphState(
             graphConfig,
             portsMap
           );
-          const enriched = enrichNodes(flowNodes, enrichDeps);
+          const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
           setNodes(enriched);
           setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
           setGraphSource(null);
