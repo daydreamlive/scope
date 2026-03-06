@@ -232,6 +232,59 @@ class CausalWanAttentionBlock(nn.Module):
         return x, new_kv
 
 
+class VaceBlock(CausalWanAttentionBlock):
+    """VACE side-network block for hint generation.
+
+    Same transformer architecture as the main blocks, plus zero-initialized
+    projection layers that produce hints for injection into the main path.
+    """
+
+    def __init__(self, *args, block_id=0, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.block_id = block_id
+
+        if block_id == 0:
+            self.before_proj = nn.Linear(self.dim, self.dim)
+            nn.init.zeros_(self.before_proj.weight)
+            nn.init.zeros_(self.before_proj.bias)
+
+        self.after_proj = nn.Linear(self.dim, self.dim)
+        nn.init.zeros_(self.after_proj.weight)
+        nn.init.zeros_(self.after_proj.bias)
+
+    def forward_vace(self, c, x, e0, freqs_cos, freqs_sin, context):
+        """Run VACE context through this block and produce a hint.
+
+        Args:
+            c: Stacked tensor of [accumulated_hints..., running_context].
+               Block 0 receives just the embedded vace_context.
+            x: Main model's latent after patch embedding (for block 0 residual).
+            e0: Time embeddings [B, F, 6, C].
+            freqs_cos: RoPE cosines for the VACE sequence.
+            freqs_sin: RoPE sines for the VACE sequence.
+            context: Text embeddings.
+
+        Returns:
+            Stacked tensor of [accumulated_hints..., new_hint, running_context].
+        """
+        if self.block_id == 0:
+            c = self.before_proj(c[:, : x.size(1), :]) + x
+            all_c = []
+        else:
+            all_c = list(torch.unbind(c))
+            c = all_c.pop(-1)
+
+        empty_cache = torch.empty(
+            c.shape[0], 0, self.num_heads, self.dim // self.num_heads,
+            dtype=c.dtype, device=c.device,
+        )
+        c, _ = super().forward(c, e0, freqs_cos, freqs_sin, context, empty_cache, empty_cache)
+
+        hint = self.after_proj(c)
+        all_c += [hint, c]
+        return torch.stack(all_c)
+
+
 class CausalHead(nn.Module):
     def __init__(self, dim, out_dim, patch_size, eps=1e-6):
         super().__init__()
@@ -348,6 +401,10 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         self.head = CausalHead(dim, out_dim, patch_size, eps)
 
+        # VACE modules - None by default, populated by init_vace()
+        self.vace_patch_embedding = None
+        self.vace_blocks = None
+
         assert (dim % num_heads) == 0 and (dim // num_heads) % 2 == 0
         d = dim // num_heads
         self.freqs = torch.cat(
@@ -358,6 +415,68 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             ],
             dim=1,
         )
+
+    def init_vace(self, vace_in_dim=96):
+        """Initialize VACE modules on the model. Call before loading VACE weights.
+
+        Creates vace_patch_embedding and vace_blocks on CPU. Move to device/dtype
+        and load weights externally after calling this.
+
+        Hints are injected at every 2nd main block (0, 2, 4, ...).
+
+        Args:
+            vace_in_dim: Input channels for VACE context (96 for masked encoding).
+        """
+        num_vace_blocks = self.num_layers // 2
+
+        with torch.device("cpu"):
+            self.vace_patch_embedding = nn.Conv3d(
+                vace_in_dim, self.dim,
+                kernel_size=self.patch_size, stride=self.patch_size,
+            )
+
+            cross_attn_type = "t2v_cross_attn"
+            self.vace_blocks = nn.ModuleList([
+                VaceBlock(
+                    cross_attn_type, self.dim, self.ffn_dim, self.num_heads,
+                    self.local_attn_size, self.sink_size,
+                    self.qk_norm, self.cross_attn_norm, self.eps,
+                    block_id=i,
+                )
+                for i in range(num_vace_blocks)
+            ])
+
+    def _forward_vace(self, x, vace_context, f, h, w, e0, context):
+        """Generate per-layer hints from VACE context.
+
+        Runs before the main block loop, outside the compiled region.
+
+        Args:
+            x: Main latent after patch embedding [B, seq_len, dim].
+            vace_context: List of conditioning tensors, each [vace_in_dim, F_ref, H, W].
+            f, h, w: Grid dimensions from the main model's patch embedding.
+            e0: Time embeddings [B, F, 6, dim].
+            context: Text embeddings [B, text_len, dim].
+
+        Returns:
+            Tuple of hint tensors, one per VACE layer, each [B, seq_len, dim].
+        """
+        target_dtype = next(self.vace_patch_embedding.parameters()).dtype
+        seq_len = x.shape[1]
+
+        c = [self.vace_patch_embedding(u.unsqueeze(0).to(dtype=target_dtype)) for u in vace_context]
+        c = [u.flatten(2).transpose(1, 2) for u in c]
+        c = torch.cat([
+            torch.cat([u, u.new_zeros(1, max(0, seq_len - u.size(1)), u.size(2))], dim=1)
+            for u in c
+        ])
+
+        freqs_cos_vace, freqs_sin_vace = precompute_freqs_i(self.freqs, f, h, w, start_frame=0)
+
+        for block in self.vace_blocks:
+            c = block.forward_vace(c, x, e0, freqs_cos_vace, freqs_sin_vace, context)
+
+        return torch.unbind(c)[:-1]
 
     def _roll_update_cache(self, kv_cache, new_kvs):
         """Update the KV cache with new key-value pairs.
@@ -387,7 +506,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         self.fill_level = min(self.fill_level + num_new, self.cache_tokens)
 
-    def _inner_forward(self, x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs):
+    def _inner_forward(self, x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs,
+                       hints=None, context_scale=1.0):
         """Pure-tensor inner forward through all blocks. Compiled with reduce-overhead
         when cache is full. With SDPA (no graph breaks), the entire 30-block loop
         is captured as a single CUDA graph for maximum performance.
@@ -404,6 +524,11 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 cache_k=cache_ks[block_index],
                 cache_v=cache_vs[block_index],
             )
+            if hints is not None and block_index % 2 == 0:
+                hint = hints[block_index // 2]
+                if hint.shape[1] > x.shape[1]:
+                    hint = hint[:, :x.shape[1], :]
+                x = x + hint * context_scale
             new_ks.append(new_k)
             new_vs.append(new_v)
         return x, list(zip(new_ks, new_vs))
@@ -416,6 +541,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         kv_cache: list = None,
         current_start: int = 0,
         update_cache: bool = False,
+        vace_context=None,
+        vace_context_scale=1.0,
     ):
         r"""
         Run the diffusion model with kv caching.
@@ -427,6 +554,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             kv_cache (list): List of cache dicts (one per block), each with 'k' and 'v'
             current_start (int): Starting position in tokens
             update_cache (bool): Whether to update the cache after forward pass
+            vace_context (list[Tensor] | None): VACE conditioning tensors from VaceEncodingBlock
+            vace_context_scale (float): Scaling factor for VACE hint injection
         Returns:
             Tensor: Denoised video tensor with shape [B, C_out, F, H, W]
         """
@@ -461,6 +590,11 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context = padded_context
         context = self.text_embedding(context)
 
+        # Generate VACE hints (runs before the compiled block loop)
+        hints = None
+        if vace_context is not None and self.vace_blocks is not None:
+            hints = self._forward_vace(x, vace_context, f, h, w, e0, context)
+
         if self.fill_level > 0:
             cache_ks = [kv_cache[i]["k"][:, :self.fill_level] for i in range(len(self.blocks))]
             cache_vs = [kv_cache[i]["v"][:, :self.fill_level] for i in range(len(self.blocks))]
@@ -476,7 +610,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             self._forward = self._inner_forward
 
         x, new_kvs = self._forward(
-            x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs
+            x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs,
+            hints, vace_context_scale,
         )
 
         if update_cache:
