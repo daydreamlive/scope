@@ -1056,7 +1056,10 @@ export function SettingsPanel({
                         />
                       )}
 
-                      <MIDIMappable parameterId="manage_cache" mappingType="toggle">
+                      <MIDIMappable
+                        parameterId="manage_cache"
+                        mappingType="toggle"
+                      >
                         <div className="flex items-center justify-between gap-2">
                           <LabelWithTooltip
                             label={PARAMETER_METADATA.manageCache.label}
@@ -1144,7 +1147,10 @@ export function SettingsPanel({
                       </MIDIMappable>
                     </div>
 
-                    <MIDIMappable parameterId="noise_scale" disabled={noiseController}>
+                    <MIDIMappable
+                      parameterId="noise_scale"
+                      disabled={noiseController}
+                    >
                       <SliderWithInput
                         label={PARAMETER_METADATA.noiseScale.label}
                         tooltip={PARAMETER_METADATA.noiseScale.tooltip}

@@ -845,7 +845,6 @@ export function InputAndControlsPanel({
                     }
                   />
                 )}
-
               </div>
             );
           })()}

@@ -232,9 +232,10 @@ export function useMIDIController(
         if (!mapping.target.parameter) continue;
 
         // Skip if this parameter is disabled in the UI
-        const paramKey = mapping.target.arrayIndex !== undefined
-          ? `${mapping.target.parameter}[${mapping.target.arrayIndex}]`
-          : mapping.target.parameter;
+        const paramKey =
+          mapping.target.arrayIndex !== undefined
+            ? `${mapping.target.parameter}[${mapping.target.arrayIndex}]`
+            : mapping.target.parameter;
         if (disabledParams?.has(paramKey)) continue;
 
         const notifyActivity = onParameterActivityRef.current;
@@ -355,7 +356,8 @@ export function useMIDIController(
         if (!(isNoteOn || isCCPress)) continue;
 
         // Skip if this parameter/action is disabled in the UI
-        const targetId = mapping.target.action ?? mapping.target.parameter ?? "";
+        const targetId =
+          mapping.target.action ?? mapping.target.parameter ?? "";
         if (disabledParams?.has(targetId)) continue;
 
         const notifyAct = onParameterActivityRef.current;

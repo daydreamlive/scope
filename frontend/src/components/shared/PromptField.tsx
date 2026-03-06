@@ -36,7 +36,9 @@ export function PromptField({
 
   return (
     <>
-      {leadingAccessory && <div className="self-center">{leadingAccessory}</div>}
+      {leadingAccessory && (
+        <div className="self-center">{leadingAccessory}</div>
+      )}
       <Textarea
         placeholder={placeholder}
         value={prompt.text}

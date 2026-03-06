@@ -318,7 +318,9 @@ export function PromptInput({
                   disabled={disabled}
                 />
               </MIDIMappable>
-              {midiEnabled && managedPrompts.length > 1 && renderPromptSelectButton(index)}
+              {midiEnabled &&
+                managedPrompts.length > 1 &&
+                renderPromptSelectButton(index)}
             </div>
           </div>
         );

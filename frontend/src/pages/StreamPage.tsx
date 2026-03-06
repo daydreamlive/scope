@@ -1103,20 +1103,23 @@ export function StreamPage() {
     }
   };
 
-  const handleLivePromptSubmit = useCallback((prompts: PromptItem[]) => {
-    // Use the timeline ref to submit the prompt
-    if (timelineRef.current) {
-      timelineRef.current.submitLivePrompt(prompts);
-    }
+  const handleLivePromptSubmit = useCallback(
+    (prompts: PromptItem[]) => {
+      // Use the timeline ref to submit the prompt
+      if (timelineRef.current) {
+        timelineRef.current.submitLivePrompt(prompts);
+      }
 
-    // Also send the updated parameters to the backend immediately
-    // Preserve the full blend while live
-    sendParameterUpdate({
-      prompts,
-      prompt_interpolation_method: interpolationMethod,
-      denoising_step_list: settings.denoisingSteps || [700, 500],
-    });
-  }, [interpolationMethod, sendParameterUpdate, settings.denoisingSteps]);
+      // Also send the updated parameters to the backend immediately
+      // Preserve the full blend while live
+      sendParameterUpdate({
+        prompts,
+        prompt_interpolation_method: interpolationMethod,
+        denoising_step_list: settings.denoisingSteps || [700, 500],
+      });
+    },
+    [interpolationMethod, sendParameterUpdate, settings.denoisingSteps]
+  );
 
   const handleMidiPromptSolo = useCallback(
     (index: number) => {
@@ -1129,7 +1132,12 @@ export function StreamPage() {
         handleLivePromptSubmit(newPromptItems);
       }
     },
-    [buildSoloPromptItems, handleLivePromptSubmit, isStreaming, promptItems.length]
+    [
+      buildSoloPromptItems,
+      handleLivePromptSubmit,
+      isStreaming,
+      promptItems.length,
+    ]
   );
 
   const handleMidiPromptWeightChange = useCallback(
@@ -1150,7 +1158,8 @@ export function StreamPage() {
         if (otherWeightsSum > 0) {
           nextPromptItems.forEach((prompt, promptIndex) => {
             if (promptIndex !== index) {
-              const proportion = promptItems[promptIndex].weight / otherWeightsSum;
+              const proportion =
+                promptItems[promptIndex].weight / otherWeightsSum;
               nextPromptItems[promptIndex] = {
                 ...prompt,
                 weight: remainingWeight * proportion,
@@ -1968,7 +1977,11 @@ export function StreamPage() {
                   | undefined
               }
               schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
-              onSchemaFieldOverrideChange={(key: string, value: unknown, isRuntimeParam?: boolean) => {
+              onSchemaFieldOverrideChange={(
+                key: string,
+                value: unknown,
+                isRuntimeParam?: boolean
+              ) => {
                 updateSettings({
                   schemaFieldOverrides: {
                     ...(settings.schemaFieldOverrides ?? {}),
@@ -2281,30 +2294,30 @@ export function StreamPage() {
           />
         )}
 
-      {/* Workflow Export Dialog */}
-      <WorkflowExportDialog
-        open={showWorkflowExport}
-        onClose={() => setShowWorkflowExport(false)}
-        settings={settings}
-        timelinePrompts={timelinePrompts}
-        promptState={{
-          promptItems,
-          interpolationMethod,
-          transitionSteps,
-          temporalInterpolationMethod,
-        }}
-      />
+        {/* Workflow Export Dialog */}
+        <WorkflowExportDialog
+          open={showWorkflowExport}
+          onClose={() => setShowWorkflowExport(false)}
+          settings={settings}
+          timelinePrompts={timelinePrompts}
+          promptState={{
+            promptItems,
+            interpolationMethod,
+            transitionSteps,
+            temporalInterpolationMethod,
+          }}
+        />
 
-      {/* Workflow Import Dialog */}
-      <WorkflowImportDialog
-        open={showWorkflowImport}
-        onClose={() => {
-          setShowWorkflowImport(false);
-          setPreloadedWorkflow(null);
-        }}
-        onLoad={handleWorkflowLoad}
-        initialWorkflow={preloadedWorkflow}
-      />
+        {/* Workflow Import Dialog */}
+        <WorkflowImportDialog
+          open={showWorkflowImport}
+          onClose={() => {
+            setShowWorkflowImport(false);
+            setPreloadedWorkflow(null);
+          }}
+          onLoad={handleWorkflowLoad}
+          initialWorkflow={preloadedWorkflow}
+        />
       </div>
     </MIDIProvider>
   );

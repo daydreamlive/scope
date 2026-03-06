@@ -107,7 +107,9 @@ export function MIDIMappable({
         ),
         duration: Infinity,
       });
-      return () => { toast.dismiss(id); };
+      return () => {
+        toast.dismiss(id);
+      };
     }
   }, [isLearning]);
 

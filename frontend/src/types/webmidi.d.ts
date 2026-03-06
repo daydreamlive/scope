@@ -51,5 +51,8 @@ interface MIDIConnectionEvent extends Event {
 }
 
 interface Navigator {
-  requestMIDIAccess?(options?: { sysex?: boolean; software?: boolean }): Promise<MIDIAccess>;
+  requestMIDIAccess?(options?: {
+    sysex?: boolean;
+    software?: boolean;
+  }): Promise<MIDIAccess>;
 }

@@ -459,7 +459,10 @@ export function SchemaComplexField({
             </MIDIMappable>
           </div>
           {ctx.noiseScaleSlider && (
-            <MIDIMappable parameterId="noise_scale" disabled={ctx.noiseController}>
+            <MIDIMappable
+              parameterId="noise_scale"
+              disabled={ctx.noiseController}
+            >
               <SliderWithInput
                 label={PARAMETER_METADATA.noiseScale.label}
                 tooltip={PARAMETER_METADATA.noiseScale.tooltip}

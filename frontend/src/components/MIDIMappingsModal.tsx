@@ -43,7 +43,10 @@ function formatTargetInfo(mapping: MIDIMapping): string {
   }
   if (mapping.target.parameter) {
     const paramName = mapping.target.parameter;
-    if (paramName === "prompt_weight" && mapping.target.arrayIndex !== undefined) {
+    if (
+      paramName === "prompt_weight" &&
+      mapping.target.arrayIndex !== undefined
+    ) {
       return `Prompt Blend ${mapping.target.arrayIndex + 1}`;
     }
     if (mapping.target.arrayIndex !== undefined) {

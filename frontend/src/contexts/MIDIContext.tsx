@@ -132,13 +132,16 @@ export function MIDIProvider({
 
   // Track which parameters/actions are currently disabled in the UI
   const disabledParametersRef = useRef<Set<string>>(new Set());
-  const setParameterDisabled = useCallback((paramId: string, disabled: boolean) => {
-    if (disabled) {
-      disabledParametersRef.current.add(paramId);
-    } else {
-      disabledParametersRef.current.delete(paramId);
-    }
-  }, []);
+  const setParameterDisabled = useCallback(
+    (paramId: string, disabled: boolean) => {
+      if (disabled) {
+        disabledParametersRef.current.add(paramId);
+      } else {
+        disabledParametersRef.current.delete(paramId);
+      }
+    },
+    []
+  );
 
   const markParameterActive = useCallback((paramId: string) => {
     setActiveParameters(prev => {
@@ -379,7 +382,10 @@ export function MIDIProvider({
         );
       });
 
-      if (!mapping || (mapping.source.midi_cc == null && mapping.source.midi_note == null))
+      if (
+        !mapping ||
+        (mapping.source.midi_cc == null && mapping.source.midi_note == null)
+      )
         return null;
       if (mapping.source.midi_cc !== undefined)
         return `CC ${mapping.source.midi_cc} (Ch ${mapping.source.channel})`;
