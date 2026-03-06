@@ -57,6 +57,7 @@ export interface PipelineStatusResponse {
   // Optional list of loaded LoRA adapters, provided by backend when available.
   loaded_lora_adapters?: { path: string; scale: number }[];
   error?: string;
+  loading_stage?: string | null;
 }
 
 export const getIceServers = async (): Promise<IceServersResponse> => {

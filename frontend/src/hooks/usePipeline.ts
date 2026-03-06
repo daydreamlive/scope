@@ -229,5 +229,6 @@ export function usePipeline(options: UsePipelineOptions = {}) {
     checkStatus,
     isLoaded: status === "loaded",
     isError: status === "error",
+    loadingStage: pipelineInfo?.loading_stage ?? null,
   };
 }

@@ -55,7 +55,7 @@ async function enableCloudMode(page: Page) {
   console.log("Enabling cloud mode...");
 
   // Open settings dialog via the cloud icon in the header
-  const cloudIcon = page.getByRole("button", { name: /cloud/i });
+  const cloudIcon = page.locator('button[title*="cloud" i]');
   await expect(cloudIcon).toBeVisible({ timeout: 10000 });
   await cloudIcon.click();
 

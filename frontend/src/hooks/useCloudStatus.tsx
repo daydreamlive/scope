@@ -30,6 +30,7 @@ export interface CloudStatus {
   credentials_configured: boolean;
   last_close_code: number | null;
   last_close_reason: string | null;
+  connect_stage: string | null;
 }
 
 const DEFAULT_STATUS: CloudStatus = {
@@ -41,6 +42,7 @@ const DEFAULT_STATUS: CloudStatus = {
   credentials_configured: false,
   last_close_code: null,
   last_close_reason: null,
+  connect_stage: null,
 };
 
 // Polling intervals based on connection state
@@ -159,5 +161,6 @@ export function useCloudStatus() {
     error: status.error,
     lastCloseCode: status.last_close_code,
     lastCloseReason: status.last_close_reason,
+    connectStage: status.connect_stage,
   };
 }
