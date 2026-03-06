@@ -48,6 +48,7 @@ from scope.core.workflows.resolve import (
 from .cloud_proxy import (
     cloud_proxy,
     get_hardware_info_from_cloud,
+    proxy_with_body,
     recording_download_cloud_path,
     upload_asset_to_cloud,
 )
@@ -933,29 +934,10 @@ async def install_lora_file(
 
     # If connected to cloud, proxy with the (potentially modified) URL
     if cloud_manager.is_connected:
-        logger.info("Proxying LoRA install to cloud")
         body = {"url": url, "filename": request.filename}
-        try:
-            response = await cloud_manager.api_request(
-                method="POST",
-                path="/api/v1/loras",
-                body=body,
-                timeout=300.0,
-            )
-        except Exception as e:
-            logger.error(f"Cloud proxy request failed: {e}")
-            raise HTTPException(
-                status_code=502,
-                detail=f"Cloud request failed: {e}",
-            ) from e
-
-        status = response.get("status", 200)
-        if status >= 400:
-            raise HTTPException(
-                status_code=status,
-                detail=response.get("error", "Cloud request failed"),
-            )
-        return response.get("data", {})
+        return await proxy_with_body(
+            cloud_manager, "POST", "/api/v1/loras", body, timeout=300.0
+        )
 
     # Local installation
     import re
@@ -1218,7 +1200,6 @@ async def delete_lora_file(
 @app.post("/api/v1/lora/download")
 async def download_lora_endpoint(
     request: LoRADownloadRequest,
-    http_request: Request,
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ) -> LoRADownloadResult:
     """Download a LoRA from HuggingFace, CivitAI, or a direct URL.
@@ -1234,31 +1215,12 @@ async def download_lora_endpoint(
         civitai_token = get_civitai_token() or request.civitai_token
 
     if cloud_manager.is_connected:
-        logger.info("Proxying LoRA download to cloud")
         body = request.model_dump(exclude_none=True)
         if civitai_token:
             body["civitai_token"] = civitai_token
-        try:
-            response = await cloud_manager.api_request(
-                method="POST",
-                path="/api/v1/lora/download",
-                body=body,
-                timeout=300.0,
-            )
-        except Exception as e:
-            logger.error(f"Cloud proxy request failed: {e}")
-            raise HTTPException(
-                status_code=502,
-                detail=f"Cloud request failed: {e}",
-            ) from e
-
-        status = response.get("status", 200)
-        if status >= 400:
-            raise HTTPException(
-                status_code=status,
-                detail=response.get("error", "Cloud request failed"),
-            )
-        return response.get("data", {})
+        return await proxy_with_body(
+            cloud_manager, "POST", "/api/v1/lora/download", body, timeout=300.0
+        )
 
     lora_dir = get_lora_dir()
     try:

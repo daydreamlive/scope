@@ -99,6 +99,45 @@ PathResolver = Callable[[Request, CloudConnectionManager], str]
 CLOUD_REQUEST_FAILED = "Cloud request failed"
 
 
+async def proxy_with_body(
+    cloud_manager: CloudConnectionManager,
+    method: str,
+    path: str,
+    body: dict | None = None,
+    timeout: float = 30.0,
+) -> Any:
+    """Proxy a request to cloud with a pre-built body.
+
+    Use this instead of ``@cloud_proxy`` when the request body needs to be
+    modified before forwarding (e.g. injecting a locally-resolved token).
+    """
+    logger.info(f"Proxying to cloud: {method} {path}")
+    try:
+        response = await cloud_manager.api_request(
+            method=method,
+            path=path,
+            body=body,
+            timeout=timeout,
+        )
+    except Exception as e:
+        logger.error(f"Cloud proxy request failed: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"{CLOUD_REQUEST_FAILED}: {e}",
+        ) from e
+
+    status = response.get("status", 200)
+    if status >= 400:
+        logger.error(f"Cloud proxy request failed: {response}")
+        raise HTTPException(
+            status_code=status,
+            detail=response.get("data", {}).get("detail")
+            or response.get("error", CLOUD_REQUEST_FAILED),
+        )
+
+    return response.get("data", {})
+
+
 async def get_hardware_info_from_cloud(
     cloud_manager: CloudConnectionManager,
     spout_available: bool,
