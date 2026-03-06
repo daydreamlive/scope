@@ -565,6 +565,9 @@ dependencies = [
 kafka = [
     { name = "aiokafka" },
 ]
+osc = [
+    { name = "python-osc" },
+]
 
 [package.dev-dependencies]
 dev = [
@@ -616,7 +619,7 @@ requires-dist = [
     { name = "twilio", specifier = ">=9.8.0" },
     { name = "uvicorn", specifier = ">=0.35.0" },
 ]
-provides-extras = ["kafka"]
+provides-extras = ["kafka", "osc"]
 
 [package.metadata.requires-dev]
 dev = [
