@@ -68,6 +68,13 @@ def resolve_civitai_metadata(
 
     response = httpx.get(api_url, headers=headers, timeout=30.0, follow_redirects=True)
     if response.status_code != 200:
+        # Surface API error messages (e.g. HTTP 451 region block) to the user
+        try:
+            body = response.json()
+        except Exception:
+            return None, None
+        if isinstance(body, dict) and "error" in body:
+            raise ValueError(str(body["error"]))
         return None, None
 
     data = response.json()

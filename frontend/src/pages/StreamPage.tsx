@@ -38,7 +38,8 @@ import type {
   DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { getInputSourceResolution } from "../lib/api";
+import { getInputSourceResolution, fetchDaydreamWorkflow } from "../lib/api";
+import type { ScopeWorkflow } from "../lib/workflowApi";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -255,6 +256,29 @@ export function StreamPage() {
   // Workflow export/import dialog state
   const [showWorkflowExport, setShowWorkflowExport] = useState(false);
   const [showWorkflowImport, setShowWorkflowImport] = useState(false);
+  const [preloadedWorkflow, setPreloadedWorkflow] =
+    useState<ScopeWorkflow | null>(null);
+
+  // Handle install-workflow deep links from Electron
+  useEffect(() => {
+    if (!window.scope?.onDeepLinkAction) return;
+    return window.scope.onDeepLinkAction(data => {
+      if (data.action !== "install-workflow") return;
+      const workflowId = data.id;
+      toast.info("Fetching workflow...");
+      fetchDaydreamWorkflow(workflowId)
+        .then(workflow => {
+          setPreloadedWorkflow(workflow);
+          setShowWorkflowImport(true);
+        })
+        .catch(err => {
+          console.error("Failed to fetch workflow from deep link:", err);
+          toast.error("Failed to import workflow", {
+            description: err instanceof Error ? err.message : String(err),
+          });
+        });
+    });
+  }, []);
 
   // Stable ref for OSC command handler (avoids hook dependency cycles)
   const oscCommandHandlerRef = useRef<(cmd: OscCommand) => void>(() => {});
@@ -2124,8 +2148,12 @@ export function StreamPage() {
       {/* Workflow Import Dialog */}
       <WorkflowImportDialog
         open={showWorkflowImport}
-        onClose={() => setShowWorkflowImport(false)}
+        onClose={() => {
+          setShowWorkflowImport(false);
+          setPreloadedWorkflow(null);
+        }}
         onLoad={handleWorkflowLoad}
+        initialWorkflow={preloadedWorkflow}
       />
     </div>
   );

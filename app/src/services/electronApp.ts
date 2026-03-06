@@ -6,6 +6,10 @@ import { IPC_CHANNELS } from '../types/ipc';
 import { SERVER_CONFIG } from '../utils/config';
 import { logger, getLogPath } from '../utils/logger';
 
+export type DeepLinkActionData =
+  | { action: 'install-plugin'; package: string }
+  | { action: 'install-workflow'; id: string };
+
 // Constants
 const WINDOW_CONFIG = {
   MAIN: { width: 1400, height: 900 },
@@ -401,7 +405,7 @@ export class ScopeElectronAppService {
     this.sendIPC(IPC_CHANNELS.SERVER_ERROR, error);
   }
 
-  sendDeepLinkAction(data: { action: string; package: string }): void {
+  sendDeepLinkAction(data: DeepLinkActionData): void {
     this.sendIPC(IPC_CHANNELS.DEEP_LINK_ACTION, data);
   }
 
