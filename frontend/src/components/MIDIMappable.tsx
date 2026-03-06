@@ -38,6 +38,7 @@ export function MIDIMappable({
     cancelLearning,
     getMappedSource,
     activeParameters,
+    setParameterDisabled,
   } = useMIDI();
 
   const [justMapped, setJustMapped] = useState(false);
@@ -47,6 +48,13 @@ export function MIDIMappable({
     if (arrayIndex !== undefined) return `${parameterId}[${arrayIndex}]`;
     return parameterId || "";
   }, [parameterId, arrayIndex, actionId]);
+
+  // Register disabled state so MIDI dispatch respects it
+  useEffect(() => {
+    if (!paramId) return;
+    setParameterDisabled(paramId, disabled);
+    return () => setParameterDisabled(paramId, false);
+  }, [paramId, disabled, setParameterDisabled]);
 
   const isLearning = learningParameter === paramId;
 

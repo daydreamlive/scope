@@ -370,39 +370,47 @@ export function SchemaComplexField({
                 inputParser={v => parseFloat(v) || 1.0}
               />
             )}
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label={PARAMETER_METADATA.manageCache.label}
-                tooltip={PARAMETER_METADATA.manageCache.tooltip}
-                className="text-sm font-medium"
-              />
-              <Toggle
-                pressed={ctx.manageCache ?? true}
-                onPressedChange={ctx.onManageCacheChange ?? (() => {})}
-                variant="outline"
-                size="sm"
-                className="h-7"
-              >
-                {(ctx.manageCache ?? true) ? "ON" : "OFF"}
-              </Toggle>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label={PARAMETER_METADATA.resetCache.label}
-                tooltip={PARAMETER_METADATA.resetCache.tooltip}
-                className="text-sm font-medium"
-              />
-              <Button
-                type="button"
-                onClick={ctx.onResetCache ?? (() => {})}
-                disabled={ctx.manageCache}
-                variant="outline"
-                size="sm"
-                className="h-7 w-7 p-0"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+            <MIDIMappable parameterId="manage_cache" mappingType="toggle">
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.manageCache.label}
+                  tooltip={PARAMETER_METADATA.manageCache.tooltip}
+                  className="text-sm font-medium"
+                />
+                <Toggle
+                  pressed={ctx.manageCache ?? true}
+                  onPressedChange={ctx.onManageCacheChange ?? (() => {})}
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                >
+                  {(ctx.manageCache ?? true) ? "ON" : "OFF"}
+                </Toggle>
+              </div>
+            </MIDIMappable>
+            <MIDIMappable
+              actionId="reset_cache"
+              mappingType="trigger"
+              disabled={ctx.manageCache ?? true}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.resetCache.label}
+                  tooltip={PARAMETER_METADATA.resetCache.tooltip}
+                  className="text-sm font-medium"
+                />
+                <Button
+                  type="button"
+                  onClick={ctx.onResetCache ?? (() => {})}
+                  disabled={ctx.manageCache}
+                  variant="outline"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </MIDIMappable>
           </div>
         </div>
       </div>
@@ -451,7 +459,7 @@ export function SchemaComplexField({
             </MIDIMappable>
           </div>
           {ctx.noiseScaleSlider && (
-            <MIDIMappable parameterId="noise_scale">
+            <MIDIMappable parameterId="noise_scale" disabled={ctx.noiseController}>
               <SliderWithInput
                 label={PARAMETER_METADATA.noiseScale.label}
                 tooltip={PARAMETER_METADATA.noiseScale.tooltip}

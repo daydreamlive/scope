@@ -96,7 +96,6 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
-    connectStage,
   } = useCloudStatus();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
@@ -306,7 +305,6 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
-    loadingStage,
   } = usePipeline();
 
   // WebRTC for streaming (unified hook works in both local and cloud modes)
@@ -1865,6 +1863,7 @@ export function StreamPage() {
       currentDenoisingSteps={settings.denoisingSteps}
       onDenoisingStepsChange={handleDenoisingStepsChange}
       currentNoiseController={settings.noiseController}
+      currentManageCache={settings.manageCache}
       onSwitchPrompt={handleMidiPromptSolo}
       onPromptWeightChange={handleMidiPromptWeightChange}
       onPlayPauseToggle={handlePlayPauseToggle}
@@ -1893,121 +1892,12 @@ export function StreamPage() {
               isStreaming={isStreaming}
               isConnecting={isConnecting || isCloudConnecting}
               isPipelineLoading={isPipelineLoading}
-              isCloudConnecting={isCloudConnecting}
-              cloudConnectStage={connectStage}
-              pipelineLoadingStage={loadingStage}
-              isConnecting={isConnecting}
-              pipelineError={pipelineError}
-              isPlaying={!settings.paused}
-              isDownloading={isDownloading}
-              onPlayPauseToggle={() => {
-                // Use timeline's play/pause handler instead of direct video toggle
-                if (timelinePlayPauseRef.current) {
-                  timelinePlayPauseRef.current();
-                }
-              }}
-              onStartStream={() => {
-                // Use timeline's play/pause handler to start stream
-                if (timelinePlayPauseRef.current) {
-                  timelinePlayPauseRef.current();
-                }
-              }}
-              onVideoPlaying={() => {
-                // Execute callback when video starts playing
-                if (onVideoPlayingCallbackRef.current) {
-                  onVideoPlayingCallbackRef.current();
-                  onVideoPlayingCallbackRef.current = null; // Clear after execution
-                }
-              }}
-              // Controller input props
-              supportsControllerInput={currentPipelineSupportsController}
-              isPointerLocked={isPointerLocked}
-              onRequestPointerLock={requestPointerLock}
-              videoContainerRef={videoContainerRef}
-              // Video scale mode
-              videoScaleMode={videoScaleMode}
-            />
-          </div>
-          {/* Timeline area - compact, always visible */}
-          <div className="flex-shrink-0 mt-2">
-            <PromptInputWithTimeline
-              currentPrompt={promptItems[0]?.text || ""}
-              currentPromptItems={promptItems}
-              transitionSteps={transitionSteps}
-              temporalInterpolationMethod={temporalInterpolationMethod}
-              onPromptSubmit={text => {
-                // Update the left panel's prompt state to reflect current timeline prompt
-                const prompts = [{ text, weight: 100 }];
-                setPromptItems(prompts);
-
-                // Send to backend - use transition if streaming and transition steps > 0
-                if (isStreaming && transitionSteps > 0) {
-                  sendParameterUpdate({
-                    transition: {
-                      target_prompts: prompts,
-                      num_steps: transitionSteps,
-                      temporal_interpolation_method:
-                        temporalInterpolationMethod,
-                    },
-                  });
-                } else {
-                  // Send direct prompts without transition
-                  sendParameterUpdate({
-                    prompts,
-                    prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
-                  });
-                }
-              }}
-              onPromptItemsSubmit={(
-                prompts,
-                blockTransitionSteps,
-                blockTemporalInterpolationMethod
-              ) => {
-                // Update the left panel's prompt state to reflect current timeline prompt blend
-                setPromptItems(prompts);
-
-                // Use transition params from block if provided, otherwise use global settings
-                const effectiveTransitionSteps =
-                  blockTransitionSteps ?? transitionSteps;
-                const effectiveTemporalInterpolationMethod =
-                  blockTemporalInterpolationMethod ??
-                  temporalInterpolationMethod;
-
-                // Update the left panel's transition settings to reflect current block's values
-                if (blockTransitionSteps !== undefined) {
-                  setTransitionSteps(blockTransitionSteps);
-                }
-                if (blockTemporalInterpolationMethod !== undefined) {
-                  setTemporalInterpolationMethod(
-                    blockTemporalInterpolationMethod
-                  );
-                }
-
-                // Send to backend - use transition if streaming and transition steps > 0
-                if (isStreaming && effectiveTransitionSteps > 0) {
-                  sendParameterUpdate({
-                    transition: {
-                      target_prompts: prompts,
-                      num_steps: effectiveTransitionSteps,
-                      temporal_interpolation_method:
-                        effectiveTemporalInterpolationMethod,
-                    },
-                  });
-                } else {
-                  // Send direct prompts without transition
-                  sendParameterUpdate({
-                    prompts,
-                    prompt_interpolation_method: interpolationMethod,
-                    denoising_step_list: settings.denoisingSteps || [700, 500],
-                  });
-                }
-              }}
-              disabled={
-                isPipelineLoading ||
-                isConnecting ||
-                isCloudConnecting ||
-                showDownloadDialog
+              canStartStream={
+                settings.inputMode === "text"
+                  ? !isInitializing
+                  : mode === "spout" || mode === "ndi" || mode === "syphon"
+                    ? !isInitializing
+                    : !!localStream && !isInitializing
               }
               onStartStream={handleStartStream}
               onStopStream={stopStream}
@@ -2078,7 +1968,7 @@ export function StreamPage() {
                   | undefined
               }
               schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
-              onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
+              onSchemaFieldOverrideChange={(key: string, value: unknown, isRuntimeParam?: boolean) => {
                 updateSettings({
                   schemaFieldOverrides: {
                     ...(settings.schemaFieldOverrides ?? {}),
@@ -2390,20 +2280,6 @@ export function StreamPage() {
             }}
           />
         )}
-
-        {/* Workflow Export Dialog */}
-        <WorkflowExportDialog
-          open={showWorkflowExport}
-          onClose={() => setShowWorkflowExport(false)}
-          settings={settings}
-          timelinePrompts={timelinePrompts}
-          promptState={{
-            promptItems,
-            interpolationMethod,
-            transitionSteps,
-            temporalInterpolationMethod,
-          }}
-        />
 
       {/* Workflow Export Dialog */}
       <WorkflowExportDialog

@@ -84,6 +84,7 @@ interface MIDIContextValue {
   clearAllMappings: () => void;
   activeParameters: Set<string>;
   markParameterActive: (paramId: string) => void;
+  setParameterDisabled: (paramId: string, disabled: boolean) => void;
 }
 
 const MIDIContext = createContext<MIDIContextValue | null>(null);
@@ -94,6 +95,7 @@ interface MIDIProviderProps {
   currentDenoisingSteps?: number[];
   onDenoisingStepsChange?: (steps: number[]) => void;
   currentNoiseController?: boolean;
+  currentManageCache?: boolean;
   onSwitchPrompt?: (index: number) => void;
   onPromptWeightChange?: (index: number, weight: number) => void;
   onPlayPauseToggle?: () => void;
@@ -105,6 +107,7 @@ export function MIDIProvider({
   currentDenoisingSteps,
   onDenoisingStepsChange,
   currentNoiseController,
+  currentManageCache,
   onSwitchPrompt,
   onPromptWeightChange,
   onPlayPauseToggle,
@@ -126,6 +129,16 @@ export function MIDIProvider({
     new Set()
   );
   const activeTimersRef = useRef<Map<string, number>>(new Map());
+
+  // Track which parameters/actions are currently disabled in the UI
+  const disabledParametersRef = useRef<Set<string>>(new Set());
+  const setParameterDisabled = useCallback((paramId: string, disabled: boolean) => {
+    if (disabled) {
+      disabledParametersRef.current.add(paramId);
+    } else {
+      disabledParametersRef.current.delete(paramId);
+    }
+  }, []);
 
   const markParameterActive = useCallback((paramId: string) => {
     setActiveParameters(prev => {
@@ -426,10 +439,12 @@ export function MIDIProvider({
     onDenoisingStepsChange,
     onLearnComplete: handleLearnComplete,
     currentNoiseController,
+    currentManageCache,
     onSwitchPrompt,
     onPromptWeightChange,
     onParameterActivity: markParameterActive,
     onPlayPauseToggle,
+    disabledParametersRef,
   });
 
   useEffect(() => {
@@ -476,6 +491,7 @@ export function MIDIProvider({
     clearAllMappings,
     activeParameters,
     markParameterActive,
+    setParameterDisabled,
   };
 
   return <MIDIContext.Provider value={value}>{children}</MIDIContext.Provider>;

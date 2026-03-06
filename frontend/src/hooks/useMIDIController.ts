@@ -14,10 +14,12 @@ export interface MIDIControllerConfig {
     source: import("../types/midi").MIDISource
   ) => void;
   currentNoiseController?: boolean;
+  currentManageCache?: boolean;
   onSwitchPrompt?: (index: number) => void;
   onPromptWeightChange?: (index: number, weight: number) => void;
   onParameterActivity?: (paramId: string) => void;
   onPlayPauseToggle?: () => void;
+  disabledParametersRef?: React.RefObject<Set<string>>;
 }
 
 export function useMIDIController(
@@ -32,10 +34,12 @@ export function useMIDIController(
     onDenoisingStepsChange,
     onLearnComplete,
     currentNoiseController,
+    currentManageCache,
     onSwitchPrompt,
     onPromptWeightChange,
     onParameterActivity,
     onPlayPauseToggle,
+    disabledParametersRef,
   } = config || {};
 
   const [midiAccess, setMidiAccess] = useState<MIDIAccess | null>(null);
@@ -58,6 +62,11 @@ export function useMIDIController(
       toggleStatesRef.current.set("noise_controller", currentNoiseController);
     }
   }, [currentNoiseController]);
+  useEffect(() => {
+    if (currentManageCache !== undefined) {
+      toggleStatesRef.current.set("manage_cache", currentManageCache);
+    }
+  }, [currentManageCache]);
 
   // Refs to avoid stale closures in the stable MIDI handler
   const sendParameterUpdateRef = useRef(sendParameterUpdate);
@@ -70,6 +79,7 @@ export function useMIDIController(
   const onPromptWeightChangeRef = useRef(onPromptWeightChange);
   const onParameterActivityRef = useRef(onParameterActivity);
   const onPlayPauseToggleRef = useRef(onPlayPauseToggle);
+  const disabledParametersRefCurrent = useRef(disabledParametersRef);
 
   sendParameterUpdateRef.current = sendParameterUpdate;
   enabledRef.current = enabled;
@@ -81,6 +91,7 @@ export function useMIDIController(
   onPromptWeightChangeRef.current = onPromptWeightChange;
   onParameterActivityRef.current = onParameterActivity;
   onPlayPauseToggleRef.current = onPlayPauseToggle;
+  disabledParametersRefCurrent.current = disabledParametersRef;
 
   // Throttled send for continuous CC — batches rapid updates per parameter key
   const throttledSendRef = useRef(
@@ -199,7 +210,8 @@ export function useMIDIController(
 
     if (!enabled || !mappingProfile?.mappings.length) return;
 
-    const BOOLEAN_PARAMS = ["noise_controller"];
+    const BOOLEAN_PARAMS = ["noise_controller", "manage_cache"];
+    const disabledParams = disabledParametersRefCurrent.current?.current;
 
     for (const mapping of mappingProfile.mappings) {
       const source = mapping.source;
@@ -209,6 +221,12 @@ export function useMIDIController(
       if (mapping.type === "continuous" && source.midi_cc !== undefined) {
         if (command !== 0xb0 || noteOrCC !== source.midi_cc) continue;
         if (!mapping.target.parameter) continue;
+
+        // Skip if this parameter is disabled in the UI
+        const paramKey = mapping.target.arrayIndex !== undefined
+          ? `${mapping.target.parameter}[${mapping.target.arrayIndex}]`
+          : mapping.target.parameter;
+        if (disabledParams?.has(paramKey)) continue;
 
         const notifyActivity = onParameterActivityRef.current;
 
@@ -326,6 +344,10 @@ export function useMIDIController(
         }
 
         if (!(isNoteOn || isCCPress)) continue;
+
+        // Skip if this parameter/action is disabled in the UI
+        const targetId = mapping.target.action ?? mapping.target.parameter ?? "";
+        if (disabledParams?.has(targetId)) continue;
 
         const notifyAct = onParameterActivityRef.current;
 

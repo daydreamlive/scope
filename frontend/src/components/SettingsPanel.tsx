@@ -1056,40 +1056,48 @@ export function SettingsPanel({
                         />
                       )}
 
-                      <div className="flex items-center justify-between gap-2">
-                        <LabelWithTooltip
-                          label={PARAMETER_METADATA.manageCache.label}
-                          tooltip={PARAMETER_METADATA.manageCache.tooltip}
-                          className="text-sm font-medium"
-                        />
-                        <Toggle
-                          pressed={manageCache}
-                          onPressedChange={onManageCacheChange || (() => {})}
-                          variant="outline"
-                          size="sm"
-                          className="h-7"
-                        >
-                          {manageCache ? "ON" : "OFF"}
-                        </Toggle>
-                      </div>
+                      <MIDIMappable parameterId="manage_cache" mappingType="toggle">
+                        <div className="flex items-center justify-between gap-2">
+                          <LabelWithTooltip
+                            label={PARAMETER_METADATA.manageCache.label}
+                            tooltip={PARAMETER_METADATA.manageCache.tooltip}
+                            className="text-sm font-medium"
+                          />
+                          <Toggle
+                            pressed={manageCache}
+                            onPressedChange={onManageCacheChange || (() => {})}
+                            variant="outline"
+                            size="sm"
+                            className="h-7"
+                          >
+                            {manageCache ? "ON" : "OFF"}
+                          </Toggle>
+                        </div>
+                      </MIDIMappable>
 
-                      <div className="flex items-center justify-between gap-2">
-                        <LabelWithTooltip
-                          label={PARAMETER_METADATA.resetCache.label}
-                          tooltip={PARAMETER_METADATA.resetCache.tooltip}
-                          className="text-sm font-medium"
-                        />
-                        <Button
-                          type="button"
-                          onClick={onResetCache || (() => {})}
-                          disabled={manageCache}
-                          variant="outline"
-                          size="sm"
-                          className="h-7 w-7 p-0"
-                        >
-                          <RotateCcw className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
+                      <MIDIMappable
+                        actionId="reset_cache"
+                        mappingType="trigger"
+                        disabled={manageCache}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <LabelWithTooltip
+                            label={PARAMETER_METADATA.resetCache.label}
+                            tooltip={PARAMETER_METADATA.resetCache.tooltip}
+                            className="text-sm font-medium"
+                          />
+                          <Button
+                            type="button"
+                            onClick={onResetCache || (() => {})}
+                            disabled={manageCache}
+                            variant="outline"
+                            size="sm"
+                            className="h-7 w-7 p-0"
+                          >
+                            <RotateCcw className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </MIDIMappable>
                     </div>
                   </div>
                 </div>
@@ -1136,7 +1144,7 @@ export function SettingsPanel({
                       </MIDIMappable>
                     </div>
 
-                    <MIDIMappable parameterId="noise_scale">
+                    <MIDIMappable parameterId="noise_scale" disabled={noiseController}>
                       <SliderWithInput
                         label={PARAMETER_METADATA.noiseScale.label}
                         tooltip={PARAMETER_METADATA.noiseScale.tooltip}
