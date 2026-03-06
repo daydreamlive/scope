@@ -20,7 +20,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
 from aiortc.mediastreams import VIDEO_TIME_BASE, MediaStreamTrack
 from av import VideoFrame
 
@@ -201,10 +201,15 @@ class CloudWebRTCClient:
 
         # Get ICE servers from cloud
         ice_response = await self.cloud_manager.webrtc_get_ice_servers()
-        ice_servers = ice_response.get("data", {}).get("iceServers", [])
 
-        # Create peer connection
-        config = {"iceServers": ice_servers} if ice_servers else {}
+        from .webrtc import credentials_to_rtc_ice_servers
+
+        rtc_ice_servers = credentials_to_rtc_ice_servers(ice_response)
+        config = (
+            RTCConfiguration(iceServers=rtc_ice_servers)
+            if rtc_ice_servers
+            else RTCConfiguration()
+        )
         self.pc = RTCPeerConnection(config)
 
         # Create input track for sending frames to cloud
