@@ -58,7 +58,7 @@ class PipelineManager:
         # Loading stage for frontend display (e.g., "Loading diffusion model...")
         self._loading_stage: str | None = None
 
-    def set_loading_stage(self, stage: str) -> None:
+    def set_loading_stage(self, stage: str | None) -> None:
         """Set the current loading stage (thread-safe)."""
         with self._lock:
             self._loading_stage = stage
@@ -250,7 +250,7 @@ class PipelineManager:
             )
 
             # Hold lock while updating state
-            self._loading_stage = None
+            self.set_loading_stage(None)
             with self._lock:
                 self._pipelines[pipeline_id] = pipeline
                 self._pipeline_load_params[pipeline_id] = load_params or {}
@@ -280,7 +280,7 @@ class PipelineManager:
             return True
 
         except Exception as e:
-            self._loading_stage = None
+            self.set_loading_stage(None)
             from .models_config import get_models_dir
 
             models_dir = get_models_dir()
