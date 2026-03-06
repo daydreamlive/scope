@@ -49,6 +49,7 @@ from .cloud_proxy import (
 from .download_models import download_models
 from .download_progress_manager import download_progress_manager
 from .file_utils import (
+    AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
     LORA_EXTENSIONS,
     VIDEO_EXTENSIONS,
@@ -632,6 +633,69 @@ async def get_pipeline_schemas(
             pipelines[pipeline_id] = schema_data
 
     return PipelineSchemasResponse(pipelines=pipelines)
+
+
+@app.post("/api/v1/pipeline/{pipeline_id:path}/run")
+async def run_pipeline(
+    pipeline_id: str,
+    request: Request,
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Run a single pipeline invocation with the given parameters.
+
+    Calls the pipeline's __call__ directly, bypassing WebRTC. Returns the
+    pipeline's result dict. The call blocks until the pipeline completes.
+    """
+    import asyncio
+
+    data = await request.json()
+
+    # Load the pipeline if it isn't already
+    try:
+        pipeline = pipeline_manager.get_pipeline_by_id(pipeline_id)
+    except Exception:
+        try:
+            pipeline = pipeline_manager.get_pipeline()
+        except Exception:
+            logger.info(f"Pipeline {pipeline_id!r} not loaded, loading now...")
+            loaded = await pipeline_manager.load_pipelines([pipeline_id])
+            if not loaded:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to load pipeline {pipeline_id}",
+                )
+            pipeline = pipeline_manager.get_pipeline_by_id(pipeline_id)
+
+    if hasattr(pipeline, "prepare"):
+        await asyncio.get_event_loop().run_in_executor(
+            None, lambda: pipeline.prepare(**data)
+        )
+
+    try:
+        result = await asyncio.get_event_loop().run_in_executor(
+            None, lambda: pipeline(**data)
+        )
+    except Exception as e:
+        logger.error(f"Pipeline run failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+    # Audio pipelines buffer WAV output in memory. Return it directly
+    # so the frontend receives a playable audio response.
+    from scope.core.audio_buffer import get_audio
+
+    wav_data, timestamp = get_audio()
+    if wav_data and len(wav_data) > 0:
+        return Response(
+            content=wav_data,
+            media_type="audio/wav",
+            headers={
+                "X-Audio-Timestamp": str(timestamp),
+                "Cache-Control": "no-cache",
+                "Content-Disposition": "inline; filename=output.wav",
+            },
+        )
+
+    return result
 
 
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
@@ -1289,8 +1353,8 @@ async def upload_asset(
     """
 
     try:
-        # Validate file type - support both images and videos
-        allowed_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+        # Validate file type - support images, videos, and audio
+        allowed_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 
         file_extension = Path(filename).suffix.lower()
         if file_extension not in allowed_extensions:
@@ -1309,6 +1373,14 @@ async def upload_asset(
                 ".webp": "image/webp",
                 ".bmp": "image/bmp",
             }
+        elif file_extension in AUDIO_EXTENSIONS:
+            asset_type = "audio"
+            content_type_map = {
+                ".wav": "audio/wav",
+                ".mp3": "audio/mpeg",
+                ".flac": "audio/flac",
+                ".ogg": "audio/ogg",
+            }
         else:
             asset_type = "video"
             content_type_map = {
@@ -1323,8 +1395,8 @@ async def upload_asset(
         # Read file content from request body
         content = await request.body()
 
-        # Validate file size (50MB limit)
-        max_size = 50 * 1024 * 1024  # 50MB
+        # Validate file size (50MB for images/video, 200MB for audio)
+        max_size = 200 * 1024 * 1024 if asset_type == "audio" else 50 * 1024 * 1024
         if len(content) > max_size:
             raise HTTPException(
                 status_code=400,
