@@ -122,12 +122,15 @@ class CloudTrack(MediaStreamTrack):
     async def _input_loop(self) -> None:
         """Background loop that receives frames from source and sends to cloud."""
         logger.info("Input loop started")
+        consecutive_errors = 0
+        max_consecutive_errors = 10
 
         try:
             while self._input_running and self._source_track is not None:
                 try:
                     # Get frame from browser
                     frame = await self._source_track.recv()
+                    consecutive_errors = 0
 
                     # Send through FrameProcessor (which relays to cloud)
                     if self.frame_processor:
@@ -137,8 +140,18 @@ class CloudTrack(MediaStreamTrack):
                     logger.info("Source track ended")
                     break
                 except Exception as e:
-                    logger.error(f"Error in input loop: {e}")
-                    break
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        logger.error(
+                            f"Error in input loop, stopping after "
+                            f"{consecutive_errors} consecutive errors: {e}"
+                        )
+                        break
+                    logger.warning(
+                        f"Transient error in input loop "
+                        f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+                    )
+                    await asyncio.sleep(0.01)
 
         except asyncio.CancelledError:
             pass

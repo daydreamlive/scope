@@ -308,12 +308,17 @@ class CloudWebRTCClient:
 
     async def _receive_frames(self, track: MediaStreamTrack):
         """Background task to receive frames from cloud."""
+        from aiortc.mediastreams import MediaStreamError
+
         logger.info("Starting frame receive loop")
+        consecutive_errors = 0
+        max_consecutive_errors = 10
 
         try:
             while True:
                 try:
                     frame = await track.recv()
+                    consecutive_errors = 0
                     self._stats["frames_received"] += 1
 
                     if self._stats["frames_received"] % 100 == 0:
@@ -324,12 +329,22 @@ class CloudWebRTCClient:
                     # Pass to output handler
                     self.output_handler.handle_frame(frame)
 
-                except Exception as e:
-                    if "MediaStreamError" in str(type(e)):
-                        logger.info("Track ended")
-                        break
-                    logger.error(f"Error receiving frame: {e}")
+                except MediaStreamError:
+                    logger.info("Track ended")
                     break
+                except Exception as e:
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        logger.error(
+                            f"Error receiving frame, stopping after "
+                            f"{consecutive_errors} consecutive errors: {e}"
+                        )
+                        break
+                    logger.warning(
+                        f"Transient error receiving frame "
+                        f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+                    )
+                    await asyncio.sleep(0.01)
 
         except asyncio.CancelledError:
             logger.info("Frame receive loop cancelled")
@@ -347,15 +362,25 @@ class CloudWebRTCClient:
         causing decode errors. Sending PLI (Picture Loss Indication)
         requests the remote end to send a keyframe.
         """
-        await asyncio.sleep(0.1)  # Allow receiver to initialize
-        for receiver in self.pc.getReceivers():
-            if receiver.track and receiver.track.kind == "video":
-                try:
-                    # Access internal PLI method from aiortc
-                    await receiver._send_rtcp_pli()
-                    logger.info("Sent PLI (keyframe request)")
-                except Exception as e:
-                    logger.debug(f"Could not send PLI: {e}")
+        delays = [0.1, 0.5, 1.0]
+        for attempt, delay in enumerate(delays):
+            await asyncio.sleep(delay)
+            sent = False
+            for receiver in self.pc.getReceivers():
+                if receiver.track and receiver.track.kind == "video":
+                    try:
+                        await receiver._send_rtcp_pli()
+                        logger.info(
+                            f"Sent PLI (keyframe request), attempt {attempt + 1}"
+                        )
+                        sent = True
+                    except Exception as e:
+                        logger.warning(
+                            f"Could not send PLI (attempt {attempt + 1}): {e}"
+                        )
+            if sent:
+                return
+        logger.warning("Failed to send PLI after all retry attempts")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a frame to cloud for processing.
