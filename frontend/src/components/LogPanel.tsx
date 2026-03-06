@@ -21,17 +21,18 @@ const levelColor: Record<LogLevel, string> = {
 };
 
 export function LogPanel({ logs, isOpen, onClose, onClear }: LogPanelProps) {
+  const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState<LogFilter>("all");
   const [copied, setCopied] = useState(false);
 
-  // Auto-scroll to bottom when new logs arrive
+  // Auto-scroll to bottom when new logs arrive or panel opens
   useEffect(() => {
-    if (autoScroll && scrollRef.current) {
-      scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
+    if (isOpen && autoScroll && bottomRef.current) {
+      bottomRef.current.scrollIntoView({ block: "end" });
     }
-  }, [logs, autoScroll]);
+  }, [logs, filter, autoScroll, isOpen]);
 
   if (!isOpen) return null;
 
@@ -142,6 +143,7 @@ export function LogPanel({ logs, isOpen, onClose, onClear }: LogPanelProps) {
             </div>
           ))
         )}
+        <div ref={bottomRef} />
       </div>
     </div>
   );
