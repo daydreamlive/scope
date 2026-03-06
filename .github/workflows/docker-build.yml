@@ -171,13 +171,12 @@ jobs:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
           PR_NUMBER="${{ needs.build-and-push.outputs.pr_number }}"
-          SHORT_SHA="${{ needs.build-and-push.outputs.short_sha }}"
 
           APP_NAME="scope-pr-${PR_NUMBER}"
 
-          echo "Deploying PR #${PR_NUMBER} to fal as ${APP_NAME} with tag ${SHORT_SHA}"
+          echo "Deploying PR #${PR_NUMBER} to fal as ${APP_NAME}"
 
-          SCOPE_DEPLOY_TAG=$SHORT_SHA fal deploy \
+          fal deploy \
             --app-name "$APP_NAME" \
             --env preview \
             --auth public \

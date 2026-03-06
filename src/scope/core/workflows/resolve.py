@@ -249,7 +249,7 @@ def _check_min_scope_version(
 def resolve_workflow(
     workflow: WorkflowRequest,
     plugin_manager: PluginManager,
-    models_dir: Path,
+    lora_dir: Path,
 ) -> WorkflowResolutionPlan:
     """Resolve all dependencies for *workflow*.
 
@@ -269,8 +269,6 @@ def resolve_workflow(
         warnings.append(
             "Could not read installed plugins. Plugin status may be inaccurate."
         )
-
-    lora_dir = models_dir / "lora"
 
     for wp in workflow.pipelines:
         if wp.source.type == "builtin":
