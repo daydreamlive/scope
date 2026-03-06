@@ -1011,6 +1011,8 @@ async def install_lora_file(
                         filename = civitai_filename
                     if dl_url:
                         url = dl_url
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e)) from e
                 except Exception as e:
                     logger.warning(f"Failed to resolve CivitAI metadata: {e}")
 

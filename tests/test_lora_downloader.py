@@ -10,6 +10,7 @@ from scope.server.lora_downloader import (
     _filename_from_url,
     _resolve_hf_url,
     download_lora,
+    resolve_civitai_metadata,
 )
 
 
@@ -152,6 +153,23 @@ def test_download_lora_with_subfolder(tmp_path: Path):
 
     # On Windows the path separator is \, normalize for comparison
     assert Path(result.filename) == Path("anime/model.safetensors")
+
+
+def test_resolve_civitai_metadata_451_region_blocked():
+    """HTTP 451 with JSON error body surfaces the API error message."""
+    mock_response = type("Response", (), {})()
+    mock_response.status_code = 451
+    mock_response.json = lambda: {
+        "error": "Access to this service is not available in your region due to legal restrictions.",
+        "code": "REGION_BLOCKED",
+    }
+
+    with patch("httpx.get", return_value=mock_response):
+        with pytest.raises(
+            ValueError,
+            match="Access to this service is not available in your region due to legal restrictions",
+        ):
+            resolve_civitai_metadata("12345")
 
 
 def test_download_lora_missing_params():

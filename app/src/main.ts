@@ -326,6 +326,7 @@ function dispatchDeepLink(data: DeepLinkData): void {
   } else if (data.action === 'install-plugin') {
     electronAppService.sendDeepLinkAction({ action: data.action, package: data.package });
   } else if (data.action === 'install-workflow') {
+    logger.info(`Received install-workflow deep link for Workflow ID: ${data.id}`);
     electronAppService.sendDeepLinkAction({ action: data.action, id: data.id });
   }
 }

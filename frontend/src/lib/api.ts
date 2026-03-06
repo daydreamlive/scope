@@ -405,10 +405,8 @@ export const installLoRAFile = async (
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Install LoRA failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
   }
 
   const result = await response.json();
