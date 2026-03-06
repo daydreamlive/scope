@@ -358,6 +358,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             ],
             dim=1,
         )
+        self._compiled_inner_forward = self._inner_forward
 
     def _roll_update_cache(self, kv_cache, new_kvs):
         """Update the KV cache with new key-value pairs.
@@ -471,7 +472,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             cache_vs = [empty_k] * len(self.blocks)
 
         if self.fill_level >= self.cache_tokens:
-            self._forward = self._inner_forward
+            self._forward = self._compiled_inner_forward
         else:
             self._forward = self._inner_forward
 

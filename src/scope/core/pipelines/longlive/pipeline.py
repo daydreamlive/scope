@@ -40,6 +40,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         self,
         config,
         quantization: Quantization | None = None,
+        compile: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
         stage_callback=None,
@@ -204,6 +205,15 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
 
+        if compile:
+            inner_model = self.components.generator.model
+            if hasattr(inner_model, "get_base_model"):
+                inner_model = inner_model.get_base_model()
+            inner_model._compiled_inner_forward = torch.compile(
+                inner_model._compiled_inner_forward, mode="max-autotune-no-cudagraphs"
+            )
+            self._warmup(inner_model)
+
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements based on current mode."""
         return prepare_for_mode(self.__class__, self.components.config, kwargs)
@@ -255,3 +265,19 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
 
         _, self.state = self.blocks(self.components, self.state)
         return {"video": postprocess_chunk(self.state.values["output_video"])}
+
+    def _warmup(self, inner_model):
+        print(f"Running warmup iteration...")
+        start = time.time()
+
+        warmup_prompt = [{"text": "warmup", "weight": 100}]
+        _ = self(prompts=warmup_prompt, init_cache=True)
+
+        inner_model.fill_level = inner_model.cache_tokens
+        _ = self(prompts=warmup_prompt, init_cache=False)
+
+        # Reset state after warmup
+        self.first_call = True
+        self.last_mode = None
+
+        print(f"Warmup completed in {time.time() - start:.2f}s")
