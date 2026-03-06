@@ -506,7 +506,11 @@ export function PromptTimeline({
           className={`flex items-center justify-between ${isCollapsed ? "mb-0" : "mb-4"}`}
         >
           <div className="flex items-center gap-2">
-            <MIDIMappable actionId="toggle_pause" mappingType="trigger">
+            <MIDIMappable
+              actionId="toggle_pause"
+              mappingType="trigger"
+              disabled={disabled || isLoading || isDownloading}
+            >
               <Button
                 onClick={onPlayPause}
                 disabled={disabled || isLoading || isDownloading}

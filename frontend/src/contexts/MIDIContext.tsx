@@ -479,6 +479,8 @@ export function MIDIProvider({
   useEffect(() => {
     return () => {
       if (learningTimeoutRef.current) clearTimeout(learningTimeoutRef.current);
+      activeTimersRef.current.forEach(timer => clearTimeout(timer));
+      activeTimersRef.current.clear();
     };
   }, []);
 

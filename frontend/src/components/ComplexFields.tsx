@@ -438,7 +438,11 @@ export function SchemaComplexField({
       <div key="noise" className="space-y-4">
         <div className="space-y-2">
           <div className="space-y-2 pt-2">
-            <MIDIMappable parameterId="noise_controller" mappingType="toggle">
+            <MIDIMappable
+              parameterId="noise_controller"
+              mappingType="toggle"
+              disabled={ctx.isStreaming}
+            >
               <div className="flex items-center justify-between gap-2">
                 <LabelWithTooltip
                   label={PARAMETER_METADATA.noiseController.label}

@@ -1124,6 +1124,7 @@ export function SettingsPanel({
                       <MIDIMappable
                         parameterId="noise_controller"
                         mappingType="toggle"
+                        disabled={isStreaming}
                       >
                         <div className="flex items-center justify-between gap-2">
                           <LabelWithTooltip

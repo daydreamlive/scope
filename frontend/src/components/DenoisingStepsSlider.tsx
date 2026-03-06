@@ -81,6 +81,25 @@ export function DenoisingStepsSlider({
   const handleStepCommit = (index: number, newValue: number) => {
     const updatedValue = [...localValue];
     updatedValue[index] = newValue;
+
+    // Enforce descending order (same logic as handleStepValueChange)
+    for (let i = index + 1; i < updatedValue.length; i++) {
+      if (updatedValue[i] >= updatedValue[i - 1]) {
+        updatedValue[i] = Math.max(MIN_VALUE, updatedValue[i - 1] - 1);
+      }
+    }
+    for (let i = index - 1; i >= 0; i--) {
+      if (updatedValue[i] <= updatedValue[i + 1]) {
+        updatedValue[i] = Math.min(MAX_VALUE, updatedValue[i + 1] + 1);
+      }
+    }
+    updatedValue[index] = Math.max(
+      MIN_VALUE,
+      Math.min(MAX_VALUE, updatedValue[index])
+    );
+
+    const error = validateSteps(updatedValue);
+    setValidationError(error);
     onChange(updatedValue);
   };
 

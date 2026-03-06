@@ -159,6 +159,16 @@ export function validateMapping(
         error: `Parameter ${mapping.target.parameter} is not an enum`,
       };
     }
+    if (param.enumValues) {
+      for (const val of mapping.target.values) {
+        if (!param.enumValues.includes(val)) {
+          return {
+            valid: false,
+            error: `Value "${val}" is not a valid option for enum "${mapping.target.parameter}"`,
+          };
+        }
+      }
+    }
   }
 
   if (mapping.type === "trigger") {

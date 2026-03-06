@@ -58,7 +58,10 @@ function formatTargetInfo(mapping: MIDIMapping): string {
 }
 
 function formatMappingType(type: string): string {
-  return type.charAt(0).toUpperCase() + type.slice(1);
+  return type
+    .split("_")
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 export function MIDIMappingsModal({
