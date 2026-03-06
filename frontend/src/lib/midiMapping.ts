@@ -146,7 +146,7 @@ export function validateMapping(
   }
 
   if (mapping.type === "enum_cycle") {
-    if (!mapping.target.parameter || !mapping.target.values) {
+    if (!mapping.target.parameter || !mapping.target.values?.length) {
       return {
         valid: false,
         error: "Missing parameter or values for enum_cycle",

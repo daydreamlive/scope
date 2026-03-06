@@ -161,40 +161,40 @@ export function DenoisingStepsSlider({
 
       <div className="space-y-3">
         {localValue.map((stepValue, index) => (
-          <MIDIMappable
-            key={index}
-            parameterId="denoising_step_list"
-            arrayIndex={index}
-          >
-            <SliderWithInput
-              label={`Step ${index + 1}`}
-              labelClassName="text-xs text-muted-foreground w-12"
-              value={stepValue}
-              onValueChange={value => handleStepValueChange(index, value)}
-              onValueCommit={value => handleStepCommit(index, value)}
-              min={MIN_VALUE}
-              max={MAX_VALUE}
-              step={1}
-              incrementAmount={1}
-              disabled={disabled}
-              inputParser={v => parseInt(v) || MIN_VALUE}
-              renderExtraButton={() =>
-                localValue.length > MIN_SLIDERS ? (
-                  <MIDIMappable actionId="remove_denoising_step">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      className="h-8 w-8 shrink-0 rounded-none hover:bg-destructive/10 text-destructive"
-                      onClick={() => removeSlider(index)}
-                      disabled={disabled}
-                    >
-                      <Trash2 className="h-3.5 w-3.5" />
-                    </Button>
-                  </MIDIMappable>
-                ) : null
-              }
-            />
-          </MIDIMappable>
+          <div key={index} className="flex items-start gap-1">
+            <MIDIMappable
+              parameterId="denoising_step_list"
+              arrayIndex={index}
+              className="flex-1 min-w-0"
+            >
+              <SliderWithInput
+                label={`Step ${index + 1}`}
+                labelClassName="text-xs text-muted-foreground w-12"
+                value={stepValue}
+                onValueChange={value => handleStepValueChange(index, value)}
+                onValueCommit={value => handleStepCommit(index, value)}
+                min={MIN_VALUE}
+                max={MAX_VALUE}
+                step={1}
+                incrementAmount={1}
+                disabled={disabled}
+                inputParser={v => parseInt(v) || MIN_VALUE}
+              />
+            </MIDIMappable>
+            {localValue.length > MIN_SLIDERS && (
+              <MIDIMappable actionId="remove_denoising_step">
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 rounded-none hover:bg-destructive/10 text-destructive mt-0.5"
+                  onClick={() => removeSlider(index)}
+                  disabled={disabled}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </Button>
+              </MIDIMappable>
+            )}
+          </div>
         ))}
       </div>
     </div>

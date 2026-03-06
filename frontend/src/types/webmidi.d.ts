@@ -11,9 +11,9 @@ interface MIDIAccess extends EventTarget {
   onstatechange: ((this: MIDIAccess, ev: MIDIConnectionEvent) => void) | null;
 }
 
-type MIDIInputMap = Map<string, MIDIInput>;
+type MIDIInputMap = ReadonlyMap<string, MIDIInput>;
 
-type MIDIOutputMap = Map<string, MIDIOutput>;
+type MIDIOutputMap = ReadonlyMap<string, MIDIOutput>;
 
 interface MIDIInput extends MIDIPort {
   onmidimessage: ((this: MIDIInput, ev: MIDIMessageEvent) => void) | null;
@@ -51,5 +51,5 @@ interface MIDIConnectionEvent extends Event {
 }
 
 interface Navigator {
-  requestMIDIAccess?(options?: { sysex: boolean }): Promise<MIDIAccess>;
+  requestMIDIAccess?(options?: { sysex?: boolean; software?: boolean }): Promise<MIDIAccess>;
 }

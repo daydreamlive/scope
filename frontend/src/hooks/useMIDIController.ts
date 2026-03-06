@@ -136,12 +136,18 @@ export function useMIDIController(
     }
 
     let pollTimer: number | undefined;
+    let midiAccessRef: MIDIAccess | null = null;
+    let stateHandler: (() => void) | null = null;
+
     navigator
       .requestMIDIAccess({ sysex: false })
       .then(access => {
+        midiAccessRef = access;
+        stateHandler = () => updateDeviceList(access);
+
         setMidiAccess(access);
         updateDeviceList(access);
-        access.addEventListener("statechange", () => updateDeviceList(access));
+        access.addEventListener("statechange", stateHandler);
 
         // Poll briefly to catch already-connected devices that enumerate late
         let polls = 0;
@@ -158,6 +164,9 @@ export function useMIDIController(
 
     return () => {
       if (pollTimer !== undefined) clearTimeout(pollTimer);
+      if (midiAccessRef && stateHandler) {
+        midiAccessRef.removeEventListener("statechange", stateHandler);
+      }
     };
   }, [enabled, updateDeviceList]);
 

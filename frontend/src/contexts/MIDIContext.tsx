@@ -288,6 +288,7 @@ export function MIDIProvider({
   const handleLearnComplete = useCallback(
     (mappingIndex: number, source: MIDISource) => {
       setLearningParameter(null);
+      learningMappingIndexRef.current = null;
       if (learningTimeoutRef.current) {
         clearTimeout(learningTimeoutRef.current);
         learningTimeoutRef.current = null;
@@ -378,7 +379,7 @@ export function MIDIProvider({
         );
       });
 
-      if (!mapping || (!mapping.source.midi_cc && !mapping.source.midi_note))
+      if (!mapping || (mapping.source.midi_cc == null && mapping.source.midi_note == null))
         return null;
       if (mapping.source.midi_cc !== undefined)
         return `CC ${mapping.source.midi_cc} (Ch ${mapping.source.channel})`;
@@ -448,8 +449,11 @@ export function MIDIProvider({
   });
 
   useEffect(() => {
-    if (devices.length > 0 && !selectedDeviceId)
-      setSelectedDeviceIdState(devices[0].id);
+    if (devices.length > 0) {
+      if (!selectedDeviceId || !devices.some(d => d.id === selectedDeviceId)) {
+        setSelectedDeviceIdState(devices[0].id);
+      }
+    }
   }, [devices, selectedDeviceId]);
 
   useEffect(() => {
