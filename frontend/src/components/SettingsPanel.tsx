@@ -363,6 +363,12 @@ interface SettingsPanelProps {
   onTempoDisable?: () => void;
   onTempoSetBpm?: (bpm: number) => void;
   onTempoRefreshSources?: () => void;
+  // Beat-quantize mode
+  quantizeMode?: string;
+  onQuantizeModeChange?: (mode: string) => void;
+  // Beat-sync lookahead
+  lookaheadMs?: number;
+  onLookaheadMsChange?: (ms: number) => void;
 }
 
 export function SettingsPanel({
@@ -419,6 +425,10 @@ export function SettingsPanel({
   onTempoDisable,
   onTempoSetBpm,
   onTempoRefreshSources,
+  quantizeMode,
+  onQuantizeModeChange,
+  lookaheadMs,
+  onLookaheadMsChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -1217,6 +1227,10 @@ export function SettingsPanel({
             onDisable={onTempoDisable}
             onSetBpm={onTempoSetBpm}
             onRefreshSources={onTempoRefreshSources ?? (() => {})}
+            quantizeMode={quantizeMode}
+            onQuantizeModeChange={onQuantizeModeChange}
+            lookaheadMs={lookaheadMs}
+            onLookaheadMsChange={onLookaheadMsChange}
           />
         )}
       </CardContent>
