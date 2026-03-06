@@ -488,8 +488,6 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
             error
           );
         }
-      } else {
-        console.warn("[UnifiedWebRTC] Data channel not available");
       }
     },
     []
