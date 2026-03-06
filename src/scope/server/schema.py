@@ -156,6 +156,12 @@ class Parameters(BaseModel):
         default=None,
         description="Enable recording for this session. When true, the backend records the stream. ",
     )
+    node_id: str | None = Field(
+        default=None,
+        description="Target graph node ID for per-node parameter updates. "
+        "When set, parameters are routed to the specific pipeline node. "
+        "When None, parameters are broadcast to all processors (backward compat).",
+    )
 
 
 class OutputSinkConfig(BaseModel):
