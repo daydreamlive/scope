@@ -129,9 +129,9 @@ export function Header({
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
-            size="icon"
+            size="sm"
             onClick={handleCloudIconClick}
-            className={`hover:opacity-80 transition-opacity h-8 w-8 ${
+            className={`hover:opacity-80 transition-opacity h-8 gap-1.5 px-2 ${
               isConnected
                 ? "text-green-500 opacity-80"
                 : isConnecting
@@ -147,12 +147,19 @@ export function Header({
             }
           >
             {isConnected ? (
-              <Cloud className="h-5 w-5" />
+              <Cloud className="h-4 w-4" />
             ) : isConnecting ? (
-              <Cloud className="h-5 w-5 animate-pulse" />
+              <Cloud className="h-4 w-4 animate-pulse" />
             ) : (
-              <CloudOff className="h-5 w-5" />
+              <CloudOff className="h-4 w-4" />
             )}
+            <span className="text-xs font-medium">
+              {isConnected
+                ? "Connected"
+                : isConnecting
+                  ? "Connecting..."
+                  : "Disconnected"}
+            </span>
           </Button>
           <Button
             variant="ghost"

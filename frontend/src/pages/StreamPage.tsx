@@ -88,6 +88,7 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
+    connectStage,
   } = useCloudStatus();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
@@ -271,6 +272,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
+    loadingStage,
   } = usePipeline();
 
   // WebRTC for streaming (unified hook works in both local and cloud modes)
@@ -1649,6 +1651,8 @@ export function StreamPage() {
               remoteStream={remoteStream}
               isPipelineLoading={isPipelineLoading}
               isCloudConnecting={isCloudConnecting}
+              cloudConnectStage={connectStage}
+              pipelineLoadingStage={loadingStage}
               isConnecting={isConnecting}
               pipelineError={pipelineError}
               isPlaying={!settings.paused}

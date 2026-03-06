@@ -66,6 +66,7 @@ class CloudConnectionManager:
         self._connecting = False
         self._connect_task: asyncio.Task | None = None
         self._connect_error: str | None = None
+        self._connect_stage: str | None = None
 
         # Last close info (for reporting to frontend)
         self._last_close_code: int | None = None
@@ -143,6 +144,7 @@ class CloudConnectionManager:
         # Build WebSocket URL
         ws_url = self._build_ws_url()
         logger.info(f"Connecting to cloud WebSocket: {ws_url.split('?')[0]}...")
+        self._connect_stage = "Connecting to cloud..."
 
         # Create session and connect
         self._session = aiohttp.ClientSession()
@@ -162,6 +164,7 @@ class CloudConnectionManager:
             raise RuntimeError(f"Failed to connect to cloud WebSocket: {e}") from e
 
         # Wait for "ready" message
+        self._connect_stage = "Starting cloud server..."
         try:
             msg = await asyncio.wait_for(self.ws.receive(), timeout=180.0)
             if msg.type == aiohttp.WSMsgType.TEXT:
@@ -195,6 +198,7 @@ class CloudConnectionManager:
             ) from None
 
         logger.info(f"Cloud server ready (connection_id: {self._connection_id})")
+        self._connect_stage = None
         self._connected = True
         self._stats["connected_at"] = time.time()
         self._stats["last_activity_at"] = time.time()
@@ -249,6 +253,7 @@ class CloudConnectionManager:
             except Exception as e:
                 self._connecting = False
                 self._connect_error = str(e)
+                self._connect_stage = None
                 logger.error(f"Background cloud connection failed: {e}")
                 self._publish_cloud_error(
                     str(e), type(e).__name__, error_type="cloud_connection_failed"
@@ -555,6 +560,7 @@ class CloudConnectionManager:
         # Clear background connection state
         self._connecting = False
         self._connect_error = None
+        self._connect_stage = None
         if self._connect_task is not None and not self._connect_task.done():
             self._connect_task.cancel()
             try:
@@ -617,6 +623,7 @@ class CloudConnectionManager:
         from .cloud_webrtc_client import CloudWebRTCClient
 
         logger.info("Starting WebRTC connection to cloud.ai...")
+        self._connect_stage = "Setting up video stream..."
         self._webrtc_client = CloudWebRTCClient(self)
 
         # Register frame callback to update stats and forward to subscribers
@@ -624,8 +631,10 @@ class CloudConnectionManager:
 
         try:
             await self._webrtc_client.connect(initial_parameters)
+            self._connect_stage = None
             logger.info("WebRTC connection established")
         except Exception as e:
+            self._connect_stage = None
             logger.error(f"Failed to start WebRTC: {e}")
             self._webrtc_client = None
             raise
@@ -716,6 +725,7 @@ class CloudConnectionManager:
             "connected": self.is_connected,
             "connecting": self._connecting,
             "error": self._connect_error,
+            "connect_stage": self._connect_stage,
             "app_id": self.app_id if self.is_connected else None,
             "connection_id": self._connection_id if self.is_connected else None,
             "webrtc_connected": self.webrtc_connected,
