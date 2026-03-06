@@ -22,8 +22,7 @@ export interface MIDITarget {
     | "reset_cache"
     | "toggle_pause"
     | "add_denoising_step"
-    | "remove_denoising_step"
-    | "first_frame_and_reset_cache";
+    | "remove_denoising_step";
   preset_index?: number;
   prompt_index?: number;
   values?: string[];

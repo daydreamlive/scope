@@ -57,7 +57,6 @@ export interface SchemaComplexFieldContext {
   manageCache?: boolean;
   onManageCacheChange?: (enabled: boolean) => void;
   onResetCache?: () => void;
-  onFirstFrameAndResetCache?: () => void;
   kvCacheAttentionBiasSlider?: SliderState;
   denoisingSteps?: number[];
   onDenoisingStepsChange?: (steps: number[]) => void;
@@ -356,48 +355,54 @@ export function SchemaComplexField({
         <div className="space-y-2">
           <div className="space-y-2 pt-2">
             {ctx.supportsKvCacheBias && ctx.kvCacheAttentionBiasSlider && (
-              <MIDIMappable parameterId="kv_cache_attention_bias">
-                <SliderWithInput
-                  label={PARAMETER_METADATA.kvCacheAttentionBias.label}
-                  tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
-                  value={ctx.kvCacheAttentionBiasSlider.localValue}
-                  onValueChange={
-                    ctx.kvCacheAttentionBiasSlider.handleValueChange
-                  }
-                  onValueCommit={
-                    ctx.kvCacheAttentionBiasSlider.handleValueCommit
-                  }
-                  min={0.01}
-                  max={1.0}
-                  step={0.01}
-                  incrementAmount={0.01}
-                  labelClassName="text-sm font-medium w-20"
-                  valueFormatter={ctx.kvCacheAttentionBiasSlider.formatValue}
-                  inputParser={v => parseFloat(v) || 1.0}
-                />
-              </MIDIMappable>
+              <SliderWithInput
+                label={PARAMETER_METADATA.kvCacheAttentionBias.label}
+                tooltip={PARAMETER_METADATA.kvCacheAttentionBias.tooltip}
+                value={ctx.kvCacheAttentionBiasSlider.localValue}
+                onValueChange={ctx.kvCacheAttentionBiasSlider.handleValueChange}
+                onValueCommit={ctx.kvCacheAttentionBiasSlider.handleValueCommit}
+                min={0.01}
+                max={1.0}
+                step={0.01}
+                incrementAmount={0.01}
+                labelClassName="text-sm font-medium w-20"
+                valueFormatter={ctx.kvCacheAttentionBiasSlider.formatValue}
+                inputParser={v => parseFloat(v) || 1.0}
+              />
             )}
-            <MIDIMappable
-              actionId="first_frame_and_reset_cache"
-              mappingType="trigger"
-            >
-              <div className="flex items-center justify-between gap-2">
-                <LabelWithTooltip
-                  label={PARAMETER_METADATA.resetCache.label}
-                  tooltip={PARAMETER_METADATA.firstFrameAndResetCache.tooltip}
-                  className="text-sm font-medium"
-                />
-                <Button
-                  type="button"
-                  onClick={ctx.onFirstFrameAndResetCache ?? (() => {})}
-                  variant="outline"
-                  size="sm"
-                  className="h-7 w-7 p-0"
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                </Button>
-              </div>
-            </MIDIMappable>
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.manageCache.label}
+                tooltip={PARAMETER_METADATA.manageCache.tooltip}
+                className="text-sm font-medium"
+              />
+              <Toggle
+                pressed={ctx.manageCache ?? true}
+                onPressedChange={ctx.onManageCacheChange ?? (() => {})}
+                variant="outline"
+                size="sm"
+                className="h-7"
+              >
+                {(ctx.manageCache ?? true) ? "ON" : "OFF"}
+              </Toggle>
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <LabelWithTooltip
+                label={PARAMETER_METADATA.resetCache.label}
+                tooltip={PARAMETER_METADATA.resetCache.tooltip}
+                className="text-sm font-medium"
+              />
+              <Button
+                type="button"
+                onClick={ctx.onResetCache ?? (() => {})}
+                disabled={ctx.manageCache}
+                variant="outline"
+                size="sm"
+                className="h-7 w-7 p-0"
+              >
+                <RotateCcw className="h-3.5 w-3.5" />
+              </Button>
+            </div>
           </div>
         </div>
       </div>

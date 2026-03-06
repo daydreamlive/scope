@@ -94,11 +94,9 @@ interface MIDIProviderProps {
   currentDenoisingSteps?: number[];
   onDenoisingStepsChange?: (steps: number[]) => void;
   currentNoiseController?: boolean;
-  currentManageCache?: boolean;
   onSwitchPrompt?: (index: number) => void;
   onPromptWeightChange?: (index: number, weight: number) => void;
   onPlayPauseToggle?: () => void;
-  onFirstFrameAndResetCache?: () => void;
 }
 
 export function MIDIProvider({
@@ -107,11 +105,9 @@ export function MIDIProvider({
   currentDenoisingSteps,
   onDenoisingStepsChange,
   currentNoiseController,
-  currentManageCache,
   onSwitchPrompt,
   onPromptWeightChange,
   onPlayPauseToggle,
-  onFirstFrameAndResetCache,
 }: MIDIProviderProps) {
   const [midiEnabled, setMidiEnabledState] = useState(loadMIDIEnabled);
   const [selectedDeviceId, setSelectedDeviceIdState] =
@@ -430,12 +426,10 @@ export function MIDIProvider({
     onDenoisingStepsChange,
     onLearnComplete: handleLearnComplete,
     currentNoiseController,
-    currentManageCache,
     onSwitchPrompt,
     onPromptWeightChange,
     onParameterActivity: markParameterActive,
     onPlayPauseToggle,
-    onFirstFrameAndResetCache,
   });
 
   useEffect(() => {

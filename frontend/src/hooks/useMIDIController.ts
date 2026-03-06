@@ -14,12 +14,10 @@ export interface MIDIControllerConfig {
     source: import("../types/midi").MIDISource
   ) => void;
   currentNoiseController?: boolean;
-  currentManageCache?: boolean;
   onSwitchPrompt?: (index: number) => void;
   onPromptWeightChange?: (index: number, weight: number) => void;
   onParameterActivity?: (paramId: string) => void;
   onPlayPauseToggle?: () => void;
-  onFirstFrameAndResetCache?: () => void;
 }
 
 export function useMIDIController(
@@ -34,12 +32,10 @@ export function useMIDIController(
     onDenoisingStepsChange,
     onLearnComplete,
     currentNoiseController,
-    currentManageCache,
     onSwitchPrompt,
     onPromptWeightChange,
     onParameterActivity,
     onPlayPauseToggle,
-    onFirstFrameAndResetCache,
   } = config || {};
 
   const [midiAccess, setMidiAccess] = useState<MIDIAccess | null>(null);
@@ -61,10 +57,7 @@ export function useMIDIController(
     if (currentNoiseController !== undefined) {
       toggleStatesRef.current.set("noise_controller", currentNoiseController);
     }
-    if (currentManageCache !== undefined) {
-      toggleStatesRef.current.set("manage_cache", currentManageCache);
-    }
-  }, [currentNoiseController, currentManageCache]);
+  }, [currentNoiseController]);
 
   // Refs to avoid stale closures in the stable MIDI handler
   const sendParameterUpdateRef = useRef(sendParameterUpdate);
@@ -77,7 +70,6 @@ export function useMIDIController(
   const onPromptWeightChangeRef = useRef(onPromptWeightChange);
   const onParameterActivityRef = useRef(onParameterActivity);
   const onPlayPauseToggleRef = useRef(onPlayPauseToggle);
-  const onFirstFrameAndResetCacheRef = useRef(onFirstFrameAndResetCache);
 
   sendParameterUpdateRef.current = sendParameterUpdate;
   enabledRef.current = enabled;
@@ -89,7 +81,6 @@ export function useMIDIController(
   onPromptWeightChangeRef.current = onPromptWeightChange;
   onParameterActivityRef.current = onParameterActivity;
   onPlayPauseToggleRef.current = onPlayPauseToggle;
-  onFirstFrameAndResetCacheRef.current = onFirstFrameAndResetCache;
 
   // Throttled send for continuous CC — batches rapid updates per parameter key
   const throttledSendRef = useRef(
@@ -208,7 +199,7 @@ export function useMIDIController(
 
     if (!enabled || !mappingProfile?.mappings.length) return;
 
-    const BOOLEAN_PARAMS = ["manage_cache", "noise_controller"];
+    const BOOLEAN_PARAMS = ["noise_controller"];
 
     for (const mapping of mappingProfile.mappings) {
       const source = mapping.source;
@@ -364,8 +355,6 @@ export function useMIDIController(
             sendParameterUpdate({ reset_cache: true });
           } else if (target.action === "toggle_pause") {
             onPlayPauseToggleRef.current?.();
-          } else if (target.action === "first_frame_and_reset_cache") {
-            onFirstFrameAndResetCacheRef.current?.();
           } else if (target.action === "add_denoising_step") {
             if (!currentDenoisingSteps || !onDenoisingStepsChange) continue;
             if (currentDenoisingSteps.length >= 10) continue;

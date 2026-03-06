@@ -30,12 +30,7 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
   resetCache: {
     label: "Reset Cache",
     tooltip:
-      "Clears previous frames from cache allowing new frames to be generated with fresh history.",
-  },
-  firstFrameAndResetCache: {
-    label: "Cache Reset",
-    tooltip:
-      "Sends the current first frame as VACE conditioning and resets the cache in a single action. Useful for live performance workflows.",
+      "Clears previous frames from cache allowing new frames to be generated with fresh history. Only available when Manage Cache is disabled.",
   },
   denoisingSteps: {
     label: "Denoising Step List",
