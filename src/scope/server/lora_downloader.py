@@ -65,12 +65,10 @@ def resolve_civitai_metadata(
         # Surface API error messages (e.g. HTTP 451 region block) to the user
         try:
             body = response.json()
-            if isinstance(body, dict) and "error" in body:
-                raise ValueError(str(body["error"]))
-        except ValueError:
-            raise
         except Exception:
-            pass
+            return None, None
+        if isinstance(body, dict) and "error" in body:
+            raise ValueError(str(body["error"]))
         return None, None
 
     data = response.json()
