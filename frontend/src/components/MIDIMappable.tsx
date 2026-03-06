@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, useMemo } from "react";
+import { toast } from "sonner";
 import { useMIDI } from "../contexts/MIDIContext";
 import { cn } from "../lib/utils";
 
@@ -88,6 +89,21 @@ export function MIDIMappable({
   }, [isMapped, isLearning]);
 
   useEffect(() => {
+    if (isLearning) {
+      const id = toast("Listening for MIDI input", {
+        icon: (
+          <span className="flex items-center gap-1">
+            <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
+            <span className="h-1.5 w-1.5 rounded-full bg-blue-400/80 animate-pulse [animation-delay:150ms]" />
+          </span>
+        ),
+        duration: Infinity,
+      });
+      return () => toast.dismiss(id);
+    }
+  }, [isLearning]);
+
+  useEffect(() => {
     return () => {
       if (isLearning) cancelLearning();
     };
@@ -105,16 +121,6 @@ export function MIDIMappable({
       )}
       onClick={handleClick}
     >
-      {isLearning && (
-        <div className="pointer-events-none absolute right-full top-1/2 z-30 mr-3 flex -translate-y-1/2 items-center gap-2 whitespace-nowrap rounded-md border border-blue-500/40 bg-background/95 px-2 py-1 text-xs font-medium text-blue-400 shadow-sm">
-          <div className="flex items-center gap-1">
-            <span className="h-1.5 w-1.5 rounded-full bg-blue-400 animate-pulse" />
-            <span className="h-1.5 w-1.5 rounded-full bg-blue-400/80 animate-pulse [animation-delay:150ms]" />
-          </div>
-          <span>Listening for MIDI input</span>
-        </div>
-      )}
-
       {isMappingMode && !disabled && (
         <div
           className={cn(
