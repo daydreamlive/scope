@@ -19,7 +19,6 @@ from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
-from ..wan2_1.vace import VACEEnabledPipeline
 from ..wan2_1.vae import create_vae
 from .modular_blocks import LongLiveBlocks
 from .schema import LongLiveConfig
@@ -32,7 +31,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
-class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
+class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return LongLiveConfig
@@ -69,14 +68,10 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         )
         lora_config = getattr(model_config, "adapter", {})
 
-        # Load generator with VACE support via upfront loading
-        # Strategy: Load LongLive base, wrap with VACE (if enabled), add VACE weights, then apply LoRA
-        # (VACE loaded before LoRA to ensure correct wrapper ordering)
         if stage_callback:
             stage_callback("Loading diffusion model...")
         start = time.time()
 
-        # Always create base CausalWanModel first
         generator = WanDiffusionWrapper(
             CausalWanModel,
             model_name=base_model_name,
@@ -86,11 +81,22 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
             **base_model_kwargs,
         )
 
-        # Apply VACE wrapper if vace_path is configured (upfront loading)
-        # This must happen before LoRA to get correct ordering: LoRA -> VACE -> Base
-        generator.model = self._init_vace(
-            config, generator.model, device=device, dtype=dtype
-        )
+        # Initialize VACE natively on the model (no wrapper needed)
+        vace_path = getattr(config, "vace_path", None)
+        if vace_path:
+            from ..wan2_1.vace.utils.weight_loader import load_vace_weights_only
+
+            vace_in_dim = getattr(config, "vace_in_dim", 96)
+            model_cfg = getattr(config, "model_config", None)
+            if model_cfg:
+                bm_kwargs = getattr(model_cfg, "base_model_kwargs", None) or {}
+                vace_in_dim = bm_kwargs.get("vace_in_dim", vace_in_dim)
+
+            generator.model.init_vace(vace_in_dim=vace_in_dim)
+            generator.model.vace_patch_embedding.to(device=device, dtype=dtype)
+            generator.model.vace_blocks.to(device=device, dtype=dtype)
+            load_vace_weights_only(generator.model, vace_path)
+            logger.info("Initialized VACE natively on CausalWanModel")
 
         # Apply LongLive's built-in performance LoRA using the module-targeted strategy.
         # This mirrors the original LongLive behavior and is independent of any

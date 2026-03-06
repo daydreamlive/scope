@@ -7,6 +7,11 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
     OutputParam,
 )
 
+from scope.core.pipelines.wan2_1.utils import (
+    initialize_crossattn_cache,
+    initialize_kv_cache,
+)
+
 
 class RecacheFramesBlock(ModularPipelineBlocks):
     @property
@@ -20,8 +25,7 @@ class RecacheFramesBlock(ModularPipelineBlocks):
         return [
             ConfigSpec("num_frame_per_block", 3),
             ConfigSpec("local_attn_size", 12),
-            ConfigSpec("vae_spatial_downsample_factor", 8),
-            ConfigSpec("patch_embedding_spatial_downsample_factor", 2),
+            ConfigSpec("global_sink", True),
         ]
 
     @property
@@ -50,7 +54,8 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             ),
             InputParam(
                 "crossattn_cache",
-                type_hint=list[dict] | None,
+                required=True,
+                type_hint=list[dict],
                 description="Initialized cross-attention cache",
             ),
             InputParam(
@@ -88,7 +93,7 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             ),
             OutputParam(
                 "crossattn_cache",
-                type_hint=list[dict] | None,
+                type_hint=list[dict],
                 description="Initialized cross-attention cache",
             ),
             OutputParam(
@@ -139,18 +144,22 @@ class RecacheFramesBlock(ModularPipelineBlocks):
         frame_seq_length = (block_state.height // scale_size) * (
             block_state.width // scale_size
         )
-        num_frame_per_block = components.config.num_frame_per_block
-        sink_tokens = components.generator.model.sink_size * frame_seq_length
 
-        # Preserve the sink frames (old scene continuity) but zero non-sink portion.
-        # This way chunked recache has the sink as context for smooth transitions.
-        for cache in block_state.kv_cache:
-            cache["k"][:, sink_tokens:].zero_()
-            cache["v"][:, sink_tokens:].zero_()
+        global_sink = components.config.global_sink
 
-        # Set fill_level to sink_tokens so only the sink is valid context initially.
-        # Each chunk will grow fill_level as it processes.
-        components.generator.model.fill_level = sink_tokens
+        # When global_sink is True (default): Preserve sink tokens in KV cache
+        # When global_sink is False: Reset KV cache before recaching
+        if not global_sink:
+            block_state.kv_cache = initialize_kv_cache(
+                generator=components.generator,
+                batch_size=1,
+                dtype=generator_param.dtype,
+                device=generator_param.device,
+                local_attn_size=components.config.local_attn_size,
+                frame_seq_length=frame_seq_length,
+                kv_cache_existing=block_state.kv_cache,
+                reset_indices=False,
+            )
 
         # Get the number of frames to recache (min of what we've generated and buffer size)
         num_recache_frames = min(
@@ -163,38 +172,51 @@ class RecacheFramesBlock(ModularPipelineBlocks):
             .to(generator_param.device)
         )
 
+        # Prepare blockwise causal mask
+        components.generator.model.block_mask = (
+            components.generator.model._prepare_blockwise_causal_attn_mask(
+                device=recache_frames.device,
+                num_frames=num_recache_frames,
+                frame_seqlen=frame_seq_length,
+                num_frame_per_block=components.config.num_frame_per_block,
+                local_attn_size=components.config.local_attn_size,
+            )
+        )
+
+        context_timestep = (
+            torch.ones(
+                [1, num_recache_frames],
+                device=recache_frames.device,
+                dtype=torch.int64,
+            )
+            * 0
+        )
+
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
+        # When global_sink is True: sink_recache_after_switch=False (preserve sink tokens)
+        # When global_sink is False: sink_recache_after_switch=True (recache writes to sink positions)
+        components.generator(
+            noisy_image_or_video=recache_frames,
+            conditional_dict=conditional_dict,
+            timestep=context_timestep,
+            kv_cache=block_state.kv_cache,
+            crossattn_cache=block_state.crossattn_cache,
+            kv_bank=block_state.kv_bank,
+            update_bank=False,
+            q_bank=True,
+            update_cache=True,
+            is_recache=True,
+            current_start=recache_start * frame_seq_length,
+            sink_recache_after_switch=not global_sink,
+        )
 
-        # Process recache frames in chunks of num_frame_per_block.
-        # Each chunk sees the sink (old scene continuity) + previously recached chunks
-        # as context, maintaining smooth transitions between prompts.
-        for chunk_idx in range(0, num_recache_frames, num_frame_per_block):
-            chunk_end = min(chunk_idx + num_frame_per_block, num_recache_frames)
-            chunk_frames = recache_frames[:, chunk_idx:chunk_end]
-
-            chunk_num_frames = chunk_end - chunk_idx
-            chunk_start_frame = recache_start + chunk_idx
-
-            context_timestep = (
-                torch.ones(
-                    [1, chunk_num_frames],
-                    device=chunk_frames.device,
-                    dtype=torch.int64,
-                )
-                * 0
-            )
-
-            components.generator(
-                noisy_image_or_video=chunk_frames,
-                conditional_dict=conditional_dict,
-                timestep=context_timestep,
-                kv_cache=block_state.kv_cache,
-                kv_bank=block_state.kv_bank,
-                update_bank=False,
-                q_bank=True,
-                update_cache=True,
-                current_start=chunk_start_frame * frame_seq_length,
-            )
+        block_state.crossattn_cache = initialize_crossattn_cache(
+            generator=components.generator,
+            batch_size=1,
+            dtype=generator_param.dtype,
+            device=generator_param.device,
+            crossattn_cache_existing=block_state.crossattn_cache,
+        )
 
         self.set_block_state(state, block_state)
         return components, state
