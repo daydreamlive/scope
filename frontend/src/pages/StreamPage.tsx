@@ -2046,6 +2046,8 @@ export function StreamPage() {
                 isCloudConnecting={isCloudConnecting}
                 isConnecting={isConnecting}
                 pipelineError={pipelineError}
+                cloudConnectStage={connectStage}
+                pipelineLoadingStage={loadingStage}
                 isPlaying={!settings.paused}
                 isDownloading={isDownloading}
                 onPlayPauseToggle={() => {
