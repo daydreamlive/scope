@@ -92,8 +92,7 @@ class DenoiseBlock(ModularPipelineBlocks):
             ),
             InputParam(
                 "crossattn_cache",
-                required=True,
-                type_hint=list[dict],
+                type_hint=list[dict] | None,
                 description="Initialized cross-attention cache",
             ),
             InputParam(
