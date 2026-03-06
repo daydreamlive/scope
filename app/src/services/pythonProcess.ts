@@ -111,7 +111,9 @@ export class ScopePythonProcessService implements PythonProcessService {
         DAYDREAM_SCOPE_MANAGED: '1',
         // Baked in at build time via vite.main.config.ts `define`.
         // Runtime env takes precedence so CLI overrides still work.
-        ...((process.env.SCOPE_CLOUD_APP_ID === undefined && __SCOPE_CLOUD_APP_ID__)
+        ...(process.env.SCOPE_CLOUD_APP_ID === undefined
+          && typeof __SCOPE_CLOUD_APP_ID__ !== 'undefined'
+          && __SCOPE_CLOUD_APP_ID__
           ? { SCOPE_CLOUD_APP_ID: __SCOPE_CLOUD_APP_ID__ }
           : {}),
       },
