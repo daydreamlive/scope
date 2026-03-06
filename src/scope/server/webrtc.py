@@ -344,7 +344,7 @@ class WebRTCManager:
                     try:
                         # Parse the JSON message
                         data = json.loads(message)
-                        logger.info(f"Received parameter update: {data}")
+                        logger.debug(f"Received parameter update: {data}")
 
                         # Check for paused parameter and call pause() method on video track
                         if "paused" in data and session.video_track:
@@ -512,7 +512,7 @@ class WebRTCManager:
                 def on_data_channel_message(message):
                     try:
                         data = json.loads(message)
-                        logger.info(f"Parameter update: {data}")
+                        logger.debug(f"Parameter update: {data}")
 
                         # Forward parameters to cloud
                         cloud_track.update_parameters(data)
@@ -644,6 +644,16 @@ class WebRTCManager:
         except Exception as e:
             logger.error(f"Failed to add ICE candidate to session {session_id}: {e}")
             raise ValueError(f"Invalid ICE candidate: {e}") from e
+
+    def broadcast_parameter_update(self, parameters: dict) -> None:
+        """Send a parameter update to all active sessions (e.g. from OSC)."""
+        for session in self.sessions.values():
+            if session.pc.connectionState in ("closed", "failed"):
+                continue
+            if "paused" in parameters and session.video_track:
+                session.video_track.pause(parameters["paused"])
+            if session.video_track and hasattr(session.video_track, "frame_processor"):
+                session.video_track.frame_processor.update_parameters(parameters)
 
     async def stop(self):
         """Close and cleanup all sessions."""
