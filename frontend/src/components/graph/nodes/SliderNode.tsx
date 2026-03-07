@@ -76,7 +76,11 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
 
   return (
     <NodeCard selected={selected} autoMinHeight>
-      <NodeHeader title="Slider" dotColor="bg-violet-400" />
+      <NodeHeader
+        title={data.customTitle || "Slider"}
+        dotColor="bg-violet-400"
+        onTitleChange={newTitle => updateField("customTitle", newTitle)}
+      />
       <NodeBody withGap>
         {/* Slider track */}
         <div

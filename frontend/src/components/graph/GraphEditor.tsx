@@ -17,7 +17,8 @@ import "@xyflow/react/dist/style.css";
 import { SourceNode } from "./nodes/SourceNode";
 import { PipelineNode } from "./nodes/PipelineNode";
 import { SinkNode } from "./nodes/SinkNode";
-import { ValueNode } from "./nodes/ValueNode";
+import { PrimitiveNode } from "./nodes/PrimitiveNode";
+import { RerouteNode } from "./nodes/RerouteNode";
 import { ControlNode } from "./nodes/ControlNode";
 import { MathNode } from "./nodes/MathNode";
 import { NoteNode } from "./nodes/NoteNode";
@@ -43,7 +44,7 @@ const nodeTypes = {
   source: SourceNode,
   pipeline: PipelineNode,
   sink: SinkNode,
-  value: ValueNode,
+  primitive: PrimitiveNode,
   control: ControlNode,
   math: MathNode,
   note: NoteNode,
@@ -52,6 +53,7 @@ const nodeTypes = {
   knobs: KnobsNode,
   xypad: XYPadNode,
   tuple: TupleNode,
+  reroute: RerouteNode,
 };
 
 const edgeTypes = {
@@ -187,7 +189,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       Edge
     > | null>(null);
 
-    // Right-click: drag = box-select, click = context menu
+    // Right-click drag = box-select, click = context menu
     const [selectionRect, setSelectionRect] = useState<{
       x1: number;
       y1: number;
@@ -302,7 +304,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onConnect,
       onReconnect,
       findConnectedPipelineParams,
-    } = useConnectionLogic(nodes, setEdges, handleEdgeDelete);
+    } = useConnectionLogic(nodes, setNodes, setEdges, handleEdgeDelete);
 
     // Node factories
     const { handleNodeTypeSelect, handleDeleteNode } = useNodeFactories({

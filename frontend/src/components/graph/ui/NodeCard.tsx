@@ -33,10 +33,7 @@ export function NodeCard({
     // Measure
     measure();
 
-    // Watch for size changes
-    // ResizeObserver fires when the element's dimensions change, so we
-    // don't need `children` as a dependency (which would cause infinite
-    // loops since JSX children are new objects on every render).
+    // Watch for size changes (ResizeObserver avoids infinite loops)
     const ro = new ResizeObserver(measure);
     ro.observe(el);
 

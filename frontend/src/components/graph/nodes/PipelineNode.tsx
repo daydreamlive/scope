@@ -1,5 +1,5 @@
 import { useRef, useCallback, useState, useLayoutEffect } from "react";
-import { Handle, Position, useEdges } from "@xyflow/react";
+import { Handle, Position, useEdges, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { RotateCcw } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
@@ -49,6 +49,7 @@ export function PipelineNode({
   data,
   selected,
 }: NodeProps<PipelineNodeType>) {
+  const { setNodes } = useReactFlow();
   const edges = useEdges();
   const pipelineIds = data.availablePipelineIds || [];
   const streamInputs = data.streamInputs ?? ["video"];
@@ -126,7 +127,19 @@ export function PipelineNode({
 
   return (
     <NodeCard selected={selected} autoMinHeight>
-      <NodeHeader title={pipelineName} dotColor="bg-blue-400" />
+      <NodeHeader
+        title={data.customTitle || pipelineName}
+        dotColor="bg-blue-400"
+        onTitleChange={newTitle =>
+          setNodes(nds =>
+            nds.map(n =>
+              n.id === id
+                ? { ...n, data: { ...n.data, customTitle: newTitle } }
+                : n
+            )
+          )
+        }
+      />
       <NodeBody withGap>
         {/* Pipeline selector */}
         <NodeParamRow label="Pipeline">
@@ -242,7 +255,7 @@ export function PipelineNode({
           );
         })}
 
-        {/* List-number parameters (e.g. denoising_steps) rendered as individual sliders */}
+        {/* List-number parameters as individual sliders */}
         {listParams.map(param => {
           const isConnected = isParamConnected(param.name);
           const rawValue = parameterValues[param.name] ?? param.defaultValue;
@@ -294,7 +307,7 @@ export function PipelineNode({
           );
         })}
 
-        {/* Prompt textarea (last, with its own handle) */}
+        {/* Prompt textarea */}
         {supportsPrompts && (
           <div ref={setRowRef("prompt")}>
             <div className="flex flex-col gap-1">

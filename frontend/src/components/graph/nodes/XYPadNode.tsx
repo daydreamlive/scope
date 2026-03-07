@@ -83,13 +83,17 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
   const rangeY = maxY - minY;
   const dp = (r: number) => (r >= 10 ? 0 : 2);
 
-  // Handle Y positions: center them vertically on the pad area
+  // Center Y positions on pad
   const padCenterY = HEADER_HEIGHT + BODY_PAD + PAD_SIZE / 2;
   const handleSpacing = 16;
 
   return (
     <NodeCard selected={selected} autoMinHeight>
-      <NodeHeader title="XY Pad" dotColor="bg-sky-400" />
+      <NodeHeader
+        title={data.customTitle || "XY Pad"}
+        dotColor="bg-sky-400"
+        onTitleChange={newTitle => updateFields({ customTitle: newTitle })}
+      />
       <NodeBody>
         <div className="flex flex-col gap-1">
           {/* The pad */}

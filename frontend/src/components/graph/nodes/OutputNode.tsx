@@ -81,7 +81,19 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
 
   return (
     <NodeCard selected={selected}>
-      <NodeHeader title={`${typeLabel} Output`} dotColor={dotColor} />
+      <NodeHeader
+        title={data.customTitle || `${typeLabel} Output`}
+        dotColor={dotColor}
+        onTitleChange={newTitle =>
+          setNodes(nds =>
+            nds.map(n =>
+              n.id === id
+                ? { ...n, data: { ...n.data, customTitle: newTitle } }
+                : n
+            )
+          )
+        }
+      />
       <div className="px-2 py-1.5 flex flex-col gap-1.5">
         <div className="px-2">
           <NodeParamRow label="Type">

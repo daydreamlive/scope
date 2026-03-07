@@ -5,12 +5,12 @@ import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import {
   NodeCard,
+  NodeHeader,
   NodeBody,
   NodeParamRow,
   NodePillInput,
   NodePillSelect,
   NodePill,
-  NODE_TOKENS,
 } from "../ui";
 
 type ControlNodeType = Node<FlowNodeData, "control">;
@@ -304,21 +304,28 @@ export function ControlNode({
 
   return (
     <NodeCard selected={selected}>
-      <div className={`${NODE_TOKENS.header} justify-between`}>
-        <div className="flex items-center gap-2">
-          <div
-            className={`w-[10px] h-[10px] rounded-full ${dotColorClass} shrink-0`}
-          />
-          <p className={NODE_TOKENS.headerText}>{title}</p>
-        </div>
-        <button
-          onClick={handleTogglePlay}
-          className="w-5 h-5 flex items-center justify-center text-[#fafafa] hover:text-blue-400 transition-colors"
-          type="button"
-        >
-          {isPlaying ? "⏸" : "▶"}
-        </button>
-      </div>
+      <NodeHeader
+        title={data.customTitle || title}
+        dotColor={dotColorClass}
+        onTitleChange={newTitle =>
+          setNodes(nds =>
+            nds.map(n =>
+              n.id === id
+                ? { ...n, data: { ...n.data, customTitle: newTitle } }
+                : n
+            )
+          )
+        }
+        rightContent={
+          <button
+            onClick={handleTogglePlay}
+            className="w-5 h-5 flex items-center justify-center text-[#fafafa] hover:text-blue-400 transition-colors"
+            type="button"
+          >
+            {isPlaying ? "⏸" : "▶"}
+          </button>
+        }
+      />
       <NodeBody withGap>
         <NodeParamRow label="Pattern">
           <NodePillSelect

@@ -108,7 +108,11 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
 
   return (
     <NodeCard selected={selected} autoMinHeight>
-      <NodeHeader title="Tuple" dotColor="bg-orange-400" />
+      <NodeHeader
+        title={data.customTitle || "Tuple"}
+        dotColor="bg-orange-400"
+        onTitleChange={newTitle => updateFields({ customTitle: newTitle })}
+      />
       <NodeBody>
         <div className="flex flex-col gap-1">
           {/* Compact Min / Max / Step row */}

@@ -15,7 +15,7 @@ interface AddNodeModalProps {
       | "source"
       | "pipeline"
       | "sink"
-      | "value"
+      | "primitive"
       | "control"
       | "math"
       | "note"
@@ -23,7 +23,8 @@ interface AddNodeModalProps {
       | "slider"
       | "knobs"
       | "xypad"
-      | "tuple",
+      | "tuple"
+      | "reroute",
     subType?: string
   ) => void;
 }
@@ -33,7 +34,7 @@ interface NodeCatalogItem {
     | "source"
     | "pipeline"
     | "sink"
-    | "value"
+    | "primitive"
     | "control"
     | "math"
     | "note"
@@ -41,7 +42,8 @@ interface NodeCatalogItem {
     | "slider"
     | "knobs"
     | "xypad"
-    | "tuple";
+    | "tuple"
+    | "reroute";
   subType?: string;
   name: string;
   description: string;
@@ -79,27 +81,10 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     category: "I/O",
   },
   {
-    type: "value",
-    subType: "string",
-    name: "String",
-    description: "Static text value",
-    color: "#fbbf24",
-    category: "Values",
-  },
-  {
-    type: "value",
-    subType: "number",
-    name: "Number",
-    description: "Static numeric value",
-    color: "#38bdf8",
-    category: "Values",
-  },
-  {
-    type: "value",
-    subType: "boolean",
-    name: "Boolean",
-    description: "True / false value",
-    color: "#34d399",
+    type: "primitive",
+    name: "Primitive",
+    description: "Adaptive value node — auto-detects type from connected input",
+    color: "#9ca3af",
     category: "Values",
   },
   {
@@ -140,6 +125,13 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     name: "Note",
     description: "Add a text annotation to the graph",
     color: "#fbbf24",
+    category: "Utility",
+  },
+  {
+    type: "reroute",
+    name: "Reroute",
+    description: "Pass-through dot to organize long connection lines",
+    color: "#9ca3af",
     category: "Utility",
   },
   {
@@ -224,13 +216,13 @@ function NodeTile({
         onClick={onSelect}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className="flex flex-col items-center justify-center gap-2 p-4 h-[84px] rounded-xl bg-[#242424] border border-[rgba(119,119,119,0.12)] hover:bg-[#2e2e2e] hover:border-[rgba(119,119,119,0.35)] transition-colors text-center group"
+        className="flex items-center gap-1.5 p-2 h-[56px] rounded-lg bg-[#242424] border border-[rgba(119,119,119,0.12)] hover:bg-[#2e2e2e] hover:border-[rgba(119,119,119,0.35)] transition-colors text-left group"
       >
         <div
-          className="w-3 h-3 rounded-full shrink-0 transition-transform group-hover:scale-125"
+          className="w-2.5 h-2.5 rounded-full shrink-0 transition-transform group-hover:scale-125"
           style={{ backgroundColor: item.color }}
         />
-        <span className="text-[13px] font-medium text-[#e0e0e0] leading-tight">
+        <span className="text-[11px] font-medium text-[#e0e0e0] leading-tight truncate">
           {item.name}
         </span>
       </button>
@@ -298,7 +290,7 @@ export function AddNodeModal({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="!max-w-3xl w-full p-0 overflow-hidden bg-[#1a1a1a] border border-[rgba(119,119,119,0.2)] rounded-2xl">
+      <DialogContent className="!max-w-xl w-full p-0 overflow-hidden bg-[#1a1a1a] border border-[rgba(119,119,119,0.2)] rounded-2xl">
         <DialogHeader className="sr-only">
           <DialogTitle>Add Node</DialogTitle>
           <DialogDescription>
@@ -306,12 +298,12 @@ export function AddNodeModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="flex flex-col h-[540px]">
+        <div className="flex flex-col h-[420px]">
           {/* Search bar */}
-          <div className="px-6 pt-6 pb-4 border-b border-[rgba(119,119,119,0.12)]">
-            <div className="flex items-center gap-3 px-4 py-2.5 bg-[#111] rounded-xl border border-[rgba(119,119,119,0.2)]">
+          <div className="px-4 pt-4 pb-3 border-b border-[rgba(119,119,119,0.12)]">
+            <div className="flex items-center gap-2 px-3 py-2 bg-[#111] rounded-lg border border-[rgba(119,119,119,0.2)]">
               <svg
-                className="w-4 h-4 text-[#666] shrink-0"
+                className="w-3.5 h-3.5 text-[#666] shrink-0"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -328,19 +320,19 @@ export function AddNodeModal({
                 value={searchText}
                 onChange={e => setSearchText(e.target.value)}
                 placeholder="Search for anything..."
-                className="flex-1 bg-transparent text-sm text-[#fafafa] placeholder:text-[#555] focus:outline-none"
+                className="flex-1 bg-transparent text-xs text-[#fafafa] placeholder:text-[#555] focus:outline-none"
                 autoFocus
               />
             </div>
           </div>
 
           {/* Category tabs */}
-          <div className="flex items-center gap-2 px-6 py-3 border-b border-[rgba(119,119,119,0.12)]">
+          <div className="flex items-center gap-1.5 px-4 py-2 border-b border-[rgba(119,119,119,0.12)]">
             {CATEGORIES.map(cat => (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
-                className={`px-4 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
                   activeCategory === cat
                     ? "bg-[#fafafa] text-[#111]"
                     : "text-[#888] hover:text-[#ccc]"
@@ -352,13 +344,13 @@ export function AddNodeModal({
           </div>
 
           {/* Grid */}
-          <div className="flex-1 overflow-y-auto px-6 py-4 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
+          <div className="flex-1 overflow-y-auto px-4 py-3 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-white/20 [&::-webkit-scrollbar-thumb]:rounded-full">
             {filteredItems.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-[#555] text-sm">
+              <div className="flex items-center justify-center h-full text-[#555] text-xs">
                 No nodes found{searchText ? ` for "${searchText}"` : ""}
               </div>
             ) : (
-              <div className="grid grid-cols-5 gap-2">
+              <div className="grid grid-cols-6 gap-1.5">
                 {filteredItems.map(item => (
                   <NodeTile
                     key={`${item.type}-${item.subType || ""}`}
@@ -371,14 +363,14 @@ export function AddNodeModal({
           </div>
 
           {/* Footer */}
-          <div className="flex items-center justify-between px-6 py-4 border-t border-[rgba(119,119,119,0.12)]">
+          <div className="flex items-center justify-between px-4 py-3 border-t border-[rgba(119,119,119,0.12)]">
             <button
               onClick={handleClose}
-              className="px-6 py-2.5 rounded-full bg-[#2a2a2a] border border-[rgba(119,119,119,0.2)] text-sm font-medium text-[#fafafa] hover:bg-[#333] transition-colors"
+              className="px-5 py-2 rounded-full bg-[#2a2a2a] border border-[rgba(119,119,119,0.2)] text-xs font-medium text-[#fafafa] hover:bg-[#333] transition-colors"
             >
               Cancel
             </button>
-            <span className="text-xs text-[#555]">
+            <span className="text-[10px] text-[#555]">
               {filteredItems.length} node{filteredItems.length !== 1 ? "s" : ""}
             </span>
           </div>

@@ -249,7 +249,19 @@ export function KnobsNode({ id, data, selected }: NodeProps<KnobsNodeType>) {
 
   return (
     <NodeCard selected={selected} autoMinHeight>
-      <NodeHeader title="Knobs" dotColor="bg-pink-400" />
+      <NodeHeader
+        title={data.customTitle || "Knobs"}
+        dotColor="bg-pink-400"
+        onTitleChange={newTitle =>
+          setNodes(nds =>
+            nds.map(n =>
+              n.id === id
+                ? { ...n, data: { ...n.data, customTitle: newTitle } }
+                : n
+            )
+          )
+        }
+      />
       <NodeBody>
         <div className="flex flex-col gap-0.5 py-0.5">
           {knobs.map((knob, i) => (

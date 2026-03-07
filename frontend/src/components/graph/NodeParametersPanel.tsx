@@ -27,7 +27,7 @@ interface NodeParametersPanelProps {
   isStreaming: boolean;
 }
 
-// Load params that remain editable during streaming
+// Load params editable during streaming
 const RUNTIME_EDITABLE_LOAD_PARAMS = new Set(["vace_context_scale"]);
 
 export function NodeParametersPanel({
@@ -88,7 +88,7 @@ export function NodeParametersPanel({
   ) => {
     let resolvedType = field.fieldType;
 
-    // Check for array types with integer/number items
+    // Check for array of numbers
     const isArrayOfNumbers = (obj: Record<string, unknown>): boolean => {
       if (obj.type === "array" && obj.items) {
         const items = obj.items as { type?: string };
@@ -124,7 +124,7 @@ export function NodeParametersPanel({
       );
     }
 
-    // Try to infer primitive type for complex fields
+    // Infer primitive type for complex fields
     if (
       typeof resolvedType === "string" &&
       COMPLEX_COMPONENTS.includes(resolvedType as ComplexComponentName)

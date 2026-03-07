@@ -62,7 +62,7 @@ function getValueFromNode(
   node: Node<FlowNodeData>,
   sourceHandleId?: string | null
 ): number | null {
-  if (node.data.nodeType === "value") {
+  if (node.data.nodeType === "primitive" || node.data.nodeType === "reroute") {
     const val = node.data.value;
     if (typeof val === "number") return val;
     return null;
@@ -243,7 +243,19 @@ export function MathNode({ id, data, selected }: NodeProps<MathNodeType>) {
 
   return (
     <NodeCard selected={selected}>
-      <NodeHeader title="Math" dotColor="bg-sky-400" />
+      <NodeHeader
+        title={data.customTitle || "Math"}
+        dotColor="bg-sky-400"
+        onTitleChange={newTitle =>
+          setNodes(nds =>
+            nds.map(n =>
+              n.id === id
+                ? { ...n, data: { ...n.data, customTitle: newTitle } }
+                : n
+            )
+          )
+        }
+      />
       <NodeBody withGap>
         <NodeParamRow label="Op">
           <NodePillSelect

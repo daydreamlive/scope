@@ -29,9 +29,13 @@ export function getEdgeColor(
   if (!parsed) return "#9ca3af";
 
   if (parsed.kind === "param") {
-    if (sourceNode.data.nodeType === "value") {
+    if (sourceNode.data.nodeType === "primitive") {
       const valueType = sourceNode.data.valueType;
       return PARAM_TYPE_COLORS[valueType || "string"] || "#9ca3af";
+    }
+    if (sourceNode.data.nodeType === "reroute") {
+      const valueType = sourceNode.data.valueType;
+      return valueType ? PARAM_TYPE_COLORS[valueType] || "#9ca3af" : "#9ca3af";
     }
     if (sourceNode.data.nodeType === "control") {
       const controlType = sourceNode.data.controlType;

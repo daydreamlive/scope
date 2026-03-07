@@ -34,13 +34,14 @@ function valuesEqual(a: unknown, b: unknown): boolean {
 
 /** Node types that produce parameter output values. */
 const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
-  "value",
+  "primitive",
   "control",
   "math",
   "slider",
   "knobs",
   "xypad",
   "tuple",
+  "reroute",
 ]);
 
 /** Node types that can receive values on their input handles. */
@@ -49,6 +50,7 @@ const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
   "knobs",
   "xypad",
   "tuple",
+  "reroute",
 ]);
 
 export function useValueForwarding(
@@ -86,7 +88,9 @@ export function useValueForwarding(
         value: unknown;
       }> = [];
 
-      if (node.data.nodeType === "value") {
+      if (node.data.nodeType === "primitive") {
+        valuesToForward.push({ handleName: null, value: node.data.value });
+      } else if (node.data.nodeType === "reroute") {
         valuesToForward.push({ handleName: null, value: node.data.value });
       } else if (
         node.data.nodeType === "control" ||
@@ -196,7 +200,9 @@ export function useValueForwarding(
       const sourceParsed = parseHandleId(edge.sourceHandle);
       if (!sourceParsed || sourceParsed.kind !== "param") continue;
 
-      if (sourceNode.data.nodeType === "value") {
+      if (sourceNode.data.nodeType === "primitive") {
+        sourceValue = sourceNode.data.value;
+      } else if (sourceNode.data.nodeType === "reroute") {
         sourceValue = sourceNode.data.value;
       } else if (
         sourceNode.data.nodeType === "control" ||
@@ -284,6 +290,9 @@ export function useValueForwarding(
             nodeUpdates["tupleValues"] = existingValues;
           }
         }
+      } else if (targetNode.data.nodeType === "reroute") {
+        // Pass source value through to the reroute node
+        nodeUpdates["value"] = sourceValue;
       }
 
       if (Object.keys(nodeUpdates).length > 0) {
@@ -293,8 +302,7 @@ export function useValueForwarding(
 
     if (updates.size === 0) return;
 
-    // Apply updates (return original array if unchanged to avoid re-render)
-    // (which would re-run this effect and loop).
+    // Apply updates (return original if unchanged to avoid loop)
     setNodes(nds => {
       let anyNodeChanged = false;
       const result = nds.map(n => {

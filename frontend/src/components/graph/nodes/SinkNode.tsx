@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { Handle, Position } from "@xyflow/react";
+import { Handle, Position, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { NodeCard, NodeHeader } from "../ui";
@@ -10,7 +10,8 @@ const HEADER_H = 28;
 const BODY_PAD = 6;
 const PREVIEW_H = 120;
 
-export function SinkNode({ data, selected }: NodeProps<SinkNodeType>) {
+export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
+  const { setNodes } = useReactFlow();
   const remoteStream = data.remoteStream as MediaStream | null | undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
 
@@ -24,7 +25,19 @@ export function SinkNode({ data, selected }: NodeProps<SinkNodeType>) {
 
   return (
     <NodeCard selected={selected}>
-      <NodeHeader title="Sink" dotColor="bg-orange-400" />
+      <NodeHeader
+        title={data.customTitle || "Sink"}
+        dotColor="bg-orange-400"
+        onTitleChange={newTitle =>
+          setNodes(nds =>
+            nds.map(n =>
+              n.id === id
+                ? { ...n, data: { ...n.data, customTitle: newTitle } }
+                : n
+            )
+          )
+        }
+      />
       <div className="p-2 flex-1 min-h-0 flex flex-col">
         <div className="relative rounded-md overflow-hidden bg-black/50 flex-1 min-h-[60px]">
           {remoteStream ? (

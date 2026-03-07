@@ -98,30 +98,42 @@ export function useNodeFactories({
     [existingIds, nodes.length, setNodes]
   );
 
-  const addValueNode = useCallback(
-    (
-      valueType: "string" | "number" | "boolean",
-      position?: { x: number; y: number }
-    ) => {
-      const id = generateNodeId(valueType, existingIds);
-      const defaultValue =
-        valueType === "boolean" ? false : valueType === "number" ? 0 : "";
+  const addPrimitiveNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      const id = generateNodeId("primitive", existingIds);
       const newNode: Node<FlowNodeData> = {
         id,
-        type: "value",
+        type: "primitive",
         position: position ?? { x: 50, y: 50 + nodes.length * 100 },
         data: {
-          label: valueType,
-          nodeType: "value",
-          valueType,
-          value: defaultValue,
+          label: "Primitive",
+          nodeType: "primitive",
+          valueType: "string",
+          value: "",
           parameterOutputs: [
             {
               name: "value",
-              type: valueType,
-              defaultValue,
+              type: "string",
+              defaultValue: "",
             },
           ],
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes]
+  );
+
+  const addRerouteNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      const id = generateNodeId("reroute", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "reroute",
+        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        data: {
+          label: "Reroute",
+          nodeType: "reroute",
         },
       };
       setNodes(nds => [...nds, newNode]);
@@ -371,7 +383,7 @@ export function useNodeFactories({
         | "source"
         | "pipeline"
         | "sink"
-        | "value"
+        | "primitive"
         | "control"
         | "math"
         | "note"
@@ -379,7 +391,8 @@ export function useNodeFactories({
         | "slider"
         | "knobs"
         | "xypad"
-        | "tuple",
+        | "tuple"
+        | "reroute",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;
@@ -394,14 +407,8 @@ export function useNodeFactories({
         case "sink":
           addSinkNode(pendingNodePosition);
           break;
-        case "value":
-          if (
-            subType === "string" ||
-            subType === "number" ||
-            subType === "boolean"
-          ) {
-            addValueNode(subType, pendingNodePosition);
-          }
+        case "primitive":
+          addPrimitiveNode(pendingNodePosition);
           break;
         case "control":
           if (
@@ -433,6 +440,9 @@ export function useNodeFactories({
         case "tuple":
           addTupleNode(pendingNodePosition);
           break;
+        case "reroute":
+          addRerouteNode(pendingNodePosition);
+          break;
       }
 
       setPendingNodePosition(null);
@@ -442,7 +452,8 @@ export function useNodeFactories({
       addSourceNode,
       addPipelineNode,
       addSinkNode,
-      addValueNode,
+      addPrimitiveNode,
+      addRerouteNode,
       addControlNode,
       addMathNode,
       addNoteNode,

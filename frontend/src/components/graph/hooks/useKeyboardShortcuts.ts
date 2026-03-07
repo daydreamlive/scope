@@ -19,7 +19,7 @@ function safeCloneData(data: FlowNodeData): FlowNodeData {
   const cleaned: Record<string, unknown> = {};
   for (const [key, value] of Object.entries(data)) {
     if (typeof value === "function") continue;
-    // Keep primitives, arrays, plain objects; skip browser APIs
+    // Keep primitives/arrays/objects, skip browser APIs
     if (
       typeof value === "object" &&
       value !== null &&

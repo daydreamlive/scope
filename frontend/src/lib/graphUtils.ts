@@ -34,12 +34,14 @@ export interface PortInfo {
 
 export interface FlowNodeData {
   label: string;
+  /** User-editable display name; when set, overrides the default header title. */
+  customTitle?: string;
   pipelineId?: string | null;
   nodeType:
     | "source"
     | "pipeline"
     | "sink"
-    | "value"
+    | "primitive"
     | "control"
     | "math"
     | "note"
@@ -47,7 +49,8 @@ export interface FlowNodeData {
     | "slider"
     | "knobs"
     | "xypad"
-    | "tuple";
+    | "tuple"
+    | "reroute";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -55,13 +58,13 @@ export interface FlowNodeData {
   streamOutputs?: string[];
   /** Parameter input ports (for pipeline nodes) */
   parameterInputs?: ParameterPortDef[];
-  /** Parameter output ports (for value nodes) */
+  /** Parameter output ports (for primitive / value-producing nodes) */
   parameterOutputs?: ParameterPortDef[];
   /** Pipeline schemas keyed by pipeline_id, for looking up ports on selection change */
   pipelinePortsMap?: Record<string, { inputs: string[]; outputs: string[] }>;
-  /** For value nodes: the type of value (string, number, boolean) */
+  /** For primitive nodes: the type of value (string, number, boolean) */
   valueType?: "string" | "number" | "boolean";
-  /** For value nodes: the current value */
+  /** For primitive / slider nodes: the current value */
   value?: unknown;
   /** For control nodes: the type of control (float, int, string) */
   controlType?: "float" | "int" | "string";
@@ -443,6 +446,12 @@ export function graphConfigToFlow(
     const uiEdges = (graph.ui_state.edges ?? []) as UIStateEdge[];
 
     for (const un of uiNodes) {
+      // Migrate old "value" nodes to "primitive"
+      const nodeType = un.type === "value" ? "primitive" : un.type;
+      const nodeData = un.data as FlowNodeData;
+      if (un.type === "value") {
+        nodeData.nodeType = "primitive";
+      }
       const sizeProps =
         un.width != null || un.height != null
           ? {
@@ -456,10 +465,10 @@ export function graphConfigToFlow(
           : {};
       nodes.push({
         id: un.id,
-        type: un.type as string,
+        type: nodeType,
         position: { x: un.position.x, y: un.position.y },
         ...sizeProps,
-        data: un.data as FlowNodeData,
+        data: nodeData,
       });
     }
 
@@ -479,7 +488,7 @@ export function graphConfigToFlow(
 
 /** Node types that are frontend-only and not sent to the backend graph. */
 const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
-  "value",
+  "primitive",
   "control",
   "math",
   "note",
@@ -488,6 +497,7 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "knobs",
   "xypad",
   "tuple",
+  "reroute",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */

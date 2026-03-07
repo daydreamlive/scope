@@ -30,7 +30,19 @@ export function NoteNode({ id, data, selected }: NodeProps<NoteNodeType>) {
 
   return (
     <NodeCard selected={selected}>
-      <NodeHeader title="Note" dotColor="bg-amber-400" />
+      <NodeHeader
+        title={data.customTitle || "Note"}
+        dotColor="bg-amber-400"
+        onTitleChange={newTitle =>
+          setNodes(nds =>
+            nds.map(n =>
+              n.id === id
+                ? { ...n, data: { ...n.data, customTitle: newTitle } }
+                : n
+            )
+          )
+        }
+      />
       <div className="flex-1 min-h-0 p-1.5">
         <textarea
           value={noteText}

@@ -220,7 +220,19 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
 
   return (
     <NodeCard selected={selected}>
-      <NodeHeader title="Source" dotColor="bg-green-400" />
+      <NodeHeader
+        title={data.customTitle || "Source"}
+        dotColor="bg-green-400"
+        onTitleChange={newTitle =>
+          setNodes(nds =>
+            nds.map(n =>
+              n.id === id
+                ? { ...n, data: { ...n.data, customTitle: newTitle } }
+                : n
+            )
+          )
+        }
+      />
       <div className="px-2 py-1.5 flex flex-col gap-1.5 flex-1 min-h-0">
         <div className="px-2">
           <NodeParamRow label="Source">
