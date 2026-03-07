@@ -1,7 +1,7 @@
 import { useRef, useCallback, useState, useLayoutEffect } from "react";
 import { Handle, Position, useEdges, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { RotateCcw } from "lucide-react";
+import { RotateCcw, AlertTriangle } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import {
@@ -69,12 +69,25 @@ export function PipelineNode({
     | ((nodeId: string, text: string) => void)
     | undefined;
   const supportsCacheManagement = data.supportsCacheManagement ?? false;
+  const pipelineAvailable = data.pipelineAvailable ?? true;
 
   const pipelineName = data.pipelineId || "Pipeline";
+
+  // If the current pipelineId is set but not in the available list, inject it
+  const isUnavailable =
+    !!data.pipelineId && !pipelineIds.includes(data.pipelineId);
 
   const selectOptions = [
     { value: "", label: "Select pipeline..." },
     ...pipelineIds.map(pid => ({ value: pid, label: pid })),
+    ...(isUnavailable
+      ? [
+          {
+            value: data.pipelineId!,
+            label: `${data.pipelineId} (not installed)`,
+          },
+        ]
+      : []),
   ];
 
   const isParamConnected = (paramName: string): boolean => {
@@ -153,6 +166,16 @@ export function PipelineNode({
             placeholder="Select pipeline..."
           />
         </NodeParamRow>
+
+        {/* Warning banner for unavailable pipeline */}
+        {!pipelineAvailable && data.pipelineId && (
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20">
+            <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
+            <span className="text-[10px] text-amber-400">
+              Pipeline not installed
+            </span>
+          </div>
+        )}
 
         {/* Stream inputs */}
         {streamInputs.map(port => (

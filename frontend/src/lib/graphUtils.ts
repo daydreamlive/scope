@@ -140,6 +140,8 @@ export interface FlowNodeData {
   promptText?: string;
   /** For pipeline nodes: callback when prompt text changes */
   onPromptChange?: (nodeId: string, text: string) => void;
+  /** For pipeline nodes: whether the selected pipeline is installed locally */
+  pipelineAvailable?: boolean;
 
   /* ── Slider node fields ── */
   /** For slider nodes: minimum value */

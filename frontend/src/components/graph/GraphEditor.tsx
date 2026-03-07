@@ -1,6 +1,7 @@
 import {
   forwardRef,
   useCallback,
+  useEffect,
   useImperativeHandle,
   useRef,
   useState,
@@ -158,6 +159,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       handleExport,
       refreshGraph,
       getCurrentGraphConfig,
+      fitViewTrigger,
     } = useGraphState(
       {
         onNodeParameterChange,
@@ -366,6 +368,16 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setEdges,
       handleSave
     );
+
+    // Auto-fit view after graph import
+    useEffect(() => {
+      if (fitViewTrigger === 0) return;
+      // Small delay to let React Flow measure the new nodes before fitting
+      const timer = setTimeout(() => {
+        reactFlowInstanceRef.current?.fitView({ padding: 0.1, duration: 300 });
+      }, 50);
+      return () => clearTimeout(timer);
+    }, [fitViewTrigger]);
 
     // Context menu suppression
     const suppressContextMenu = useCallback(

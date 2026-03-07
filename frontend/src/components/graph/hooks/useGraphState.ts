@@ -17,6 +17,8 @@ import {
   getPipelineSchemas,
 } from "../../../lib/api";
 import { getEdgeColor, PARAM_TYPE_COLORS } from "../constants";
+import { getDefaultPromptForMode } from "../../../data/pipelines";
+import type { InputMode } from "../../../types";
 
 // ---------------------------------------------------------------------------
 // localStorage helpers for graph backup
@@ -47,6 +49,38 @@ function clearGraphFromLocalStorage(): void {
   } catch {
     // ignore
   }
+}
+
+/** Attach pipeline node parameter values into ui_state for persistence. */
+function attachNodeParams(
+  config: ReturnType<typeof flowToGraphConfig>,
+  params: Record<string, Record<string, unknown>>
+): ReturnType<typeof flowToGraphConfig> {
+  // Only persist non-empty param bags
+  const filtered: Record<string, Record<string, unknown>> = {};
+  for (const [nodeId, bag] of Object.entries(params)) {
+    if (bag && Object.keys(bag).length > 0) {
+      filtered[nodeId] = bag;
+    }
+  }
+  if (Object.keys(filtered).length === 0) return config;
+  return {
+    ...config,
+    ui_state: {
+      ...(config.ui_state ?? {}),
+      node_params: filtered,
+    },
+  };
+}
+
+/** Extract pipeline node parameter values from ui_state. */
+function extractNodeParams(
+  uiState: Record<string, unknown> | null | undefined
+): Record<string, Record<string, unknown>> {
+  if (!uiState || typeof uiState !== "object") return {};
+  const raw = (uiState as Record<string, unknown>).node_params;
+  if (!raw || typeof raw !== "object") return {};
+  return raw as Record<string, Record<string, unknown>>;
 }
 
 interface EnrichNodesDeps {
@@ -96,6 +130,9 @@ function enrichNodes(
       const supportsCacheManagement =
         schema?.supports_cache_management ?? false;
       const nodeParamValues = deps.nodeParamsRef.current?.[n.id] || {};
+      const pipelineAvailable = pipelineId
+        ? deps.availablePipelineIds.includes(pipelineId)
+        : true;
       return {
         ...n,
         data: {
@@ -110,6 +147,7 @@ function enrichNodes(
           supportsCacheManagement,
           promptText: (nodeParamValues.__prompt as string) || "",
           onPromptChange: deps.handlePromptChange,
+          pipelineAvailable,
         },
       };
     }
@@ -221,6 +259,7 @@ export function useGraphState(
   const [nodeParams, setNodeParams] = useState<
     Record<string, Record<string, unknown>>
   >({});
+  const [fitViewTrigger, setFitViewTrigger] = useState(0);
 
   // Callback refs
   const nodesRef = useRef(nodes);
@@ -268,14 +307,25 @@ export function useGraphState(
 
   const handlePipelineSelect = useCallback(
     (nodeId: string, newPipelineId: string | null) => {
+      const schema = newPipelineId ? pipelineSchemas[newPipelineId] : null;
+      const supportsPrompts = schema?.supports_prompts ?? false;
+
+      // Pre-fill prompt with the same default used in perform mode
+      if (supportsPrompts && schema) {
+        const defaultMode = (schema.default_mode ?? "text") as InputMode;
+        const defaultPrompt = getDefaultPromptForMode(defaultMode);
+        setNodeParams(prev => ({
+          ...prev,
+          [nodeId]: { ...(prev[nodeId] || {}), __prompt: defaultPrompt },
+        }));
+      }
+
       setNodes(nds =>
         nds.map(n => {
           if (n.id !== nodeId) return n;
           const ports =
             newPipelineId && portsMap ? portsMap[newPipelineId] : null;
-          const schema = newPipelineId ? pipelineSchemas[newPipelineId] : null;
           const parameterInputs = schema ? extractParameterPorts(schema) : [];
-          const supportsPrompts = schema?.supports_prompts ?? false;
           const supportsCacheManagement =
             schema?.supports_cache_management ?? false;
           const newStyle = { ...n.style };
@@ -577,6 +627,14 @@ export function useGraphState(
             graphConfig,
             portsMap
           );
+          // Restore persisted pipeline node parameter values
+          const restoredParams = extractNodeParams(
+            (backup as Record<string, unknown>).ui_state as
+              | Record<string, unknown>
+              | null
+              | undefined
+          );
+          setNodeParams(restoredParams);
           const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
           setNodes(enriched);
           setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
@@ -601,6 +659,9 @@ export function useGraphState(
             response.graph,
             portsMap
           );
+          // Restore persisted pipeline node parameter values
+          const restoredParams = extractNodeParams(response.graph.ui_state);
+          setNodeParams(restoredParams);
           // Use ref for latest enrichDeps
           const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
           setNodes(enriched);
@@ -645,7 +706,10 @@ export function useGraphState(
 
     const timer = setTimeout(async () => {
       try {
-        const graphConfig = flowToGraphConfig(nodes, edges);
+        const graphConfig = attachNodeParams(
+          flowToGraphConfig(nodes, edges),
+          nodeParamsRef.current
+        );
         const graphJson = JSON.stringify(graphConfig);
         // Always save to localStorage first (never fails structurally)
         saveGraphToLocalStorage(graphJson);
@@ -666,7 +730,7 @@ export function useGraphState(
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [nodes, edges]);
+  }, [nodes, edges, nodeParams]);
 
   // Manual save (immediate, no debounce)
   const handleSave = useCallback(async () => {
@@ -675,7 +739,10 @@ export function useGraphState(
       return;
     }
     try {
-      const graphConfig = flowToGraphConfig(nodes, edges);
+      const graphConfig = attachNodeParams(
+        flowToGraphConfig(nodes, edges),
+        nodeParamsRef.current
+      );
       const graphJson = JSON.stringify(graphConfig);
       // Always save to localStorage first
       saveGraphToLocalStorage(graphJson);
@@ -706,7 +773,10 @@ export function useGraphState(
         const currentNodes = nodesRef.current;
         const currentEdges = edgesRef.current;
         if (currentNodes.length > 0 || currentEdges.length > 0) {
-          const graphConfig = flowToGraphConfig(currentNodes, currentEdges);
+          const graphConfig = attachNodeParams(
+            flowToGraphConfig(currentNodes, currentEdges),
+            nodeParamsRef.current
+          );
           saveGraphToLocalStorage(JSON.stringify(graphConfig));
         }
       } catch {
@@ -753,11 +823,15 @@ export function useGraphState(
             graphConfig,
             portsMap
           );
+          // Restore persisted pipeline node parameter values
+          const restoredParams = extractNodeParams(graphConfig.ui_state);
+          setNodeParams(restoredParams);
           const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
           setNodes(enriched);
           setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
           setGraphSource(null);
           setStatus(`Imported from ${file.name}`);
+          setFitViewTrigger(c => c + 1);
         } catch {
           setStatus("Import failed: invalid JSON");
         }
@@ -771,7 +845,10 @@ export function useGraphState(
 
   // Export graph as JSON file
   const handleExport = useCallback(() => {
-    const graphConfig = flowToGraphConfig(nodes, edges);
+    const graphConfig = attachNodeParams(
+      flowToGraphConfig(nodes, edges),
+      nodeParamsRef.current
+    );
     const dataStr = JSON.stringify(graphConfig, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -788,7 +865,11 @@ export function useGraphState(
   // Return the current graph config from the frontend React state.
   // This is always up-to-date (no debounce / backend round-trip).
   const getCurrentGraphConfig = useCallback(
-    () => flowToGraphConfig(nodesRef.current, edgesRef.current),
+    () =>
+      attachNodeParams(
+        flowToGraphConfig(nodesRef.current, edgesRef.current),
+        nodeParamsRef.current
+      ),
     []
   );
 
@@ -821,5 +902,6 @@ export function useGraphState(
     handleExport,
     refreshGraph: loadGraphFromBackend,
     getCurrentGraphConfig,
+    fitViewTrigger,
   };
 }
