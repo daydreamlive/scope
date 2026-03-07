@@ -44,7 +44,8 @@ export function useKeyboardShortcuts(
   nodes: Node<FlowNodeData>[],
   edges: Edge[],
   setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>,
-  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>
+  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
+  handleSave?: () => void
 ) {
   const clipboardRef = useRef<ClipboardData | null>(null);
   const pasteCountRef = useRef(0);
@@ -55,6 +56,9 @@ export function useKeyboardShortcuts(
   const edgesRef = useRef(edges);
   edgesRef.current = edges;
 
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Skip if focus is in form elements
@@ -63,6 +67,13 @@ export function useKeyboardShortcuts(
         activeElement?.tagName === "INPUT" ||
         activeElement?.tagName === "TEXTAREA" ||
         activeElement?.tagName === "SELECT";
+
+      // Cmd/Ctrl+S → Save
+      if ((e.metaKey || e.ctrlKey) && e.key === "s") {
+        e.preventDefault();
+        handleSaveRef.current?.();
+        return;
+      }
 
       // Tab → open Add Node modal
       if (e.key === "Tab" && !isInputElement) {

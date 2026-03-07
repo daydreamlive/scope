@@ -18,6 +18,37 @@ import {
 } from "../../../lib/api";
 import { getEdgeColor, PARAM_TYPE_COLORS } from "../constants";
 
+// ---------------------------------------------------------------------------
+// localStorage helpers for graph backup
+// ---------------------------------------------------------------------------
+const LS_GRAPH_KEY = "scope:graph:backup";
+
+function saveGraphToLocalStorage(graphJson: string): void {
+  try {
+    localStorage.setItem(LS_GRAPH_KEY, graphJson);
+  } catch {
+    // Storage full or unavailable – silently ignore
+  }
+}
+
+function loadGraphFromLocalStorage(): unknown | null {
+  try {
+    const raw = localStorage.getItem(LS_GRAPH_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
+}
+
+function clearGraphFromLocalStorage(): void {
+  try {
+    localStorage.removeItem(LS_GRAPH_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 interface EnrichNodesDeps {
   availablePipelineIds: string[];
   portsMap: Record<string, { inputs: string[]; outputs: string[] }>;
@@ -194,6 +225,9 @@ export function useGraphState(
   // Callback refs
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
+
+  const edgesRef = useRef(edges);
+  edgesRef.current = edges;
 
   const onNodeParamChangeRef = useRef(callbacks.onNodeParameterChange);
   onNodeParamChangeRef.current = callbacks.onNodeParameterChange;
@@ -524,9 +558,41 @@ export function useGraphState(
     );
   }, [edges, setNodes, setEdges]);
 
-  // Reload graph from backend
+  // Reload graph from backend (with localStorage fallback)
   const loadGraphFromBackend = useCallback(() => {
     if (Object.keys(portsMap).length === 0) return;
+
+    const restoreFromLocalStorage = () => {
+      const backup = loadGraphFromLocalStorage();
+      if (
+        backup &&
+        typeof backup === "object" &&
+        backup !== null &&
+        "nodes" in backup &&
+        "edges" in backup
+      ) {
+        try {
+          const graphConfig = backup as Parameters<typeof graphConfigToFlow>[0];
+          const { nodes: flowNodes, edges: flowEdges } = graphConfigToFlow(
+            graphConfig,
+            portsMap
+          );
+          const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
+          setNodes(enriched);
+          setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
+          setGraphSource(null);
+          setStatus("Restored from local backup");
+          // Re-push to backend so it's in sync
+          setGraph(graphConfig as Parameters<typeof setGraph>[0]).catch(() => {
+            // best effort
+          });
+          return true;
+        } catch {
+          // backup was corrupt
+        }
+      }
+      return false;
+    };
 
     getGraph()
       .then(response => {
@@ -542,13 +608,19 @@ export function useGraphState(
           setGraphSource(response.source);
           setStatus(`Loaded from ${response.source}`);
         } else {
-          setStatus("No graph configured");
+          // Backend has no graph – try localStorage fallback
+          if (!restoreFromLocalStorage()) {
+            setStatus("No graph configured");
+          }
         }
         initialLoadDone.current = true;
       })
       .catch(err => {
         console.error("Failed to load graph:", err);
-        setStatus("Failed to load graph");
+        // Backend unreachable – try localStorage fallback
+        if (!restoreFromLocalStorage()) {
+          setStatus("Failed to load graph");
+        }
         initialLoadDone.current = true;
       });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -566,7 +638,7 @@ export function useGraphState(
     onGraphChangeRef.current?.();
   }, [nodes, edges]);
 
-  // Auto-save graph
+  // Auto-save graph (debounced)
   useEffect(() => {
     if (!initialLoadDone.current) return;
     if (nodes.length === 0 && edges.length === 0) return;
@@ -574,9 +646,19 @@ export function useGraphState(
     const timer = setTimeout(async () => {
       try {
         const graphConfig = flowToGraphConfig(nodes, edges);
-        const result = await setGraph(graphConfig);
-        setGraphSource("api");
-        setStatus(`Saved: ${result.nodes} nodes, ${result.edges} edges`);
+        const graphJson = JSON.stringify(graphConfig);
+        // Always save to localStorage first (never fails structurally)
+        saveGraphToLocalStorage(graphJson);
+        // Then try backend (may reject incomplete graphs)
+        try {
+          const result = await setGraph(graphConfig);
+          setGraphSource("api");
+          setStatus(`Saved: ${result.nodes} nodes, ${result.edges} edges`);
+        } catch {
+          // Backend rejected (e.g. missing source/sink) — that's OK,
+          // localStorage has the latest state.
+          setStatus("Saved locally");
+        }
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         setStatus(`Save failed: ${message}`);
@@ -586,10 +668,61 @@ export function useGraphState(
     return () => clearTimeout(timer);
   }, [nodes, edges]);
 
+  // Manual save (immediate, no debounce)
+  const handleSave = useCallback(async () => {
+    if (nodes.length === 0 && edges.length === 0) {
+      setStatus("Nothing to save");
+      return;
+    }
+    try {
+      const graphConfig = flowToGraphConfig(nodes, edges);
+      const graphJson = JSON.stringify(graphConfig);
+      // Always save to localStorage first
+      saveGraphToLocalStorage(graphJson);
+      // Then try backend
+      try {
+        const result = await setGraph(graphConfig);
+        setGraphSource("api");
+        setStatus(`Saved: ${result.nodes} nodes, ${result.edges} edges`);
+      } catch {
+        // Backend rejected — localStorage still has it
+        setStatus("Saved locally (incomplete graph)");
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Unknown error";
+      setStatus(`Save failed: ${message}`);
+    }
+  }, [nodes, edges]);
+
+  // Keep handleSave in a ref so the beforeunload handler always uses the latest
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+
+  // beforeunload: sync-save to localStorage and warn about unsaved changes
+  useEffect(() => {
+    const handler = () => {
+      // Synchronously write current graph to localStorage
+      try {
+        const currentNodes = nodesRef.current;
+        const currentEdges = edgesRef.current;
+        if (currentNodes.length > 0 || currentEdges.length > 0) {
+          const graphConfig = flowToGraphConfig(currentNodes, currentEdges);
+          saveGraphToLocalStorage(JSON.stringify(graphConfig));
+        }
+      } catch {
+        // best effort
+      }
+    };
+
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, []);
+
   // Clear graph
   const handleClear = useCallback(async () => {
     try {
       await clearGraph();
+      clearGraphFromLocalStorage();
       setNodes([]);
       setEdges([]);
       setGraphSource(null);
@@ -676,6 +809,7 @@ export function useGraphState(
     onNodeParamChangeRef,
     onOutputSinkChangeRef,
     handleClear,
+    handleSave,
     handleImport,
     handleExport,
     refreshGraph: loadGraphFromBackend,

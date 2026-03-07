@@ -51,7 +51,10 @@ interface NodeCatalogItem {
   category: string;
 }
 
+// Ordered by color so visually similar nodes are grouped together:
+// green → blue → sky-blue → purple → pink → red → orange → yellow → gray
 const NODE_CATALOG: NodeCatalogItem[] = [
+  // Green
   {
     type: "source",
     name: "Source",
@@ -59,6 +62,7 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#4ade80",
     category: "I/O",
   },
+  // Blue
   {
     type: "pipeline",
     name: "Pipeline",
@@ -66,27 +70,7 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#60a5fa",
     category: "I/O",
   },
-  {
-    type: "sink",
-    name: "Sink",
-    description: "Output node for the workflow",
-    color: "#fb923c",
-    category: "I/O",
-  },
-  {
-    type: "output",
-    name: "Output",
-    description: "Send video to Spout, NDI, or Syphon receivers",
-    color: "#f87171",
-    category: "I/O",
-  },
-  {
-    type: "primitive",
-    name: "Primitive",
-    description: "Adaptive value node — auto-detects type from connected input",
-    color: "#9ca3af",
-    category: "Values",
-  },
+  // Sky-blue
   {
     type: "control",
     subType: "float",
@@ -106,49 +90,11 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     category: "Controls",
   },
   {
-    type: "control",
-    subType: "string",
-    name: "StringControl",
-    description: "Cycles through a list of strings using movement patterns",
-    color: "#fbbf24",
-    category: "Controls",
-  },
-  {
     type: "math",
     name: "Math",
     description: "Perform arithmetic operations on two numeric inputs",
     color: "#38bdf8",
     category: "Utility",
-  },
-  {
-    type: "note",
-    name: "Note",
-    description: "Add a text annotation to the graph",
-    color: "#fbbf24",
-    category: "Utility",
-  },
-  {
-    type: "reroute",
-    name: "Reroute",
-    description: "Pass-through dot to organize long connection lines",
-    color: "#9ca3af",
-    category: "Utility",
-  },
-  {
-    type: "slider",
-    name: "Slider",
-    description:
-      "Horizontal slider for a single numeric value with min/max/step",
-    color: "#a78bfa",
-    category: "UI",
-  },
-  {
-    type: "knobs",
-    name: "Knobs",
-    description:
-      "Multi-knob console with dynamic add/remove and per-knob range",
-    color: "#f472b6",
-    category: "UI",
   },
   {
     type: "xypad",
@@ -157,6 +103,40 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#38bdf8",
     category: "UI",
   },
+  // Purple
+  {
+    type: "slider",
+    name: "Slider",
+    description:
+      "Horizontal slider for a single numeric value with min/max/step",
+    color: "#a78bfa",
+    category: "UI",
+  },
+  // Pink
+  {
+    type: "knobs",
+    name: "Knobs",
+    description:
+      "Multi-knob console with dynamic add/remove and per-knob range",
+    color: "#f472b6",
+    category: "UI",
+  },
+  // Red
+  {
+    type: "output",
+    name: "Output",
+    description: "Send video to Spout, NDI, or Syphon receivers",
+    color: "#f87171",
+    category: "I/O",
+  },
+  // Orange
+  {
+    type: "sink",
+    name: "Sink",
+    description: "Output node for the workflow",
+    color: "#fb923c",
+    category: "I/O",
+  },
   {
     type: "tuple",
     name: "Tuple",
@@ -164,6 +144,37 @@ const NODE_CATALOG: NodeCatalogItem[] = [
       "Dynamic list of numbers with ordering constraints (e.g. denoising steps)",
     color: "#fb923c",
     category: "UI",
+  },
+  // Yellow
+  {
+    type: "control",
+    subType: "string",
+    name: "StringControl",
+    description: "Cycles through a list of strings using movement patterns",
+    color: "#fbbf24",
+    category: "Controls",
+  },
+  {
+    type: "note",
+    name: "Note",
+    description: "Add a text annotation to the graph",
+    color: "#fbbf24",
+    category: "Utility",
+  },
+  // Gray
+  {
+    type: "primitive",
+    name: "Primitive",
+    description: "Adaptive value node — auto-detects type from connected input",
+    color: "#9ca3af",
+    category: "Values",
+  },
+  {
+    type: "reroute",
+    name: "Reroute",
+    description: "Pass-through dot to organize long connection lines",
+    color: "#9ca3af",
+    category: "Utility",
   },
 ];
 

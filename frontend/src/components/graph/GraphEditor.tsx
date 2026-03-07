@@ -32,6 +32,16 @@ import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
 import { NODE_TOKENS } from "./ui";
 import type { FlowNodeData } from "../../lib/graphUtils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 
 import { useGraphState } from "./hooks/useGraphState";
 import { useConnectionLogic } from "./hooks/useConnectionLogic";
@@ -141,6 +151,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onNodeParamChangeRef,
       onOutputSinkChangeRef,
       handleClear,
+      handleSave,
       handleImport,
       handleExport,
       refreshGraph,
@@ -179,6 +190,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     } | null>(null);
 
     const [showAddNodeModal, setShowAddNodeModal] = useState(false);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [pendingNodePosition, setPendingNodePosition] = useState<{
       x: number;
       y: number;
@@ -345,7 +357,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       nodes,
       edges,
       setNodes,
-      setEdges
+      setEdges,
+      handleSave
     );
 
     // Context menu suppression
@@ -451,6 +464,14 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               </span>
             )}
 
+            <button
+              onClick={handleSave}
+              className={NODE_TOKENS.toolbarButton}
+              title="Save graph (Ctrl+S)"
+            >
+              Save
+            </button>
+
             <input
               ref={fileInputRef}
               type="file"
@@ -471,7 +492,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               Export
             </button>
             <button
-              onClick={handleClear}
+              onClick={() => setShowClearConfirm(true)}
               className={NODE_TOKENS.toolbarButton}
               title="Clear graph"
             >
@@ -565,6 +586,37 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               />
             )}
           </div>
+
+          {/* Clear confirmation dialog */}
+          <AlertDialog
+            open={showClearConfirm}
+            onOpenChange={(open: boolean) => {
+              if (!open) setShowClearConfirm(false);
+            }}
+          >
+            <AlertDialogContent className="sm:max-w-md">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear graph?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will remove all nodes and connections from the graph.
+                  This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setShowClearConfirm(false)}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    setShowClearConfirm(false);
+                    handleClear();
+                  }}
+                >
+                  Clear
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </div>
       </div>
     );
