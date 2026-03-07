@@ -19,7 +19,13 @@ function valuesEqual(a: unknown, b: unknown): boolean {
     const kb = Object.keys(b as Record<string, unknown>);
     if (ka.length !== kb.length) return false;
     for (const k of ka) {
-      if (!valuesEqual((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k])) return false;
+      if (
+        !valuesEqual(
+          (a as Record<string, unknown>)[k],
+          (b as Record<string, unknown>)[k]
+        )
+      )
+        return false;
     }
     return true;
   }
@@ -75,7 +81,10 @@ export function useValueForwarding(
       if (connected.length === 0) continue;
 
       // Get values to forward
-      const valuesToForward: Array<{ handleName: string | null; value: unknown }> = [];
+      const valuesToForward: Array<{
+        handleName: string | null;
+        value: unknown;
+      }> = [];
 
       if (node.data.nodeType === "value") {
         valuesToForward.push({ handleName: null, value: node.data.value });
@@ -83,21 +92,30 @@ export function useValueForwarding(
         node.data.nodeType === "control" ||
         node.data.nodeType === "math"
       ) {
-        valuesToForward.push({ handleName: null, value: node.data.currentValue });
+        valuesToForward.push({
+          handleName: null,
+          value: node.data.currentValue,
+        });
       } else if (node.data.nodeType === "slider") {
         valuesToForward.push({ handleName: "value", value: node.data.value });
       } else if (node.data.nodeType === "knobs") {
         const knobs = node.data.knobs;
         if (knobs) {
           for (let i = 0; i < knobs.length; i++) {
-            valuesToForward.push({ handleName: `knob_${i}`, value: knobs[i].value });
+            valuesToForward.push({
+              handleName: `knob_${i}`,
+              value: knobs[i].value,
+            });
           }
         }
       } else if (node.data.nodeType === "xypad") {
         valuesToForward.push({ handleName: "x", value: node.data.padX });
         valuesToForward.push({ handleName: "y", value: node.data.padY });
       } else if (node.data.nodeType === "tuple") {
-        valuesToForward.push({ handleName: "value", value: node.data.tupleValues });
+        valuesToForward.push({
+          handleName: "value",
+          value: node.data.tupleValues,
+        });
       }
 
       // Throttle animated nodes
@@ -138,7 +156,11 @@ export function useValueForwarding(
             { text: String(entry.value), weight: 100 },
           ]);
         } else {
-          onNodeParamChangeRef.current(backendId, targetParsed.name, entry.value);
+          onNodeParamChangeRef.current(
+            backendId,
+            targetParsed.name,
+            entry.value
+          );
         }
       }
     }
@@ -160,7 +182,8 @@ export function useValueForwarding(
 
     for (const edge of edges) {
       const targetNode = nodes.find(n => n.id === edge.target);
-      if (!targetNode || !UI_INPUT_TYPES.has(targetNode.data.nodeType)) continue;
+      if (!targetNode || !UI_INPUT_TYPES.has(targetNode.data.nodeType))
+        continue;
 
       const targetParsed = parseHandleId(edge.targetHandle);
       if (!targetParsed || targetParsed.kind !== "param") continue;
@@ -200,7 +223,10 @@ export function useValueForwarding(
       // Determine field to update
       const nodeUpdates = updates.get(edge.target) ?? {};
 
-      if (targetNode.data.nodeType === "slider" && targetParsed.name === "value") {
+      if (
+        targetNode.data.nodeType === "slider" &&
+        targetParsed.name === "value"
+      ) {
         const min = targetNode.data.sliderMin ?? 0;
         const max = targetNode.data.sliderMax ?? 1;
         const clamped = Math.min(Math.max(Number(sourceValue), min), max);
@@ -210,9 +236,14 @@ export function useValueForwarding(
         const knobs = targetNode.data.knobs;
         if (knobs && !isNaN(idx) && idx < knobs.length) {
           const knob = knobs[idx];
-          const clamped = Math.min(Math.max(Number(sourceValue), knob.min), knob.max);
+          const clamped = Math.min(
+            Math.max(Number(sourceValue), knob.min),
+            knob.max
+          );
           // Merge knobs array
-          const existingKnobs = (nodeUpdates["knobs"] as typeof knobs) ?? [...knobs];
+          const existingKnobs = (nodeUpdates["knobs"] as typeof knobs) ?? [
+            ...knobs,
+          ];
           existingKnobs[idx] = { ...existingKnobs[idx], value: clamped };
           nodeUpdates["knobs"] = existingKnobs;
         }
@@ -220,21 +251,35 @@ export function useValueForwarding(
         if (targetParsed.name === "x") {
           const min = targetNode.data.padMinX ?? 0;
           const max = targetNode.data.padMaxX ?? 1;
-          nodeUpdates["padX"] = Math.min(Math.max(Number(sourceValue), min), max);
+          nodeUpdates["padX"] = Math.min(
+            Math.max(Number(sourceValue), min),
+            max
+          );
         } else if (targetParsed.name === "y") {
           const min = targetNode.data.padMinY ?? 0;
           const max = targetNode.data.padMaxY ?? 1;
-          nodeUpdates["padY"] = Math.min(Math.max(Number(sourceValue), min), max);
+          nodeUpdates["padY"] = Math.min(
+            Math.max(Number(sourceValue), min),
+            max
+          );
         }
       } else if (targetNode.data.nodeType === "tuple") {
         if (targetParsed.name === "value" && Array.isArray(sourceValue)) {
           nodeUpdates["tupleValues"] = sourceValue;
-        } else if (targetParsed.name.startsWith("row_") && typeof sourceValue === "number") {
+        } else if (
+          targetParsed.name.startsWith("row_") &&
+          typeof sourceValue === "number"
+        ) {
           const rowIdx = parseInt(targetParsed.name.replace("row_", ""), 10);
           const tupleValues = targetNode.data.tupleValues;
           if (tupleValues && !isNaN(rowIdx) && rowIdx < tupleValues.length) {
-            const existingValues = (nodeUpdates["tupleValues"] as number[]) ?? [...tupleValues];
-            const clamped = Math.min(Math.max(sourceValue, targetNode.data.tupleMin ?? 0), targetNode.data.tupleMax ?? 1000);
+            const existingValues = (nodeUpdates["tupleValues"] as number[]) ?? [
+              ...tupleValues,
+            ];
+            const clamped = Math.min(
+              Math.max(sourceValue, targetNode.data.tupleMin ?? 0),
+              targetNode.data.tupleMax ?? 1000
+            );
             existingValues[rowIdx] = clamped;
             nodeUpdates["tupleValues"] = existingValues;
           }

@@ -35,7 +35,13 @@ function polarToXY(cx: number, cy: number, r: number, deg: number) {
   return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
 }
 
-function describeArc(cx: number, cy: number, r: number, startDeg: number, endDeg: number) {
+function describeArc(
+  cx: number,
+  cy: number,
+  r: number,
+  startDeg: number,
+  endDeg: number
+) {
   const start = polarToXY(cx, cy, r, endDeg);
   const end = polarToXY(cx, cy, r, startDeg);
   const large = endDeg - startDeg > 180 ? 1 : 0;
@@ -54,7 +60,11 @@ function SingleKnobRow({
   knob: KnobDef;
   index: number;
   onValueChange: (index: number, value: number) => void;
-  onFieldChange: (index: number, field: keyof KnobDef, value: string | number) => void;
+  onFieldChange: (
+    index: number,
+    field: keyof KnobDef,
+    value: string | number
+  ) => void;
   onRemove: (index: number) => void;
   canRemove: boolean;
 }) {
@@ -121,12 +131,29 @@ function SingleKnobRow({
             strokeLinecap="round"
           />
         )}
-        <circle cx={cx} cy={cy} r={5} fill="#2a2a2a" stroke="rgba(119,119,119,0.35)" strokeWidth={1} />
-        <line x1={cx} y1={cy} x2={indEnd.x} y2={indEnd.y} stroke={COLOR} strokeWidth={2} strokeLinecap="round" />
+        <circle
+          cx={cx}
+          cy={cy}
+          r={5}
+          fill="#2a2a2a"
+          stroke="rgba(119,119,119,0.35)"
+          strokeWidth={1}
+        />
+        <line
+          x1={cx}
+          y1={cy}
+          x2={indEnd.x}
+          y2={indEnd.y}
+          stroke={COLOR}
+          strokeWidth={2}
+          strokeLinecap="round"
+        />
       </svg>
 
       {/* Value */}
-      <span className={`${NODE_TOKENS.primaryText} w-[32px] text-center shrink-0`}>
+      <span
+        className={`${NODE_TOKENS.primaryText} w-[32px] text-center shrink-0`}
+      >
         {clamped.toFixed(max - min >= 10 ? 0 : 2)}
       </span>
 
@@ -143,7 +170,9 @@ function SingleKnobRow({
         className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[28px] !text-[8px] !px-0.5 !py-0 shrink-0`}
         type="number"
         value={knob.min}
-        onChange={e => onFieldChange(index, "min", parseFloat(e.target.value) || 0)}
+        onChange={e =>
+          onFieldChange(index, "min", parseFloat(e.target.value) || 0)
+        }
         onMouseDown={e => e.stopPropagation()}
         title="Min"
       />
@@ -151,7 +180,9 @@ function SingleKnobRow({
         className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[28px] !text-[8px] !px-0.5 !py-0 shrink-0`}
         type="number"
         value={knob.max}
-        onChange={e => onFieldChange(index, "max", parseFloat(e.target.value) || 1)}
+        onChange={e =>
+          onFieldChange(index, "max", parseFloat(e.target.value) || 1)
+        }
         onMouseDown={e => e.stopPropagation()}
         title="Max"
       />
@@ -171,12 +202,15 @@ function SingleKnobRow({
 
 export function KnobsNode({ id, data, selected }: NodeProps<KnobsNodeType>) {
   const { setNodes } = useReactFlow();
-  const knobs: KnobDef[] = data.knobs && data.knobs.length > 0 ? data.knobs : [defaultKnob(0)];
+  const knobs: KnobDef[] =
+    data.knobs && data.knobs.length > 0 ? data.knobs : [defaultKnob(0)];
 
   const updateKnobs = useCallback(
     (newKnobs: KnobDef[]) => {
       setNodes(nds =>
-        nds.map(n => (n.id === id ? { ...n, data: { ...n.data, knobs: newKnobs } } : n))
+        nds.map(n =>
+          n.id === id ? { ...n, data: { ...n.data, knobs: newKnobs } } : n
+        )
       );
     },
     [id, setNodes]
@@ -241,7 +275,8 @@ export function KnobsNode({ id, data, selected }: NodeProps<KnobsNodeType>) {
 
       {/* Input & Output handles for each knob, vertically aligned to each row */}
       {knobs.map((_, i) => {
-        const yOffset = HEADER_HEIGHT + BODY_PAD_TOP + ROW_HEIGHT * i + ROW_HEIGHT / 2;
+        const yOffset =
+          HEADER_HEIGHT + BODY_PAD_TOP + ROW_HEIGHT * i + ROW_HEIGHT / 2;
         return (
           <span key={`handles-${i}`}>
             <Handle

@@ -145,14 +145,16 @@ const NODE_CATALOG: NodeCatalogItem[] = [
   {
     type: "slider",
     name: "Slider",
-    description: "Horizontal slider for a single numeric value with min/max/step",
+    description:
+      "Horizontal slider for a single numeric value with min/max/step",
     color: "#a78bfa",
     category: "UI",
   },
   {
     type: "knobs",
     name: "Knobs",
-    description: "Multi-knob console with dynamic add/remove and per-knob range",
+    description:
+      "Multi-knob console with dynamic add/remove and per-knob range",
     color: "#f472b6",
     category: "UI",
   },
@@ -166,7 +168,8 @@ const NODE_CATALOG: NodeCatalogItem[] = [
   {
     type: "tuple",
     name: "Tuple",
-    description: "Dynamic list of numbers with ordering constraints (e.g. denoising steps)",
+    description:
+      "Dynamic list of numbers with ordering constraints (e.g. denoising steps)",
     color: "#fb923c",
     category: "UI",
   },

@@ -234,7 +234,9 @@ export function useNodeFactories({
           sliderMax: 1,
           sliderStep: 0.01,
           value: 0.5,
-          parameterOutputs: [{ name: "value", type: "number", defaultValue: 0.5 }],
+          parameterOutputs: [
+            { name: "value", type: "number", defaultValue: 0.5 },
+          ],
         },
       };
       setNodes(nds => [...nds, newNode]);
@@ -310,7 +312,13 @@ export function useNodeFactories({
           tupleStep: 1,
           tupleEnforceOrder: true,
           tupleOrderDirection: "desc",
-          parameterOutputs: [{ name: "value", type: "list_number", defaultValue: [999, 800, 600] }],
+          parameterOutputs: [
+            {
+              name: "value",
+              type: "list_number",
+              defaultValue: [999, 800, 600],
+            },
+          ],
         },
       };
       setNodes(nds => [...nds, newNode]);

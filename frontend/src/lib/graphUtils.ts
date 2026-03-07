@@ -344,13 +344,14 @@ export function graphConfigToFlow(
       data: {
         label: n.id,
         nodeType: "source",
-        sourceMode: (n.source_mode as
-          | "video"
-          | "camera"
-          | "spout"
-          | "ndi"
-          | "syphon"
-          | undefined) ?? "video",
+        sourceMode:
+          (n.source_mode as
+            | "video"
+            | "camera"
+            | "spout"
+            | "ndi"
+            | "syphon"
+            | undefined) ?? "video",
         sourceName: n.source_name ?? undefined,
       },
     });

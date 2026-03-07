@@ -28,7 +28,9 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
   const updateFields = useCallback(
     (fields: Record<string, unknown>) => {
       setNodes(nds =>
-        nds.map(n => (n.id === id ? { ...n, data: { ...n.data, ...fields } } : n))
+        nds.map(n =>
+          n.id === id ? { ...n, data: { ...n.data, ...fields } } : n
+        )
       );
     },
     [id, setNodes]
@@ -62,7 +64,8 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
       target.setPointerCapture(e.pointerId);
       setValuesFromMouse(e.clientX, e.clientY);
 
-      const onMove = (ev: PointerEvent) => setValuesFromMouse(ev.clientX, ev.clientY);
+      const onMove = (ev: PointerEvent) =>
+        setValuesFromMouse(ev.clientX, ev.clientY);
       const onUp = () => {
         target.removeEventListener("pointermove", onMove);
         target.removeEventListener("pointerup", onUp);
@@ -102,7 +105,10 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
             onPointerDown={handlePointerDown}
           >
             {/* Grid lines */}
-            <div className="absolute inset-0 pointer-events-none" style={{ opacity: 0.08 }}>
+            <div
+              className="absolute inset-0 pointer-events-none"
+              style={{ opacity: 0.08 }}
+            >
               <div className="absolute left-1/4 top-0 bottom-0 w-px bg-white" />
               <div className="absolute left-1/2 top-0 bottom-0 w-px bg-white" />
               <div className="absolute left-3/4 top-0 bottom-0 w-px bg-white" />
@@ -113,11 +119,23 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
             {/* Crosshairs */}
             <div
               className="absolute pointer-events-none"
-              style={{ left: `${dotLeft}%`, top: 0, bottom: 0, width: 1, background: `${COLOR_X}33` }}
+              style={{
+                left: `${dotLeft}%`,
+                top: 0,
+                bottom: 0,
+                width: 1,
+                background: `${COLOR_X}33`,
+              }}
             />
             <div
               className="absolute pointer-events-none"
-              style={{ top: `${dotTop}%`, left: 0, right: 0, height: 1, background: `${COLOR_Y}33` }}
+              style={{
+                top: `${dotTop}%`,
+                left: 0,
+                right: 0,
+                height: 1,
+                background: `${COLOR_Y}33`,
+              }}
             />
             {/* Dot */}
             <div
@@ -134,10 +152,16 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
           {/* Value display */}
           <div className="flex justify-between px-1">
             <span className={NODE_TOKENS.primaryText}>
-              X: <span style={{ color: COLOR_X }}>{clampedX.toFixed(dp(rangeX))}</span>
+              X:{" "}
+              <span style={{ color: COLOR_X }}>
+                {clampedX.toFixed(dp(rangeX))}
+              </span>
             </span>
             <span className={NODE_TOKENS.primaryText}>
-              Y: <span style={{ color: COLOR_Y }}>{clampedY.toFixed(dp(rangeY))}</span>
+              Y:{" "}
+              <span style={{ color: COLOR_Y }}>
+                {clampedY.toFixed(dp(rangeY))}
+              </span>
             </span>
           </div>
 
@@ -147,32 +171,48 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
               <span className={`${NODE_TOKENS.labelText} w-3 shrink-0`}>X</span>
               <input
                 className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-0.5 !py-0`}
-                type="number" value={minX}
-                onChange={e => updateFields({ padMinX: Number(e.target.value) })}
-                onMouseDown={e => e.stopPropagation()} title="Min X"
+                type="number"
+                value={minX}
+                onChange={e =>
+                  updateFields({ padMinX: Number(e.target.value) })
+                }
+                onMouseDown={e => e.stopPropagation()}
+                title="Min X"
               />
               <span className={`${NODE_TOKENS.labelText} shrink-0`}>–</span>
               <input
                 className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-0.5 !py-0`}
-                type="number" value={maxX}
-                onChange={e => updateFields({ padMaxX: Number(e.target.value) })}
-                onMouseDown={e => e.stopPropagation()} title="Max X"
+                type="number"
+                value={maxX}
+                onChange={e =>
+                  updateFields({ padMaxX: Number(e.target.value) })
+                }
+                onMouseDown={e => e.stopPropagation()}
+                title="Max X"
               />
             </div>
             <div className="flex items-center gap-1">
               <span className={`${NODE_TOKENS.labelText} w-3 shrink-0`}>Y</span>
               <input
                 className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-0.5 !py-0`}
-                type="number" value={minY}
-                onChange={e => updateFields({ padMinY: Number(e.target.value) })}
-                onMouseDown={e => e.stopPropagation()} title="Min Y"
+                type="number"
+                value={minY}
+                onChange={e =>
+                  updateFields({ padMinY: Number(e.target.value) })
+                }
+                onMouseDown={e => e.stopPropagation()}
+                title="Min Y"
               />
               <span className={`${NODE_TOKENS.labelText} shrink-0`}>–</span>
               <input
                 className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-0.5 !py-0`}
-                type="number" value={maxY}
-                onChange={e => updateFields({ padMaxY: Number(e.target.value) })}
-                onMouseDown={e => e.stopPropagation()} title="Max Y"
+                type="number"
+                value={maxY}
+                onChange={e =>
+                  updateFields({ padMaxY: Number(e.target.value) })
+                }
+                onMouseDown={e => e.stopPropagation()}
+                title="Max Y"
               />
             </div>
           </div>
@@ -185,14 +225,22 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
         position={Position.Left}
         id={buildHandleId("param", "x")}
         className="!w-2 !h-2 !border-0"
-        style={{ top: padCenterY - handleSpacing / 2, left: 8, backgroundColor: COLOR_X }}
+        style={{
+          top: padCenterY - handleSpacing / 2,
+          left: 8,
+          backgroundColor: COLOR_X,
+        }}
       />
       <Handle
         type="target"
         position={Position.Left}
         id={buildHandleId("param", "y")}
         className="!w-2 !h-2 !border-0"
-        style={{ top: padCenterY + handleSpacing / 2, left: 8, backgroundColor: COLOR_Y }}
+        style={{
+          top: padCenterY + handleSpacing / 2,
+          left: 8,
+          backgroundColor: COLOR_Y,
+        }}
       />
 
       {/* Output handles (right) — centered on pad */}
@@ -201,14 +249,22 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
         position={Position.Right}
         id={buildHandleId("param", "x")}
         className="!w-2 !h-2 !border-0"
-        style={{ top: padCenterY - handleSpacing / 2, right: 8, backgroundColor: COLOR_X }}
+        style={{
+          top: padCenterY - handleSpacing / 2,
+          right: 8,
+          backgroundColor: COLOR_X,
+        }}
       />
       <Handle
         type="source"
         position={Position.Right}
         id={buildHandleId("param", "y")}
         className="!w-2 !h-2 !border-0"
-        style={{ top: padCenterY + handleSpacing / 2, right: 8, backgroundColor: COLOR_Y }}
+        style={{
+          top: padCenterY + handleSpacing / 2,
+          right: 8,
+          backgroundColor: COLOR_Y,
+        }}
       />
     </NodeCard>
   );

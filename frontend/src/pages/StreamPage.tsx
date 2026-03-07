@@ -40,7 +40,12 @@ import type {
   DownloadProgress,
 } from "../types";
 import type { PromptItem, PromptTransition } from "../lib/api";
-import { getInputSourceResolution, fetchDaydreamWorkflow, setGraph, getGraph } from "../lib/api";
+import {
+  getInputSourceResolution,
+  fetchDaydreamWorkflow,
+  setGraph,
+  getGraph,
+} from "../lib/api";
 import type { ScopeWorkflow } from "../lib/workflowApi";
 import { linearGraphFromSettings } from "../lib/graphUtils";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
@@ -1380,10 +1385,8 @@ export function StreamPage() {
           const graphResponse = await getGraph();
           if (graphResponse.graph) {
             const graphPipelineIds = graphResponse.graph.nodes
-              .filter(
-                (n) => n.type === "pipeline" && n.pipeline_id
-              )
-              .map((n) => n.pipeline_id as string);
+              .filter(n => n.type === "pipeline" && n.pipeline_id)
+              .map(n => n.pipeline_id as string);
             if (graphPipelineIds.length > 0) {
               pipelineIds.length = 0;
               pipelineIds.push(...graphPipelineIds);

@@ -3,7 +3,13 @@ import type { NodeProps, Node } from "@xyflow/react";
 import { useCallback } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
-import { NodeCard, NodeHeader, NodeBody, NodePillToggle, NODE_TOKENS } from "../ui";
+import {
+  NodeCard,
+  NodeHeader,
+  NodeBody,
+  NodePillToggle,
+  NODE_TOKENS,
+} from "../ui";
 
 type TupleNodeType = Node<FlowNodeData, "tuple">;
 
@@ -19,7 +25,8 @@ const BODY_PAD = 6;
 export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
   const { setNodes } = useReactFlow();
 
-  const values = data.tupleValues && data.tupleValues.length > 0 ? data.tupleValues : [0];
+  const values =
+    data.tupleValues && data.tupleValues.length > 0 ? data.tupleValues : [0];
   const tMin = data.tupleMin ?? 0;
   const tMax = data.tupleMax ?? 1000;
   const tStep = data.tupleStep ?? 1;
@@ -29,7 +36,9 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
   const updateFields = useCallback(
     (fields: Record<string, unknown>) => {
       setNodes(nds =>
-        nds.map(n => (n.id === id ? { ...n, data: { ...n.data, ...fields } } : n))
+        nds.map(n =>
+          n.id === id ? { ...n, data: { ...n.data, ...fields } } : n
+        )
       );
     },
     [id, setNodes]
@@ -53,11 +62,13 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
       if (enforceOrder && newValues.length > 1) {
         if (orderDir === "desc") {
           const upper = index > 0 ? newValues[index - 1] : tMax;
-          const lower = index < newValues.length - 1 ? newValues[index + 1] : tMin;
+          const lower =
+            index < newValues.length - 1 ? newValues[index + 1] : tMin;
           v = Math.min(Math.max(v, lower), upper);
         } else {
           const lower = index > 0 ? newValues[index - 1] : tMin;
-          const upper = index < newValues.length - 1 ? newValues[index + 1] : tMax;
+          const upper =
+            index < newValues.length - 1 ? newValues[index + 1] : tMax;
           v = Math.min(Math.max(v, lower), upper);
         }
       }
@@ -123,7 +134,9 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
               className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-1 !py-0`}
               type="number"
               value={tStep}
-              onChange={e => updateFields({ tupleStep: Number(e.target.value) })}
+              onChange={e =>
+                updateFields({ tupleStep: Number(e.target.value) })
+              }
               onMouseDown={e => e.stopPropagation()}
             />
           </div>
@@ -140,7 +153,11 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
             {enforceOrder && (
               <button
                 className={`${NODE_TOKENS.pill} text-[9px] text-[#aaa] hover:text-[#fff] cursor-pointer transition-colors`}
-                onClick={() => updateFields({ tupleOrderDirection: orderDir === "desc" ? "asc" : "desc" })}
+                onClick={() =>
+                  updateFields({
+                    tupleOrderDirection: orderDir === "desc" ? "asc" : "desc",
+                  })
+                }
               >
                 {orderDir === "desc" ? "\u2193 Desc" : "\u2191 Asc"}
               </button>
@@ -153,11 +170,18 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
               const pct = rangeSize > 0 ? ((v - tMin) / rangeSize) * 100 : 0;
               return (
                 <div key={i} className="flex items-center gap-1">
-                  <span className={`${NODE_TOKENS.labelText} w-3 text-right shrink-0`}>{i}</span>
+                  <span
+                    className={`${NODE_TOKENS.labelText} w-3 text-right shrink-0`}
+                  >
+                    {i}
+                  </span>
                   {/* Mini slider */}
                   <div
                     className="relative flex-1 h-4 rounded-full cursor-pointer select-none"
-                    style={{ background: "#1b1a1a", border: "1px solid rgba(119,119,119,0.15)" }}
+                    style={{
+                      background: "#1b1a1a",
+                      border: "1px solid rgba(119,119,119,0.15)",
+                    }}
                     onPointerDown={e => {
                       e.preventDefault();
                       e.stopPropagation();
@@ -170,7 +194,8 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
                         setValueAt(i, tMin + ratio * rangeSize);
                       };
                       setFromMouse(e.clientX);
-                      const onMove = (ev: PointerEvent) => setFromMouse(ev.clientX);
+                      const onMove = (ev: PointerEvent) =>
+                        setFromMouse(ev.clientX);
                       const onUp = () => {
                         target.removeEventListener("pointermove", onMove);
                         target.removeEventListener("pointerup", onUp);
@@ -181,7 +206,11 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
                   >
                     <div
                       className="absolute left-0 top-0 h-full rounded-full pointer-events-none"
-                      style={{ width: `${pct}%`, background: COLOR, opacity: 0.3 }}
+                      style={{
+                        width: `${pct}%`,
+                        background: COLOR,
+                        opacity: 0.3,
+                      }}
                     />
                     <div
                       className="absolute top-1/2 -translate-y-1/2 w-2 h-2 rounded-full pointer-events-none"
@@ -193,7 +222,9 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
                     className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[40px] !text-[9px] !px-1`}
                     type="number"
                     value={v.toFixed(decimalPlaces)}
-                    onChange={e => setValueAt(i, parseFloat(e.target.value) || 0)}
+                    onChange={e =>
+                      setValueAt(i, parseFloat(e.target.value) || 0)
+                    }
                     onMouseDown={e => e.stopPropagation()}
                     step={tStep}
                     min={tMin}
@@ -229,7 +260,11 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
         position={Position.Left}
         id={buildHandleId("param", "value")}
         className="!w-2 !h-2 !border-0"
-        style={{ top: HEADER_HEIGHT + BODY_PAD + 8, left: 8, backgroundColor: COLOR }}
+        style={{
+          top: HEADER_HEIGHT + BODY_PAD + 8,
+          left: 8,
+          backgroundColor: COLOR,
+        }}
       />
 
       {/* Per-row input handles (left, aligned with each value row) */}
@@ -253,7 +288,11 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
         position={Position.Right}
         id={buildHandleId("param", "value")}
         className="!w-2 !h-2 !border-0"
-        style={{ top: HEADER_HEIGHT + BODY_PAD + 8, right: 8, backgroundColor: COLOR }}
+        style={{
+          top: HEADER_HEIGHT + BODY_PAD + 8,
+          right: 8,
+          backgroundColor: COLOR,
+        }}
       />
     </NodeCard>
   );

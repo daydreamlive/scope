@@ -112,7 +112,8 @@ export function useKeyboardShortcuts(
 
       // Cmd/Ctrl+V → Paste
       if ((e.metaKey || e.ctrlKey) && e.key === "v" && !isInputElement) {
-        if (!clipboardRef.current || clipboardRef.current.nodes.length === 0) return;
+        if (!clipboardRef.current || clipboardRef.current.nodes.length === 0)
+          return;
 
         e.preventDefault();
 

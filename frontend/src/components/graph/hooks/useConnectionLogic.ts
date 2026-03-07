@@ -80,7 +80,12 @@ export function useConnectionLogic(
         if (!sourceNode || !targetNode) return false;
 
         // Determine source output type
-        let sourceType: "string" | "number" | "boolean" | "list_number" | undefined;
+        let sourceType:
+          | "string"
+          | "number"
+          | "boolean"
+          | "list_number"
+          | undefined;
 
         if (sourceNode.data.nodeType === "value") {
           sourceType = sourceNode.data.valueType;
@@ -141,7 +146,10 @@ export function useConnectionLogic(
         if (targetParam.type === "list_number" && sourceType === "number") {
           return true;
         }
-        if (targetParam.type === "list_number" && sourceType === "list_number") {
+        if (
+          targetParam.type === "list_number" &&
+          sourceType === "list_number"
+        ) {
           return true;
         }
 

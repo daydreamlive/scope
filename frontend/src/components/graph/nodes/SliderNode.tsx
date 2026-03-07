@@ -3,7 +3,14 @@ import type { NodeProps, Node } from "@xyflow/react";
 import { useCallback, useRef } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
-import { NodeCard, NodeHeader, NodeBody, NodeParamRow, NodePillInput, NODE_TOKENS } from "../ui";
+import {
+  NodeCard,
+  NodeHeader,
+  NodeBody,
+  NodeParamRow,
+  NodePillInput,
+  NODE_TOKENS,
+} from "../ui";
 
 type SliderNodeType = Node<FlowNodeData, "slider">;
 
@@ -21,7 +28,9 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
   const updateField = useCallback(
     (field: string, v: unknown) => {
       setNodes(nds =>
-        nds.map(n => (n.id === id ? { ...n, data: { ...n.data, [field]: v } } : n))
+        nds.map(n =>
+          n.id === id ? { ...n, data: { ...n.data, [field]: v } } : n
+        )
       );
     },
     [id, setNodes]
@@ -72,7 +81,10 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
         <div
           ref={sliderRef}
           className="relative w-full h-5 rounded-full cursor-pointer select-none"
-          style={{ background: "#1b1a1a", border: "1px solid rgba(119,119,119,0.15)" }}
+          style={{
+            background: "#1b1a1a",
+            border: "1px solid rgba(119,119,119,0.15)",
+          }}
           onPointerDown={handlePointerDown}
         >
           {/* Filled portion */}
@@ -93,7 +105,9 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
 
         {/* Current value display */}
         <div className="flex justify-center">
-          <span className={NODE_TOKENS.primaryText}>{clampedValue.toFixed(step < 1 ? 2 : 0)}</span>
+          <span className={NODE_TOKENS.primaryText}>
+            {clampedValue.toFixed(step < 1 ? 2 : 0)}
+          </span>
         </div>
 
         {/* Min / Max / Step */}
