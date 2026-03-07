@@ -72,6 +72,8 @@ const edgeTypes = {
 
 export interface GraphEditorHandle {
   refreshGraph: () => void;
+  /** Return the current graph config from React state (always up-to-date). */
+  getCurrentGraphConfig: () => import("../../lib/api").GraphConfig;
 }
 
 interface GraphEditorProps {
@@ -155,6 +157,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       handleImport,
       handleExport,
       refreshGraph,
+      getCurrentGraphConfig,
     } = useGraphState(
       {
         onNodeParameterChange,
@@ -178,8 +181,11 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       }
     );
 
-    // Expose refreshGraph
-    useImperativeHandle(ref, () => ({ refreshGraph }), [refreshGraph]);
+    // Expose refreshGraph and getCurrentGraphConfig
+    useImperativeHandle(ref, () => ({ refreshGraph, getCurrentGraphConfig }), [
+      refreshGraph,
+      getCurrentGraphConfig,
+    ]);
 
     // Context menu & add-node modal
     const [contextMenu, setContextMenu] = useState<{

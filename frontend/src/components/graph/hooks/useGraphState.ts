@@ -785,6 +785,13 @@ export function useGraphState(
     setStatus("Graph exported");
   }, [nodes, edges]);
 
+  // Return the current graph config from the frontend React state.
+  // This is always up-to-date (no debounce / backend round-trip).
+  const getCurrentGraphConfig = useCallback(
+    () => flowToGraphConfig(nodesRef.current, edgesRef.current),
+    []
+  );
+
   return {
     nodes,
     setNodes,
@@ -813,5 +820,6 @@ export function useGraphState(
     handleImport,
     handleExport,
     refreshGraph: loadGraphFromBackend,
+    getCurrentGraphConfig,
   };
 }

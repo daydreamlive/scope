@@ -1377,19 +1377,53 @@ export function StreamPage() {
         pipelineIds.push(...settings.postprocessorIds);
       }
 
-      // In graph mode, extract pipeline IDs and source mode from the graph
-      // instead of using the perform-mode settings
+      // In graph mode (or when a custom graph exists from graph mode),
+      // extract pipeline IDs and source mode from the graph so the
+      // workflow builder settings dominate over perform-mode defaults.
       let graphSourceMode: string | null = null;
       let graphInputSource: {
         enabled: boolean;
         source_type: string;
         source_name: string;
       } | null = null;
-      if (graphMode) {
+      if (graphMode || nonLinearGraph) {
         try {
-          const graphResponse = await getGraph();
-          if (graphResponse.graph) {
-            const graphPipelineIds = graphResponse.graph.nodes
+          // In graph mode, read directly from the frontend React state
+          // (always up-to-date, no debounce / backend round-trip).
+          // When nonLinearGraph is true (perform mode with a custom graph),
+          // fall back to reading from the backend.
+          let graphNodes:
+            | {
+                type: string;
+                pipeline_id?: string | null;
+                source_mode?: string | null;
+                source_name?: string | null;
+              }[]
+            | null = null;
+
+          if (graphMode) {
+            const frontendGraph =
+              graphEditorRef.current?.getCurrentGraphConfig();
+            if (frontendGraph) {
+              graphNodes = frontendGraph.nodes;
+              // Force-save to backend so load_pipeline & graph_executor
+              // also use the latest graph (best-effort, don't block on failure).
+              setGraph(frontendGraph).catch(err =>
+                console.warn("Failed to force-save graph before stream:", err)
+              );
+            }
+          }
+
+          // Fallback: read from backend (for nonLinearGraph / if frontend read failed)
+          if (!graphNodes) {
+            const graphResponse = await getGraph();
+            if (graphResponse.graph) {
+              graphNodes = graphResponse.graph.nodes;
+            }
+          }
+
+          if (graphNodes) {
+            const graphPipelineIds = graphNodes
               .filter(n => n.type === "pipeline" && n.pipeline_id)
               .map(n => n.pipeline_id as string);
             if (graphPipelineIds.length > 0) {
@@ -1403,9 +1437,7 @@ export function StreamPage() {
             // spout, ndi, syphon) need video input, so graphSourceMode is
             // always "video". For server-side sources we also capture the
             // input source config so the backend receives it.
-            const sourceNode = graphResponse.graph.nodes.find(
-              n => n.type === "source"
-            );
+            const sourceNode = graphNodes.find(n => n.type === "source");
             if (sourceNode) {
               const sm = sourceNode.source_mode || "video";
               // All graph source modes require video InputMode
@@ -1491,7 +1523,7 @@ export function StreamPage() {
       // mode so the backend receives the correct input_mode (e.g. "video")
       let currentMode =
         settings.inputMode || getPipelineDefaultMode(pipelineIdToUse) || "text";
-      if (graphMode && graphSourceMode) {
+      if ((graphMode || nonLinearGraph) && graphSourceMode) {
         currentMode = graphSourceMode as InputMode;
       }
 
@@ -1736,8 +1768,8 @@ export function StreamPage() {
       }
 
       // Generic input source (NDI, Spout, etc.) - send if enabled.
-      // In graph mode, prefer the graph's source config over perform-mode settings.
-      if (graphMode && graphInputSource) {
+      // In graph/workflow mode, prefer the graph's source config over perform-mode settings.
+      if ((graphMode || nonLinearGraph) && graphInputSource) {
         initialParameters.input_source = graphInputSource;
       } else if (settings.inputSource?.enabled) {
         initialParameters.input_source = settings.inputSource;
@@ -1859,13 +1891,26 @@ export function StreamPage() {
               /* ignore */
             }
           } else {
-            // Switching Graph → Perform: sync source mode from graph
+            // Switching Graph → Perform: sync pipeline ID and source mode
+            // from the graph so perform mode reflects the workflow builder.
             try {
-              const response = await getGraph();
-              if (response.graph) {
-                const sourceNode = response.graph.nodes.find(
-                  n => n.type === "source"
+              // Read directly from frontend state (always current)
+              const frontendGraph =
+                graphEditorRef.current?.getCurrentGraphConfig();
+              const graphNodes =
+                frontendGraph?.nodes ?? (await getGraph()).graph?.nodes ?? null;
+
+              if (graphNodes) {
+                // Sync pipeline ID from the graph's first pipeline node
+                const firstPipeline = graphNodes.find(
+                  n => n.type === "pipeline" && n.pipeline_id
                 );
+                if (firstPipeline?.pipeline_id) {
+                  skipNextModeReset(firstPipeline.pipeline_id);
+                  updateSettings({ pipelineId: firstPipeline.pipeline_id });
+                }
+
+                const sourceNode = graphNodes.find(n => n.type === "source");
                 // Default to "video" if source node has no explicit mode
                 const sourceMode = (sourceNode?.source_mode || "video") as
                   | "video"
