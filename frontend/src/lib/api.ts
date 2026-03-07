@@ -549,6 +549,7 @@ export interface PipelineSchemaProperty {
   $ref?: string;
   /** UI hints from backend (Field json_schema_extra) */
   ui?: SchemaFieldUI;
+  [k: string]: unknown;
 }
 
 export interface PipelineConfigSchema {
@@ -600,6 +601,9 @@ export interface PipelineSchemaInfo {
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
   plugin_name: string | null;
+  // Graph port declarations
+  inputs?: string[];
+  outputs?: string[];
 }
 
 export interface PipelineSchemasResponse {
@@ -872,6 +876,89 @@ export const deleteApiKey = async (
   if (!response.ok) {
     const detail = await extractErrorDetail(response);
     throw new Error(detail);
+  }
+
+  return response.json();
+};
+
+// Graph Configuration types and API functions
+
+export interface GraphNode {
+  id: string;
+  type: "source" | "pipeline" | "sink";
+  pipeline_id?: string | null;
+  x?: number | null;
+  y?: number | null;
+  w?: number | null;
+  h?: number | null;
+  source_mode?: string | null;
+  source_name?: string | null;
+}
+
+export interface GraphEdge {
+  from: string;
+  from_port: string;
+  to_node: string;
+  to_port: string;
+  kind?: "stream" | "parameter";
+}
+
+export interface GraphConfig {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  /** Opaque frontend UI state (frontend-only nodes, edges, etc.). Stored and returned as-is by the backend. */
+  ui_state?: Record<string, unknown> | null;
+}
+
+export interface GraphResponse {
+  source: "api" | null;
+  graph: GraphConfig | null;
+}
+
+export const getGraph = async (): Promise<GraphResponse> => {
+  const response = await fetch("/api/v1/graph", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get graph failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+export const setGraph = async (
+  graph: GraphConfig
+): Promise<{ message: string; nodes: number; edges: number }> => {
+  const response = await fetch("/api/v1/graph", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(graph),
+  });
+
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+
+  return response.json();
+};
+
+export const clearGraph = async (): Promise<{ message: string }> => {
+  const response = await fetch("/api/v1/graph", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Clear graph failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
   }
 
   return response.json();
