@@ -22,7 +22,8 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
 
   const min = data.sliderMin ?? 0;
   const max = data.sliderMax ?? 1;
-  const step = data.sliderStep ?? 0.01;
+  const rawStep = data.sliderStep ?? 0.01;
+  const step = Number.isFinite(rawStep) && rawStep > 0 ? rawStep : 0.01;
   const value = typeof data.value === "number" ? data.value : min;
 
   const updateField = useCallback(
@@ -46,8 +47,8 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
       let ratio = (clientX - rect.left) / rect.width;
       ratio = Math.min(Math.max(ratio, 0), 1);
       let newVal = min + ratio * (max - min);
-      // snap to step
-      newVal = Math.round(newVal / step) * step;
+      // snap to step (anchored to min so values align to min + n*step)
+      newVal = min + Math.round((newVal - min) / step) * step;
       newVal = Math.min(Math.max(newVal, min), max);
       updateField("value", parseFloat(newVal.toFixed(10)));
     },

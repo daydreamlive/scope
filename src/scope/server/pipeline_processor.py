@@ -459,7 +459,7 @@ class PipelineProcessor:
             processing_time = time.time() - processing_start
 
             output = output_dict.get("video")
-            if output is None:
+            if not output_dict:
                 return
 
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
@@ -486,23 +486,26 @@ class PipelineProcessor:
                 if not transition_active or transition is None:
                     self.parameters.pop("transition", None)
 
-            num_frames = output.shape[0]
+            if output is not None:
+                num_frames = output.shape[0]
 
-            # Record batch timing for throttling calculations
-            if input_frame_count > 0:
-                self.throttler.record_input_batch(input_frame_count, processing_time)
-            if num_frames > 0:
-                self.throttler.record_output_batch(num_frames, processing_time)
+                # Record batch timing for throttling calculations
+                if input_frame_count > 0:
+                    self.throttler.record_input_batch(
+                        input_frame_count, processing_time
+                    )
+                if num_frames > 0:
+                    self.throttler.record_output_batch(num_frames, processing_time)
 
-            # Normalize to [0, 255] and convert to uint8
-            # Keep frames on GPU - frame_processor handles CPU transfer for streaming
-            output = (
-                (output * 255.0)
-                .clamp(0, 255)
-                .to(dtype=torch.uint8)
-                .contiguous()
-                .detach()
-            )
+                # Normalize to [0, 255] and convert to uint8
+                # Keep frames on GPU - frame_processor handles CPU transfer for streaming
+                output = (
+                    (output * 255.0)
+                    .clamp(0, 255)
+                    .to(dtype=torch.uint8)
+                    .contiguous()
+                    .detach()
+                )
 
             # Put each output port's frames to its queues (all frame ports are streamed)
             for port, value in output_dict.items():
@@ -518,6 +521,11 @@ class PipelineProcessor:
                 if self.output_consumers.get(port):
                     target_size = value.shape[0] * OUTPUT_QUEUE_MAX_SIZE_FACTOR
                     self._resize_output_queue(port, target_size)
+                    # Re-read queues after potential resize – _resize_output_queue
+                    # may replace self.output_queues[port] with a new list.
+                    queues = self.output_queues.get(port)
+                    if not queues:
+                        continue
                 if value.dtype != torch.uint8:
                     value = (
                         (value * 255.0)

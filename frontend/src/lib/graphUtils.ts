@@ -131,6 +131,8 @@ export interface FlowNodeData {
   remoteStream?: MediaStream | null;
   /** For pipeline nodes: whether the selected pipeline supports prompts */
   supportsPrompts?: boolean;
+  /** For pipeline nodes: whether the selected pipeline supports cache management (shows Reset Cache button) */
+  supportsCacheManagement?: boolean;
   /** For pipeline nodes: current prompt text */
   promptText?: string;
   /** For pipeline nodes: callback when prompt text changes */
@@ -231,6 +233,10 @@ export function extractParameterPorts(
     const schemaProp = prop as SchemaProperty;
     // Only include fields that have ui metadata (json_schema_extra), matching sidebar behavior
     if (!schemaProp.ui) continue;
+
+    // Skip complex component fields that get special handling in the node
+    // (e.g. manage_cache has component "cache" and is replaced by a Reset Cache button)
+    if (schemaProp.ui.component === "cache") continue;
 
     // Check for array types with integer/number items (e.g. denoising_steps: list[int])
     // Handles both direct { type: "array", items: ... } and anyOf: [{ type: "array" }, { type: "null" }]

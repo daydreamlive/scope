@@ -1380,6 +1380,11 @@ export function StreamPage() {
       // In graph mode, extract pipeline IDs and source mode from the graph
       // instead of using the perform-mode settings
       let graphSourceMode: string | null = null;
+      let graphInputSource: {
+        enabled: boolean;
+        source_type: string;
+        source_name: string;
+      } | null = null;
       if (graphMode) {
         try {
           const graphResponse = await getGraph();
@@ -1393,15 +1398,27 @@ export function StreamPage() {
               pipelineIdToUse = graphPipelineIds[0];
             }
 
-            // Extract source mode from the graph's source node so we use
-            // the graph's input mode (e.g. "video") instead of the perform-mode setting.
-            // Default to "video" if a source node exists but has no explicit mode
-            // (matches the SourceNode UI default).
+            // Extract source mode from the graph's source node and normalize
+            // to a valid InputMode. All source_mode values (video, camera,
+            // spout, ndi, syphon) need video input, so graphSourceMode is
+            // always "video". For server-side sources we also capture the
+            // input source config so the backend receives it.
             const sourceNode = graphResponse.graph.nodes.find(
               n => n.type === "source"
             );
             if (sourceNode) {
-              graphSourceMode = sourceNode.source_mode || "video";
+              const sm = sourceNode.source_mode || "video";
+              // All graph source modes require video InputMode
+              graphSourceMode = "video";
+
+              // For server-side sources, capture input source config
+              if (sm === "spout" || sm === "ndi" || sm === "syphon") {
+                graphInputSource = {
+                  enabled: true,
+                  source_type: sm,
+                  source_name: sourceNode.source_name ?? "",
+                };
+              }
             }
           }
         } catch (err) {
@@ -1718,8 +1735,11 @@ export function StreamPage() {
         }
       }
 
-      // Generic input source (NDI, Spout, etc.) - send if enabled
-      if (settings.inputSource?.enabled) {
+      // Generic input source (NDI, Spout, etc.) - send if enabled.
+      // In graph mode, prefer the graph's source config over perform-mode settings.
+      if (graphMode && graphInputSource) {
+        initialParameters.input_source = graphInputSource;
+      } else if (settings.inputSource?.enabled) {
         initialParameters.input_source = settings.inputSource;
       }
 

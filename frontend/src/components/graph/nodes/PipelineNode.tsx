@@ -1,6 +1,7 @@
 import { useRef, useCallback, useState, useLayoutEffect } from "react";
 import { Handle, Position, useEdges } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
+import { RotateCcw } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import {
@@ -66,6 +67,7 @@ export function PipelineNode({
   const onPromptChange = data.onPromptChange as
     | ((nodeId: string, text: string) => void)
     | undefined;
+  const supportsCacheManagement = data.supportsCacheManagement ?? false;
 
   const pipelineName = data.pipelineId || "Pipeline";
 
@@ -156,6 +158,21 @@ export function PipelineNode({
             </NodeParamRow>
           </div>
         ))}
+
+        {/* Reset Cache button for pipelines that support cache management */}
+        {supportsCacheManagement && (
+          <NodeParamRow label="Reset Cache">
+            <button
+              type="button"
+              onClick={() => onParameterChange?.(id, "reset_cache", true)}
+              className={`${NODE_TOKENS.pill} flex items-center justify-center gap-1 w-[110px] cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
+              title="Clear longlive cache to regenerate fresh frames"
+            >
+              <RotateCcw className="h-3 w-3 text-[#fafafa]" />
+              <span className={NODE_TOKENS.primaryText}>Reset</span>
+            </button>
+          </NodeParamRow>
+        )}
 
         {/* Primitive parameters (string, number, boolean) */}
         {primitiveParams.map(param => {

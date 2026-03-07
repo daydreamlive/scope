@@ -61,6 +61,8 @@ function enrichNodes(
       const schema = pipelineId ? deps.pipelineSchemas[pipelineId] : null;
       const parameterInputs = schema ? extractParameterPorts(schema) : [];
       const supportsPrompts = schema?.supports_prompts ?? false;
+      const supportsCacheManagement =
+        schema?.supports_cache_management ?? false;
       const nodeParamValues = deps.nodeParamsRef.current?.[n.id] || {};
       return {
         ...n,
@@ -73,6 +75,7 @@ function enrichNodes(
           parameterValues: nodeParamValues,
           onParameterChange: deps.handleNodeParameterChange,
           supportsPrompts,
+          supportsCacheManagement,
           promptText: (nodeParamValues.__prompt as string) || "",
           onPromptChange: deps.handlePromptChange,
         },
@@ -238,6 +241,8 @@ export function useGraphState(
           const schema = newPipelineId ? pipelineSchemas[newPipelineId] : null;
           const parameterInputs = schema ? extractParameterPorts(schema) : [];
           const supportsPrompts = schema?.supports_prompts ?? false;
+          const supportsCacheManagement =
+            schema?.supports_cache_management ?? false;
           const newStyle = { ...n.style };
           delete newStyle.height;
           return {
@@ -253,6 +258,7 @@ export function useGraphState(
               streamOutputs: ports?.outputs ?? ["video"],
               parameterInputs,
               supportsPrompts,
+              supportsCacheManagement,
             },
           };
         })
