@@ -88,7 +88,8 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
             base_seed = 42
 
         # Create generator from seed for reproducible generation
-        block_seed = base_seed + block_state.current_start_frame
+        # manual_seed accepts a C long long, so clamp to [0, 2^63-1]
+        block_seed = (base_seed + block_state.current_start_frame) % (2**63)
         rng = torch.Generator(device=components.config.device).manual_seed(block_seed)
 
         # Generate empty latents (noise)
