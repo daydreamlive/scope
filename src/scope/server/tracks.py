@@ -3,7 +3,6 @@ import fractions
 import logging
 import threading
 import time
-from collections import deque
 
 import numpy as np
 from aiortc import MediaStreamTrack
@@ -237,7 +236,7 @@ class AudioProcessingTrack(MediaStreamTrack):
         self.channels = channels
 
         self._samples_per_frame = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960
-        self._audio_buffer: deque[float] = deque()
+        self._audio_buffer = np.array([], dtype=np.float32)
         self._first_audio_logged = False
 
     @staticmethod
@@ -310,22 +309,21 @@ class AudioProcessingTrack(MediaStreamTrack):
                 elif audio_np.shape[0] == 2 and self.channels == 1:
                     audio_np = audio_np.mean(axis=0, keepdims=True)
 
-            # Interleave into buffer: [L0, R0, L1, R1, ...]
-            for i in range(audio_np.shape[1]):
-                for ch in range(self.channels):
-                    self._audio_buffer.append(audio_np[ch, i])
+            # Interleave channels: [L0, R0, L1, R1, ...] via Fortran-order ravel
+            interleaved = np.ravel(audio_np, order="F").astype(np.float32)
+            self._audio_buffer = np.concatenate([self._audio_buffer, interleaved])
 
         # Serve a 20ms frame from the buffer
         samples_needed = self._samples_per_frame * self.channels
         if len(self._audio_buffer) >= samples_needed:
-            samples = [self._audio_buffer.popleft() for _ in range(samples_needed)]
-            return self._create_audio_frame(samples)
+            frame_samples = self._audio_buffer[:samples_needed]
+            self._audio_buffer = self._audio_buffer[samples_needed:]
+            return self._create_audio_frame(frame_samples)
 
         return self._create_silence_frame()
 
-    def _create_audio_frame(self, samples: list[float]) -> AudioFrame:
-        samples_array = np.array(samples, dtype=np.float32)
-        samples_int16 = (samples_array * 32767).clip(-32768, 32767).astype(np.int16)
+    def _create_audio_frame(self, samples: np.ndarray) -> AudioFrame:
+        samples_int16 = (samples * 32767).clip(-32768, 32767).astype(np.int16)
 
         layout = "stereo" if self.channels == 2 else "mono"
         frame = AudioFrame(format="s16", layout=layout, samples=self._samples_per_frame)
@@ -346,5 +344,5 @@ class AudioProcessingTrack(MediaStreamTrack):
         return frame
 
     def stop(self):
-        self._audio_buffer.clear()
+        self._audio_buffer = np.array([], dtype=np.float32)
         super().stop()
