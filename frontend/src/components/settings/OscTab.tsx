@@ -3,22 +3,14 @@ import { BookOpenText, Loader2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
 import { openExternalUrl } from "@/lib/openExternal";
-import { updateOscSettings } from "@/lib/api";
-
-interface OscStatus {
-  enabled: boolean;
-  listening: boolean;
-  port: number | null;
-  host: string | null;
-  log_all_messages: boolean;
-}
+import { updateOscSettings, type OscStatusResponse } from "@/lib/api";
 
 interface OscTabProps {
   isActive: boolean;
 }
 
 export function OscTab({ isActive }: OscTabProps) {
-  const [status, setStatus] = useState<OscStatus | null>(null);
+  const [status, setStatus] = useState<OscStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isTogglingLog, setIsTogglingLog] = useState(false);
 
@@ -49,8 +41,8 @@ export function OscTab({ isActive }: OscTabProps) {
   const handleToggleLogging = async (checked: boolean) => {
     setIsTogglingLog(true);
     try {
-      await updateOscSettings({ log_all_messages: checked });
-      setStatus(prev => (prev ? { ...prev, log_all_messages: checked } : prev));
+      const updated = await updateOscSettings({ log_all_messages: checked });
+      setStatus(prev => (prev ? { ...prev, ...updated } : prev));
     } catch (err) {
       console.error("Failed to update OSC logging setting:", err);
     } finally {
