@@ -151,6 +151,9 @@ interface PromptTimelineProps {
   onRecordingToggle?: () => void;
   onWorkflowExport?: () => void;
   onWorkflowImport?: () => void;
+  onExportToDaydream?: () => void;
+  isAuthenticated?: boolean;
+  isExportingToDaydream?: boolean;
 }
 
 export function PromptTimeline({
@@ -182,6 +185,9 @@ export function PromptTimeline({
   onRecordingToggle,
   onWorkflowExport,
   onWorkflowImport,
+  onExportToDaydream,
+  isAuthenticated = false,
+  isExportingToDaydream = false,
 }: PromptTimelineProps) {
   const timelineRef = useRef<HTMLDivElement>(null);
   const [timelineWidth, setTimelineWidth] = useState(800);
@@ -599,7 +605,12 @@ export function PromptTimeline({
                 setShowExportDialog(false);
                 onWorkflowExport?.();
               }}
+              onExportToDaydream={() => {
+                onExportToDaydream?.();
+              }}
               isRecording={isRecording}
+              isAuthenticated={isAuthenticated}
+              isExportingToDaydream={isExportingToDaydream}
             />
             <Button
               onClick={() => onWorkflowImport?.()}
