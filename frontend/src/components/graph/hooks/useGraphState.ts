@@ -270,7 +270,7 @@ export function useGraphState(
   const [pipelineSchemas, setPipelineSchemas] = useState<
     Record<string, PipelineSchemaInfo>
   >({});
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [nodeParams, setNodeParams] = useState<
     Record<string, Record<string, unknown>>
   >({});
@@ -811,7 +811,7 @@ export function useGraphState(
       setNodes([]);
       setEdges([]);
       setGraphSource(null);
-      setSelectedNodeId(null);
+      setSelectedNodeIds([]);
       setStatus("Graph cleared");
       callbacks.onGraphClear?.();
     } catch (err) {
@@ -900,8 +900,8 @@ export function useGraphState(
     availablePipelineIds,
     portsMap,
     pipelineSchemas,
-    selectedNodeId,
-    setSelectedNodeId,
+    selectedNodeIds,
+    setSelectedNodeIds,
     nodeParams,
     handlePipelineSelect,
     handleNodeParameterChange,

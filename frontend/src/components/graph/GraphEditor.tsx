@@ -14,6 +14,24 @@ import {
 } from "@xyflow/react";
 import type { Edge, Node, ReactFlowInstance } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
+import {
+  Camera,
+  Workflow,
+  Monitor,
+  SlidersHorizontal,
+  Trash2,
+  Type,
+  Hash,
+  ToggleLeft,
+  Sigma,
+  StickyNote,
+  Send,
+  Gauge,
+  CircleDot,
+  Grid2x2,
+  ListOrdered,
+  GitBranch,
+} from "lucide-react";
 
 import { SourceNode } from "./nodes/SourceNode";
 import { PipelineNode } from "./nodes/PipelineNode";
@@ -145,8 +163,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       graphSource,
       availablePipelineIds,
       portsMap,
-      selectedNodeId,
-      setSelectedNodeId,
+      selectedNodeIds,
+      setSelectedNodeIds,
       handlePipelineSelect,
       handleEdgeDelete,
       resolveBackendId,
@@ -327,15 +345,15 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     } = useConnectionLogic(nodes, setNodes, setEdges, handleEdgeDelete);
 
     // Node factories
-    const { handleNodeTypeSelect, handleDeleteNode } = useNodeFactories({
+    const { handleNodeTypeSelect, handleDeleteNodes } = useNodeFactories({
       nodes,
       setNodes,
       setEdges,
       availablePipelineIds,
       portsMap,
       handlePipelineSelect,
-      selectedNodeId,
-      setSelectedNodeId,
+      selectedNodeIds,
+      setSelectedNodeIds,
       spoutOutputAvailable,
       ndiOutputAvailable,
       syphonOutputAvailable,
@@ -531,11 +549,10 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               onInit={instance => {
                 reactFlowInstanceRef.current = instance;
               }}
-              onNodeClick={(_event, node) => setSelectedNodeId(node.id)}
-              onPaneClick={() => {
-                setSelectedNodeId(null);
-                setContextMenu(null);
-              }}
+              onSelectionChange={({ nodes: selected }) =>
+                setSelectedNodeIds(selected.map(n => n.id))
+              }
+              onPaneClick={() => setContextMenu(null)}
               onPaneContextMenu={suppressContextMenu}
               onNodeContextMenu={suppressNodeContextMenu}
               nodeTypes={nodeTypes}
@@ -553,27 +570,139 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                 x={contextMenu.x}
                 y={contextMenu.y}
                 onClose={() => setContextMenu(null)}
+                header={contextMenu.type === "pane" ? "Create" : undefined}
                 items={
                   contextMenu.type === "pane"
                     ? [
                         {
-                          label: "+ Add node",
-                          onClick: () => {
-                            setShowAddNodeModal(true);
-                          },
+                          label: "Source",
+                          icon: <Camera />,
+                          onClick: () => handleNodeTypeSelect("source"),
+                          keywords: ["input", "camera", "video"],
                         },
-                      ]
-                    : [
                         {
-                          label: "Delete node",
-                          onClick: () => {
-                            if (contextMenu.nodeId) {
-                              handleDeleteNode(contextMenu.nodeId);
-                            }
-                          },
-                          danger: true,
+                          label: "Pipeline",
+                          icon: <Workflow />,
+                          onClick: () => handleNodeTypeSelect("pipeline"),
+                          keywords: ["process", "effect", "filter"],
+                        },
+                        {
+                          label: "Sink",
+                          icon: <Monitor />,
+                          onClick: () => handleNodeTypeSelect("sink"),
+                          keywords: ["output", "display", "preview"],
+                        },
+                        {
+                          label: "Output",
+                          icon: <Send />,
+                          onClick: () => handleNodeTypeSelect("output"),
+                          keywords: ["spout", "ndi", "syphon", "send"],
+                        },
+                        {
+                          label: "Controls",
+                          icon: <SlidersHorizontal />,
+                          children: [
+                            {
+                              label: "FloatControl",
+                              icon: <Gauge />,
+                              onClick: () => handleNodeTypeSelect("control", "float"),
+                              keywords: ["float", "animated", "sine"],
+                            },
+                            {
+                              label: "IntControl",
+                              icon: <Hash />,
+                              onClick: () => handleNodeTypeSelect("control", "int"),
+                              keywords: ["integer", "animated"],
+                            },
+                            {
+                              label: "StringControl",
+                              icon: <Type />,
+                              onClick: () => handleNodeTypeSelect("control", "string"),
+                              keywords: ["text", "cycle", "animated"],
+                            },
+                          ],
+                        },
+                        {
+                          label: "UI",
+                          icon: <CircleDot />,
+                          children: [
+                            {
+                              label: "Slider",
+                              icon: <SlidersHorizontal />,
+                              onClick: () => handleNodeTypeSelect("slider"),
+                              keywords: ["range", "value"],
+                            },
+                            {
+                              label: "Knobs",
+                              icon: <CircleDot />,
+                              onClick: () => handleNodeTypeSelect("knobs"),
+                              keywords: ["dial", "rotary"],
+                            },
+                            {
+                              label: "XY Pad",
+                              icon: <Grid2x2 />,
+                              onClick: () => handleNodeTypeSelect("xypad"),
+                              keywords: ["pad", "2d", "touch"],
+                            },
+                            {
+                              label: "Tuple",
+                              icon: <ListOrdered />,
+                              onClick: () => handleNodeTypeSelect("tuple"),
+                              keywords: ["list", "numbers", "array"],
+                            },
+                          ],
+                        },
+                        {
+                          label: "Utility",
+                          icon: <Sigma />,
+                          children: [
+                            {
+                              label: "Math",
+                              icon: <Sigma />,
+                              onClick: () => handleNodeTypeSelect("math"),
+                              keywords: ["add", "multiply", "arithmetic"],
+                            },
+                            {
+                              label: "Note",
+                              icon: <StickyNote />,
+                              onClick: () => handleNodeTypeSelect("note"),
+                              keywords: ["comment", "annotation", "text"],
+                            },
+                            {
+                              label: "Reroute",
+                              icon: <GitBranch />,
+                              onClick: () => handleNodeTypeSelect("reroute"),
+                              keywords: ["passthrough", "wire", "dot"],
+                            },
+                          ],
+                        },
+                        {
+                          label: "Primitive",
+                          icon: <ToggleLeft />,
+                          onClick: () => handleNodeTypeSelect("primitive"),
+                          keywords: ["value", "string", "number", "boolean"],
                         },
                       ]
+                    : (() => {
+                        const clickedId = contextMenu.nodeId;
+                        const isInSelection =
+                          !!clickedId && selectedNodeIds.includes(clickedId);
+                        const idsToDelete =
+                          isInSelection && selectedNodeIds.length > 1
+                            ? selectedNodeIds
+                            : clickedId
+                              ? [clickedId]
+                              : [];
+                        const count = idsToDelete.length;
+                        return [
+                          {
+                            label: count > 1 ? `Delete ${count} nodes` : "Delete",
+                            icon: <Trash2 />,
+                            onClick: () => handleDeleteNodes(idsToDelete),
+                            danger: true,
+                          },
+                        ];
+                      })()
                 }
               />
             )}

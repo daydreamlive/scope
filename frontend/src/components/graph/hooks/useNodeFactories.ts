@@ -12,8 +12,8 @@ interface UseNodeFactoriesArgs {
   availablePipelineIds: string[];
   portsMap: Record<string, { inputs: string[]; outputs: string[] }>;
   handlePipelineSelect: (nodeId: string, newPipelineId: string | null) => void;
-  selectedNodeId: string | null;
-  setSelectedNodeId: (id: string | null) => void;
+  selectedNodeIds: string[];
+  setSelectedNodeIds: (ids: string[]) => void;
   spoutOutputAvailable: boolean;
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
@@ -28,8 +28,8 @@ export function useNodeFactories({
   availablePipelineIds,
   portsMap,
   handlePipelineSelect,
-  selectedNodeId,
-  setSelectedNodeId,
+  selectedNodeIds,
+  setSelectedNodeIds,
   spoutOutputAvailable,
   ndiOutputAvailable,
   syphonOutputAvailable,
@@ -466,21 +466,18 @@ export function useNodeFactories({
     ]
   );
 
-  const handleDeleteNode = useCallback(
-    (nodeId: string) => {
-      setNodes(nds => nds.filter(n => n.id !== nodeId));
-      setEdges(eds =>
-        eds.filter(e => e.source !== nodeId && e.target !== nodeId)
-      );
-      if (selectedNodeId === nodeId) {
-        setSelectedNodeId(null);
-      }
+  const handleDeleteNodes = useCallback(
+    (nodeIds: string[]) => {
+      const idSet = new Set(nodeIds);
+      setNodes(nds => nds.filter(n => !idSet.has(n.id)));
+      setEdges(eds => eds.filter(e => !idSet.has(e.source) && !idSet.has(e.target)));
+      setSelectedNodeIds(selectedNodeIds.filter(id => !idSet.has(id)));
     },
-    [setNodes, setEdges, selectedNodeId, setSelectedNodeId]
+    [setNodes, setEdges, selectedNodeIds, setSelectedNodeIds]
   );
 
   return {
     handleNodeTypeSelect,
-    handleDeleteNode,
+    handleDeleteNodes,
   };
 }
