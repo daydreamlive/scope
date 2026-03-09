@@ -1,13 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
 import { BookOpenText, Loader2 } from "lucide-react";
 import { Button } from "../ui/button";
+import { Switch } from "../ui/switch";
 import { openExternalUrl } from "@/lib/openExternal";
+import { updateOscSettings } from "@/lib/api";
 
 interface OscStatus {
   enabled: boolean;
   listening: boolean;
   port: number | null;
   host: string | null;
+  log_all_messages: boolean;
 }
 
 interface OscTabProps {
@@ -17,6 +20,7 @@ interface OscTabProps {
 export function OscTab({ isActive }: OscTabProps) {
   const [status, setStatus] = useState<OscStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isTogglingLog, setIsTogglingLog] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     setIsLoading(true);
@@ -40,6 +44,18 @@ export function OscTab({ isActive }: OscTabProps) {
 
   const handleOpenDocs = () => {
     openExternalUrl(`${window.location.origin}/api/v1/osc/docs`);
+  };
+
+  const handleToggleLogging = async (checked: boolean) => {
+    setIsTogglingLog(true);
+    try {
+      await updateOscSettings({ log_all_messages: checked });
+      setStatus(prev => (prev ? { ...prev, log_all_messages: checked } : prev));
+    } catch (err) {
+      console.error("Failed to update OSC logging setting:", err);
+    } finally {
+      setIsTogglingLog(false);
+    }
   };
 
   return (
@@ -78,6 +94,25 @@ export function OscTab({ isActive }: OscTabProps) {
             </div>
           </div>
         )}
+
+        {/* Log all messages toggle */}
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-medium text-foreground w-32">
+            Log Messages
+          </span>
+          <div className="flex-1 flex items-center justify-end gap-2">
+            <span className="text-xs text-muted-foreground">
+              {status?.log_all_messages ? "All" : "Unknown only"}
+            </span>
+            <Switch
+              aria-label="Log all OSC messages"
+              checked={status?.log_all_messages ?? false}
+              onCheckedChange={handleToggleLogging}
+              disabled={isTogglingLog || isLoading || !status?.listening}
+              className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
+            />
+          </div>
+        </div>
 
         {/* Docs */}
         <div className="flex items-center gap-4">
