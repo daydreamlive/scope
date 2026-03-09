@@ -268,6 +268,8 @@ cloud_connection_manager = None
 kafka_publisher = None
 # Global OSC server instance
 osc_server = None
+# Global DMX server instance
+dmx_server = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -357,6 +359,14 @@ async def lifespan(app: FastAPI):
     osc_server.set_managers(pipeline_manager, webrtc_manager)
     await osc_server.start()
 
+    # Start DMX (Art-Net) server on standard port 6454
+    from .dmx_server import DMXServer
+
+    dmx_config_dir = Path.home() / ".daydream-scope"
+    dmx_server = DMXServer(port=6454, config_dir=dmx_config_dir)
+    dmx_server.set_managers(pipeline_manager, webrtc_manager)
+    await dmx_server.start()
+
     # Syphon server discovery (macOS only): create the ObjC singleton and do
     # an initial NSRunLoop pump so servers are available when the UI first loads.
     # Subsequent refreshes pump on demand in the list_input_sources endpoint.
@@ -376,6 +386,11 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if dmx_server:
+        logger.info("Shutting down DMX server...")
+        await dmx_server.stop()
+        logger.info("DMX server shutdown complete")
+
     if osc_server:
         logger.info("Shutting down OSC server...")
         await osc_server.stop()
@@ -422,6 +437,12 @@ def get_osc_server():
     """Dependency to get OSC server instance."""
 
     return osc_server
+
+
+def get_dmx_server():
+    """Dependency to get DMX server instance."""
+
+    return dmx_server
 
 
 app = FastAPI(
@@ -758,6 +779,265 @@ async def osc_docs_page(
     port = srv.port if srv else 8000
     html_content = render_osc_docs_html(pm, port)
     return Response(content=html_content, media_type="text/html")
+
+
+# ---------------------------------------------------------------------------
+# DMX endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/dmx/status")
+async def dmx_status():
+    """Return current DMX (Art-Net) server status."""
+    srv = get_dmx_server()
+    if srv is None:
+        return {
+            "enabled": False,
+            "listening": False,
+            "port": None,
+            "input_active": False,
+            "input_mapping_count": 0,
+            "output_enabled": False,
+            "output_mapping_count": 0,
+            "output_merge_mode": "htp",
+        }
+    return srv.status()
+
+
+@app.get("/api/v1/dmx/config")
+async def dmx_config():
+    """Return current DMX configuration."""
+    srv = get_dmx_server()
+    if srv is None:
+        return {"error": "DMX server not running"}
+    return srv.get_config()
+
+
+class DMXConfigUpdateRequest(BaseModel):
+    input_universe: int | None = None
+    input_start_channel: int | None = None
+    output_universe: int | None = None
+    output_enabled: bool | None = None
+    output_merge_mode: str | None = None
+
+
+@app.put("/api/v1/dmx/config")
+async def update_dmx_config(request: DMXConfigUpdateRequest):
+    """Update DMX configuration."""
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    updates = request.model_dump(exclude_none=True)
+    return srv.update_config(updates)
+
+
+class DMXInputMappingRequest(BaseModel):
+    id: str
+    universe: int
+    channel: int
+    param_key: str
+    category: str = "generation"
+    min_value: float = 0.0
+    max_value: float = 1.0
+    enabled: bool = True
+
+
+@app.post("/api/v1/dmx/input-mappings")
+async def add_dmx_input_mapping(request: DMXInputMappingRequest):
+    """Add or update a DMX input mapping."""
+    from .dmx_server import DMXInputMapping, ParameterCategory
+
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    if request.channel < 1 or request.channel > 512:
+        raise HTTPException(status_code=400, detail="Channel must be between 1 and 512")
+
+    mapping = DMXInputMapping(
+        id=request.id,
+        universe=request.universe,
+        channel=request.channel,
+        param_key=request.param_key,
+        category=ParameterCategory(request.category),
+        min_value=request.min_value,
+        max_value=request.max_value,
+        enabled=request.enabled,
+    )
+    srv.add_input_mapping(mapping)
+    return {"success": True, "mapping": mapping.to_dict()}
+
+
+@app.delete("/api/v1/dmx/input-mappings/{mapping_id}")
+async def delete_dmx_input_mapping(mapping_id: str):
+    """Remove a DMX input mapping."""
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    if srv.remove_input_mapping(mapping_id):
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Mapping not found")
+
+
+class DMXOutputMappingRequest(BaseModel):
+    id: str
+    universe: int
+    channel: int
+    source_key: str
+    category: str = "analysis"
+    min_value: float = 0.0
+    max_value: float = 1.0
+    enabled: bool = True
+
+
+@app.post("/api/v1/dmx/output-mappings")
+async def add_dmx_output_mapping(request: DMXOutputMappingRequest):
+    """Add or update a DMX output mapping."""
+    from .dmx_server import DMXOutputMapping, ParameterCategory
+
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    if request.channel < 1 or request.channel > 512:
+        raise HTTPException(status_code=400, detail="Channel must be between 1 and 512")
+
+    mapping = DMXOutputMapping(
+        id=request.id,
+        universe=request.universe,
+        channel=request.channel,
+        source_key=request.source_key,
+        category=ParameterCategory(request.category),
+        min_value=request.min_value,
+        max_value=request.max_value,
+        enabled=request.enabled,
+    )
+    srv.add_output_mapping(mapping)
+    return {"success": True, "mapping": mapping.to_dict()}
+
+
+@app.delete("/api/v1/dmx/output-mappings/{mapping_id}")
+async def delete_dmx_output_mapping(mapping_id: str):
+    """Remove a DMX output mapping."""
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    if srv.remove_output_mapping(mapping_id):
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Mapping not found")
+
+
+@app.post("/api/v1/dmx/test-output")
+async def dmx_test_output():
+    """Send a test ramp (0→255→0) to all mapped output channels."""
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    if not srv.config.output_enabled:
+        raise HTTPException(status_code=400, detail="DMX output is not enabled")
+
+    srv.test_output()
+    return {"success": True, "message": "Test ramp started (2 seconds)"}
+
+
+@app.get("/api/v1/dmx/parameters")
+async def dmx_parameters(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Return available parameters grouped by category for DMX mapping."""
+    from .osc_docs import get_osc_paths
+
+    # Reuse OSC paths - same parameters are available for DMX
+    osc_paths = get_osc_paths(pm)
+
+    # Group parameters by category
+    categories = {
+        "generation": [],
+        "lora": [],
+        "color": [],
+        "analysis": [],
+    }
+
+    # Process active and available paths
+    for section in (osc_paths.get("active", {}), osc_paths.get("available", {})):
+        for _group_name, paths in section.items():
+            for path in paths:
+                param = {
+                    "key": path.get("key", ""),
+                    "type": path.get("type", ""),
+                    "description": path.get("description", ""),
+                    "min": path.get("min"),
+                    "max": path.get("max"),
+                }
+
+                # Categorize based on key patterns
+                key = param["key"].lower()
+                if "lora" in key:
+                    categories["lora"].append(param)
+                elif any(x in key for x in ["color", "hue", "saturation", "brightness"]):
+                    categories["color"].append(param)
+                elif any(x in key for x in ["motion", "beat", "analysis"]):
+                    categories["analysis"].append(param)
+                else:
+                    categories["generation"].append(param)
+
+    return categories
+
+
+@app.get("/api/v1/dmx/analysis-sources")
+async def dmx_analysis_sources():
+    """Return available analysis sources for DMX output mapping."""
+    # These are the analysis values that can be mapped to DMX output
+    return {
+        "sources": [
+            {
+                "key": "color_r",
+                "category": "analysis",
+                "description": "Average red component of the frame (0-1)",
+                "min": 0.0,
+                "max": 1.0,
+            },
+            {
+                "key": "color_g",
+                "category": "analysis",
+                "description": "Average green component of the frame (0-1)",
+                "min": 0.0,
+                "max": 1.0,
+            },
+            {
+                "key": "color_b",
+                "category": "analysis",
+                "description": "Average blue component of the frame (0-1)",
+                "min": 0.0,
+                "max": 1.0,
+            },
+            {
+                "key": "brightness",
+                "category": "analysis",
+                "description": "Average brightness of the frame (0-1)",
+                "min": 0.0,
+                "max": 1.0,
+            },
+            {
+                "key": "motion",
+                "category": "analysis",
+                "description": "Motion detection value (0-1)",
+                "min": 0.0,
+                "max": 1.0,
+            },
+            {
+                "key": "beat",
+                "category": "analysis",
+                "description": "Beat detection value from audio (0-1)",
+                "min": 0.0,
+                "max": 1.0,
+            },
+        ]
+    }
 
 
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
