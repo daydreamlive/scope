@@ -566,12 +566,13 @@ class PipelineManager:
 
         # Extract VACE-specific parameters from load_params if present
         if load_params:
+            # Always apply vace_context_scale when provided (applies to both
+            # ref-image and input-video VACE modes)
+            config["vace_context_scale"] = load_params.get("vace_context_scale", 1.0)
+
             ref_images = load_params.get("ref_images", [])
             if ref_images:
                 config["ref_images"] = ref_images
-                config["vace_context_scale"] = load_params.get(
-                    "vace_context_scale", 1.0
-                )
                 logger.info(
                     f"_configure_vace: VACE parameters from load_params: "
                     f"ref_images count={len(ref_images)}, "
