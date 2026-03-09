@@ -10,6 +10,7 @@ as either valid or invalid before being forwarded.
 
 import asyncio
 import logging
+import re
 import time
 from typing import TYPE_CHECKING, Any
 
@@ -42,6 +43,7 @@ class OSCServer:
         # Cached path inventory to avoid rebuilding on every OSC message.
         self._known_paths_cache: dict[str, dict[str, Any]] | None = None
         self._known_paths_cache_time: float = 0.0
+        self._known_paths_cache_signature: tuple[Any, ...] | None = None
 
     @property
     def port(self) -> int:
@@ -81,15 +83,28 @@ class OSCServer:
     def _get_known_paths(self) -> dict[str, dict[str, Any]]:
         """Return the known OSC paths, rebuilding from the registry when stale."""
         now = time.monotonic()
+        cache_signature = self._get_known_paths_signature()
         if (
             self._known_paths_cache is None
+            or self._known_paths_cache_signature != cache_signature
             or now - self._known_paths_cache_time > _PATH_CACHE_TTL
         ):
             from .osc_docs import get_all_known_paths
 
             self._known_paths_cache = get_all_known_paths(self._pipeline_manager)
             self._known_paths_cache_time = now
+            self._known_paths_cache_signature = cache_signature
         return self._known_paths_cache
+
+    def _get_known_paths_signature(self) -> tuple[Any, ...]:
+        """Return a lightweight signature of state that affects OSC paths."""
+        if self._pipeline_manager is None:
+            return ()
+
+        pipeline_ids = tuple(self._pipeline_manager.get_loaded_pipeline_ids())
+        adapters = self._pipeline_manager.get_loaded_lora_adapters()
+        lora_paths = tuple(adapter.get("path", "") for adapter in adapters)
+        return (pipeline_ids, lora_paths)
 
     def _build_dispatcher(self) -> Dispatcher:
         dispatcher = Dispatcher()
@@ -115,7 +130,7 @@ class OSCServer:
 
         if path_info is None:
             logger.info(
-                "OSC INVALID  %s = %r  reason=unknown path",
+                "OSC UNKNOWN  %s = %r",
                 address,
                 value,
             )
@@ -136,7 +151,14 @@ class OSCServer:
         # Apply the parameter immediately to all active local sessions so
         # the pipeline effect takes place without waiting for the frontend
         # round-trip.
-        if self._webrtc_manager:
+        lora_match = re.match(r"lora/(\d+)/scale$", key)
+        if lora_match:
+            lora_path = path_info.get("lora_path", "")
+            if self._webrtc_manager:
+                self._webrtc_manager.broadcast_parameter_update(
+                    {"lora_scales": [{"path": lora_path, "scale": value}]}
+                )
+        elif self._webrtc_manager:
             self._webrtc_manager.broadcast_parameter_update({key: value})
 
         # Push to all SSE subscribers so the frontend can sync its UI state.

@@ -47,6 +47,8 @@ from scope.core.workflows.resolve import (
 )
 
 from .cloud_proxy import (
+    CLOUD_REQUEST_FAILED,
+    _proxy_to_cloud,
     cloud_proxy,
     get_hardware_info_from_cloud,
     proxy_with_body,
@@ -562,7 +564,6 @@ async def root():
 
 
 @app.post("/api/v1/pipeline/load")
-@cloud_proxy(timeout=60.0)
 async def load_pipeline(
     request: PipelineLoadRequest,
     http_request: Request,
@@ -585,6 +586,20 @@ async def load_pipeline(
 
         # load_params is already a dict (or None)
         load_params_dict = request.load_params
+
+        # Always store load context locally so the OSC server can discover
+        # LoRA adapters even when the pipeline runs on a remote host.
+        pipeline_manager.store_load_context(pipeline_ids, load_params_dict)
+
+        if cloud_manager and cloud_manager.is_connected:
+            return await _proxy_to_cloud(
+                cloud_manager,
+                http_request,
+                http_request.url.path,
+                http_request.method.upper(),
+                60.0,
+                CLOUD_REQUEST_FAILED,
+            )
 
         # Local mode: start loading in background without blocking
         asyncio.create_task(

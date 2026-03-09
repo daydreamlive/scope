@@ -100,6 +100,61 @@ class PipelineManager:
                 if status == PipelineStatus.LOADED
             ]
 
+    def store_load_context(
+        self,
+        pipeline_ids: list[str],
+        load_params: dict | None,
+    ) -> None:
+        """Store pipeline IDs and load params locally without loading pipelines.
+
+        Used in cloud inference mode so the local OSC server can discover LoRA
+        adapters (via the load_params fallback) even though the actual pipeline
+        runs on a remote host.
+        """
+        with self._lock:
+            self._load_params = load_params
+            for pid in pipeline_ids:
+                self._pipeline_load_params[pid] = load_params or {}
+
+    def get_loaded_lora_adapters(self) -> list[dict[str, Any]]:
+        """Return currently loaded LoRA adapters across all pipelines (thread-safe).
+
+        Each entry has at least ``path`` and ``scale`` keys.
+        """
+        with self._lock:
+            # Prefer runtime adapter metadata from live pipeline instances when
+            # available, because that reflects the current scale after updates.
+            runtime_adapters: list[dict[str, Any]] = []
+            for pipeline in self._pipelines.values():
+                adapters = getattr(pipeline, "loaded_lora_adapters", None)
+                if not adapters:
+                    continue
+                runtime_adapters.extend(adapters)
+            if runtime_adapters:
+                return runtime_adapters
+
+            # Fallback to configured LoRAs from load params so OSC docs and
+            # validation still know about enabled adapters even if the current
+            # pipeline implementation has not populated loaded_lora_adapters.
+            load_param_sets: list[dict[str, Any]] = (
+                [self._load_params] if self._load_params else []
+            ) + list(self._pipeline_load_params.values())
+
+            for load_params in load_param_sets:
+                loras = load_params.get("loras") if load_params else None
+                if not loras:
+                    continue
+                return [
+                    {
+                        "path": lora.get("path", ""),
+                        "scale": lora.get("scale", 1.0),
+                        "merge_mode": lora.get("merge_mode"),
+                    }
+                    for lora in loras
+                ]
+
+            return []
+
     def get_pipeline_by_id(self, pipeline_id: str):
         """Get a pipeline instance by ID (thread-safe).
 
@@ -374,26 +429,7 @@ class PipelineManager:
             if self._pipelines:
                 pipeline_id = next(iter(self._pipelines.keys()))
 
-            # Capture loaded LoRA adapters from all pipelines
-            # Collect from all pipelines that expose this attribute
-            loaded_lora_adapters = None
-            if self._pipelines:
-                all_adapters = []
-                seen_paths = set()
-
-                for pipeline in self._pipelines.values():
-                    if hasattr(pipeline, "loaded_lora_adapters"):
-                        adapters = getattr(pipeline, "loaded_lora_adapters", None)
-                        if adapters:
-                            # Add adapters, avoiding duplicates by path
-                            for adapter in adapters:
-                                adapter_path = adapter.get("path")
-                                if adapter_path and adapter_path not in seen_paths:
-                                    all_adapters.append(adapter)
-                                    seen_paths.add(adapter_path)
-
-                if all_adapters:
-                    loaded_lora_adapters = all_adapters
+            loaded_lora_adapters = self.get_loaded_lora_adapters() or None
 
             # If there's an error, clear error statuses after capturing them
             # This ensures errors don't persist across page reloads

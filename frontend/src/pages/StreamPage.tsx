@@ -1152,6 +1152,20 @@ export function StreamPage() {
           break;
         }
         default: {
+          // LoRA adapter scale updates (e.g. "lora/0/scale")
+          const loraMatch = key.match(/^lora\/(\d+)\/scale$/);
+          if (loraMatch) {
+            const loraIndex = parseInt(loraMatch[1], 10);
+            const currentLoras = settings.loras || [];
+            if (loraIndex < currentLoras.length) {
+              const updatedLoras = currentLoras.map((lora, i) =>
+                i === loraIndex ? { ...lora, scale: Number(value) } : lora
+              );
+              handleLorasChange(updatedLoras);
+            }
+            break;
+          }
+
           // Pipeline-specific runtime params:
           // update frontend override state first, then forward to backend.
           if (pipelineHasRuntimeField(settings.pipelineId, key)) {

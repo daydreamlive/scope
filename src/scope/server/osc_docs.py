@@ -7,13 +7,10 @@ Builds the list of available OSC paths from:
 """
 
 import html
-import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .pipeline_manager import PipelineManager
-
-logger = logging.getLogger(__name__)
 
 # Runtime params that are useful to control via OSC (from schema.Parameters).
 # We curate this list to exclude structural params like pipeline_ids.
@@ -155,6 +152,35 @@ def _collect_pipeline_paths() -> dict[str, list[dict[str, Any]]]:
     return pipeline_paths
 
 
+def _collect_lora_paths(
+    pipeline_manager: "PipelineManager | None",
+) -> list[dict[str, Any]]:
+    """Build OSC path entries for each currently loaded LoRA adapter."""
+    if not pipeline_manager:
+        return []
+    loaded = pipeline_manager.get_loaded_lora_adapters()
+    paths: list[dict[str, Any]] = []
+    for i, adapter in enumerate(loaded):
+        adapter_path = adapter.get("path", "")
+        filename = (
+            adapter_path.rsplit("/", 1)[-1]
+            if "/" in adapter_path
+            else (adapter_path or f"slot {i}")
+        )
+        paths.append(
+            {
+                "key": f"lora/{i}/scale",
+                "type": "float",
+                "description": f"Scale for LoRA adapter {i} ({filename})",
+                "min": -10.0,
+                "max": 10.0,
+                "osc_address": f"/scope/lora/{i}/scale",
+                "lora_path": adapter_path,
+            }
+        )
+    return paths
+
+
 def get_osc_paths(
     pipeline_manager: "PipelineManager | None",
 ) -> dict[str, Any]:
@@ -177,6 +203,11 @@ def get_osc_paths(
     for p in _RUNTIME_PARAMS:
         runtime_list.append({**p, "osc_address": f"/scope/{p['key']}"})
     active_groups["Runtime"] = runtime_list
+
+    # LoRA adapter scale paths (only present when adapters are loaded)
+    lora_paths = _collect_lora_paths(pipeline_manager)
+    if lora_paths:
+        active_groups["LoRA Adapters"] = lora_paths
 
     for pid, paths in pipeline_paths.items():
         target = active_groups if pid in active_pipeline_ids else available_groups
