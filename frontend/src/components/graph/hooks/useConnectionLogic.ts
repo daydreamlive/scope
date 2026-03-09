@@ -503,13 +503,20 @@ export function useConnectionLogic(
         edgeColor = getEdgeColor(sourceNode, connection.sourceHandle);
       }
 
+      // Check if this is a video edge (white line)
+      const parsed = parseHandleId(connection.sourceHandle);
+      const isVideoEdge =
+        parsed?.kind === "stream" &&
+        (parsed?.name === "video" || parsed?.name === "video2");
+      const strokeWidth = isVideoEdge ? 5 : 2;
+
       setEdges(eds => {
         let updated = addEdge(
           {
             ...connection,
             type: "default",
             reconnectable: "target" as const,
-            style: { stroke: edgeColor, strokeWidth: 2 },
+            style: { stroke: edgeColor, strokeWidth },
             animated: false,
             data: { onDelete: handleEdgeDelete },
           },
@@ -550,11 +557,17 @@ export function useConnectionLogic(
           ) {
             const sourceNode = nodes.find(n => n.id === e.source);
             const edgeColor = getEdgeColor(sourceNode, e.sourceHandle);
+            // Check if this is a video edge (white line)
+            const parsed = parseHandleId(e.sourceHandle);
+            const isVideoEdge =
+              parsed?.kind === "stream" &&
+              (parsed?.name === "video" || parsed?.name === "video2");
+            const strokeWidth = isVideoEdge ? 5 : 2;
             return {
               ...e,
               type: "default",
               reconnectable: "target" as const,
-              style: { stroke: edgeColor, strokeWidth: 2 },
+              style: { stroke: edgeColor, strokeWidth },
               animated: false,
               data: { onDelete: handleEdgeDelete },
             };

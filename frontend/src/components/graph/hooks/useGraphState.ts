@@ -133,6 +133,9 @@ function enrichNodes(
       const pipelineAvailable = pipelineId
         ? deps.availablePipelineIds.includes(pipelineId)
         : true;
+      // Keep streamInputs/streamOutputs in sync with the schema's ports map
+      const ports =
+        pipelineId && deps.portsMap ? deps.portsMap[pipelineId] : null;
       return {
         ...n,
         data: {
@@ -148,6 +151,12 @@ function enrichNodes(
           promptText: (nodeParamValues.__prompt as string) || "",
           onPromptChange: deps.handlePromptChange,
           pipelineAvailable,
+          ...(ports
+            ? {
+                streamInputs: ports.inputs,
+                streamOutputs: ports.outputs,
+              }
+            : {}),
         },
       };
     }
@@ -194,11 +203,17 @@ function colorEdges(
   return flowEdges.map(edge => {
     const sourceNode = enrichedNodes.find(n => n.id === edge.source);
     const edgeColor = getEdgeColor(sourceNode, edge.sourceHandle);
+    // Check if this is a video edge (white line)
+    const parsed = parseHandleId(edge.sourceHandle);
+    const isVideoEdge =
+      parsed?.kind === "stream" &&
+      (parsed?.name === "video" || parsed?.name === "video2");
+    const strokeWidth = isVideoEdge ? 5 : 2;
     return {
       ...edge,
       type: "default",
       reconnectable: "target" as const,
-      style: { stroke: edgeColor, strokeWidth: 2 },
+      style: { stroke: edgeColor, strokeWidth },
       animated: false,
       data: { onDelete: handleEdgeDelete },
     };
