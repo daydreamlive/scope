@@ -14,6 +14,9 @@ import { usePromptManager } from "../hooks/usePromptManager";
 import { PromptField } from "./shared/PromptField";
 import { WeightSlider } from "./shared/WeightSlider";
 import { TemporalTransitionControls } from "./shared/TemporalTransitionControls";
+import { MIDIMappable } from "./MIDIMappable";
+import { useMIDI } from "../contexts/MIDIContext";
+import { Toggle } from "./ui/toggle";
 
 interface PromptInputProps {
   className?: string;
@@ -63,11 +66,13 @@ export function PromptInput({
     defaultSpatialInterpolationMethod !== null;
   const [isProcessing, setIsProcessing] = useState(false);
   const [focusedIndex, setFocusedIndex] = useState<number | null>(null);
+  const { midiEnabled } = useMIDI();
 
   // Use shared prompt management hook
   // This is a controlled component, so we pass prompts directly
   const {
     prompts: managedPrompts,
+    setPrompts,
     handlePromptTextChange,
     handleWeightChange,
     handleAddPrompt,
@@ -89,6 +94,59 @@ export function PromptInput({
       onInterpolationMethodChange?.("linear");
     }
   }, [managedPrompts.length, interpolationMethod, onInterpolationMethodChange]);
+
+  const isSoloPrompt = (index: number) =>
+    managedPrompts.every((prompt, promptIndex) => {
+      if (promptIndex === index) return prompt.weight > 99;
+      return prompt.weight < 1;
+    });
+
+  const handlePromptSolo = (index: number) => {
+    const soloPrompts = managedPrompts.map((prompt, promptIndex) => ({
+      ...prompt,
+      weight: promptIndex === index ? 100 : 0,
+    }));
+
+    setPrompts(soloPrompts);
+
+    if (isStreaming) {
+      onLivePromptSubmit?.(soloPrompts);
+    }
+  };
+
+  const renderPromptSelectButton = (index: number) => {
+    if (!midiEnabled) return undefined;
+
+    const isSolo = isSoloPrompt(index);
+
+    return (
+      <MIDIMappable
+        actionId={`switch_prompt_${index}`}
+        mappingType="trigger"
+        className="inline-flex h-5 w-5 shrink-0 items-center border border-gray-800 justify-center overflow-hidden rounded-sm leading-none"
+        mappingModeClassName="p-2 rounded-md"
+        overlayClassName="rounded-md"
+      >
+        <div className="h-full w-full">
+          <Toggle
+            pressed={isSolo}
+            variant="default"
+            className="shrink-0 cursor-pointer rounded-sm  bg-transparent text-[10px] font-semibold uppercase leading-none text-muted-foreground hover:bg-transparent hover:text-foreground data-[state=on]:border-blue-500 data-[state=on]:bg-blue-500 data-[state=on]:text-white data-[state=on]:hover:bg-blue-500"
+            onPressedChange={pressed => {
+              if (pressed) {
+                handlePromptSolo(index);
+              }
+            }}
+            disabled={disabled}
+            aria-label={`Solo prompt ${index + 1}`}
+            title={`Solo prompt ${index + 1}`}
+          >
+            S
+          </Toggle>
+        </div>
+      </MIDIMappable>
+    );
+  };
 
   type SubmitStrategy = "transition" | "live" | "normal";
 
@@ -153,7 +211,7 @@ export function PromptInput({
   if (isSinglePrompt) {
     return (
       <div className={`space-y-3 ${className}`}>
-        <div className="flex items-start bg-card border border-border rounded-lg px-4 py-3 gap-3">
+        <div className="flex items-center bg-card border border-border rounded-lg px-4 py-3 gap-3">
           <PromptField
             prompt={managedPrompts[0]}
             index={0}
@@ -230,7 +288,7 @@ export function PromptInput({
       {managedPrompts.map((prompt, index) => {
         return (
           <div key={index} className="space-y-2">
-            <div className="flex items-start bg-card border border-border rounded-lg px-4 py-3 gap-3">
+            <div className="flex items-center bg-card border border-border rounded-lg px-4 py-3 gap-3">
               <PromptField
                 prompt={prompt}
                 index={index}
@@ -246,11 +304,24 @@ export function PromptInput({
               />
             </div>
 
-            <WeightSlider
-              value={normalizedWeights[index]}
-              onValueChange={value => handleWeightChange(index, value)}
-              disabled={disabled}
-            />
+            <div className="flex items-center gap-2">
+              <MIDIMappable
+                parameterId="prompt_weight"
+                arrayIndex={index}
+                mappingType="continuous"
+                range={{ min: 0, max: 100 }}
+                className="flex-1"
+              >
+                <WeightSlider
+                  value={normalizedWeights[index]}
+                  onValueChange={value => handleWeightChange(index, value)}
+                  disabled={disabled}
+                />
+              </MIDIMappable>
+              {midiEnabled &&
+                managedPrompts.length > 1 &&
+                renderPromptSelectButton(index)}
+            </div>
           </div>
         );
       })}

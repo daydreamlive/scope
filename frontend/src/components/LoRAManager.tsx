@@ -15,6 +15,7 @@ import type { LoRAConfig, LoraMergeStrategy } from "../types";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 import { FilePicker } from "./ui/file-picker";
+import { MIDIMappable } from "./MIDIMappable";
 
 interface LoRAManagerProps {
   loras: LoRAConfig[];
@@ -209,31 +210,37 @@ export function LoRAManager({
               </Select>
             </div>
 
-            <div className="flex items-center gap-2">
-              <LabelWithTooltip
-                label="Scale"
-                tooltip={getScaleAdjustmentInfo(lora).tooltipText}
-                className="text-xs text-muted-foreground w-16"
-              />
-              <div className="flex-1 min-w-0">
-                <SliderWithInput
-                  value={localScales[lora.id] ?? lora.scale}
-                  onValueChange={value => {
-                    handleLocalScaleChange(lora.id, value);
-                  }}
-                  onValueCommit={value => {
-                    handleScaleCommit(lora.id, value);
-                  }}
-                  min={-10}
-                  max={10}
-                  step={0.1}
-                  incrementAmount={0.1}
-                  disabled={getScaleAdjustmentInfo(lora).isDisabled}
-                  className="flex-1"
-                  valueFormatter={v => Math.round(v * 10) / 10}
+            <MIDIMappable
+              parameterId={`lora_scale_${lora.id}`}
+              range={{ min: -10, max: 10 }}
+              disabled={getScaleAdjustmentInfo(lora).isDisabled}
+            >
+              <div className="flex items-center gap-2">
+                <LabelWithTooltip
+                  label="Scale"
+                  tooltip={getScaleAdjustmentInfo(lora).tooltipText}
+                  className="text-xs text-muted-foreground w-16"
                 />
+                <div className="flex-1 min-w-0">
+                  <SliderWithInput
+                    value={localScales[lora.id] ?? lora.scale}
+                    onValueChange={value => {
+                      handleLocalScaleChange(lora.id, value);
+                    }}
+                    onValueCommit={value => {
+                      handleScaleCommit(lora.id, value);
+                    }}
+                    min={-10}
+                    max={10}
+                    step={0.1}
+                    incrementAmount={0.1}
+                    disabled={getScaleAdjustmentInfo(lora).isDisabled}
+                    className="flex-1"
+                    valueFormatter={v => Math.round(v * 10) / 10}
+                  />
+                </div>
               </div>
-            </div>
+            </MIDIMappable>
           </div>
         ))}
       </div>
