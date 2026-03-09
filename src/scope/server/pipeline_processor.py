@@ -19,15 +19,14 @@ from .pipeline_throttler import PipelineThrottler
 logger = logging.getLogger(__name__)
 
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
-OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
+OUTPUT_QUEUE_MAX_SIZE_FACTOR = 2
 
 SLEEP_TIME = 0.01
 
 # FPS calculation constants
 MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
 MAX_FPS = 60.0  # Maximum FPS cap
-OUTPUT_FPS_SAMPLE_SIZE = 30
-OUTPUT_FPS_MIN_SAMPLES = 2
+BATCH_FPS_SAMPLE_SIZE = 10  # Number of batch-level samples for windowed averaging
 
 
 class PipelineProcessor:
@@ -78,10 +77,13 @@ class PipelineProcessor:
 
         self.is_prepared = False
 
-        # Output FPS tracking (based on frames added to output queue)
-        # Stores inter-frame durations (seconds)
-        self.output_frame_deltas = deque(maxlen=OUTPUT_FPS_SAMPLE_SIZE)
-        self._last_frame_time: float | None = None
+        # Output FPS tracking (batch-level throughput)
+        # Stores (num_frames, interval) tuples so that FPS = sum(frames) / sum(intervals),
+        # correctly handling variable batch sizes across pipeline calls
+        self._batch_samples: deque[tuple[int, float]] = deque(
+            maxlen=BATCH_FPS_SAMPLE_SIZE
+        )
+        self._last_batch_time: float | None = None
         # Start with a higher initial FPS to prevent initial queue buildup
         self.current_output_fps = MAX_FPS
         self.output_fps_lock = threading.Lock()
@@ -354,8 +356,8 @@ class PipelineProcessor:
         # Pause or resume the processing
         paused = self.parameters.pop("paused", None)
         if paused is not None and paused != self.paused:
-            # Reset so the next FPS delta doesn't span the pause/unpause gap
-            self._last_frame_time = None
+            # Reset so the next batch FPS sample doesn't span the pause/unpause gap
+            self._last_batch_time = None
             self.paused = paused
         if self.paused:
             self.shutdown_event.wait(SLEEP_TIME)
@@ -511,8 +513,6 @@ class PipelineProcessor:
             # Output frames are [H, W, C], convert to [1, H, W, C] for consistency
             for frame in output:
                 frame = frame.unsqueeze(0)
-                # Track when a frame is ready (production rate)
-                self._track_output_frame()
                 try:
                     self.output_queue.put_nowait(frame)
                 except queue.Full:
@@ -520,6 +520,9 @@ class PipelineProcessor:
                         f"Output queue full for {self.pipeline_id}, dropping processed frame"
                     )
                     continue
+
+            # Track batch-level throughput for FPS calculation
+            self._track_output_batch(num_frames, processing_time)
 
             # Apply throttling if this pipeline is producing faster than next can consume
             # Only throttle if: (1) has video input, (2) has next processor
@@ -537,34 +540,45 @@ class PipelineProcessor:
         self.is_prepared = True
         self._pending_cache_init = False
 
-    def _track_output_frame(self):
-        """Track when a frame is added to the output queue (production rate).
+    def _track_output_batch(self, num_frames: int, processing_time: float):
+        """Track batch-level production throughput for FPS calculation.
 
-        Stores inter-frame deltas instead of absolute timestamps so that
-        pauses don't artificially lower the measured FPS.
+        Stores (num_frames, interval) tuples and computes FPS as
+        sum(frames) / sum(intervals). This correctly handles variable
+        batch sizes and avoids the oscillation caused by per-frame delta
+        tracking where near-zero intra-batch deltas mixed with large
+        inter-batch gaps cause the FPS estimate to swing permanently.
+
+        On the first call, processing_time is used as the interval since
+        there is no previous batch to measure against. This gives a useful
+        FPS estimate immediately rather than waiting for a second batch.
         """
         now = time.time()
         with self.output_fps_lock:
-            if self._last_frame_time is not None:
-                delta = now - self._last_frame_time
-                self.output_frame_deltas.append(delta)
+            if self._last_batch_time is not None:
+                interval = now - self._last_batch_time
+            elif processing_time > 0:
+                # First batch: use processing time as initial interval estimate
+                interval = processing_time
+            else:
+                interval = 0
 
-            self._last_frame_time = now
+            if interval > 0:
+                self._batch_samples.append((num_frames, interval))
+
+            self._last_batch_time = now
 
         self._calculate_output_fps()
 
     def _calculate_output_fps(self):
-        """Calculate FPS from the average inter-frame delta."""
+        """Calculate FPS from batch-level throughput: sum(frames) / sum(intervals)."""
         with self.output_fps_lock:
-            if len(self.output_frame_deltas) >= OUTPUT_FPS_MIN_SAMPLES:
-                avg_delta = sum(self.output_frame_deltas) / len(
-                    self.output_frame_deltas
-                )
-                if avg_delta > 0:
-                    estimated_fps = 1.0 / avg_delta
-                    # Clamp to reasonable bounds
-                    estimated_fps = max(MIN_FPS, min(MAX_FPS, estimated_fps))
-                    self.current_output_fps = estimated_fps
+            if self._batch_samples:
+                total_frames = sum(n for n, _ in self._batch_samples)
+                total_time = sum(t for _, t in self._batch_samples)
+                if total_time > 0:
+                    fps = total_frames / total_time
+                    self.current_output_fps = max(MIN_FPS, min(MAX_FPS, fps))
 
     def get_fps(self) -> float:
         """Get the current dynamically calculated pipeline FPS.
