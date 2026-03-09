@@ -1599,6 +1599,7 @@ export function StreamPage() {
         // Add VACE parameters if pipeline supports VACE
         if (currentPipeline?.supportsVACE) {
           loadParams.vace_enabled = vaceEnabled;
+          loadParams.vace_context_scale = settings.vaceContextScale ?? 1.0;
 
           // Add VACE reference images if provided
           const vaceParams = getVaceParams(
@@ -1734,8 +1735,10 @@ export function StreamPage() {
         );
         if ("vace_ref_images" in vaceParams) {
           initialParameters.vace_ref_images = vaceParams.vace_ref_images;
-          initialParameters.vace_context_scale = vaceParams.vace_context_scale;
         }
+        // Always send vace_context_scale when VACE is supported,
+        // not just when ref images are present (it also applies to input video VACE)
+        initialParameters.vace_context_scale = settings.vaceContextScale ?? 1.0;
         // Add vace_use_input_video parameter
         if (currentMode === "video") {
           initialParameters.vace_use_input_video =
