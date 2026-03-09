@@ -305,6 +305,14 @@ export function StreamPage() {
       return;
     }
 
+    const isElectron = Boolean(
+      (window as unknown as { scope?: { openExternal?: unknown } }).scope
+        ?.openExternal
+    );
+    // Open a blank tab synchronously while user-activation is still live,
+    // so popup blockers don't interfere. Electron uses IPC and doesn't need this.
+    const pendingTab = isElectron ? null : window.open("about:blank", "_blank");
+
     setIsExportingToDaydream(true);
     try {
       const pluginInfoMap = new Map<string, PluginInfo>(
@@ -333,12 +341,17 @@ export function StreamPage() {
         workflow.metadata.name
       );
 
-      openExternalUrl(result.createUrl);
+      if (pendingTab) {
+        pendingTab.location.href = result.createUrl;
+      } else {
+        openExternalUrl(result.createUrl);
+      }
       toast.success("Opening daydream.live...", {
         description:
           "Your workflow has been sent to daydream.live for publishing.",
       });
     } catch (err) {
+      pendingTab?.close();
       console.error("Export to daydream.live failed:", err);
       toast.error("Export failed", {
         description: err instanceof Error ? err.message : String(err),
