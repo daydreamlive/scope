@@ -7,10 +7,13 @@ const LOCAL_POLL_INTERVAL_MS = 2000;
 export type LogLevel = "ERROR" | "WARNING" | "INFO" | "DEBUG" | "UNKNOWN";
 
 export interface LogLine {
+  id: number;
   text: string;
   level: LogLevel;
   isCloud: boolean;
 }
+
+let nextLogId = 0;
 
 function parseLogLine(raw: string): LogLine {
   const isCloud = raw.includes("- scope.cloud -");
@@ -20,7 +23,7 @@ function parseLogLine(raw: string): LogLine {
   else if (raw.includes(" - INFO - ")) level = "INFO";
   else if (raw.includes(" - DEBUG - ")) level = "DEBUG";
 
-  return { text: raw, level, isCloud };
+  return { id: nextLogId++, text: raw, level, isCloud };
 }
 
 export function useLogStream() {

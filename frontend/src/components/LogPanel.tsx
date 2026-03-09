@@ -1,4 +1,11 @@
-import { useRef, useEffect, useState } from "react";
+import React, {
+  useRef,
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+} from "react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { Terminal, Copy, Trash2, X, Check } from "lucide-react";
 import { Button } from "./ui/button";
 import type { LogLine, LogLevel } from "../hooks/useLogStream";
@@ -20,41 +27,61 @@ const levelColor: Record<LogLevel, string> = {
   UNKNOWN: "text-neutral-400",
 };
 
+const LogRow = React.memo(function LogRow({ log }: { log: LogLine }) {
+  return (
+    <div
+      className={`${levelColor[log.level]} whitespace-pre-wrap leading-5${log.isCloud ? " border-l-2 border-blue-500/50 bg-blue-950/20 pl-2" : ""}`}
+    >
+      {log.isCloud && (
+        <span className="bg-blue-900/40 text-blue-300 text-[10px] px-1 rounded mr-1 inline-block">
+          CLOUD
+        </span>
+      )}
+      {log.text}
+    </div>
+  );
+});
+
 export function LogPanel({ logs, isOpen, onClose, onClear }: LogPanelProps) {
-  const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
-  const [autoScroll, setAutoScroll] = useState(true);
+  const autoScrollRef = useRef(true);
   const [filter, setFilter] = useState<LogFilter>("all");
   const [copied, setCopied] = useState(false);
 
-  // Auto-scroll to bottom when new logs arrive or panel opens
-  useEffect(() => {
-    if (isOpen && autoScroll && bottomRef.current) {
-      bottomRef.current.scrollIntoView({ block: "end" });
-    }
-  }, [logs, filter, autoScroll, isOpen]);
-
-  if (!isOpen) return null;
-
-  const filteredLogs = logs.filter(log => {
+  const filteredLogs = useMemo(() => {
     if (filter === "errors")
-      return log.level === "ERROR" || log.level === "WARNING";
-    if (filter === "cloud") return log.isCloud;
-    return true;
+      return logs.filter(l => l.level === "ERROR" || l.level === "WARNING");
+    if (filter === "cloud") return logs.filter(l => l.isCloud);
+    return logs;
+  }, [logs, filter]);
+
+  const virtualizer = useVirtualizer({
+    count: filteredLogs.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 20,
+    overscan: 20,
   });
 
-  const handleCopy = async () => {
+  useEffect(() => {
+    if (isOpen && autoScrollRef.current && filteredLogs.length > 0) {
+      virtualizer.scrollToIndex(filteredLogs.length - 1, { align: "end" });
+    }
+  }, [filteredLogs.length, isOpen, virtualizer]);
+
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    const el = e.currentTarget;
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
+    autoScrollRef.current = isAtBottom;
+  }, []);
+
+  const handleCopy = useCallback(async () => {
     const text = filteredLogs.map(l => l.text).join("\n");
     await navigator.clipboard.writeText(text);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
-  };
+  }, [filteredLogs]);
 
-  const handleScroll = (e: React.UIEvent<HTMLDivElement>) => {
-    const el = e.currentTarget;
-    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-    setAutoScroll(isAtBottom);
-  };
+  if (!isOpen) return null;
 
   return (
     <div
@@ -68,7 +95,6 @@ export function LogPanel({ logs, isOpen, onClose, onClear }: LogPanelProps) {
 
         <div className="flex-1" />
 
-        {/* Filter buttons */}
         {(["all", "errors", "cloud"] as const).map(f => (
           <button
             key={f}
@@ -129,21 +155,34 @@ export function LogPanel({ logs, isOpen, onClose, onClear }: LogPanelProps) {
             No logs yet
           </div>
         ) : (
-          filteredLogs.map((log, i) => (
-            <div
-              key={i}
-              className={`${levelColor[log.level]} whitespace-pre-wrap leading-5${log.isCloud ? " border-l-2 border-blue-500/50 bg-blue-950/20 pl-2" : ""}`}
-            >
-              {log.isCloud && (
-                <span className="bg-blue-900/40 text-blue-300 text-[10px] px-1 rounded mr-1 inline-block">
-                  CLOUD
-                </span>
-              )}
-              {log.text}
-            </div>
-          ))
+          <div
+            style={{
+              height: virtualizer.getTotalSize(),
+              width: "100%",
+              position: "relative",
+            }}
+          >
+            {virtualizer.getVirtualItems().map(virtualRow => {
+              const log = filteredLogs[virtualRow.index];
+              return (
+                <div
+                  key={log.id}
+                  ref={virtualizer.measureElement}
+                  data-index={virtualRow.index}
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${virtualRow.start}px)`,
+                  }}
+                >
+                  <LogRow log={log} />
+                </div>
+              );
+            })}
+          </div>
         )}
-        <div ref={bottomRef} />
       </div>
     </div>
   );
