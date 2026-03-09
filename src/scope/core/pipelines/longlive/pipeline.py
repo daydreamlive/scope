@@ -267,7 +267,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         return {"video": postprocess_chunk(self.state.values["output_video"])}
 
     def _warmup(self, inner_model):
-        print(f"Running warmup iteration...")
+        print("Running warmup iteration...")
         start = time.time()
 
         warmup_prompt = [{"text": "warmup", "weight": 100}]

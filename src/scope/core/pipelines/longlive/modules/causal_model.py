@@ -532,7 +532,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 x = x + hint * context_scale
             new_ks.append(new_k)
             new_vs.append(new_v)
-        return x, list(zip(new_ks, new_vs))
+        return x, list(zip(new_ks, new_vs, strict=True))
 
     def _forward_inference(
         self,
