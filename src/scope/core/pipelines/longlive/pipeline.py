@@ -280,7 +280,10 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             h = self.state.get("height") // 8
             w = self.state.get("width") // 8
             f = self.components.config.num_frame_per_block
-            self.state.set("vace_context", [torch.randn(96, f, h, w, device="cuda", dtype=torch.bfloat16)])
+            self.state.set(
+                "vace_context",
+                [torch.randn(96, f, h, w, device="cuda", dtype=torch.bfloat16)],
+            )
             _ = self(prompts=warmup_prompt, init_cache=False)
 
         # Reset state after warmup

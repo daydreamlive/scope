@@ -185,7 +185,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         has_extension = has_first_frame or has_last_frame
 
         if not has_ref_images and not has_input_frames and not has_extension:
-            if not hasattr(block_state, 'vace_context'):
+            if not hasattr(block_state, "vace_context"):
                 block_state.vace_context = None
             block_state.vace_ref_images = None
             self.set_block_state(state, block_state)

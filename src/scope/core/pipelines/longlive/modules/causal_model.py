@@ -147,6 +147,7 @@ class CausalWanAttentionBlock(nn.Module):
         self.dim = dim
         self.ffn_dim = ffn_dim
         self.num_heads = num_heads
+        self.head_dim = dim // num_heads
         self.local_attn_size = local_attn_size
         self.qk_norm = qk_norm
         self.cross_attn_norm = cross_attn_norm
@@ -210,7 +211,7 @@ class CausalWanAttentionBlock(nn.Module):
 
         # cross-attention (inlined with graph-safe attention to avoid graph breaks)
         cx = self.norm3(x)
-        b_ca, n_ca, d_ca = cx.size(0), self.self_attn.num_heads, self.self_attn.head_dim
+        b_ca, n_ca, d_ca = cx.size(0), self.num_heads, self.head_dim
         cq = self.cross_attn.norm_q(self.cross_attn.q(cx)).view(b_ca, -1, n_ca, d_ca)
         ck = self.cross_attn.norm_k(self.cross_attn.k(context)).view(b_ca, -1, n_ca, d_ca)
         cv = self.cross_attn.v(context).view(b_ca, -1, n_ca, d_ca)
@@ -612,12 +613,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             cache_ks = [empty_k] * len(self.blocks)
             cache_vs = [empty_k] * len(self.blocks)
 
-        if self.fill_level >= self.cache_tokens:
-            self._forward = self._compiled_inner_forward
-        else:
-            self._forward = self._inner_forward
-
-        x, new_kvs = self._forward(
+        forward_fn = self._compiled_inner_forward if self.fill_level >= self.cache_tokens else self._inner_forward
+        x, new_kvs = forward_fn(
             x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs,
             vace_embedded, context_scale_t, freqs_cos_vace, freqs_sin_vace,
         )

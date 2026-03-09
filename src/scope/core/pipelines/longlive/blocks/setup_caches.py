@@ -15,6 +15,7 @@ from diffusers.modular_pipelines.modular_pipeline_utils import (
 
 logger = logging.getLogger(__name__)
 
+
 def initialize_kv_cache(
     generator,
     batch_size: int,
@@ -235,10 +236,15 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 components.generator,
                 components.config.local_attn_size * frame_seq_length,
             )
+            cache_tokens = frame_seq_length * (
+                components.config.local_attn_size
+                - components.config.num_frame_per_block
+            )
+            sink_tokens = frame_seq_length * components.generator.model.sink_size
             set_all_modules_cache_sink_tokens(
                 components.generator,
-                frame_seq_length * (components.config.local_attn_size - components.config.num_frame_per_block),
-                frame_seq_length * components.generator.model.sink_size,
+                cache_tokens,
+                sink_tokens,
             )
 
             block_state.kv_cache = initialize_kv_cache(
