@@ -433,7 +433,29 @@ class PipelineProcessor:
             output_dict = self.pipeline(**call_params)
             processing_time = time.time() - processing_start
 
-            if not output_dict:
+            # Pass audio to callback regardless of whether video exists.
+            # This ensures audio-only pipelines can deliver audio.
+            audio_output = output_dict.get("audio")
+            audio_sample_rate = output_dict.get("audio_sample_rate")
+            if (
+                audio_output is not None
+                and audio_sample_rate is not None
+                and self.audio_callback
+            ):
+                try:
+                    audio_cpu = audio_output.detach().cpu()
+                    self.audio_callback(audio_cpu, audio_sample_rate)
+                except Exception as e:
+                    logger.error(f"Error in audio callback: {e}")
+
+            # Extract video from the returned dictionary
+            output = output_dict.get("video")
+            if output is None:
+                # No video produced. If the pipeline also has no input
+                # requirements (audio-only), sleep to prevent CPU spinning.
+                # 20ms matches WebRTC audio frame cadence.
+                if requirements is None:
+                    self.shutdown_event.wait(0.02)
                 return
 
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
@@ -497,20 +519,6 @@ class PipelineProcessor:
                             logger.debug(
                                 f"Output queue full for {self.pipeline_id} port '{port}', dropping frame"
                             )
-
-            # Pass audio to callback if available
-            audio_output = output_dict.get("audio")
-            audio_sample_rate = output_dict.get("audio_sample_rate")
-            if (
-                audio_output is not None
-                and audio_sample_rate is not None
-                and self.audio_callback
-            ):
-                try:
-                    audio_cpu = audio_output.detach().cpu()
-                    self.audio_callback(audio_cpu, audio_sample_rate)
-                except Exception as e:
-                    logger.error(f"Error in audio callback: {e}")
 
             # Latch native frame rate for stable playback speed.
             # Check output dict first, then pipeline config as fallback.

@@ -58,6 +58,7 @@ export function VideoOutput({
   // User can click the speaker icon to unmute once the stream is playing.
   const [isMuted, setIsMuted] = useState(true);
   const [hasAudioTrack, setHasAudioTrack] = useState(false);
+  const [hasVideoTrack, setHasVideoTrack] = useState(false);
 
   // Use external ref if provided, otherwise use internal
   const containerRef = videoContainerRef || internalContainerRef;
@@ -66,14 +67,14 @@ export function VideoOutput({
     if (videoRef.current && remoteStream) {
       videoRef.current.srcObject = remoteStream;
 
-      // Check if the stream contains an audio track
-      const audioTracks = remoteStream.getAudioTracks();
-      setHasAudioTrack(audioTracks.length > 0);
+      // Check if the stream contains audio/video tracks
+      setHasAudioTrack(remoteStream.getAudioTracks().length > 0);
+      setHasVideoTrack(remoteStream.getVideoTracks().length > 0);
 
       // Listen for tracks being added later (audio may arrive after video)
       const handleTrackAdded = () => {
-        const tracks = remoteStream.getAudioTracks();
-        setHasAudioTrack(tracks.length > 0);
+        setHasAudioTrack(remoteStream.getAudioTracks().length > 0);
+        setHasVideoTrack(remoteStream.getVideoTracks().length > 0);
       };
       remoteStream.addEventListener("addtrack", handleTrackAdded);
 
@@ -203,17 +204,28 @@ export function VideoOutput({
             className="relative w-full h-full cursor-pointer flex items-center justify-center"
             onClick={handleVideoClick}
           >
+            {/* Always render the video element (browsers won't play display:none media).
+                For audio-only streams it acts as an invisible audio sink. */}
             <video
               ref={videoRef}
               className={
-                videoScaleMode === "fit"
-                  ? "w-full h-full object-contain"
-                  : "max-w-full max-h-full object-contain"
+                hasVideoTrack
+                  ? videoScaleMode === "fit"
+                    ? "w-full h-full object-contain"
+                    : "max-w-full max-h-full object-contain"
+                  : "absolute w-0 h-0 overflow-hidden"
               }
               autoPlay
               muted={isMuted}
               playsInline
             />
+            {/* Audio-only visual indicator */}
+            {!hasVideoTrack && (
+              <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                <Volume2 className="w-12 h-12" />
+                <p className="text-lg">Audio Only</p>
+              </div>
+            )}
             {/* Audio mute/unmute toggle - only shown when stream has audio */}
             {hasAudioTrack && (
               <button

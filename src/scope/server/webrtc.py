@@ -19,8 +19,11 @@ from aiortc.codecs import h264, vpx
 from aiortc.contrib.media import MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
+from scope.core.pipelines.registry import PipelineRegistry
+
 from .cloud_track import CloudTrack
 from .credentials import get_turn_credentials
+from .frame_processor import FrameProcessor
 from .headless import HeadlessSession
 from .kafka_publisher import publish_event
 from .media_clock import MediaClock
@@ -31,7 +34,6 @@ from .tracks import AudioProcessingTrack, VideoProcessingTrack
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
-    from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,7 @@ class Session:
         pc: RTCPeerConnection,
         video_track: MediaStreamTrack | None = None,
         audio_track: "AudioProcessingTrack | None" = None,
+        frame_processor: "FrameProcessor | None" = None,
         media_clock: "MediaClock | None" = None,
         data_channel: RTCDataChannel | None = None,
         relay: MediaRelay | None = None,
@@ -70,6 +73,7 @@ class Session:
         self.pc = pc
         self.video_track = video_track
         self.audio_track = audio_track
+        self.frame_processor = frame_processor
         self.media_clock = media_clock
         self.data_channel = data_channel
         self.relay = relay
@@ -88,9 +92,13 @@ class Session:
                     self.notification_sender
                 )
 
-            # Stop video track first to properly cleanup FrameProcessor
+            # Stop video track first
             if self.video_track is not None:
                 await self.video_track.stop()
+
+            # Stop frame processor (owned by session, shared between tracks)
+            if self.frame_processor is not None:
+                self.frame_processor.stop()
 
             if self.pc is not None and self.pc.connectionState not in [
                 "closed",
@@ -195,6 +203,24 @@ def _publish_connection_error(
     )
 
 
+def _pipelines_produce_video(pipeline_ids: list[str]) -> bool:
+    """Check whether the pipeline chain produces video output.
+
+    Returns True (the default) unless the *last* pipeline in the chain
+    explicitly declares ``produces_video = False`` in its config.
+    """
+
+    if not pipeline_ids:
+        return True
+
+    # The last pipeline in the chain determines the final output modality
+    last_id = pipeline_ids[-1]
+    config_cls = PipelineRegistry.get_config_class(last_id)
+    if config_cls is None:
+        return True
+    return getattr(config_cls, "produces_video", True)
+
+
 class WebRTCManager:
     """
     Manages multiple WebRTC peer connections using sessions.
@@ -248,28 +274,91 @@ class WebRTCManager:
 
             # Create shared media clock for A/V synchronization
             media_clock = MediaClock()
+            session.media_clock = media_clock
 
-            video_track = VideoProcessingTrack(
-                pipeline_manager,
+            # Determine whether the pipeline produces video.
+            # If all pipelines in the chain are audio-only, skip video track creation.
+            pipeline_ids = initial_parameters.get("pipeline_ids", [])
+            produces_video = _pipelines_produce_video(pipeline_ids)
+
+            # Create FrameProcessor (owned by session, shared between tracks)
+            frame_processor = FrameProcessor(
+                pipeline_manager=pipeline_manager,
                 initial_parameters=initial_parameters,
                 notification_callback=notification_sender.call,
-                media_clock=media_clock,
                 session_id=session.id,
                 user_id=request.user_id,
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
                 tempo_sync=tempo_sync,
             )
-            session.video_track = video_track
-            session.media_clock = media_clock
+            frame_processor.start()
+            session.frame_processor = frame_processor
 
-            # Eagerly initialize the FrameProcessor so the AudioProcessingTrack
-            # can share it. VideoProcessingTrack.recv() normally does this lazily,
-            # but we need the reference now to wire audio.
-            video_track.initialize_output_processing()
+            video_track = None
+            relay = None
+
+            if produces_video:
+                video_track = VideoProcessingTrack(
+                    pipeline_manager,
+                    initial_parameters=initial_parameters,
+                    notification_callback=notification_sender.call,
+                    media_clock=media_clock,
+                    session_id=session.id,
+                    user_id=request.user_id,
+                    connection_id=request.connection_id,
+                    connection_info=request.connection_info,
+                    frame_processor=frame_processor,
+                )
+                session.video_track = video_track
+
+                # Create a MediaRelay to allow multiple consumers (WebRTC and recording)
+                relay = MediaRelay()
+                relayed_track = relay.subscribe(video_track)
+
+                # Only create RecordingManager if recording is enabled for this session
+                # WebRTC initial params take precedence; if absent, fall back to env var
+                from .recording import RECORDING_ENABLED
+
+                recording_param = initial_parameters.get("recording")
+                recording_enabled = (
+                    recording_param
+                    if recording_param is not None
+                    else RECORDING_ENABLED
+                )
+                if recording_enabled:
+                    recording_manager = RecordingManager(video_track=video_track)
+                    session.recording_manager = recording_manager
+                    recording_manager.set_relay(relay)
+                else:
+                    session.recording_manager = None
+
+                # Add the relayed video track to WebRTC connection
+                pc.addTrack(relayed_track)
+
+                # Store relay for cleanup
+                session.relay = relay
+
+                # Start recording when ready (only if recording is enabled)
+                if recording_enabled and session.recording_manager:
+                    recording_manager = session.recording_manager
+
+                    async def start_recording_when_ready():
+                        """Start recording when frames start flowing."""
+                        try:
+                            await asyncio.sleep(0.1)
+                            await recording_manager.start_recording()
+                        except Exception as e:
+                            logger.debug(f"Could not start recording yet: {e}")
+
+                    asyncio.create_task(start_recording_when_ready())
+            else:
+                logger.info(
+                    f"Audio-only pipeline(s) {pipeline_ids}, skipping video track"
+                )
 
             audio_track = AudioProcessingTrack(
-                frame_processor=video_track.frame_processor,
+                frame_processor=frame_processor,
             )
             session.audio_track = audio_track
 
@@ -278,57 +367,12 @@ class WebRTCManager:
             if tempo_sync is not None:
                 tempo_sync.register_notification_session(notification_sender)
 
-            # Create a MediaRelay to allow multiple consumers (WebRTC and recording)
-            relay = MediaRelay()
-            relayed_track = relay.subscribe(video_track)
-
-            # Only create RecordingManager if recording is enabled for this session
-            # WebRTC initial params take precedence; if absent, fall back to env var
-            from .recording import RECORDING_ENABLED
-
-            recording_param = initial_parameters.get("recording")
-            recording_enabled = (
-                recording_param if recording_param is not None else RECORDING_ENABLED
-            )
-            if recording_enabled:
-                # Create RecordingManager and store it in the session
-                # Pass the original video_track - RecordingManager will subscribe to relay itself
-                recording_manager = RecordingManager(video_track=video_track)
-                session.recording_manager = recording_manager
-
-                # Set the relay on the recording manager so it can create a recording track
-                recording_manager.set_relay(relay)
-            else:
-                session.recording_manager = None
-
-            # Add the relayed video track to WebRTC connection
-            pc.addTrack(relayed_track)
-
-            # Store relay for cleanup
-            session.relay = relay
-
-            # Start recording when ready (only if recording is enabled)
-            if recording_enabled and session.recording_manager:
-                recording_manager = session.recording_manager
-
-                async def start_recording_when_ready():
-                    """Start recording when frames start flowing."""
-                    try:
-                        # Wait a bit for the connection to establish and frames to start flowing
-                        await asyncio.sleep(0.1)
-                        # Try to start recording
-                        await recording_manager.start_recording()
-                    except Exception as e:
-                        logger.debug(f"Could not start recording yet: {e}")
-
-                asyncio.create_task(start_recording_when_ready())
-
             logger.info(f"Created new session: {session}")
 
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
                 logger.info(f"Track received: {track.kind} for session {session.id}")
-                if track.kind == "video":
+                if track.kind == "video" and video_track is not None:
                     video_track.initialize_input_processing(track)
 
             @pc.on("connectionstatechange")
@@ -403,10 +447,8 @@ class WebRTCManager:
                             return
 
                         # Send parameters to the frame processor
-                        if session.video_track and hasattr(
-                            session.video_track, "frame_processor"
-                        ):
-                            session.video_track.frame_processor.update_parameters(data)
+                        if session.frame_processor:
+                            session.frame_processor.update_parameters(data)
                         else:
                             logger.warning(
                                 "No frame processor available for parameter update"
