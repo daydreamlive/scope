@@ -316,7 +316,12 @@ class CloudWebRTCClient:
                     frame = await track.recv()
                     self._stats["frames_received"] += 1
 
-                    if self._stats["frames_received"] % 100 == 0:
+                    if self._stats["frames_received"] == 1:
+                        logger.info(
+                            "First frame received from cloud "
+                            "(keyframe decoded successfully)"
+                        )
+                    elif self._stats["frames_received"] % 100 == 0:
                         logger.debug(
                             f"Received {self._stats['frames_received']} frames"
                         )
@@ -347,13 +352,19 @@ class CloudWebRTCClient:
         causing decode errors. Sending PLI (Picture Loss Indication)
         requests the remote end to send a keyframe.
         """
-        await asyncio.sleep(0.1)  # Allow receiver to initialize
+        await asyncio.sleep(0.5)  # Allow receiver to get first RTP packets
         for receiver in self.pc.getReceivers():
             if receiver.track and receiver.track.kind == "video":
                 try:
-                    # Access internal PLI method from aiortc
-                    await receiver._send_rtcp_pli()
-                    logger.info("Sent PLI (keyframe request)")
+                    # Get remote SSRC from receiver's internal stream tracking
+                    # (required by aiortc >= 1.14.0)
+                    remote_streams = receiver._RTCRtpReceiver__remote_streams
+                    if not remote_streams:
+                        logger.debug("No remote streams yet, skipping PLI")
+                        return
+                    media_ssrc = next(iter(remote_streams))
+                    await receiver._send_rtcp_pli(media_ssrc)
+                    logger.info(f"Sent PLI keyframe request (media_ssrc={media_ssrc})")
                 except Exception as e:
                     logger.debug(f"Could not send PLI: {e}")
 

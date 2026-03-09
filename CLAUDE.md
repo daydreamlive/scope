@@ -81,6 +81,24 @@ This documentation can be used to understand the architecture of the project:
 - The `docs/api` directory contains server API reference
 - The `docs/architecture` contains architecture documents describing different systems used within the project
 
+## Deploying to fal.ai (Staging)
+
+Deploy the current branch to fal.ai staging using the `deploy-staging.sh` script:
+
+```bash
+bash deploy-staging.sh
+```
+
+This script:
+1. Creates a Python 3.12 venv at `.venv-fal` (must match Docker image Python version)
+2. Installs the `fal` CLI into that venv
+3. Authenticates with `fal auth login` if needed
+4. Deploys `src/scope/cloud/fal_app.py` to the `emran-scope` app on fal.ai
+
+**Prerequisites**: The Docker image for the current commit must be built first. The `docker-build` CI workflow builds it automatically on push. Wait for CI to complete before deploying.
+
+**Important**: The `.venv-fal` Python version must match the Docker image's Python version (3.12). If you get a version mismatch error, delete `.venv-fal` and re-run the script.
+
 ## Contributing Requirements
 
 - All commits must be signed off (DCO): `git commit -s`
