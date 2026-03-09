@@ -936,6 +936,14 @@ class PipelineManager:
                 logger.debug(
                     f"Krea: Using 14B VACE checkpoint at {config['vace_path']}"
                 )
+                # Extract VACE parameters from load_params (mirrors _configure_vace)
+                if load_params:
+                    config["vace_context_scale"] = load_params.get(
+                        "vace_context_scale", 1.0
+                    )
+                    ref_images = load_params.get("ref_images", [])
+                    if ref_images:
+                        config["ref_images"] = ref_images
             else:
                 logger.info("VACE disabled by load_params, skipping VACE configuration")
 
