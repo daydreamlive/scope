@@ -277,7 +277,6 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         _ = self(prompts=warmup_prompt, init_cache=False)
 
         if inner_model.vace_blocks is not None:
-            print("Warming up VACE contextttt")
             h = self.state.get("height") // 8
             w = self.state.get("width") // 8
             f = self.components.config.num_frame_per_block
