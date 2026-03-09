@@ -94,7 +94,7 @@ export function OscTab({ isActive }: OscTabProps) {
           </span>
           <div className="flex-1 flex items-center justify-end gap-2">
             <span className="text-xs text-muted-foreground">
-              {status?.log_all_messages ? "All" : "Unknown only"}
+              {status?.log_all_messages ? "All" : "Errors only"}
             </span>
             <Switch
               aria-label="Log all OSC messages"
