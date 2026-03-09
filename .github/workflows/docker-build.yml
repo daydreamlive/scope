@@ -287,8 +287,8 @@ jobs:
       - name: Build Scope app
         env:
           VITE_DAYDREAM_API_KEY: ${{ secrets.E2ES_DAYDREAM_API_KEY }}
-          VITE_DAYDREAM_AUTH_URL: https://app.daydream.monster/sign-in/local
-          VITE_DAYDREAM_API_BASE: https://api.daydream.monster
+          VITE_DAYDREAM_AUTH_URL: https://app.daydream.live/sign-in/local
+          VITE_DAYDREAM_API_BASE: https://api.daydream.live
         run: |
           echo "Building Scope with API key auth..."
           uv run build
