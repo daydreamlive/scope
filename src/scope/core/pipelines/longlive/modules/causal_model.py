@@ -492,7 +492,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         self.fill_level = min(self.fill_level + num_new, self.cache_tokens)
 
     def _inner_forward(self, x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs,
-                       vace_embedded=None, context_scale=1.0,
+                       vace_embedded=None, context_scale=None,
                        freqs_cos_vace=None, freqs_sin_vace=None):
         """Pure-tensor inner forward through all blocks. Compiled with reduce-overhead
         when cache is full. With SDPA (no graph breaks), the entire block loop
@@ -596,9 +596,12 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         vace_embedded = None
         freqs_cos_vace = None
         freqs_sin_vace = None
+        context_scale_t = None
         if vace_context is not None and self.vace_blocks is not None:
             vace_embedded = self._embed_vace_context(vace_context, seq_len=x.shape[1])
             freqs_cos_vace, freqs_sin_vace = precompute_freqs_i(self.freqs, f, h, w, start_frame=0)
+            scale = vace_context_scale if vace_context_scale is not None else 1.0
+            context_scale_t = torch.tensor(scale, dtype=x.dtype, device=x.device)
 
         if self.fill_level > 0:
             cache_ks = [kv_cache[i]["k"][:, :self.fill_level] for i in range(len(self.blocks))]
@@ -616,7 +619,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         x, new_kvs = self._forward(
             x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs,
-            vace_embedded, vace_context_scale, freqs_cos_vace, freqs_sin_vace,
+            vace_embedded, context_scale_t, freqs_cos_vace, freqs_sin_vace,
         )
 
         if update_cache:

@@ -101,6 +101,12 @@ class VaceEncodingBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
+                "vace_context",
+                default=None,
+                type_hint=torch.Tensor | None,
+                description="VACE context that provides visual conditioning",
+            ),
+            InputParam(
                 "vace_ref_images",
                 default=None,
                 type_hint=list[str] | None,
@@ -179,7 +185,8 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         has_extension = has_first_frame or has_last_frame
 
         if not has_ref_images and not has_input_frames and not has_extension:
-            block_state.vace_context = None
+            if not hasattr(block_state, 'vace_context'):
+                block_state.vace_context = None
             block_state.vace_ref_images = None
             self.set_block_state(state, block_state)
             return components, state

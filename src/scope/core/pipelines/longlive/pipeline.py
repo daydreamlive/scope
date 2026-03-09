@@ -276,7 +276,17 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         inner_model.fill_level = inner_model.cache_tokens
         _ = self(prompts=warmup_prompt, init_cache=False)
 
+        if inner_model.vace_blocks is not None:
+            print("Warming up VACE contextttt")
+            h = self.state.get("height") // 8
+            w = self.state.get("width") // 8
+            f = self.components.config.num_frame_per_block
+            self.state.set("vace_context", [torch.randn(96, f, h, w, device="cuda", dtype=torch.bfloat16)])
+            _ = self(prompts=warmup_prompt, init_cache=False)
+
         # Reset state after warmup
+        inner_model.fill_level = 0
+        self.state.set("vace_context", None)
         self.first_call = True
         self.last_mode = None
 
