@@ -19,7 +19,7 @@ from .pipeline_throttler import PipelineThrottler
 logger = logging.getLogger(__name__)
 
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
-OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
+OUTPUT_QUEUE_MAX_SIZE_FACTOR = 2
 
 SLEEP_TIME = 0.01
 
