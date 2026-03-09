@@ -2,7 +2,6 @@ import { useState, useEffect, useCallback } from "react";
 import { BookOpenText, Loader2, Plus, Trash2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
-import { Label } from "../ui/label";
 import {
   Select,
   SelectContent,
@@ -335,7 +334,9 @@ export function DmxTab({ isActive }: DmxTabProps) {
           <div className="grid gap-4 py-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="universe">Universe</Label>
+                <label htmlFor="universe" className="text-sm font-medium">
+                  Universe
+                </label>
                 <Input
                   id="universe"
                   type="number"
@@ -351,7 +352,9 @@ export function DmxTab({ isActive }: DmxTabProps) {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="channel">Channel (1-512)</Label>
+                <label htmlFor="channel" className="text-sm font-medium">
+                  Channel (1-512)
+                </label>
                 <Input
                   id="channel"
                   type="number"
@@ -369,7 +372,9 @@ export function DmxTab({ isActive }: DmxTabProps) {
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="param">Parameter</Label>
+              <label htmlFor="param" className="text-sm font-medium">
+                Parameter
+              </label>
               <Select
                 value={newMapping.param_key}
                 onValueChange={value => {
@@ -402,7 +407,9 @@ export function DmxTab({ isActive }: DmxTabProps) {
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="min_value">Min Value</Label>
+                <label htmlFor="min_value" className="text-sm font-medium">
+                  Min Value
+                </label>
                 <Input
                   id="min_value"
                   type="number"
@@ -417,7 +424,9 @@ export function DmxTab({ isActive }: DmxTabProps) {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="max_value">Max Value</Label>
+                <label htmlFor="max_value" className="text-sm font-medium">
+                  Max Value
+                </label>
                 <Input
                   id="max_value"
                   type="number"

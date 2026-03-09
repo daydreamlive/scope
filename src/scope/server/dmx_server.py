@@ -154,8 +154,8 @@ class DMXServer:
         self._port = port
         self._transport: asyncio.DatagramTransport | None = None
         self._listening = False
-        self._pipeline_manager: "PipelineManager | None" = None
-        self._webrtc_manager: "WebRTCManager | None" = None
+        self._pipeline_manager: PipelineManager | None = None
+        self._webrtc_manager: WebRTCManager | None = None
 
         # SSE subscribers for real-time DMX monitoring
         self._sse_queues: list[asyncio.Queue] = []
