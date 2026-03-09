@@ -77,6 +77,8 @@ def main():
     args = parser.parse_args()
 
     # Setup config and pipeline
+    lora_path = Path.home() / ".daydream-scope/models/lora/daydream-scope-dissolve.safetensors"
+
     config = OmegaConf.create(
         {
             "model_dir": str(get_models_dir()),
@@ -84,6 +86,7 @@ def main():
                 get_model_file_path("LongLive-1.3B/models/longlive_base.pt")
             ),
             "lora_path": str(get_model_file_path("LongLive-1.3B/models/lora.pt")),
+            "loras": [{"path": str(lora_path), "scale": 1.0}],
             "text_encoder_path": str(
                 get_model_file_path(
                     "WanVideo_comfy/umt5-xxl-enc-fp8_e4m3fn.safetensors"
@@ -99,7 +102,7 @@ def main():
     )
 
     device = torch.device("cuda")
-    pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16)
+    pipeline = LongLivePipeline(config, device=device, dtype=torch.bfloat16, quantization="fp8_e4m3fn", compile=True)
 
     # Create output directory
     output_dir = Path(__file__).parent / "output"

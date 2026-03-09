@@ -48,6 +48,7 @@ export function usePipelines() {
           supportsCacheManagement: schema.supports_cache_management,
           supportsKvCacheBias: schema.supports_kv_cache_bias,
           supportsQuantization: schema.supports_quantization,
+          vaceFp8Compatible: schema.vace_fp8_compatible,
           minDimension: schema.min_dimension,
           recommendedQuantizationVramThreshold:
             schema.recommended_quantization_vram_threshold ?? undefined,

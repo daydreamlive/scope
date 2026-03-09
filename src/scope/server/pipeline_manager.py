@@ -205,10 +205,11 @@ class PipelineManager:
                 load_event = self._load_events.get(pipeline_id)
                 if load_event:
                     # Release lock while waiting
+                    compile_enabled = (load_params or {}).get("compile", False)
+                    wait_timeout = 1800 if compile_enabled else 300
                     self._lock.release()
                     try:
-                        # Wait up to 5 minutes for load to complete
-                        load_event.wait(timeout=300)
+                        load_event.wait(timeout=wait_timeout)
                     finally:
                         self._lock.acquire()
 
@@ -882,12 +883,15 @@ class PipelineManager:
             )
 
             quantization = None
+            compile_model = False
             if load_params:
                 quantization = load_params.get("quantization", None)
+                compile_model = load_params.get("compile", False)
 
             pipeline = LongLivePipeline(
                 config,
                 quantization=quantization,
+                compile=compile_model,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
                 stage_callback=stage_callback,

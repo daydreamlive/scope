@@ -596,6 +596,7 @@ export interface PipelineSchemaInfo {
   supports_cache_management: boolean;
   supports_kv_cache_bias: boolean;
   supports_quantization: boolean;
+  vace_fp8_compatible: boolean;
   min_dimension: number;
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;

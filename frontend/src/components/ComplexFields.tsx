@@ -68,6 +68,7 @@ export interface SchemaComplexFieldContext {
   inputMode?: "text" | "video";
   supportsNoiseControls?: boolean;
   supportsQuantization?: boolean;
+  vaceFp8Compatible?: boolean;
   supportsCacheManagement?: boolean;
   supportsKvCacheBias?: boolean;
   isStreaming?: boolean;
@@ -154,7 +155,8 @@ export function SchemaComplexField({
         </div>
         {ctx.vaceEnabled &&
           ctx.quantization !== null &&
-          ctx.quantization !== undefined && (
+          ctx.quantization !== undefined &&
+          !(ctx.vaceFp8Compatible ?? false) && (
             <div className="flex items-start gap-1.5 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
               <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
               <p className="text-xs text-amber-600 dark:text-amber-500">
@@ -492,6 +494,8 @@ export function SchemaComplexField({
   if (component === "quantization" && !rendered.has("quantization")) {
     rendered.add("quantization");
     if (!ctx.supportsQuantization) return null;
+    const vaceFp8Blocked =
+      (ctx.vaceEnabled ?? false) && !(ctx.vaceFp8Compatible ?? false);
     return (
       <div key="quantization" className="space-y-4">
         <div className="space-y-2">
@@ -509,9 +513,7 @@ export function SchemaComplexField({
                     v === "none" ? null : (v as "fp8_e4m3fn")
                   )
                 }
-                disabled={
-                  (ctx.isStreaming ?? false) || (ctx.vaceEnabled ?? false)
-                }
+                disabled={(ctx.isStreaming ?? false) || vaceFp8Blocked}
               >
                 <SelectTrigger className="w-[140px] h-7">
                   <SelectValue />
@@ -524,7 +526,7 @@ export function SchemaComplexField({
                 </SelectContent>
               </Select>
             </div>
-            {ctx.vaceEnabled && (
+            {vaceFp8Blocked && (
               <p className="text-xs text-muted-foreground">
                 Disabled because VACE is enabled. Disable VACE to use FP8
                 quantization.
@@ -532,6 +534,44 @@ export function SchemaComplexField({
             )}
           </div>
         </div>
+      </div>
+    );
+  }
+
+  if (component === "compile" && !rendered.has("compile")) {
+    rendered.add("compile");
+    const compileValue =
+      (ctx.schemaFieldOverrides?.["compile"] as boolean) ?? false;
+    return (
+      <div key="compile" className="space-y-2">
+        <div className="flex items-center justify-between gap-2">
+          <LabelWithTooltip
+            label="Compile"
+            tooltip="Use torch.compile for faster inference. First-time compilation takes several minutes but subsequent runs use the compiled cache."
+            className="text-sm font-medium"
+          />
+          <Toggle
+            pressed={compileValue}
+            onPressedChange={v =>
+              ctx.onSchemaFieldOverrideChange?.("compile", v, false)
+            }
+            variant="outline"
+            size="sm"
+            className="h-7"
+            disabled={(ctx.isStreaming ?? false) || (ctx.isLoading ?? false)}
+          >
+            {compileValue ? "ON" : "OFF"}
+          </Toggle>
+        </div>
+        {compileValue && (
+          <div className="flex items-start gap-1.5 p-2 rounded-md bg-blue-500/10 border border-blue-500/20">
+            <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
+            <p className="text-xs text-blue-600 dark:text-blue-400">
+              Note: First-time compilation can take several minutes. Subsequent
+              runs will be significantly faster.
+            </p>
+          </div>
+        )}
       </div>
     );
   }

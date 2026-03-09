@@ -210,6 +210,7 @@ export const COMPLEX_COMPONENTS = [
   "denoising_steps",
   "noise",
   "quantization",
+  "compile",
   "image",
 ] as const;
 

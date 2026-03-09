@@ -136,6 +136,7 @@ export interface PipelineInfo {
   supportsCacheManagement?: boolean;
   supportsKvCacheBias?: boolean;
   supportsQuantization?: boolean;
+  vaceFp8Compatible?: boolean;
   minDimension?: number;
   recommendedQuantizationVramThreshold?: number | null;
   // Controller input support - presence of ctrl_input field in pipeline schema

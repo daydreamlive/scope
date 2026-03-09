@@ -101,15 +101,18 @@ export function usePipeline(options: UsePipelineOptions = {}) {
           load_params: loadParams,
         });
 
+        // Extend timeout when torch.compile is enabled (first-time compilation is slow)
+        const effectiveTimeout = loadParams?.compile ? maxTimeout * 3 : maxTimeout;
+
         // Set up timeout for the load operation
         const timeoutPromise = new Promise<boolean>((_, reject) => {
           loadTimeoutRef.current = setTimeout(() => {
             reject(
               new Error(
-                `Pipeline load timeout after ${maxTimeout / 1000} seconds`
+                `Pipeline load timeout after ${effectiveTimeout / 1000} seconds`
               )
             );
-          }, maxTimeout);
+          }, effectiveTimeout);
         });
 
         // Wait for pipeline to be loaded or error

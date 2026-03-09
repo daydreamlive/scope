@@ -732,6 +732,8 @@ export function SettingsPanel({
               supportsNoiseControls,
               supportsQuantization:
                 pipelines?.[pipelineId]?.supportsQuantization,
+              vaceFp8Compatible:
+                pipelines?.[pipelineId]?.vaceFp8Compatible,
               supportsCacheManagement:
                 pipelines?.[pipelineId]?.supportsCacheManagement,
               supportsKvCacheBias: pipelines?.[pipelineId]?.supportsKvCacheBias,
@@ -822,7 +824,7 @@ export function SettingsPanel({
                       {vaceEnabled ? "ON" : "OFF"}
                     </Toggle>
                   </div>
-                  {vaceEnabled && quantization !== null && (
+                  {vaceEnabled && quantization !== null && !(pipelines?.[pipelineId]?.vaceFp8Compatible) && (
                     <div className="flex items-start gap-1.5 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
                       <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
                       <p className="text-xs text-amber-600 dark:text-amber-500">
@@ -1190,7 +1192,7 @@ export function SettingsPanel({
                               value === "none" ? null : (value as "fp8_e4m3fn")
                             );
                           }}
-                          disabled={isStreaming || vaceEnabled}
+                          disabled={isStreaming || (vaceEnabled && !(pipelines?.[pipelineId]?.vaceFp8Compatible))}
                         >
                           <SelectTrigger className="w-[140px] h-7">
                             <SelectValue />
@@ -1203,8 +1205,7 @@ export function SettingsPanel({
                           </SelectContent>
                         </Select>
                       </div>
-                      {/* Note when quantization is disabled due to VACE */}
-                      {vaceEnabled && (
+                      {vaceEnabled && !(pipelines?.[pipelineId]?.vaceFp8Compatible) && (
                         <p className="text-xs text-muted-foreground">
                           Disabled because VACE is enabled. Disable VACE to use
                           FP8 quantization.

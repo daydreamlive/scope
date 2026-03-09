@@ -125,6 +125,15 @@ class LongLiveConfig(BasePipelineConfig):
             order=8, component="quantization", is_load_param=True
         ),
     )
+    compile: bool = Field(
+        default=False,
+        description="Use torch.compile for faster inference. First-time compilation takes several minutes.",
+        json_schema_extra=ui_field_config(
+            order=9, component="compile", is_load_param=True, label="Compile"
+        ),
+    )
+
+    vace_fp8_compatible = True
 
     modes = {
         "text": ModeDefaults(default=True),
