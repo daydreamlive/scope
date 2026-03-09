@@ -229,6 +229,12 @@ class BasePipelineConfig(BaseModel):
     supports_vace: ClassVar[bool] = False
 
     # UI capability metadata - tells frontend what controls to show
+    # Whether this pipeline produces video output. Audio-only pipelines set this
+    # to False so the server can skip creating a video track.
+    produces_video: ClassVar[bool] = True
+    # Whether this pipeline expects audio input from the browser (microphone).
+    requires_audio_input: ClassVar[bool] = False
+
     supports_cache_management: ClassVar[bool] = False
     supports_kv_cache_bias: ClassVar[bool] = False
     supports_quantization: ClassVar[bool] = False
@@ -380,6 +386,8 @@ class BasePipelineConfig(BaseModel):
             cls.recommended_quantization_vram_threshold
         )
         metadata["modified"] = cls.modified
+        metadata["produces_video"] = cls.produces_video
+        metadata["requires_audio_input"] = cls.requires_audio_input
         # Convert UsageType enum values to strings for JSON serialization
         metadata["usage"] = [usage.value for usage in cls.usage] if cls.usage else []
         metadata["config_schema"] = cls.model_json_schema()

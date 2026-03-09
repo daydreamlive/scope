@@ -159,6 +159,7 @@ def _register_pipelines():
         ),
         ("memflow", ".memflow.pipeline", "MemFlowPipeline"),
         ("passthrough", ".passthrough.pipeline", "PassthroughPipeline"),
+        ("test_tone", ".test_tone.pipeline", "TestTonePipeline"),
         (
             "video_depth_anything",
             ".video_depth_anything.pipeline",
