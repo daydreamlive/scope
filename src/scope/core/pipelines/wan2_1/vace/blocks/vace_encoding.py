@@ -103,7 +103,7 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             InputParam(
                 "vace_context",
                 default=None,
-                type_hint=torch.Tensor | None,
+                type_hint=list[torch.Tensor] | None,
                 description="VACE context that provides visual conditioning",
             ),
             InputParam(
