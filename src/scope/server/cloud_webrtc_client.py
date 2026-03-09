@@ -248,7 +248,16 @@ class CloudWebRTCClient:
                 self._connected = True
                 self._stats["connected_at"] = time.time()
                 logger.info("WebRTC connected to cloud")
-            elif state in ("disconnected", "failed", "closed"):
+            elif state in ("disconnected", "failed"):
+                was_connected = self._connected
+                self._connected = False
+                # Notify cloud manager to surface error and attempt reconnection
+                # Only notify if we were previously connected (not on initial failure)
+                if was_connected:
+                    self.cloud_manager.on_webrtc_connection_lost(
+                        reason=f"WebRTC connection state: {state}"
+                    )
+            elif state == "closed":
                 self._connected = False
 
         @self.pc.on("icecandidate")

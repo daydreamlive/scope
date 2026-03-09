@@ -771,6 +771,14 @@ class CloudStatusResponse(BaseModel):
         default=False,
         description="Whether WebRTC media connection to cloud is active",
     )
+    webrtc_error: str | None = Field(
+        default=None,
+        description="Error message if WebRTC connection was lost",
+    )
+    webrtc_reconnecting: bool = Field(
+        default=False,
+        description="Whether a WebRTC reconnection attempt is in progress",
+    )
     app_id: str | None = Field(
         default=None,
         description="The cloud app ID if connected",

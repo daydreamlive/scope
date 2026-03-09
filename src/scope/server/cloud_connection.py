@@ -76,6 +76,13 @@ class CloudConnectionManager:
         self._webrtc_client: CloudWebRTCClient | None = None
         self._frame_callbacks: list[Callable[[VideoFrame], None]] = []
 
+        # WebRTC error state (for surfacing to frontend)
+        self._webrtc_error: str | None = None
+        self._webrtc_reconnect_task: asyncio.Task | None = None
+        self._webrtc_reconnect_attempts: int = 0
+        self._max_webrtc_reconnect_attempts: int = 3
+        self._last_webrtc_params: dict | None = None
+
         # Stats tracking
         self._stats = {
             "webrtc_offers_sent": 0,
@@ -626,6 +633,13 @@ class CloudConnectionManager:
         self._connect_stage = "Setting up video stream..."
         self._webrtc_client = CloudWebRTCClient(self)
 
+        # Store parameters for potential reconnection
+        self._last_webrtc_params = initial_parameters
+
+        # Clear any previous error state
+        self._webrtc_error = None
+        self._webrtc_reconnect_attempts = 0
+
         # Register frame callback to update stats and forward to subscribers
         self._webrtc_client.output_handler.add_callback(self._on_frame_from_cloud)
 
@@ -641,11 +655,95 @@ class CloudConnectionManager:
 
     async def stop_webrtc(self) -> None:
         """Stop the WebRTC connection to cloud.ai."""
+        # Cancel any pending reconnection
+        if self._webrtc_reconnect_task is not None:
+            self._webrtc_reconnect_task.cancel()
+            self._webrtc_reconnect_task = None
+
         if self._webrtc_client is not None:
             logger.info("Stopping WebRTC connection...")
             await self._webrtc_client.disconnect()
             self._webrtc_client = None
             logger.info("WebRTC connection stopped")
+
+        # Clear error state on explicit stop
+        self._webrtc_error = None
+        self._webrtc_reconnect_attempts = 0
+
+    def on_webrtc_connection_lost(self, reason: str = "Connection lost") -> None:
+        """Handle WebRTC connection loss (called by CloudWebRTCClient).
+
+        This is called when the WebRTC connection state changes to
+        'disconnected' or 'failed'. It sets an error state visible to
+        the frontend and attempts automatic reconnection.
+        """
+        self._webrtc_error = f"Remote inference connection lost: {reason}"
+        logger.warning(self._webrtc_error)
+
+        # Publish error event for analytics/logging
+        self._publish_cloud_error(
+            self._webrtc_error,
+            "WebRTCDisconnected",
+            error_type="webrtc_connection_lost",
+        )
+
+        # Attempt reconnection if we still have a valid cloud connection
+        if self.is_connected and self._webrtc_reconnect_task is None:
+            self._webrtc_reconnect_task = asyncio.create_task(
+                self._attempt_webrtc_reconnect()
+            )
+
+    async def _attempt_webrtc_reconnect(self) -> None:
+        """Attempt to reconnect WebRTC with exponential backoff."""
+        backoff_seconds = [1, 2, 4]  # Exponential backoff
+
+        while self._webrtc_reconnect_attempts < self._max_webrtc_reconnect_attempts:
+            if not self.is_connected:
+                logger.info("Cloud connection lost, aborting WebRTC reconnection")
+                break
+
+            attempt = self._webrtc_reconnect_attempts + 1
+            delay = backoff_seconds[min(attempt - 1, len(backoff_seconds) - 1)]
+
+            logger.info(
+                f"Attempting WebRTC reconnection ({attempt}/{self._max_webrtc_reconnect_attempts}) "
+                f"in {delay}s..."
+            )
+            await asyncio.sleep(delay)
+
+            try:
+                # Clean up old client
+                if self._webrtc_client is not None:
+                    try:
+                        await self._webrtc_client.disconnect()
+                    except Exception:
+                        pass
+                    self._webrtc_client = None
+
+                # Reconnect with last known parameters
+                await self.start_webrtc(self._last_webrtc_params)
+
+                # Success!
+                logger.info("WebRTC reconnection successful")
+                self._webrtc_error = None
+                self._webrtc_reconnect_attempts = 0
+                self._webrtc_reconnect_task = None
+                return
+
+            except Exception as e:
+                self._webrtc_reconnect_attempts += 1
+                logger.error(f"WebRTC reconnection attempt {attempt} failed: {e}")
+
+        # All attempts exhausted
+        if self._webrtc_reconnect_attempts >= self._max_webrtc_reconnect_attempts:
+            self._webrtc_error = (
+                "Remote inference connection lost. "
+                "Reconnection failed after multiple attempts. "
+                "Please toggle cloud mode off and on to reconnect."
+            )
+            logger.error(self._webrtc_error)
+
+        self._webrtc_reconnect_task = None
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a video frame to cloud.ai for processing.
@@ -721,14 +819,21 @@ class CloudConnectionManager:
 
     def get_status(self) -> dict:
         """Get current connection status."""
+        # Combine connection error and WebRTC error for frontend display
+        error = self._connect_error
+        if self._webrtc_error and not error:
+            error = self._webrtc_error
+
         status = {
             "connected": self.is_connected,
             "connecting": self._connecting,
-            "error": self._connect_error,
+            "error": error,
             "connect_stage": self._connect_stage,
             "app_id": self.app_id if self.is_connected else None,
             "connection_id": self._connection_id if self.is_connected else None,
             "webrtc_connected": self.webrtc_connected,
+            "webrtc_error": self._webrtc_error,
+            "webrtc_reconnecting": self._webrtc_reconnect_task is not None,
             "last_close_code": self._last_close_code,
             "last_close_reason": self._last_close_reason,
         }
