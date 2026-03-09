@@ -940,6 +940,41 @@ export const downloadLoRA = async (
 };
 
 // ---------------------------------------------------------------------------
+// OSC settings
+// ---------------------------------------------------------------------------
+
+export interface OscSettingsRequest {
+  log_all_messages: boolean;
+}
+
+export interface OscStatusResponse {
+  enabled: boolean;
+  listening: boolean;
+  port: number | null;
+  host: string | null;
+  log_all_messages: boolean;
+}
+
+export const updateOscSettings = async (
+  settings: OscSettingsRequest
+): Promise<OscStatusResponse> => {
+  const response = await fetch("/api/v1/osc/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Update OSC settings failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
 // Daydream API – workflow import from community hub
 // ---------------------------------------------------------------------------
 
