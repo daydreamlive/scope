@@ -727,11 +727,32 @@ async def get_pipeline_schemas(
 
 @app.get("/api/v1/osc/status")
 async def osc_status():
-    """Return current OSC server status (port, listening state)."""
+    """Return current OSC server status (port, listening state, logging mode)."""
 
     srv = get_osc_server()
     if srv is None:
-        return {"enabled": False, "listening": False, "port": None, "host": None}
+        return {
+            "enabled": False,
+            "listening": False,
+            "port": None,
+            "host": None,
+            "log_all_messages": False,
+        }
+    return srv.status()
+
+
+class OscSettingsRequest(BaseModel):
+    log_all_messages: bool
+
+
+@app.put("/api/v1/osc/settings")
+async def update_osc_settings(request: OscSettingsRequest):
+    """Update OSC server runtime settings (e.g. logging verbosity)."""
+
+    srv = get_osc_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="OSC server not running")
+    srv.log_all_messages = request.log_all_messages
     return srv.status()
 
 

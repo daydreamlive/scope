@@ -1,22 +1,18 @@
 import { useState, useEffect, useCallback } from "react";
 import { BookOpenText, Loader2 } from "lucide-react";
 import { Button } from "../ui/button";
+import { Switch } from "../ui/switch";
 import { openExternalUrl } from "@/lib/openExternal";
-
-interface OscStatus {
-  enabled: boolean;
-  listening: boolean;
-  port: number | null;
-  host: string | null;
-}
+import { updateOscSettings, type OscStatusResponse } from "@/lib/api";
 
 interface OscTabProps {
   isActive: boolean;
 }
 
 export function OscTab({ isActive }: OscTabProps) {
-  const [status, setStatus] = useState<OscStatus | null>(null);
+  const [status, setStatus] = useState<OscStatusResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [isTogglingLog, setIsTogglingLog] = useState(false);
 
   const fetchStatus = useCallback(async () => {
     setIsLoading(true);
@@ -40,6 +36,18 @@ export function OscTab({ isActive }: OscTabProps) {
 
   const handleOpenDocs = () => {
     openExternalUrl(`${window.location.origin}/api/v1/osc/docs`);
+  };
+
+  const handleToggleLogging = async (checked: boolean) => {
+    setIsTogglingLog(true);
+    try {
+      const updated = await updateOscSettings({ log_all_messages: checked });
+      setStatus(prev => (prev ? { ...prev, ...updated } : prev));
+    } catch (err) {
+      console.error("Failed to update OSC logging setting:", err);
+    } finally {
+      setIsTogglingLog(false);
+    }
   };
 
   return (
@@ -78,6 +86,25 @@ export function OscTab({ isActive }: OscTabProps) {
             </div>
           </div>
         )}
+
+        {/* Log all messages toggle */}
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-medium text-foreground w-32">
+            Log Messages
+          </span>
+          <div className="flex-1 flex items-center justify-end gap-2">
+            <span className="text-xs text-muted-foreground">
+              {status?.log_all_messages ? "All" : "Errors only"}
+            </span>
+            <Switch
+              aria-label="Log all OSC messages"
+              checked={status?.log_all_messages ?? false}
+              onCheckedChange={handleToggleLogging}
+              disabled={isTogglingLog || isLoading || !status?.listening}
+              className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
+            />
+          </div>
+        </div>
 
         {/* Docs */}
         <div className="flex items-center gap-4">

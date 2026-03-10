@@ -8,6 +8,7 @@ interface PromptFieldProps {
   index: number;
   placeholder: string;
   showRemove: boolean;
+  leadingAccessory?: React.ReactNode;
   focusedIndex: number | null;
   onTextChange: (index: number, text: string) => void;
   onFocus: (index: number) => void;
@@ -22,6 +23,7 @@ export function PromptField({
   index,
   placeholder,
   showRemove,
+  leadingAccessory,
   focusedIndex,
   onTextChange,
   onFocus,
@@ -34,6 +36,9 @@ export function PromptField({
 
   return (
     <>
+      {leadingAccessory && (
+        <div className="self-center">{leadingAccessory}</div>
+      )}
       <Textarea
         placeholder={placeholder}
         value={prompt.text}
@@ -55,7 +60,7 @@ export function PromptField({
           disabled={disabled}
           size="sm"
           variant="ghost"
-          className="rounded-full w-8 h-8 p-0"
+          className="self-center rounded-full w-8 h-8 p-0"
         >
           <X className="h-4 w-4" />
         </Button>
