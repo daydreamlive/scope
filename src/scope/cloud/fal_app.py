@@ -824,7 +824,7 @@ class ScopeApp(fal.App, keep_alive=300):
                 )
 
                 # Check if the requested plugin is allowed via the Daydream API
-                async def is_plugin_allowed(package: str) -> bool:
+                async def is_plugin_allowed(package: str) -> bool | None:
                     import re
 
                     def normalize_plugin_url(url: str) -> str:
@@ -869,11 +869,19 @@ class ScopeApp(fal.App, keep_alive=300):
                         print(
                             f"[{log_prefix()}] Failed to fetch allowed plugins from {base_url}: {e}"
                         )
-                        return False
+                        return None
 
                     return False
 
-                if not await is_plugin_allowed(requested_package):
+                allowed = await is_plugin_allowed(requested_package)
+                if allowed is None:
+                    return {
+                        "type": "api_response",
+                        "request_id": request_id,
+                        "status": 503,
+                        "error": "Unable to verify plugin allowlist — the Daydream API is currently unavailable. Please try again later.",
+                    }
+                if not allowed:
                     return {
                         "type": "api_response",
                         "request_id": request_id,
