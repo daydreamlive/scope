@@ -94,6 +94,7 @@ interface EnrichNodesDeps {
     value: unknown
   ) => void;
   handlePromptChange: (nodeId: string, text: string) => void;
+  handlePromptSubmit: (nodeId: string) => void;
   nodeParamsRef: React.RefObject<Record<string, Record<string, unknown>>>;
   localStream?: MediaStream | null;
   remoteStream?: MediaStream | null;
@@ -129,6 +130,7 @@ function enrichNodes(
       const supportsPrompts = schema?.supports_prompts ?? false;
       const supportsCacheManagement =
         schema?.supports_cache_management ?? false;
+      const supportsVace = schema?.supports_vace ?? false;
       const nodeParamValues = deps.nodeParamsRef.current?.[n.id] || {};
       const pipelineAvailable = pipelineId
         ? deps.availablePipelineIds.includes(pipelineId)
@@ -148,8 +150,10 @@ function enrichNodes(
           onParameterChange: deps.handleNodeParameterChange,
           supportsPrompts,
           supportsCacheManagement,
+          supportsVace,
           promptText: (nodeParamValues.__prompt as string) || "",
           onPromptChange: deps.handlePromptChange,
+          onPromptSubmit: deps.handlePromptSubmit,
           pipelineAvailable,
           ...(ports
             ? {
@@ -343,6 +347,7 @@ export function useGraphState(
           const parameterInputs = schema ? extractParameterPorts(schema) : [];
           const supportsCacheManagement =
             schema?.supports_cache_management ?? false;
+          const supportsVace = schema?.supports_vace ?? false;
           const newStyle = { ...n.style };
           delete newStyle.height;
           return {
@@ -359,6 +364,7 @@ export function useGraphState(
               parameterInputs,
               supportsPrompts,
               supportsCacheManagement,
+              supportsVace,
             },
           };
         })
@@ -378,20 +384,75 @@ export function useGraphState(
     [resolveBackendId]
   );
 
+  // Debounce timers for prompt backend sends (keyed by nodeId)
+  const promptDebounceTimers = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({});
+
+  const sendPromptToBackend = useCallback(
+    (nodeId: string) => {
+      if (!isStreamingRef.current) return;
+      const text = (nodeParamsRef.current[nodeId]?.__prompt as string) || "";
+      onNodeParamChangeRef.current?.(resolveBackendId(nodeId), "prompts", [
+        { text, weight: 100 },
+      ]);
+    },
+    [resolveBackendId]
+  );
+
   const handlePromptChange = useCallback(
     (nodeId: string, text: string) => {
+      // Update local state immediately (keeps textarea responsive)
       setNodeParams(prev => ({
         ...prev,
         [nodeId]: { ...(prev[nodeId] || {}), __prompt: text },
       }));
-      if (isStreamingRef.current) {
-        onNodeParamChangeRef.current?.(resolveBackendId(nodeId), "prompts", [
-          { text, weight: 100 },
-        ]);
+      // Debounce the backend send (~500ms)
+      if (promptDebounceTimers.current[nodeId]) {
+        clearTimeout(promptDebounceTimers.current[nodeId]);
       }
+      promptDebounceTimers.current[nodeId] = setTimeout(() => {
+        sendPromptToBackend(nodeId);
+        delete promptDebounceTimers.current[nodeId];
+      }, 500);
     },
-    [resolveBackendId]
+    [sendPromptToBackend]
   );
+
+  const handlePromptSubmit = useCallback(
+    (nodeId: string) => {
+      // Cancel any pending debounce and send immediately
+      if (promptDebounceTimers.current[nodeId]) {
+        clearTimeout(promptDebounceTimers.current[nodeId]);
+        delete promptDebounceTimers.current[nodeId];
+      }
+      sendPromptToBackend(nodeId);
+    },
+    [sendPromptToBackend]
+  );
+
+  // Flush prompts to backend when streaming starts (safety net for data channel readiness)
+  const wasStreamingRef = useRef(false);
+  useEffect(() => {
+    const nowStreaming = streams.isStreaming;
+    if (nowStreaming && !wasStreamingRef.current) {
+      const timerId = setTimeout(() => {
+        const currentNodes = nodesRef.current;
+        const currentParams = nodeParamsRef.current;
+        for (const node of currentNodes) {
+          if (node.data.nodeType !== "pipeline") continue;
+          const prompt = (currentParams[node.id]?.__prompt as string) || "";
+          if (!prompt) continue;
+          onNodeParamChangeRef.current?.(resolveBackendId(node.id), "prompts", [
+            { text: prompt, weight: 100 },
+          ]);
+        }
+      }, 500);
+      wasStreamingRef.current = nowStreaming;
+      return () => clearTimeout(timerId);
+    }
+    wasStreamingRef.current = nowStreaming;
+  }, [streams.isStreaming, resolveBackendId]);
 
   const handleEdgeDelete = useCallback(
     (edgeId: string) => {
@@ -421,6 +482,7 @@ export function useGraphState(
     handlePipelineSelect,
     handleNodeParameterChange,
     handlePromptChange,
+    handlePromptSubmit,
     nodeParamsRef,
     localStream: streams.localStream,
     remoteStream: streams.remoteStream,
@@ -888,6 +950,19 @@ export function useGraphState(
     []
   );
 
+  const getGraphNodePrompts = useCallback((): Array<{
+    nodeId: string;
+    text: string;
+  }> => {
+    const results: Array<{ nodeId: string; text: string }> = [];
+    for (const node of nodesRef.current) {
+      if (node.data.nodeType !== "pipeline") continue;
+      const text = (nodeParamsRef.current[node.id]?.__prompt as string) || "";
+      if (text) results.push({ nodeId: node.id, text });
+    }
+    return results;
+  }, []);
+
   return {
     nodes,
     setNodes,
@@ -906,6 +981,7 @@ export function useGraphState(
     handlePipelineSelect,
     handleNodeParameterChange,
     handlePromptChange,
+    handlePromptSubmit,
     handleEdgeDelete,
     resolveBackendId,
     isStreamingRef,
@@ -917,6 +993,7 @@ export function useGraphState(
     handleExport,
     refreshGraph: loadGraphFromBackend,
     getCurrentGraphConfig,
+    getGraphNodePrompts,
     fitViewTrigger,
   };
 }

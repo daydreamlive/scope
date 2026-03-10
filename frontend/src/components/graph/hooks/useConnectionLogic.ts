@@ -10,12 +10,20 @@ import { getEdgeColor, PARAM_TYPE_COLORS } from "../constants";
  * walks upstream through the chain of reroutes until a concrete producer is
  * found. Returns undefined when no type can be determined.
  */
+type ResolvedType =
+  | "string"
+  | "number"
+  | "boolean"
+  | "list_number"
+  | "vace"
+  | undefined;
+
 function resolveSourceType(
   node: Node<FlowNodeData>,
   nodes: Node<FlowNodeData>[],
   edges: Edge[],
   visited = new Set<string>()
-): "string" | "number" | "boolean" | "list_number" | undefined {
+): ResolvedType {
   if (visited.has(node.id)) return undefined;
   visited.add(node.id);
 
@@ -27,6 +35,8 @@ function resolveSourceType(
   if (nt === "math") return "number";
   if (nt === "slider" || nt === "knobs" || nt === "xypad") return "number";
   if (nt === "tuple") return "list_number";
+  if (nt === "image") return "string";
+  if (nt === "vace") return "vace";
   if (nt === "reroute") {
     // Walk upstream to find source
     for (const e of edges) {
@@ -46,14 +56,26 @@ function resolveSourceType(
 function resolveTargetType(
   targetNode: Node<FlowNodeData>,
   targetParamName: string
-): "string" | "number" | "boolean" | "list_number" | undefined {
+): ResolvedType {
   const nt = targetNode.data.nodeType;
   if (targetParamName === "__prompt") return "string";
+  if (targetParamName === "__vace") return "vace";
   if (nt === "math") return "number";
   if (nt === "slider" || nt === "knobs" || nt === "xypad") return "number";
   if (nt === "tuple") {
     if (targetParamName === "value") return "list_number";
     if (targetParamName.startsWith("row_")) return "number";
+    return undefined;
+  }
+  if (nt === "vace") {
+    // VACE node accepts string (image paths) on its input handles
+    if (
+      targetParamName === "ref_image" ||
+      targetParamName === "first_frame" ||
+      targetParamName === "last_frame"
+    ) {
+      return "string";
+    }
     return undefined;
   }
   if (nt === "reroute") return undefined; // accepts any
@@ -75,7 +97,7 @@ function resolveDownstreamType(
   nodes: Node<FlowNodeData>[],
   edges: Edge[],
   visited = new Set<string>()
-): "string" | "number" | "boolean" | "list_number" | undefined {
+): ResolvedType {
   if (visited.has(nodeId)) return undefined;
   visited.add(nodeId);
 
@@ -240,6 +262,20 @@ export function useConnectionLogic(
 
         if (!sourceType) return false;
 
+        // VACE compound connection: only VACE → pipeline.__vace
+        if (targetParsed.name === "__vace") {
+          return sourceType === "vace";
+        }
+        if (sourceType === "vace") {
+          // VACE output can only connect to __vace ports
+          return targetParsed.name === "__vace";
+        }
+
+        // VACE node input handles accept string (image paths)
+        if (targetNode.data.nodeType === "vace") {
+          return sourceType === "string";
+        }
+
         if (targetParsed.name === "__prompt") {
           return sourceType === "string";
         }
@@ -330,6 +366,7 @@ export function useConnectionLogic(
         if (
           expectedType &&
           expectedType !== "list_number" &&
+          expectedType !== "vace" &&
           expectedType !== sourceNode.data.valueType
         ) {
           changed.set(sourceNode.id, expectedType);
@@ -346,12 +383,12 @@ export function useConnectionLogic(
                 ...n,
                 data: {
                   ...n.data,
-                  valueType: expectedType,
+                  valueType: expectedType as "string" | "number" | "boolean",
                   value: defaultVal,
                   parameterOutputs: [
                     {
                       name: "value",
-                      type: expectedType,
+                      type: expectedType as "string" | "number" | "boolean",
                       defaultValue: defaultVal,
                     },
                   ],
@@ -372,13 +409,12 @@ export function useConnectionLogic(
 
         if (isConcreteSource) {
           const srcType = changed.has(sourceNode.id)
-            ? (changed.get(sourceNode.id) as ReturnType<
-                typeof resolveSourceType
-              >)
+            ? (changed.get(sourceNode.id) as ResolvedType)
             : resolveSourceType(sourceNode, nodes, edgesWithNew);
           if (
             srcType &&
             srcType !== "list_number" &&
+            srcType !== "vace" &&
             srcType !== targetNode.data.valueType
           ) {
             changed.set(targetNode.id, srcType);
@@ -387,7 +423,10 @@ export function useConnectionLogic(
                 if (n.id !== targetNode.id) return n;
                 return {
                   ...n,
-                  data: { ...n.data, valueType: srcType },
+                  data: {
+                    ...n.data,
+                    valueType: srcType as "string" | "number" | "boolean",
+                  },
                 };
               })
             );
@@ -406,7 +445,12 @@ export function useConnectionLogic(
           );
         }
 
-        if (expectedType && expectedType !== "list_number") {
+        if (
+          expectedType &&
+          expectedType !== "list_number" &&
+          expectedType !== "vace"
+        ) {
+          const narrowType = expectedType as "string" | "number" | "boolean";
           const { rerouteIds, rootSourceId } = collectUpstreamChain(
             sourceNode.id,
             nodes,
@@ -414,49 +458,49 @@ export function useConnectionLogic(
           );
 
           for (const rid of rerouteIds) {
-            changed.set(rid, expectedType);
+            changed.set(rid, narrowType);
           }
           if (rootSourceId) {
             const rootNode = nodes.find(n => n.id === rootSourceId);
             if (
               rootNode?.data.nodeType === "primitive" &&
-              rootNode.data.valueType !== expectedType
+              rootNode.data.valueType !== narrowType
             ) {
-              changed.set(rootSourceId, expectedType);
+              changed.set(rootSourceId, narrowType);
             }
           }
 
           setNodes(nds =>
             nds.map(n => {
               if (rerouteIds.includes(n.id)) {
-                if (n.data.valueType === expectedType) return n;
+                if (n.data.valueType === narrowType) return n;
                 return {
                   ...n,
-                  data: { ...n.data, valueType: expectedType },
+                  data: { ...n.data, valueType: narrowType },
                 };
               }
               if (
                 rootSourceId &&
                 n.id === rootSourceId &&
                 n.data.nodeType === "primitive" &&
-                n.data.valueType !== expectedType
+                n.data.valueType !== narrowType
               ) {
                 const defaultVal =
-                  expectedType === "boolean"
+                  narrowType === "boolean"
                     ? false
-                    : expectedType === "number"
+                    : narrowType === "number"
                       ? 0
                       : "";
                 return {
                   ...n,
                   data: {
                     ...n.data,
-                    valueType: expectedType,
+                    valueType: narrowType,
                     value: defaultVal,
                     parameterOutputs: [
                       {
                         name: "value",
-                        type: expectedType,
+                        type: narrowType,
                         defaultValue: defaultVal,
                       },
                     ],

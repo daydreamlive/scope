@@ -50,7 +50,9 @@ export interface FlowNodeData {
     | "knobs"
     | "xypad"
     | "tuple"
-    | "reroute";
+    | "reroute"
+    | "image"
+    | "vace";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -177,6 +179,24 @@ export interface FlowNodeData {
   /** For tuple nodes: ordering direction */
   tupleOrderDirection?: "asc" | "desc";
 
+  /* ── Image node fields ── */
+  /** For image nodes: the selected image asset path */
+  imagePath?: string;
+
+  /* ── VACE node fields ── */
+  /** For VACE nodes: context scale (0.0-2.0) */
+  vaceContextScale?: number;
+  /** For VACE nodes: reference image path (set via Image node connection) */
+  vaceRefImage?: string;
+  /** For VACE nodes: first frame image path (set via Image node connection) */
+  vaceFirstFrame?: string;
+  /** For VACE nodes: last frame image path (set via Image node connection) */
+  vaceLastFrame?: string;
+
+  /* ── Pipeline VACE support ── */
+  /** For pipeline nodes: whether the selected pipeline supports VACE */
+  supportsVace?: boolean;
+
   [key: string]: unknown;
 }
 
@@ -240,8 +260,13 @@ export function extractParameterPorts(
     if (!schemaProp.ui) continue;
 
     // Skip complex component fields that get special handling in the node
-    // (e.g. manage_cache has component "cache" and is replaced by a Reset Cache button)
-    if (schemaProp.ui.component === "cache") continue;
+    // (e.g. manage_cache has component "cache" and is replaced by a Reset Cache button,
+    //  vace_context_scale has component "vace" and is handled by the VACE node)
+    if (
+      schemaProp.ui.component === "cache" ||
+      schemaProp.ui.component === "vace"
+    )
+      continue;
 
     // Check for array types with integer/number items (e.g. denoising_steps: list[int])
     // Handles both direct { type: "array", items: ... } and anyOf: [{ type: "array" }, { type: "null" }]
@@ -500,6 +525,8 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "xypad",
   "tuple",
   "reroute",
+  "image",
+  "vace",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */

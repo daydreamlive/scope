@@ -31,6 +31,8 @@ import {
   Grid2x2,
   ListOrdered,
   GitBranch,
+  Image,
+  Sparkles,
 } from "lucide-react";
 
 import { SourceNode } from "./nodes/SourceNode";
@@ -46,6 +48,8 @@ import { SliderNode } from "./nodes/SliderNode";
 import { KnobsNode } from "./nodes/KnobsNode";
 import { XYPadNode } from "./nodes/XYPadNode";
 import { TupleNode } from "./nodes/TupleNode";
+import { ImageNode } from "./nodes/ImageNode";
+import { VaceNode } from "./nodes/VaceNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -83,6 +87,8 @@ const nodeTypes = {
   xypad: XYPadNode,
   tuple: TupleNode,
   reroute: RerouteNode,
+  image: ImageNode,
+  vace: VaceNode,
 };
 
 const edgeTypes = {
@@ -91,8 +97,8 @@ const edgeTypes = {
 
 export interface GraphEditorHandle {
   refreshGraph: () => void;
-  /** Return the current graph config from React state (always up-to-date). */
   getCurrentGraphConfig: () => import("../../lib/api").GraphConfig;
+  getGraphNodePrompts: () => Array<{ nodeId: string; text: string }>;
 }
 
 interface GraphEditorProps {
@@ -177,6 +183,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       handleExport,
       refreshGraph,
       getCurrentGraphConfig,
+      getGraphNodePrompts,
       fitViewTrigger,
     } = useGraphState(
       {
@@ -201,11 +208,12 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       }
     );
 
-    // Expose refreshGraph and getCurrentGraphConfig
-    useImperativeHandle(ref, () => ({ refreshGraph, getCurrentGraphConfig }), [
-      refreshGraph,
-      getCurrentGraphConfig,
-    ]);
+    // Expose refreshGraph, getCurrentGraphConfig, and getGraphNodePrompts
+    useImperativeHandle(
+      ref,
+      () => ({ refreshGraph, getCurrentGraphConfig, getGraphNodePrompts }),
+      [refreshGraph, getCurrentGraphConfig, getGraphNodePrompts]
+    );
 
     // Context menu & add-node modal
     const [contextMenu, setContextMenu] = useState<{
@@ -605,19 +613,22 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                             {
                               label: "FloatControl",
                               icon: <Gauge />,
-                              onClick: () => handleNodeTypeSelect("control", "float"),
+                              onClick: () =>
+                                handleNodeTypeSelect("control", "float"),
                               keywords: ["float", "animated", "sine"],
                             },
                             {
                               label: "IntControl",
                               icon: <Hash />,
-                              onClick: () => handleNodeTypeSelect("control", "int"),
+                              onClick: () =>
+                                handleNodeTypeSelect("control", "int"),
                               keywords: ["integer", "animated"],
                             },
                             {
                               label: "StringControl",
                               icon: <Type />,
-                              onClick: () => handleNodeTypeSelect("control", "string"),
+                              onClick: () =>
+                                handleNodeTypeSelect("control", "string"),
                               keywords: ["text", "cycle", "animated"],
                             },
                           ],
@@ -677,6 +688,23 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                           ],
                         },
                         {
+                          label: "Image",
+                          icon: <Image />,
+                          onClick: () => handleNodeTypeSelect("image"),
+                          keywords: ["image", "picture", "photo", "reference"],
+                        },
+                        {
+                          label: "VACE",
+                          icon: <Sparkles />,
+                          onClick: () => handleNodeTypeSelect("vace"),
+                          keywords: [
+                            "vace",
+                            "conditioning",
+                            "reference",
+                            "frame",
+                          ],
+                        },
+                        {
                           label: "Primitive",
                           icon: <ToggleLeft />,
                           onClick: () => handleNodeTypeSelect("primitive"),
@@ -696,7 +724,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                         const count = idsToDelete.length;
                         return [
                           {
-                            label: count > 1 ? `Delete ${count} nodes` : "Delete",
+                            label:
+                              count > 1 ? `Delete ${count} nodes` : "Delete",
                             icon: <Trash2 />,
                             onClick: () => handleDeleteNodes(idsToDelete),
                             danger: true,

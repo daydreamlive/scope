@@ -8,6 +8,10 @@ interface NodeCardProps {
   className?: string;
   /** When true, measures content height and enforces it as minHeight on resize */
   autoMinHeight?: boolean;
+  /** Override the default minimum width (240px) for the resize handles */
+  minWidth?: number;
+  /** Override the default minimum height (60px) for the resize handles */
+  minHeight?: number;
 }
 
 export function NodeCard({
@@ -15,6 +19,8 @@ export function NodeCard({
   selected,
   className = "",
   autoMinHeight = false,
+  minWidth = 240,
+  minHeight: minHeightProp = 60,
 }: NodeCardProps) {
   const measureRef = useRef<HTMLDivElement>(null);
   const [minH, setMinH] = useState(60);
@@ -46,8 +52,10 @@ export function NodeCard({
     >
       <NodeResizer
         isVisible={!!selected}
-        minWidth={240}
-        minHeight={autoMinHeight ? Math.max(60, minH) : 60}
+        minWidth={minWidth}
+        minHeight={
+          autoMinHeight ? Math.max(minHeightProp, minH) : minHeightProp
+        }
         lineClassName="!border-transparent"
         handleClassName="!w-2 !h-2 !bg-transparent !border !border-blue-400/20 hover:!border-blue-400/40 !rounded-sm"
       />

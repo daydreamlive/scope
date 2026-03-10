@@ -42,6 +42,8 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "xypad",
   "tuple",
   "reroute",
+  "image",
+  "vace",
 ]);
 
 /** Node types that can receive values on their input handles. */
@@ -51,6 +53,7 @@ const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
   "xypad",
   "tuple",
   "reroute",
+  "vace",
 ]);
 
 export function useValueForwarding(
@@ -120,6 +123,11 @@ export function useValueForwarding(
           handleName: "value",
           value: node.data.tupleValues,
         });
+      } else if (node.data.nodeType === "image") {
+        valuesToForward.push({
+          handleName: "value",
+          value: node.data.imagePath || "",
+        });
       }
 
       // Throttle animated nodes
@@ -146,6 +154,47 @@ export function useValueForwarding(
 
         // Only to pipeline nodes
         if (targetNode.data.nodeType !== "pipeline") continue;
+
+        // VACE compound connection: expand into individual parameters
+        if (
+          node.data.nodeType === "vace" &&
+          sourceParsed.name === "__vace" &&
+          targetParsed.name === "__vace"
+        ) {
+          const backendId = resolveBackendId(edge.target);
+          const ctxScale =
+            typeof node.data.vaceContextScale === "number"
+              ? node.data.vaceContextScale
+              : 1.0;
+          onNodeParamChangeRef.current(
+            backendId,
+            "vace_context_scale",
+            ctxScale
+          );
+          const refImg = (node.data.vaceRefImage as string) || "";
+          if (refImg) {
+            onNodeParamChangeRef.current(backendId, "vace_ref_images", [
+              refImg,
+            ]);
+          }
+          const firstFrame = (node.data.vaceFirstFrame as string) || "";
+          if (firstFrame) {
+            onNodeParamChangeRef.current(
+              backendId,
+              "first_frame_image",
+              firstFrame
+            );
+          }
+          const lastFrame = (node.data.vaceLastFrame as string) || "";
+          if (lastFrame) {
+            onNodeParamChangeRef.current(
+              backendId,
+              "last_frame_image",
+              lastFrame
+            );
+          }
+          continue;
+        }
 
         // Find matching value
         const entry = valuesToForward.find(v => {
@@ -289,6 +338,15 @@ export function useValueForwarding(
             existingValues[rowIdx] = clamped;
             nodeUpdates["tupleValues"] = existingValues;
           }
+        }
+      } else if (targetNode.data.nodeType === "vace") {
+        // Map image input handles to VACE node data fields
+        if (targetParsed.name === "ref_image") {
+          nodeUpdates["vaceRefImage"] = String(sourceValue);
+        } else if (targetParsed.name === "first_frame") {
+          nodeUpdates["vaceFirstFrame"] = String(sourceValue);
+        } else if (targetParsed.name === "last_frame") {
+          nodeUpdates["vaceLastFrame"] = String(sourceValue);
         }
       } else if (targetNode.data.nodeType === "reroute") {
         // Pass source value through to the reroute node

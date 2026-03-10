@@ -1,4 +1,11 @@
-import { useEffect, useRef, useState, useMemo, useLayoutEffect, type ReactNode } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useMemo,
+  useLayoutEffect,
+  type ReactNode,
+} from "react";
 
 export interface ContextMenuItem {
   label: string;
@@ -21,14 +28,23 @@ type FlatItem = ContextMenuItem & { parentLabel?: string };
 
 const VIEWPORT_PADDING = 8;
 
-export function ContextMenu({ x, y, onClose, items, header }: ContextMenuProps) {
+export function ContextMenu({
+  x,
+  y,
+  onClose,
+  items,
+  header,
+}: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState("");
   const [activeSubmenu, setActiveSubmenu] = useState<number | null>(null);
 
   // Adjusted position after measuring the menu against the viewport
-  const [pos, setPos] = useState<{ left: number; top: number }>({ left: x, top: y });
+  const [pos, setPos] = useState<{ left: number; top: number }>({
+    left: x,
+    top: y,
+  });
   // Whether the menu opens upward / leftward (used for submenu direction too)
   const [flipX, setFlipX] = useState(false);
   const [flipY, setFlipY] = useState(false);
@@ -187,11 +203,15 @@ export function ContextMenu({ x, y, onClose, items, header }: ContextMenuProps) 
             <div
               key={i}
               className="relative"
-              onMouseEnter={() => item.children ? setActiveSubmenu(i) : setActiveSubmenu(null)}
+              onMouseEnter={() =>
+                item.children ? setActiveSubmenu(i) : setActiveSubmenu(null)
+              }
               onMouseLeave={() => setActiveSubmenu(null)}
             >
               <button
-                onClick={() => { if (!item.children) handleSelect(item); }}
+                onClick={() => {
+                  if (!item.children) handleSelect(item);
+                }}
                 className={`w-full text-left px-3 py-1.5 text-[13px] flex items-center gap-2.5 transition-colors ${
                   item.danger
                     ? "text-red-400 hover:bg-[#1f1f1f] hover:text-red-300"
@@ -205,7 +225,9 @@ export function ContextMenu({ x, y, onClose, items, header }: ContextMenuProps) 
                 )}
                 <span className="flex-1">{item.label}</span>
                 {item.children && (
-                  <span className="text-[#555] text-[11px] ml-2">{flipX ? "‹" : "›"}</span>
+                  <span className="text-[#555] text-[11px] ml-2">
+                    {flipX ? "‹" : "›"}
+                  </span>
                 )}
               </button>
 
@@ -254,7 +276,10 @@ function SubmenuPanel({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    const css: React.CSSProperties = { position: "absolute", visibility: "visible" };
+    const css: React.CSSProperties = {
+      position: "absolute",
+      visibility: "visible",
+    };
 
     // Horizontal: open to the right by default, flip left if needed
     if (flipX || parent.right + rect.width + 4 > vw - VIEWPORT_PADDING) {

@@ -1844,6 +1844,16 @@ export function StreamPage() {
         ];
       }
 
+      // In graph mode, use the graph node's prompt instead of perform mode defaults
+      if (graphMode || nonLinearGraph) {
+        const graphPrompts = graphEditorRef.current?.getGraphNodePrompts();
+        if (graphPrompts && graphPrompts.length > 0) {
+          initialParameters.prompts = [
+            { text: graphPrompts[0].text, weight: 100 },
+          ];
+        }
+      }
+
       // Cache management for pipelines that support it
       if (currentPipeline?.supportsCacheManagement) {
         initialParameters.manage_cache = settings.manageCache ?? true;

@@ -1,7 +1,7 @@
 import { useRef, useCallback, useState, useLayoutEffect } from "react";
 import { Handle, Position, useEdges, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { RotateCcw, AlertTriangle } from "lucide-react";
+import { RotateCcw, AlertTriangle, ArrowUp } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import {
@@ -68,8 +68,12 @@ export function PipelineNode({
   const onPromptChange = data.onPromptChange as
     | ((nodeId: string, text: string) => void)
     | undefined;
+  const onPromptSubmit = data.onPromptSubmit as
+    | ((nodeId: string) => void)
+    | undefined;
   const supportsCacheManagement = data.supportsCacheManagement ?? false;
   const pipelineAvailable = data.pipelineAvailable ?? true;
+  const supportsVace = data.supportsVace ?? false;
 
   const pipelineName = data.pipelineId || "Pipeline";
 
@@ -98,6 +102,10 @@ export function PipelineNode({
   const isPromptConnected = edges.some(
     e =>
       e.target === id && e.targetHandle === buildHandleId("param", "__prompt")
+  );
+
+  const isVaceConnected = edges.some(
+    e => e.target === id && e.targetHandle === buildHandleId("param", "__vace")
   );
 
   const listParams = parameterInputs.filter(p => p.type === "list_number");
@@ -135,6 +143,7 @@ export function PipelineNode({
     streamOutputs,
     parameterInputs,
     supportsPrompts,
+    supportsVace,
     data.pipelineId,
   ]);
 
@@ -330,6 +339,17 @@ export function PipelineNode({
           );
         })}
 
+        {/* VACE input */}
+        {supportsVace && (
+          <div ref={setRowRef("vace")}>
+            <NodeParamRow label="VACE">
+              <NodePill className={isVaceConnected ? "" : "opacity-40"}>
+                {isVaceConnected ? "Connected" : "Not connected"}
+              </NodePill>
+            </NodeParamRow>
+          </div>
+        )}
+
         {/* Prompt textarea */}
         {supportsPrompts && (
           <div ref={setRowRef("prompt")}>
@@ -342,11 +362,23 @@ export function PipelineNode({
                   {promptText || "—"}
                 </NodePill>
               ) : (
-                <NodePillTextarea
-                  value={promptText}
-                  onChange={text => onPromptChange?.(id, text)}
-                  placeholder="Enter prompt..."
-                />
+                <div className="flex flex-col gap-1">
+                  <NodePillTextarea
+                    value={promptText}
+                    onChange={text => onPromptChange?.(id, text)}
+                    onSubmit={() => onPromptSubmit?.(id)}
+                    placeholder="Enter prompt..."
+                  />
+                  <button
+                    type="button"
+                    onClick={() => onPromptSubmit?.(id)}
+                    className={`${NODE_TOKENS.pill} flex items-center justify-center gap-1 w-full cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
+                    title="Send prompt (Enter)"
+                  >
+                    <ArrowUp className="h-3 w-3 text-[#fafafa]" />
+                    <span className={NODE_TOKENS.primaryText}>Send</span>
+                  </button>
+                </div>
               )}
             </div>
           </div>
@@ -428,6 +460,21 @@ export function PipelineNode({
             top: rowPositions["prompt"] ?? 0,
             left: 8,
             backgroundColor: PARAM_TYPE_COLORS.string,
+          }}
+        />
+      )}
+
+      {/* VACE compound input handle */}
+      {supportsVace && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          id={buildHandleId("param", "__vace")}
+          className="!w-2 !h-2 !border-0"
+          style={{
+            top: rowPositions["vace"] ?? 0,
+            left: 8,
+            backgroundColor: "#a78bfa",
           }}
         />
       )}

@@ -4,6 +4,7 @@ import { NODE_TOKENS } from "./tokens";
 interface NodePillTextareaProps {
   value: string;
   onChange: (value: string) => void;
+  onSubmit?: () => void;
   disabled?: boolean;
   placeholder?: string;
   className?: string;
@@ -12,6 +13,7 @@ interface NodePillTextareaProps {
 export function NodePillTextarea({
   value,
   onChange,
+  onSubmit,
   disabled = false,
   placeholder,
   className = "",
@@ -26,11 +28,20 @@ export function NodePillTextarea({
     e.stopPropagation();
   };
 
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      onSubmit?.();
+      textareaRef.current?.blur();
+    }
+  };
+
   return (
     <textarea
       ref={textareaRef}
       value={value}
       onChange={handleChange}
+      onKeyDown={handleKeyDown}
       onWheel={handleWheel}
       disabled={disabled}
       placeholder={placeholder}

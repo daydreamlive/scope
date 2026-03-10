@@ -59,6 +59,12 @@ export function getEdgeColor(
     if (sourceNode.data.nodeType === "tuple") {
       return "#fb923c"; // orange-400
     }
+    if (sourceNode.data.nodeType === "image") {
+      return "#f472b6"; // pink-400
+    }
+    if (sourceNode.data.nodeType === "vace") {
+      return "#a78bfa"; // violet-400
+    }
     return "#9ca3af";
   }
 

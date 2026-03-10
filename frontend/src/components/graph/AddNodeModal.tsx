@@ -24,7 +24,9 @@ interface AddNodeModalProps {
       | "knobs"
       | "xypad"
       | "tuple"
-      | "reroute",
+      | "reroute"
+      | "image"
+      | "vace",
     subType?: string
   ) => void;
 }
@@ -43,7 +45,9 @@ interface NodeCatalogItem {
     | "knobs"
     | "xypad"
     | "tuple"
-    | "reroute";
+    | "reroute"
+    | "image"
+    | "vace";
   subType?: string;
   name: string;
   description: string;
@@ -121,6 +125,14 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#f472b6",
     category: "UI",
   },
+  // Pink
+  {
+    type: "image",
+    name: "Image",
+    description: "Pick an image from assets to use as reference or VACE input",
+    color: "#f472b6",
+    category: "I/O",
+  },
   // Red
   {
     type: "output",
@@ -160,6 +172,15 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     description: "Add a text annotation to the graph",
     color: "#fbbf24",
     category: "Utility",
+  },
+  // Violet
+  {
+    type: "vace",
+    name: "VACE",
+    description:
+      "Bundle VACE parameters (context scale, reference images) for pipeline conditioning",
+    color: "#a78bfa",
+    category: "I/O",
   },
   // Gray
   {

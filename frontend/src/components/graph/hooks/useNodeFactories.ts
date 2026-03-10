@@ -377,6 +377,53 @@ export function useNodeFactories({
     ]
   );
 
+  const addImageNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      const id = generateNodeId("image", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "image",
+        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        style: { width: 160, height: 140 },
+        data: {
+          label: "Image",
+          nodeType: "image",
+          imagePath: "",
+          parameterOutputs: [
+            { name: "value", type: "string", defaultValue: "" },
+          ],
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes]
+  );
+
+  const addVaceNode = useCallback(
+    (position?: { x: number; y: number }) => {
+      const id = generateNodeId("vace", existingIds);
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: "vace",
+        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
+        style: { width: 240 },
+        data: {
+          label: "VACE",
+          nodeType: "vace",
+          vaceContextScale: 1.0,
+          vaceRefImage: "",
+          vaceFirstFrame: "",
+          vaceLastFrame: "",
+          parameterOutputs: [
+            { name: "__vace", type: "string", defaultValue: "" },
+          ],
+        },
+      };
+      setNodes(nds => [...nds, newNode]);
+    },
+    [existingIds, nodes.length, setNodes]
+  );
+
   const handleNodeTypeSelect = useCallback(
     (
       type:
@@ -392,7 +439,9 @@ export function useNodeFactories({
         | "knobs"
         | "xypad"
         | "tuple"
-        | "reroute",
+        | "reroute"
+        | "image"
+        | "vace",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;
@@ -443,6 +492,12 @@ export function useNodeFactories({
         case "reroute":
           addRerouteNode(pendingNodePosition);
           break;
+        case "image":
+          addImageNode(pendingNodePosition);
+          break;
+        case "vace":
+          addVaceNode(pendingNodePosition);
+          break;
       }
 
       setPendingNodePosition(null);
@@ -462,6 +517,8 @@ export function useNodeFactories({
       addKnobsNode,
       addXYPadNode,
       addTupleNode,
+      addImageNode,
+      addVaceNode,
       setPendingNodePosition,
     ]
   );
