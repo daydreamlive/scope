@@ -111,6 +111,11 @@ from .schema import (
     WebRTCOfferResponse,
 )
 
+# Cached responses for pipeline schemas and plugin list.
+# Server restarts after plugin install/uninstall, so these are naturally reset.
+_pipeline_schemas_cache: PipelineSchemasResponse | None = None
+_plugins_list_cache: object | None = None
+
 
 class STUNErrorFilter(logging.Filter):
     """Filter to suppress STUN/TURN connection errors that are not critical."""
@@ -677,6 +682,10 @@ async def get_pipeline_schemas(
     In cloud mode (when connected to cloud), this proxies the request to the
     cloud-hosted scope backend to get the available pipelines there.
     """
+    global _pipeline_schemas_cache
+    if _pipeline_schemas_cache is not None:
+        return _pipeline_schemas_cache
+
     from scope.core.pipelines.registry import PipelineRegistry
     from scope.core.plugins import get_plugin_manager
 
@@ -694,7 +703,9 @@ async def get_pipeline_schemas(
             )
             pipelines[pipeline_id] = schema_data
 
-    return PipelineSchemasResponse(pipelines=pipelines)
+    response = PipelineSchemasResponse(pipelines=pipelines)
+    _pipeline_schemas_cache = response
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -908,6 +919,26 @@ async def add_ice_candidate(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error adding ICE candidate to session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.delete(
+    "/api/v1/webrtc/offer/{session_id}", status_code=204, response_class=Response
+)
+async def close_webrtc_session(
+    session_id: str,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Close and remove a WebRTC session.
+
+    Used by the cloud proxy (fal_app) to tear down the WebRTC peer connection
+    when the signaling WebSocket closes (e.g. MAX_DURATION_EXCEEDED).
+    """
+    try:
+        await webrtc_manager.remove_session(session_id)
+        return Response(status_code=204)
+    except Exception as e:
+        logger.error(f"Error closing WebRTC session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -2219,6 +2250,10 @@ async def list_plugins(
 
     from .schema import FailedPluginInfoSchema, PluginListResponse
 
+    global _plugins_list_cache
+    if _plugins_list_cache is not None:
+        return _plugins_list_cache
+
     try:
         plugin_manager = get_plugin_manager()
         plugins_data = await plugin_manager.list_plugins_async()
@@ -2235,9 +2270,11 @@ async def list_plugins(
             for f in plugin_manager.get_failed_plugins()
         ]
 
-        return PluginListResponse(
+        response = PluginListResponse(
             plugins=plugins, total=len(plugins), failed_plugins=failed
         )
+        _plugins_list_cache = response
+        return response
     except Exception as e:
         logger.error(f"Error listing plugins: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

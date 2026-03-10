@@ -8,7 +8,10 @@ import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
 import { WorkflowImportDialog } from "../components/WorkflowImportDialog";
-import type { WorkflowPromptState } from "../lib/workflowSettings";
+import {
+  buildScopeWorkflow,
+  type WorkflowPromptState,
+} from "../lib/workflowSettings";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { LogPanel } from "../components/LogPanel";
@@ -39,11 +42,21 @@ import type {
   DownloadProgress,
   SettingsState,
 } from "../types";
-import type { PromptItem, PromptTransition } from "../lib/api";
+import type { PromptItem, PromptTransition, PluginInfo } from "../lib/api";
 import { getInputSourceResolution, fetchDaydreamWorkflow } from "../lib/api";
+import { useLoRAsContext } from "../contexts/LoRAsContext";
+import { usePluginsContext } from "../contexts/PluginsContext";
+import { useServerInfoContext } from "../contexts/ServerInfoContext";
 import type { ScopeWorkflow } from "../lib/workflowApi";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
+import {
+  isAuthenticated as checkIsAuthenticated,
+  getDaydreamAPIKey,
+  redirectToSignIn,
+} from "../lib/auth";
+import { createDaydreamImportSession } from "../lib/daydreamExport";
+import { openExternalUrl } from "../lib/openExternal";
 
 interface OscCommand {
   key: string;
@@ -260,6 +273,105 @@ export function StreamPage() {
   const [showWorkflowImport, setShowWorkflowImport] = useState(false);
   const [preloadedWorkflow, setPreloadedWorkflow] =
     useState<ScopeWorkflow | null>(null);
+
+  // Daydream export state
+  const [isExportingToDaydream, setIsExportingToDaydream] = useState(false);
+  const [isDaydreamAuthenticated, setIsDaydreamAuthenticated] = useState(
+    checkIsAuthenticated()
+  );
+  const { loraFiles } = useLoRAsContext();
+  const { plugins } = usePluginsContext();
+  const { version: scopeVersion } = useServerInfoContext();
+
+  useEffect(() => {
+    const handleAuthChange = () => {
+      setIsDaydreamAuthenticated(checkIsAuthenticated());
+    };
+    window.addEventListener("daydream-auth-change", handleAuthChange);
+    return () => {
+      window.removeEventListener("daydream-auth-change", handleAuthChange);
+    };
+  }, []);
+
+  const handleExportToDaydream = useCallback(async () => {
+    if (!isDaydreamAuthenticated) {
+      redirectToSignIn();
+      return;
+    }
+
+    const apiKey = getDaydreamAPIKey();
+    if (!apiKey) {
+      toast.error("Not authenticated with Daydream");
+      return;
+    }
+
+    const isElectron = Boolean(
+      (window as unknown as { scope?: { openExternal?: unknown } }).scope
+        ?.openExternal
+    );
+    // Open a blank tab synchronously while user-activation is still live,
+    // so popup blockers don't interfere. Electron uses IPC and doesn't need this.
+    const pendingTab = isElectron ? null : window.open("about:blank", "_blank");
+
+    setIsExportingToDaydream(true);
+    try {
+      const pluginInfoMap = new Map<string, PluginInfo>(
+        plugins.map(p => [p.name, p])
+      );
+
+      const workflow = buildScopeWorkflow({
+        name: "Untitled Workflow",
+        settings,
+        timelinePrompts,
+        promptState: {
+          promptItems,
+          interpolationMethod,
+          transitionSteps,
+          temporalInterpolationMethod,
+        },
+        pipelineInfoMap: pipelines ?? {},
+        loraFiles,
+        pluginInfoMap,
+        scopeVersion: scopeVersion ?? "unknown",
+      });
+
+      const result = await createDaydreamImportSession(
+        apiKey,
+        workflow,
+        workflow.metadata.name
+      );
+
+      if (pendingTab) {
+        pendingTab.location.href = result.createUrl;
+      } else {
+        openExternalUrl(result.createUrl);
+      }
+      toast.success("Opening daydream.live...", {
+        description:
+          "Your workflow has been sent to daydream.live for publishing.",
+      });
+    } catch (err) {
+      pendingTab?.close();
+      console.error("Export to daydream.live failed:", err);
+      toast.error("Export failed", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setIsExportingToDaydream(false);
+    }
+  }, [
+    isDaydreamAuthenticated,
+    plugins,
+    settings,
+    timelinePrompts,
+    promptItems,
+    interpolationMethod,
+    transitionSteps,
+    temporalInterpolationMethod,
+    pipelines,
+    loraFiles,
+    scopeVersion,
+  ]);
 
   // Handle install-workflow deep links from Electron
   useEffect(() => {
@@ -2163,6 +2275,9 @@ export function StreamPage() {
                 onRecordingToggle={() => setIsRecording(prev => !prev)}
                 onWorkflowExport={() => setShowWorkflowExport(true)}
                 onWorkflowImport={() => setShowWorkflowImport(true)}
+                onExportToDaydream={handleExportToDaydream}
+                isAuthenticated={isDaydreamAuthenticated}
+                isExportingToDaydream={isExportingToDaydream}
               />
             </div>
           </div>

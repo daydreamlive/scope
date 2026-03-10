@@ -48,6 +48,9 @@ interface PromptInputWithTimelineProps {
   onRecordingToggle?: () => void;
   onWorkflowExport?: () => void;
   onWorkflowImport?: () => void;
+  onExportToDaydream?: () => void;
+  isAuthenticated?: boolean;
+  isExportingToDaydream?: boolean;
 }
 
 export function PromptInputWithTimeline({
@@ -86,6 +89,9 @@ export function PromptInputWithTimeline({
   onRecordingToggle,
   onWorkflowExport,
   onWorkflowImport,
+  onExportToDaydream,
+  isAuthenticated = false,
+  isExportingToDaydream = false,
 }: PromptInputWithTimelineProps) {
   const [isLive, setIsLive] = useState(false);
   const [selectedPromptId, setSelectedPromptId] = useState<string | null>(null);
@@ -558,6 +564,9 @@ export function PromptInputWithTimeline({
         onRecordingToggle={onRecordingToggle}
         onWorkflowExport={onWorkflowExport}
         onWorkflowImport={onWorkflowImport}
+        onExportToDaydream={onExportToDaydream}
+        isAuthenticated={isAuthenticated}
+        isExportingToDaydream={isExportingToDaydream}
       />
     </div>
   );

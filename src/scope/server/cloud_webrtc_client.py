@@ -308,15 +308,25 @@ class CloudWebRTCClient:
 
     async def _receive_frames(self, track: MediaStreamTrack):
         """Background task to receive frames from cloud."""
+        from aiortc.mediastreams import MediaStreamError
+
         logger.info("Starting frame receive loop")
+        consecutive_errors = 0
+        max_consecutive_errors = 10
 
         try:
             while True:
                 try:
                     frame = await track.recv()
+                    consecutive_errors = 0
                     self._stats["frames_received"] += 1
 
-                    if self._stats["frames_received"] % 100 == 0:
+                    if self._stats["frames_received"] == 1:
+                        logger.info(
+                            "First frame received from cloud "
+                            "(keyframe decoded successfully)"
+                        )
+                    elif self._stats["frames_received"] % 100 == 0:
                         logger.debug(
                             f"Received {self._stats['frames_received']} frames"
                         )
@@ -324,12 +334,22 @@ class CloudWebRTCClient:
                     # Pass to output handler
                     self.output_handler.handle_frame(frame)
 
-                except Exception as e:
-                    if "MediaStreamError" in str(type(e)):
-                        logger.info("Track ended")
-                        break
-                    logger.error(f"Error receiving frame: {e}")
+                except MediaStreamError:
+                    logger.info("Track ended")
                     break
+                except Exception as e:
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        logger.error(
+                            f"Error receiving frame, stopping after "
+                            f"{consecutive_errors} consecutive errors: {e}"
+                        )
+                        break
+                    logger.warning(
+                        f"Transient error receiving frame "
+                        f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+                    )
+                    await asyncio.sleep(0.01)
 
         except asyncio.CancelledError:
             logger.info("Frame receive loop cancelled")
@@ -340,22 +360,43 @@ class CloudWebRTCClient:
             )
 
     async def _request_keyframe(self):
-        """Request a keyframe via PLI after short delay for receiver setup.
+        """Request a keyframe via PLI once the receiver has remote streams.
 
         VP8/VP9 decoders need a keyframe (I-frame) to start decoding.
         After a new WebRTC connection, we may receive P-frames first,
         causing decode errors. Sending PLI (Picture Loss Indication)
         requests the remote end to send a keyframe.
         """
-        await asyncio.sleep(0.1)  # Allow receiver to initialize
-        for receiver in self.pc.getReceivers():
-            if receiver.track and receiver.track.kind == "video":
-                try:
-                    # Access internal PLI method from aiortc
-                    await receiver._send_rtcp_pli()
-                    logger.info("Sent PLI (keyframe request)")
-                except Exception as e:
-                    logger.debug(f"Could not send PLI: {e}")
+        # Poll until remote_streams is populated (RTP packets have arrived)
+        timeout = 5.0
+        poll_interval = 0.1
+        elapsed = 0.0
+        receiver = None
+        remote_streams = None
+
+        while elapsed < timeout:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            for r in self.pc.getReceivers():
+                if r.track and r.track.kind == "video":
+                    streams = r._RTCRtpReceiver__remote_streams
+                    if streams:
+                        receiver = r
+                        remote_streams = streams
+                        break
+            if remote_streams:
+                break
+
+        if not remote_streams or not receiver:
+            logger.debug("No remote streams after %.1fs, skipping PLI", timeout)
+            return
+
+        try:
+            media_ssrc = next(iter(remote_streams))
+            await receiver._send_rtcp_pli(media_ssrc)
+            logger.info(f"Sent PLI keyframe request (media_ssrc={media_ssrc})")
+        except Exception as e:
+            logger.debug(f"Could not send PLI: {e}")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a frame to cloud for processing.

@@ -1172,7 +1172,34 @@ class ScopeApp(fal.App, keep_alive=300):
                         timeout=5.0,
                     )
             except Exception:
-                pass
+                print(f"[{log_prefix()}] Warning: Failed to clear fal connection ID")
+
+            # Close the WebRTC session on the local Scope backend.
+            # The WebRTC peer connection (UDP) is independent of this WebSocket,
+            # so it must be explicitly torn down to stop video streaming.
+            if session_id:
+                import httpx
+
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.delete(
+                            f"{SCOPE_LOCAL_URL}/api/v1/webrtc/offer/{session_id}",
+                            timeout=10.0,
+                        )
+                        if resp.status_code == 204:
+                            print(
+                                f"[{log_prefix()}] Closed WebRTC session {session_id}"
+                            )
+                        else:
+                            print(
+                                f"[{log_prefix()}] Warning: Failed to close WebRTC "
+                                f"session {session_id}: {resp.status_code}"
+                            )
+                except Exception as e:
+                    print(
+                        f"[{log_prefix()}] Warning: Failed to close WebRTC "
+                        f"session {session_id}: {e}"
+                    )
 
             # Clean up session data to prevent data leakage between users.
             # Block the next connection's "ready" message until cleanup finishes.
