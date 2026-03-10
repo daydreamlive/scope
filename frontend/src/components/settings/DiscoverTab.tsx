@@ -60,6 +60,7 @@ interface DiscoverTabProps {
   installedRepoUrls: string[];
   isInstalling?: boolean;
   disabled?: boolean;
+  cloudConnected?: boolean;
 }
 
 export function DiscoverTab({
@@ -67,6 +68,7 @@ export function DiscoverTab({
   installedRepoUrls,
   isInstalling = false,
   disabled = false,
+  cloudConnected = false,
 }: DiscoverTabProps) {
   const [plugins, setPlugins] = useState<DaydreamPlugin[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -86,6 +88,7 @@ export function DiscoverTab({
       const params = new URLSearchParams({
         limit: "50",
         sortBy: "popularity",
+        remoteOnly: String(cloudConnected),
       });
       if (debouncedSearch) {
         params.set("search", debouncedSearch);
@@ -104,7 +107,7 @@ export function DiscoverTab({
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedSearch]);
+  }, [debouncedSearch, cloudConnected]);
 
   useEffect(() => {
     fetchDiscoverPlugins();

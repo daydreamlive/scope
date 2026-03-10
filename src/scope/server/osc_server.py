@@ -35,6 +35,7 @@ class OSCServer:
         self._server: AsyncIOOSCUDPServer | None = None
         self._transport: asyncio.DatagramTransport | None = None
         self._listening = False
+        self._log_all_messages = False
         self._pipeline_manager: PipelineManager | None = None
         self._webrtc_manager: WebRTCManager | None = None
         # SSE subscribers — each is an asyncio.Queue fed by _handle_osc_message.
@@ -54,6 +55,14 @@ class OSCServer:
     @property
     def listening(self) -> bool:
         return self._listening
+
+    @property
+    def log_all_messages(self) -> bool:
+        return self._log_all_messages
+
+    @log_all_messages.setter
+    def log_all_messages(self, value: bool) -> None:
+        self._log_all_messages = value
 
     def set_managers(
         self,
@@ -115,7 +124,7 @@ class OSCServer:
 
         if path_info is None:
             logger.info(
-                "OSC INVALID  %s = %r  reason=unknown path",
+                "OSC UNKNOWN  %s = %r",
                 address,
                 value,
             )
@@ -132,6 +141,9 @@ class OSCServer:
                 reason,
             )
             return
+
+        if self._log_all_messages:
+            logger.info("OSC OK  %s = %r", address, value)
 
         # Apply the parameter immediately to all active local sessions so
         # the pipeline effect takes place without waiting for the frontend
@@ -178,4 +190,5 @@ class OSCServer:
             "listening": self._listening,
             "port": self._port,
             "host": self._host,
+            "log_all_messages": self._log_all_messages,
         }

@@ -15,4 +15,9 @@ jobs:
           PR_NUMBER=${{ github.event.pull_request.number }}
           echo "Deleting fal app scope-pr-${PR_NUMBER}..."
           pip install fal
-          fal apps delete --env preview scope-pr-${PR_NUMBER}
+          output=$(fal apps delete --env preview scope-pr-${PR_NUMBER} 2>&1) || true
+          echo "$output"
+          if echo "$output" | grep -qi "not found"; then
+            echo "::error::Failed to delete fal app scope-pr-${PR_NUMBER}"
+            exit 1
+          fi

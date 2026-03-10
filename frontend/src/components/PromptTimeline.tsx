@@ -24,6 +24,7 @@ import {
   Minimize2,
 } from "lucide-react";
 import { ExportDialog } from "./ExportDialog";
+import { MIDIMappable } from "./MIDIMappable";
 
 import type { PromptItem } from "../lib/api";
 import { generateRandomColor } from "../utils/promptColors";
@@ -505,18 +506,24 @@ export function PromptTimeline({
           className={`flex items-center justify-between ${isCollapsed ? "mb-0" : "mb-4"}`}
         >
           <div className="flex items-center gap-2">
-            <Button
-              onClick={onPlayPause}
+            <MIDIMappable
+              actionId="toggle_pause"
+              mappingType="trigger"
               disabled={disabled || isLoading || isDownloading}
-              size="sm"
-              variant="outline"
             >
-              {isPlaying ? (
-                <Pause className="h-4 w-4" />
-              ) : (
-                <Play className="h-4 w-4" />
-              )}
-            </Button>
+              <Button
+                onClick={onPlayPause}
+                disabled={disabled || isLoading || isDownloading}
+                size="sm"
+                variant="outline"
+              >
+                {isPlaying ? (
+                  <Pause className="h-4 w-4" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+              </Button>
+            </MIDIMappable>
             <Button
               onClick={onReset}
               disabled={disabled || isLoading || isDownloading}

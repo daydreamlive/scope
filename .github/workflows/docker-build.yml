@@ -160,7 +160,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install fal
         run: pip install fal
@@ -170,6 +170,8 @@ jobs:
         env:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
+          set -euo pipefail
+
           PR_NUMBER="${{ needs.build-and-push.outputs.pr_number }}"
 
           APP_NAME="scope-pr-${PR_NUMBER}"
@@ -262,7 +264,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install uv
         run: pip install uv
@@ -285,8 +287,8 @@ jobs:
       - name: Build Scope app
         env:
           VITE_DAYDREAM_API_KEY: ${{ secrets.E2ES_DAYDREAM_API_KEY }}
-          VITE_DAYDREAM_AUTH_URL: https://app.daydream.monster/sign-in/local
-          VITE_DAYDREAM_API_BASE: https://api.daydream.monster
+          VITE_DAYDREAM_AUTH_URL: https://app.daydream.live/sign-in/local
+          VITE_DAYDREAM_API_BASE: https://api.daydream.live
         run: |
           echo "Building Scope with API key auth..."
           uv run build
@@ -296,7 +298,7 @@ jobs:
           SCOPE_CLOUD_APP_ID: ${{ needs.deploy-pr.outputs.fal_app_id }}
         run: |
           echo "Starting Scope with cloud app ID: $SCOPE_CLOUD_APP_ID"
-          uv run daydream-scope &
+          uv run daydream-scope > scope-app.log 2>&1 &
 
           echo "Waiting for localhost:8000 to be ready..."
           MAX_ATTEMPTS=60
@@ -325,7 +327,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: playwright-report-pr-${{ needs.build-and-push.outputs.pr_number }}
+          name: playwright-report
           path: e2e/playwright-report/
           retention-days: 30
 
@@ -333,8 +335,16 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-artifacts-pr-${{ needs.build-and-push.outputs.pr_number }}
+          name: test-artifacts
           path: e2e/test-results/
+          retention-days: 30
+
+      - name: Upload app logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scope-app-logs
+          path: scope-app.log
           retention-days: 30
 
       - name: Comment test results on PR
