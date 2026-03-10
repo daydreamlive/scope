@@ -278,6 +278,8 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
 
         vace_blocks = getattr(inner_model, "vace_blocks", None)
         if vace_blocks is not None:
+            self.components.vae.clear_cache()
+
             h = self.state.get("height")
             w = self.state.get("width")
             num_frames = (
