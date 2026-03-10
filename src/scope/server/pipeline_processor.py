@@ -36,6 +36,7 @@ def _has_native_vace(pipeline) -> bool:
     except (AttributeError, TypeError):
         return False
 
+
 SLEEP_TIME = 0.01
 
 # FPS calculation constants
