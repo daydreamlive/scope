@@ -2293,7 +2293,11 @@ async def set_tempo(request: TempoSetTempoRequest):
         tempo_sync.set_tempo(request.bpm)
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    # get_status reads from the poll-loop cache which may be stale.
+    # Patch the BPM to reflect what we just set so the response is correct.
     status = tempo_sync.get_status()
+    if status.get("beat_state"):
+        status["beat_state"]["bpm"] = request.bpm
     return TempoStatusResponse(**status)
 
 

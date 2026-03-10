@@ -12,38 +12,17 @@ import { Button } from "../ui/button";
 import type { TempoState } from "../../hooks/useTempoSync";
 import type { TempoSourcesResponse, TempoEnableRequest } from "../../lib/api";
 
-function BeatIndicator({
-  beatPhase,
-  barPosition,
-  beatsPerBar,
-}: {
-  beatPhase: number;
-  barPosition: number;
-  beatsPerBar: number;
-}) {
-  const currentBeat = Math.floor(barPosition);
+function BeatIndicator({ beatPhase }: { beatPhase: number }) {
   const brightness = 1 - beatPhase;
 
   return (
-    <div className="flex items-center gap-1.5">
-      {Array.from({ length: beatsPerBar }, (_, i) => {
-        const isActive = i === currentBeat;
-        return (
-          <div
-            key={i}
-            className="w-3 h-3 rounded-full border border-border transition-all duration-75"
-            style={{
-              backgroundColor: isActive
-                ? `rgba(255, 255, 255, ${0.3 + brightness * 0.7})`
-                : "rgba(255, 255, 255, 0.08)",
-              boxShadow: isActive
-                ? `0 0 ${4 + brightness * 6}px rgba(255, 255, 255, ${brightness * 0.5})`
-                : "none",
-            }}
-          />
-        );
-      })}
-    </div>
+    <div
+      className="w-3 h-3 rounded-full border border-border transition-all duration-75"
+      style={{
+        backgroundColor: `rgba(255, 255, 255, ${0.3 + brightness * 0.7})`,
+        boxShadow: `0 0 ${4 + brightness * 6}px rgba(255, 255, 255, ${brightness * 0.5})`,
+      }}
+    />
   );
 }
 
@@ -56,6 +35,10 @@ export function TempoSyncSection({
   onDisable,
   onSetBpm,
   onRefreshSources,
+  quantizeMode,
+  onQuantizeModeChange,
+  lookaheadMs,
+  onLookaheadMsChange,
 }: {
   tempoState: TempoState;
   sources: TempoSourcesResponse | null;
@@ -65,20 +48,25 @@ export function TempoSyncSection({
   onDisable: () => void;
   onSetBpm?: (bpm: number) => void;
   onRefreshSources: () => void;
+  quantizeMode?: string;
+  onQuantizeModeChange?: (mode: string) => void;
+  lookaheadMs?: number;
+  onLookaheadMsChange?: (ms: number) => void;
 }) {
   const [selectedSource, setSelectedSource] = useState<"link" | "midi_clock">(
     "link"
   );
   const [selectedMidiDevice, setSelectedMidiDevice] = useState<string>("");
   const [bpmInput, setBpmInput] = useState("120");
-  const [bpmInputFocused, setBpmInputFocused] = useState(false);
+  const bpmInputFocusedRef = useRef(false);
+  const [beatsPerBar, setBeatsPerBar] = useState(4);
   const sourcesLoaded = useRef(false);
 
   useEffect(() => {
-    if (tempoState.bpm !== null && !bpmInputFocused) {
+    if (tempoState.bpm !== null && !bpmInputFocusedRef.current) {
       setBpmInput(String(Math.round(tempoState.bpm)));
     }
-  }, [tempoState.bpm, bpmInputFocused]);
+  }, [tempoState.bpm]);
 
   useEffect(() => {
     if (sources && !sourcesLoaded.current) {
@@ -100,6 +88,7 @@ export function TempoSyncSection({
       const request: TempoEnableRequest = {
         source: selectedSource,
         bpm: parseFloat(bpmInput) || 120,
+        beats_per_bar: beatsPerBar,
       };
       if (selectedSource === "midi_clock" && selectedMidiDevice) {
         request.midi_device = selectedMidiDevice;
@@ -206,6 +195,29 @@ export function TempoSyncSection({
               </Select>
             </div>
           )}
+          <div className="space-y-2">
+            <LabelWithTooltip
+              label="Beats per Bar"
+              tooltip="Time signature: number of beats in each bar. Used for bar-aligned quantization and Link quantum."
+              className="text-xs text-muted-foreground"
+            />
+            <Select
+              value={String(beatsPerBar)}
+              onValueChange={v => setBeatsPerBar(Number(v))}
+              disabled={tempoState.enabled || loading}
+            >
+              <SelectTrigger className="h-8 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {[2, 3, 4, 5, 6, 7, 8].map(n => (
+                  <SelectItem key={n} value={String(n)}>
+                    {n}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </>
       )}
 
@@ -221,11 +233,7 @@ export function TempoSyncSection({
           </div>
 
           <div className="flex items-center justify-between">
-            <BeatIndicator
-              beatPhase={tempoState.beatPhase}
-              barPosition={tempoState.barPosition}
-              beatsPerBar={tempoState.beatsPerBar}
-            />
+            <BeatIndicator beatPhase={tempoState.beatPhase} />
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               {tempoState.sourceType === "link" &&
                 tempoState.numPeers !== null && (
@@ -247,8 +255,8 @@ export function TempoSyncSection({
                 step={1}
                 value={bpmInput}
                 onChange={e => setBpmInput(e.target.value)}
-                onFocus={() => setBpmInputFocused(true)}
-                onBlur={() => setBpmInputFocused(false)}
+                onFocus={() => (bpmInputFocusedRef.current = true)}
+                onBlur={() => (bpmInputFocusedRef.current = false)}
                 onKeyDown={e => {
                   if (e.key === "Enter") {
                     const val = parseFloat(bpmInput);
@@ -272,6 +280,57 @@ export function TempoSyncSection({
           )}
         </div>
       )}
+
+      {tempoState.enabled && onQuantizeModeChange && (
+        <div className="space-y-2">
+          <LabelWithTooltip
+            label="Beat Quantize"
+            tooltip="Schedule discrete parameter changes to land on beat boundaries. Changes are applied ahead of time so the visual transition aligns with the beat."
+            className="text-xs text-muted-foreground"
+          />
+          <Select
+            value={quantizeMode || "none"}
+            onValueChange={onQuantizeModeChange}
+          >
+            <SelectTrigger className="h-8 text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Immediate</SelectItem>
+              <SelectItem value="beat">Beat</SelectItem>
+              <SelectItem value="bar">Bar</SelectItem>
+              <SelectItem value="2_bar">2 Bars</SelectItem>
+              <SelectItem value="4_bar">4 Bars</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {tempoState.enabled &&
+        onLookaheadMsChange &&
+        (quantizeMode || "none") !== "none" && (
+          <div className="space-y-2">
+            <LabelWithTooltip
+              label="Lookahead"
+              tooltip="Compensate for pipeline latency by applying parameter changes this many milliseconds before the beat boundary. Increase if visual changes arrive late; decrease if they arrive early."
+              className="text-xs text-muted-foreground"
+            />
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={1000}
+                step={10}
+                value={lookaheadMs ?? 0}
+                onChange={e => onLookaheadMsChange(Number(e.target.value))}
+                className="flex-1 h-1.5 accent-foreground"
+              />
+              <span className="text-xs font-mono tabular-nums w-12 text-right text-muted-foreground">
+                {lookaheadMs ?? 0}ms
+              </span>
+            </div>
+          </div>
+        )}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

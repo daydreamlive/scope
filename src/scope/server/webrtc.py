@@ -134,7 +134,8 @@ class NotificationSender:
                 def send_sync():
                     try:
                         self.data_channel.send(message_str)
-                        logger.info(f"Sent notification to frontend: {message}")
+                        if message.get("type") != "tempo_update":
+                            logger.info(f"Sent notification to frontend: {message}")
                     except Exception as e:
                         logger.error(f"Failed to send notification: {e}")
 
@@ -363,9 +364,20 @@ class WebRTCManager:
                         data = json.loads(message)
                         logger.info(f"Received parameter update: {data}")
 
-                        # Check for paused parameter and call pause() method on video track
+                        # Always handle paused immediately (before quantized
+                        # scheduling) so pause/unpause is never delayed.
                         if "paused" in data and session.video_track:
                             session.video_track.pause(data["paused"])
+
+                        # Check for quantized update flag
+                        if data.pop("_quantized", False):
+                            if session.video_track and hasattr(
+                                session.video_track, "frame_processor"
+                            ):
+                                session.video_track.frame_processor.schedule_quantized_update(
+                                    data
+                                )
+                            return
 
                         # Send parameters to the frame processor
                         if session.video_track and hasattr(
