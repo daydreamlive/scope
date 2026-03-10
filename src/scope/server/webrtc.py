@@ -652,8 +652,13 @@ class WebRTCManager:
                 continue
             if "paused" in parameters and session.video_track:
                 session.video_track.pause(parameters["paused"])
-            if session.video_track and hasattr(session.video_track, "frame_processor"):
-                session.video_track.frame_processor.update_parameters(parameters)
+            fp = (
+                getattr(session.video_track, "frame_processor", None)
+                if session.video_track
+                else None
+            )
+            if fp is not None:
+                fp.update_parameters(parameters)
 
     async def stop(self):
         """Close and cleanup all sessions."""

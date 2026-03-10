@@ -172,7 +172,14 @@ class ModuleTargetedLoRAStrategy:
 
             logger.info(f"{logger_prefix}Loaded LongLive LoRA: {lora_path}")
 
-            return [{"path": adapter_path, "scale": scale}]
+            from pathlib import Path as _Path
+
+            from ..utils import sanitize_adapter_name
+
+            adapter_name = sanitize_adapter_name(_Path(adapter_path).stem)
+            return [
+                {"adapter_name": adapter_name, "path": adapter_path, "scale": scale}
+            ]
 
         except Exception as e:
             logger.error(

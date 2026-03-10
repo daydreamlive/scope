@@ -14,6 +14,7 @@ import type {
   LoRAFilesResponse,
   LoRAInstallRequest,
   LoRAInstallResponse,
+  LoadedLoRAAdaptersResponse,
   AssetsResponse,
   AssetFileInfo,
   WebRTCOfferRequest,
@@ -104,6 +105,14 @@ export function useApi() {
     },
     [adapter, isCloudMode]
   );
+
+  const getLoadedLoRAAdapters =
+    useCallback(async (): Promise<LoadedLoRAAdaptersResponse> => {
+      if (isCloudMode && adapter) {
+        return adapter.api.getLoadedLoRAAdapters();
+      }
+      return api.getLoadedLoRAAdapters();
+    }, [adapter, isCloudMode]);
 
   // Asset APIs
   const listAssets = useCallback(
@@ -205,6 +214,7 @@ export function useApi() {
     // LoRA
     listLoRAFiles,
     installLoRAFile,
+    getLoadedLoRAAdapters,
 
     // Assets
     listAssets,

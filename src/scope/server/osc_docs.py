@@ -155,6 +155,42 @@ def _collect_pipeline_paths() -> dict[str, list[dict[str, Any]]]:
     return pipeline_paths
 
 
+def _collect_lora_paths(
+    pipeline_manager: "PipelineManager | None",
+) -> list[dict[str, Any]]:
+    """Build OSC path entries for each currently loaded LoRA adapter."""
+    if not pipeline_manager:
+        return []
+    loaded = pipeline_manager.get_loaded_lora_adapters()
+    logger.debug(
+        "_collect_lora_paths: got %d loaded adapter(s): %s",
+        len(loaded),
+        [a.get("adapter_name", a.get("path", "")) for a in loaded],
+    )
+    paths: list[dict[str, Any]] = []
+    for i, adapter in enumerate(loaded):
+        adapter_path = adapter.get("path", "")
+        adapter_name = adapter.get("adapter_name", "")
+        filename = (
+            adapter_path.rsplit("/", 1)[-1]
+            if "/" in adapter_path
+            else (adapter_path or f"slot {i}")
+        )
+        paths.append(
+            {
+                "key": f"lora/{i}/scale",
+                "type": "float",
+                "description": f"Scale for LoRA adapter {i} ({filename})",
+                "min": -10.0,
+                "max": 10.0,
+                "osc_address": f"/scope/lora/{i}/scale",
+                "lora_path": adapter_path,
+                "lora_adapter_name": adapter_name,
+            }
+        )
+    return paths
+
+
 def get_osc_paths(
     pipeline_manager: "PipelineManager | None",
 ) -> dict[str, Any]:
@@ -177,6 +213,11 @@ def get_osc_paths(
     for p in _RUNTIME_PARAMS:
         runtime_list.append({**p, "osc_address": f"/scope/{p['key']}"})
     active_groups["Runtime"] = runtime_list
+
+    # LoRA adapter scale paths (only present when adapters are loaded)
+    lora_paths = _collect_lora_paths(pipeline_manager)
+    if lora_paths:
+        active_groups["LoRA Adapters"] = lora_paths
 
     for pid, paths in pipeline_paths.items():
         target = active_groups if pid in active_pipeline_ids else available_groups

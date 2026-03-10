@@ -47,6 +47,8 @@ from scope.core.workflows.resolve import (
 )
 
 from .cloud_proxy import (
+    CLOUD_REQUEST_FAILED,
+    _proxy_to_cloud,
     cloud_proxy,
     get_hardware_info_from_cloud,
     proxy_with_body,
@@ -100,6 +102,8 @@ from .schema import (
     IceCandidateRequest,
     IceServerConfig,
     IceServersResponse,
+    LoadedLoRAAdapterInfo,
+    LoadedLoRAAdaptersResponse,
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
@@ -561,8 +565,37 @@ async def root():
     return {"message": "Scope API - Frontend index.html not found"}
 
 
+async def _refresh_cloud_lora_cache(
+    cloud_manager: "CloudConnectionManager",
+    pipeline_manager: "PipelineManager",
+) -> None:
+    """Fetch loaded LoRA adapters from cloud and update the local cache.
+
+    Called as a fire-and-forget task after a cloud pipeline load so the OSC
+    server has authoritative adapter data without continuous polling.
+    """
+    try:
+        response = await cloud_manager.api_request(
+            method="GET",
+            path="/api/v1/loras/loaded",
+            timeout=10.0,
+        )
+        data = response.get("data", response)
+        adapters = data.get("adapters", [])
+        pipeline_manager.update_loaded_lora_cache(adapters)
+        logger.info(
+            "_refresh_cloud_lora_cache: cached %d adapter(s) from cloud",
+            len(adapters),
+        )
+        logger.debug(
+            "_refresh_cloud_lora_cache: adapter ids=%s",
+            [a.get("adapter_name", a.get("path", "")) for a in adapters],
+        )
+    except Exception as e:
+        logger.warning("_refresh_cloud_lora_cache: failed to fetch from cloud: %s", e)
+
+
 @app.post("/api/v1/pipeline/load")
-@cloud_proxy(timeout=60.0)
 async def load_pipeline(
     request: PipelineLoadRequest,
     http_request: Request,
@@ -585,6 +618,26 @@ async def load_pipeline(
 
         # load_params is already a dict (or None)
         load_params_dict = request.load_params
+
+        # Always store load context locally so the OSC server can discover
+        # LoRA adapters even when the pipeline runs on a remote host.
+        pipeline_manager.store_load_context(pipeline_ids, load_params_dict)
+
+        if cloud_manager and cloud_manager.is_connected:
+            result = await _proxy_to_cloud(
+                cloud_manager,
+                http_request,
+                http_request.url.path,
+                http_request.method.upper(),
+                60.0,
+                CLOUD_REQUEST_FAILED,
+            )
+            # Refresh the local LoRA adapter cache from cloud so OSC stays
+            # accurate without relying on the load-params guess.
+            asyncio.create_task(
+                _refresh_cloud_lora_cache(cloud_manager, pipeline_manager)
+            )
+            return result
 
         # Local mode: start loading in background without blocking
         asyncio.create_task(
@@ -706,11 +759,18 @@ async def update_osc_settings(request: OscSettingsRequest):
 @app.get("/api/v1/osc/paths")
 async def osc_paths(
     pm: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Return all OSC paths split into active / available sections."""
     from .osc_docs import get_osc_paths
 
-    return get_osc_paths(pm)
+    if cloud_manager and cloud_manager.is_connected:
+        await _refresh_cloud_lora_cache(cloud_manager, pm)
+
+    result = get_osc_paths(pm)
+    lora_count = len(result.get("active", {}).get("LoRA Adapters", []))
+    logger.debug("osc_paths: active LoRA adapter paths=%d", lora_count)
+    return result
 
 
 @app.get("/api/v1/osc/stream")
@@ -750,13 +810,18 @@ async def osc_sse_stream():
 @app.get("/api/v1/osc/docs")
 async def osc_docs_page(
     pm: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Serve a self-contained HTML reference page for OSC control."""
     from .osc_docs import render_osc_docs_html
 
+    if cloud_manager and cloud_manager.is_connected:
+        await _refresh_cloud_lora_cache(cloud_manager, pm)
+
     srv = get_osc_server()
     port = srv.port if srv else 8000
     html_content = render_osc_docs_html(pm, port)
+    logger.debug("osc_docs_page: rendered docs on port=%d", port)
     return Response(content=html_content, media_type="text/html")
 
 
@@ -817,7 +882,25 @@ async def handle_webrtc_offer(
         # If connected to cloud, use cloud mode (video flows through backend)
         if cloud_manager.is_connected:
             logger.info("Using relay mode - video will flow through backend to cloud")
-            return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
+            initial_params = request.initialParameters or {}
+            pipeline_ids = initial_params.get("pipeline_ids") or []
+            if initial_params.get("loras") is not None:
+                pipeline_manager.store_load_context(pipeline_ids, initial_params)
+                logger.debug(
+                    "handle_webrtc_offer: stored cloud LoRA context from initialParameters "
+                    "(pipeline_ids=%s, loras=%d)",
+                    pipeline_ids,
+                    len(initial_params.get("loras") or []),
+                )
+
+            result = await webrtc_manager.handle_offer_with_relay(
+                request, cloud_manager
+            )
+            # Best-effort cloud refresh so OSC docs/path inventory converges quickly.
+            asyncio.create_task(
+                _refresh_cloud_lora_cache(cloud_manager, pipeline_manager)
+            )
+            return result
 
         # Local mode: ensure pipeline is loaded before proceeding
         status_info = await pipeline_manager.get_status_info_async()
@@ -1009,6 +1092,31 @@ async def list_lora_files(
     except Exception as e:  # pragma: no cover - defensive logging
         logger.error(f"list_lora_files: Error listing LoRA files: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/loras/loaded", response_model=LoadedLoRAAdaptersResponse)
+@cloud_proxy()
+async def get_loaded_lora_adapters(
+    http_request: Request,
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Return currently loaded LoRA adapter instances.
+
+    When cloud mode is active, proxies to the cloud backend so the response
+    always reflects the actual runtime state.
+    """
+    raw = pipeline_manager.get_loaded_lora_adapters()
+    adapters = [
+        LoadedLoRAAdapterInfo(
+            adapter_name=a.get("adapter_name", a.get("path", "")),
+            path=a.get("path", ""),
+            scale=a.get("scale", 1.0),
+            merge_mode=a.get("merge_mode"),
+        )
+        for a in raw
+    ]
+    return LoadedLoRAAdaptersResponse(adapters=adapters)
 
 
 class LoRAInstallRequest(BaseModel):
@@ -2492,6 +2600,7 @@ async def connect_to_cloud(
 @app.post("/api/v1/cloud/disconnect", response_model=CloudStatusResponse)
 async def disconnect_from_cloud(
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
 ):
     """Disconnect from cloud.
 
@@ -2500,6 +2609,7 @@ async def disconnect_from_cloud(
     """
     try:
         await cloud_manager.disconnect()
+        pipeline_manager.clear_loaded_lora_cache()
         credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
         return CloudStatusResponse(
             connected=False,

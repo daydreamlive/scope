@@ -33,6 +33,7 @@ import type {
   LoRAFilesResponse,
   LoRAInstallRequest,
   LoRAInstallResponse,
+  LoadedLoRAAdaptersResponse,
   AssetsResponse,
   AssetFileInfo,
 } from "./api";
@@ -425,6 +426,9 @@ export class CloudAdapter {
 
     installLoRAFile: (data: LoRAInstallRequest): Promise<LoRAInstallResponse> =>
       this.apiRequest("POST", "/api/v1/loras", data, 300000),
+
+    getLoadedLoRAAdapters: (): Promise<LoadedLoRAAdaptersResponse> =>
+      this.apiRequest("GET", "/api/v1/loras/loaded"),
 
     listAssets: (type?: "image" | "video"): Promise<AssetsResponse> =>
       this.apiRequest(

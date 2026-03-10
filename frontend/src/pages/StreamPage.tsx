@@ -150,16 +150,6 @@ export function StreamPage() {
   const hasAvailableOutputs =
     spoutAvailable || ndiOutputAvailable || syphonOutputAvailable;
 
-  // Combined refresh function for pipeline schemas, pipelines list, and hardware info
-  const handlePipelinesRefresh = useCallback(async () => {
-    // Refresh all hooks to keep them in sync when cloud mode toggles
-    await Promise.all([
-      refreshPipelineSchemas(),
-      refreshPipelines(),
-      refreshHardwareInfo(),
-    ]);
-  }, [refreshPipelineSchemas, refreshPipelines, refreshHardwareInfo]);
-
   // Prompt state - use unified default prompts based on mode
   const initialMode =
     settings.inputMode || getPipelineDefaultMode(settings.pipelineId);
@@ -305,7 +295,23 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
+    checkStatus: checkPipelineStatus,
   } = usePipeline();
+
+  // Combined refresh function for pipeline schemas, pipelines list, and hardware info
+  const handlePipelinesRefresh = useCallback(async () => {
+    await Promise.all([
+      refreshPipelineSchemas(),
+      refreshPipelines(),
+      refreshHardwareInfo(),
+      checkPipelineStatus(),
+    ]);
+  }, [
+    refreshPipelineSchemas,
+    refreshPipelines,
+    refreshHardwareInfo,
+    checkPipelineStatus,
+  ]);
 
   // WebRTC for streaming (unified hook works in both local and cloud modes)
   const {
@@ -1290,6 +1296,20 @@ export function StreamPage() {
           break;
         }
         default: {
+          // LoRA adapter scale updates (e.g. "lora/0/scale")
+          const loraMatch = key.match(/^lora\/(\d+)\/scale$/);
+          if (loraMatch) {
+            const loraIndex = parseInt(loraMatch[1], 10);
+            const currentLoras = settings.loras || [];
+            if (loraIndex < currentLoras.length) {
+              const updatedLoras = currentLoras.map((lora, i) =>
+                i === loraIndex ? { ...lora, scale: Number(value) } : lora
+              );
+              handleLorasChange(updatedLoras);
+            }
+            break;
+          }
+
           // Pipeline-specific runtime params:
           // update frontend override state first, then forward to backend.
           if (pipelineHasRuntimeField(settings.pipelineId, key)) {
