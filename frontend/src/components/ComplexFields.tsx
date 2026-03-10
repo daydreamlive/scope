@@ -513,14 +513,14 @@ export function SchemaComplexField({
                     v === "none" ? null : (v as "fp8_e4m3fn")
                   )
                 }
-                disabled={(ctx.isStreaming ?? false) || vaceFp8Blocked}
+                disabled={ctx.isStreaming ?? false}
               >
                 <SelectTrigger className="w-[140px] h-7">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">None</SelectItem>
-                  <SelectItem value="fp8_e4m3fn">
+                  <SelectItem value="fp8_e4m3fn" disabled={vaceFp8Blocked}>
                     fp8_e4m3fn (Dynamic)
                   </SelectItem>
                 </SelectContent>
@@ -528,8 +528,7 @@ export function SchemaComplexField({
             </div>
             {vaceFp8Blocked && (
               <p className="text-xs text-muted-foreground">
-                Disabled because VACE is enabled. Disable VACE to use FP8
-                quantization.
+                FP8 quantization is unavailable while VACE is enabled.
               </p>
             )}
           </div>

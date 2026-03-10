@@ -267,7 +267,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         return {"video": postprocess_chunk(self.state.values["output_video"])}
 
     def _warmup(self, inner_model):
-        print("Running warmup iteration...")
+        logger.info("Running warmup iteration...")
         start = time.time()
 
         warmup_prompt = [{"text": "warmup", "weight": 100}]
@@ -276,20 +276,31 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
         inner_model.fill_level = inner_model.cache_tokens
         _ = self(prompts=warmup_prompt, init_cache=False)
 
-        if inner_model.vace_blocks is not None:
-            h = self.state.get("height") // 8
-            w = self.state.get("width") // 8
-            f = self.components.config.num_frame_per_block
-            self.state.set(
-                "vace_context",
-                [torch.randn(96, f, h, w, device="cuda", dtype=torch.bfloat16)],
+        vace_blocks = getattr(inner_model, "vace_blocks", None)
+        if vace_blocks is not None:
+            h = self.state.get("height")
+            w = self.state.get("width")
+            num_frames = (
+                self.components.config.num_frame_per_block
+                * self.components.config.vae_temporal_downsample_factor
             )
-            _ = self(prompts=warmup_prompt, init_cache=False)
+            dummy_vace_input = torch.zeros(
+                1, 3, num_frames, h, w, device="cuda", dtype=torch.bfloat16
+            )
+            _ = self(
+                prompts=warmup_prompt,
+                init_cache=False,
+                vace_input_frames=dummy_vace_input,
+            )
 
         # Reset state after warmup
         inner_model.fill_level = 0
         self.state.set("vace_context", None)
+        self.state.set("vace_input_frames", None)
+        self.state.set("vace_input_masks", None)
+        if vace_blocks is not None:
+            self.blocks.sub_blocks["vace_encoding"].clear_encoder_caches()
         self.first_call = True
         self.last_mode = None
 
-        print(f"Warmup completed in {time.time() - start:.2f}s")
+        logger.info(f"Warmup completed in {time.time() - start:.2f}s")
