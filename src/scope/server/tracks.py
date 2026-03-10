@@ -35,6 +35,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         user_id: str | None = None,
         connection_id: str | None = None,
         connection_info: dict | None = None,
+        frame_processor: "FrameProcessor | None" = None,
     ):
         super().__init__()
         self.pipeline_manager = pipeline_manager
@@ -49,7 +50,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.fps = fps
         self.frame_ptime = 1.0 / fps
 
-        self.frame_processor = None
+        self.frame_processor = frame_processor
         self.input_task = None
         self.input_task_running = False
         self._paused = False
@@ -120,17 +121,12 @@ class VideoProcessingTrack(MediaStreamTrack):
         return self._fallback_pts, VIDEO_TIME_BASE
 
     def initialize_output_processing(self):
+        """No-op guard; FrameProcessor is injected via constructor."""
         if not self.frame_processor:
-            self.frame_processor = FrameProcessor(
-                pipeline_manager=self.pipeline_manager,
-                initial_parameters=self.initial_parameters,
-                notification_callback=self.notification_callback,
-                session_id=self.session_id,
-                user_id=self.user_id,
-                connection_id=self.connection_id,
-                connection_info=self.connection_info,
+            raise RuntimeError(
+                "VideoProcessingTrack requires a FrameProcessor. "
+                "Pass one via the constructor."
             )
-            self.frame_processor.start()
 
     def initialize_input_processing(self, track: MediaStreamTrack):
         self.track = track
@@ -205,8 +201,8 @@ class VideoProcessingTrack(MediaStreamTrack):
             except asyncio.CancelledError:
                 pass
 
-        if self.frame_processor is not None:
-            self.frame_processor.stop()
+        # Note: frame_processor.stop() is handled by Session.close(),
+        # not here, because the FrameProcessor is shared with AudioProcessingTrack.
 
         super().stop()
 
