@@ -138,17 +138,17 @@ export function Header({
             onClick={handleCloudIconClick}
             className={`hover:opacity-80 transition-opacity h-8 gap-1.5 px-2 ${
               isConnected
-                ? "text-green-500 opacity-80"
+                ? "text-green-500 opacity-100"
                 : isConnecting
-                  ? "text-amber-400 opacity-80"
-                  : "text-muted-foreground opacity-60"
+                  ? "text-amber-400 opacity-100"
+                  : "text-muted-foreground opacity-80"
             }`}
             title={
               isConnected
                 ? "Cloud connected"
                 : isConnecting
                   ? "Connecting to cloud..."
-                  : "Cloud disconnected"
+                  : "Enable remote inference"
             }
           >
             {isConnected ? (
@@ -163,14 +163,14 @@ export function Header({
                 ? "Connected"
                 : isConnecting
                   ? "Connecting..."
-                  : "Disconnected"}
+                  : "Enable Remote Inference"}
             </span>
           </Button>
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setPluginsOpen(true)}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-60 h-8 w-8"
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 w-8"
             title="Plugins"
           >
             <Plug className="h-5 w-5" />
@@ -179,7 +179,7 @@ export function Header({
             variant="ghost"
             size="icon"
             onClick={() => setSettingsOpen(true)}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-60 h-8 w-8"
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 w-8"
             title="Settings"
           >
             <Settings className="h-5 w-5" />
