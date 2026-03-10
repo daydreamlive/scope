@@ -81,22 +81,27 @@ jobs:
           SUFFIX="${{ inputs.suffix }}"
 
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            # Manual dispatch: use provided version + latest
             VERSION="${{ github.event.inputs.version }}"
             TAGS="$DOCKERHUB:$VERSION$SUFFIX,$DOCKERHUB:latest$SUFFIX"
             TAGS="$TAGS,$GHCR:$VERSION$SUFFIX,$GHCR:latest$SUFFIX"
           elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            # Git tag: extract version (e.g., v0.1.0 -> 0.1.0) + latest
             VERSION_TAG="${{ github.ref_name }}"
-            VERSION="${VERSION_TAG#v}"
+            VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
             TAGS="$DOCKERHUB:$VERSION$SUFFIX,$DOCKERHUB:latest$SUFFIX"
             TAGS="$TAGS,$GHCR:$VERSION$SUFFIX,$GHCR:latest$SUFFIX"
           elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            # Main branch
             SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
             TAGS="$DOCKERHUB:main$SUFFIX,$DOCKERHUB:$SHORT_SHA$SUFFIX"
             TAGS="$TAGS,$GHCR:main$SUFFIX,$GHCR:$SHORT_SHA$SUFFIX"
           elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
+            # Runpod serverless branch
             TAGS="$DOCKERHUB:runpod-serverless$SUFFIX"
             TAGS="$TAGS,$GHCR:runpod-serverless$SUFFIX"
           elif [ "${{ github.event_name }}" == "pull_request" ]; then
+            # Pull request: use sanitized branch name + short SHA
             BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
             SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
             TAGS="$DOCKERHUB:$BRANCH_TAG$SUFFIX,$DOCKERHUB:$SHORT_SHA$SUFFIX"
