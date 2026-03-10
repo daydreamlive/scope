@@ -11,6 +11,7 @@ import {
 import { Button } from "../ui/button";
 import type { TempoState } from "../../hooks/useTempoSync";
 import type { TempoSourcesResponse, TempoEnableRequest } from "../../lib/api";
+import { ModulationSection, type ModulationsState } from "./ModulationSection";
 
 function BeatIndicator({ beatPhase }: { beatPhase: number }) {
   const brightness = 1 - beatPhase;
@@ -39,6 +40,8 @@ export function TempoSyncSection({
   onQuantizeModeChange,
   lookaheadMs,
   onLookaheadMsChange,
+  modulations,
+  onModulationsChange,
 }: {
   tempoState: TempoState;
   sources: TempoSourcesResponse | null;
@@ -52,6 +55,8 @@ export function TempoSyncSection({
   onQuantizeModeChange?: (mode: string) => void;
   lookaheadMs?: number;
   onLookaheadMsChange?: (ms: number) => void;
+  modulations?: ModulationsState;
+  onModulationsChange?: (modulations: ModulationsState) => void;
 }) {
   const [selectedSource, setSelectedSource] = useState<"link" | "midi_clock">(
     "link"
@@ -331,6 +336,13 @@ export function TempoSyncSection({
             </div>
           </div>
         )}
+
+      {tempoState.enabled && onModulationsChange && (
+        <ModulationSection
+          modulations={modulations ?? {}}
+          onModulationsChange={onModulationsChange}
+        />
+      )}
 
       {error && <p className="text-xs text-destructive">{error}</p>}
     </div>

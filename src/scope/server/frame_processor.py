@@ -9,6 +9,7 @@ import torch
 from aiortc.mediastreams import VideoFrame
 
 from .kafka_publisher import publish_event
+from .modulation import ModulationEngine
 from .parameter_scheduler import ParameterScheduler
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
@@ -67,6 +68,11 @@ class FrameProcessor:
             )
             if tempo_sync is not None
             else None
+        )
+
+        # Modulation engine for continuous beat-synced parameter oscillation
+        self.modulation_engine: ModulationEngine | None = (
+            ModulationEngine() if tempo_sync is not None else None
         )
 
         # Session ID for Kafka event tracking
@@ -636,6 +642,10 @@ class FrameProcessor:
             input_source_config = parameters.pop("input_source")
             self._update_input_source(input_source_config)
 
+        # Intercept modulation config and route to ModulationEngine
+        if self.modulation_engine is not None and "modulations" in parameters:
+            self.modulation_engine.update(parameters.pop("modulations"))
+
         # Intercept client-forwarded beat state and route to TempoSync
         # (beat state is injected into call_params by PipelineProcessor,
         # not through the regular parameter queue)
@@ -973,6 +983,7 @@ class FrameProcessor:
                 connection_id=self.connection_id,
                 connection_info=self.connection_info,
                 tempo_sync=self.tempo_sync,
+                modulation_engine=self.modulation_engine,
             )
 
             self.pipeline_processors.append(processor)

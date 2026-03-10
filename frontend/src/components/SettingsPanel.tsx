@@ -61,6 +61,7 @@ import {
 } from "./ComplexFields";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
 import { TempoSyncSection } from "./settings/TempoSyncSection";
+import type { ModulationsState } from "./settings/ModulationSection";
 import type { TempoState } from "../hooks/useTempoSync";
 import type { TempoSourcesResponse, TempoEnableRequest } from "../lib/api";
 
@@ -374,6 +375,9 @@ interface SettingsPanelProps {
   // Beat-sync lookahead
   lookaheadMs?: number;
   onLookaheadMsChange?: (ms: number) => void;
+  // Beat-synced modulation
+  modulations?: ModulationsState;
+  onModulationsChange?: (modulations: ModulationsState) => void;
 }
 
 export function SettingsPanel({
@@ -434,6 +438,8 @@ export function SettingsPanel({
   onQuantizeModeChange,
   lookaheadMs,
   onLookaheadMsChange,
+  modulations,
+  onModulationsChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -1263,6 +1269,8 @@ export function SettingsPanel({
             onQuantizeModeChange={onQuantizeModeChange}
             lookaheadMs={lookaheadMs}
             onLookaheadMsChange={onLookaheadMsChange}
+            modulations={modulations}
+            onModulationsChange={onModulationsChange}
           />
         )}
       </CardContent>

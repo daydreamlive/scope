@@ -174,6 +174,7 @@ def _register_pipelines():
         ("gray", ".gray.pipeline", "GrayPipeline"),
         ("optical_flow", ".optical_flow.pipeline", "OpticalFlowPipeline"),
         ("metronome", ".metronome.pipeline", "MetronomePipeline"),
+        ("mod-scope", ".mod_scope.pipeline", "ModScopePipeline"),
     ]
 
     # Try to import and register each pipeline

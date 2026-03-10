@@ -106,6 +106,17 @@ export interface SettingsState {
   quantizeMode?: "none" | "beat" | "bar" | "2_bar" | "4_bar";
   // Lookahead in ms for beat-sync scheduling (compensates for pipeline latency)
   lookaheadMs?: number;
+  // Beat-synced parameter modulation configs
+  modulations?: Record<
+    string,
+    {
+      enabled: boolean;
+      shape: string;
+      depth: number;
+      rate: string;
+      base_value: number;
+    }
+  >;
   // Dynamic schema-driven fields (key = schema field name snake_case, value = parsed value)
   schemaFieldOverrides?: Record<string, unknown>;
   // Schema-driven overrides for preprocessor/postprocessor plugin configs
