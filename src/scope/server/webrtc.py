@@ -652,7 +652,10 @@ class WebRTCManager:
                 continue
             if "paused" in parameters and session.video_track:
                 session.video_track.pause(parameters["paused"])
-            if session.video_track and hasattr(session.video_track, "frame_processor"):
+            if (
+                session.video_track
+                and getattr(session.video_track, "frame_processor", None) is not None
+            ):
                 session.video_track.frame_processor.update_parameters(parameters)
 
     async def stop(self):
