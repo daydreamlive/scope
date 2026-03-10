@@ -296,9 +296,10 @@ jobs:
       - name: Start Scope app
         env:
           SCOPE_CLOUD_APP_ID: ${{ needs.deploy-pr.outputs.fal_app_id }}
+          SCOPE_DEBUG_ENDPOINTS: "1"
         run: |
           echo "Starting Scope with cloud app ID: $SCOPE_CLOUD_APP_ID"
-          uv run daydream-scope > scope-app.log 2>&1 &
+          SCOPE_DEBUG_ENDPOINTS=1 uv run daydream-scope > scope-app.log 2>&1 &
 
           echo "Waiting for localhost:8000 to be ready..."
           MAX_ATTEMPTS=60

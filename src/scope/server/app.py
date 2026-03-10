@@ -2558,8 +2558,20 @@ async def debug_disconnect_webrtc(
     This endpoint is intended for E2E testing of the reconnection logic.
     It triggers the same code path as a real network disconnect.
 
+    Only available when SCOPE_DEBUG_ENDPOINTS=1 environment variable is set.
+
     Returns the cloud status after triggering the disconnect.
     """
+    import os
+
+    # Guard: Only allow in development/testing environments
+    if not os.environ.get("SCOPE_DEBUG_ENDPOINTS"):
+        logger.warning("Debug endpoint called but SCOPE_DEBUG_ENDPOINTS not set")
+        raise HTTPException(
+            status_code=404,
+            detail="Not found",
+        )
+
     if not cloud_manager.webrtc_connected:
         raise HTTPException(
             status_code=400,

@@ -82,6 +82,8 @@ class CloudConnectionManager:
         self._webrtc_reconnect_attempts: int = 0
         self._max_webrtc_reconnect_attempts: int = 3
         self._last_webrtc_params: dict | None = None
+        # Flag to track if we're in a reconnection attempt (prevents budget reset)
+        self._is_reconnecting: bool = False
 
         # Stats tracking
         self._stats = {
@@ -633,12 +635,15 @@ class CloudConnectionManager:
         self._connect_stage = "Setting up video stream..."
         self._webrtc_client = CloudWebRTCClient(self)
 
-        # Store parameters for potential reconnection
-        self._last_webrtc_params = initial_parameters
+        # Store parameters for potential reconnection (only on fresh start)
+        if initial_parameters is not None:
+            self._last_webrtc_params = initial_parameters
 
-        # Clear any previous error state
-        self._webrtc_error = None
-        self._webrtc_reconnect_attempts = 0
+        # Clear error state only on fresh connection (not during reconnection)
+        # This prevents resetting the reconnect attempt budget mid-reconnection
+        if not self._is_reconnecting:
+            self._webrtc_error = None
+            self._webrtc_reconnect_attempts = 0
 
         # Register frame callback to update stats and forward to subscribers
         self._webrtc_client.output_handler.add_callback(self._on_frame_from_cloud)
@@ -696,54 +701,68 @@ class CloudConnectionManager:
     async def _attempt_webrtc_reconnect(self) -> None:
         """Attempt to reconnect WebRTC with exponential backoff."""
         backoff_seconds = [1, 2, 4]  # Exponential backoff
+        self._is_reconnecting = True
 
-        while self._webrtc_reconnect_attempts < self._max_webrtc_reconnect_attempts:
-            if not self.is_connected:
-                logger.info("Cloud connection lost, aborting WebRTC reconnection")
-                break
+        try:
+            while self._webrtc_reconnect_attempts < self._max_webrtc_reconnect_attempts:
+                if not self.is_connected:
+                    logger.info("Cloud connection lost, aborting WebRTC reconnection")
+                    break
 
-            attempt = self._webrtc_reconnect_attempts + 1
-            delay = backoff_seconds[min(attempt - 1, len(backoff_seconds) - 1)]
+                attempt = self._webrtc_reconnect_attempts + 1
+                delay = backoff_seconds[min(attempt - 1, len(backoff_seconds) - 1)]
 
-            logger.info(
-                f"Attempting WebRTC reconnection ({attempt}/{self._max_webrtc_reconnect_attempts}) "
-                f"in {delay}s..."
-            )
-            await asyncio.sleep(delay)
+                logger.info(
+                    f"Attempting WebRTC reconnection ({attempt}/{self._max_webrtc_reconnect_attempts}) "
+                    f"in {delay}s..."
+                )
+                await asyncio.sleep(delay)
 
-            try:
-                # Clean up old client
-                if self._webrtc_client is not None:
-                    try:
-                        await self._webrtc_client.disconnect()
-                    except Exception:
-                        pass
-                    self._webrtc_client = None
+                # Check if connection recovered during backoff (race condition fix)
+                if self.webrtc_connected:
+                    logger.info("WebRTC recovered during backoff, aborting reconnection")
+                    self._webrtc_error = None
+                    self._webrtc_reconnect_attempts = 0
+                    return
 
-                # Reconnect with last known parameters
-                await self.start_webrtc(self._last_webrtc_params)
+                # Also check if cloud connection was lost during sleep
+                if not self.is_connected:
+                    logger.info("Cloud connection lost during backoff, aborting")
+                    break
 
-                # Success!
-                logger.info("WebRTC reconnection successful")
-                self._webrtc_error = None
-                self._webrtc_reconnect_attempts = 0
-                self._webrtc_reconnect_task = None
-                return
+                try:
+                    # Clean up old client
+                    if self._webrtc_client is not None:
+                        try:
+                            await self._webrtc_client.disconnect()
+                        except Exception:
+                            pass
+                        self._webrtc_client = None
 
-            except Exception as e:
-                self._webrtc_reconnect_attempts += 1
-                logger.error(f"WebRTC reconnection attempt {attempt} failed: {e}")
+                    # Reconnect with last known parameters
+                    await self.start_webrtc(self._last_webrtc_params)
 
-        # All attempts exhausted
-        if self._webrtc_reconnect_attempts >= self._max_webrtc_reconnect_attempts:
-            self._webrtc_error = (
-                "Remote inference connection lost. "
-                "Reconnection failed after multiple attempts. "
-                "Please toggle cloud mode off and on to reconnect."
-            )
-            logger.error(self._webrtc_error)
+                    # Success!
+                    logger.info("WebRTC reconnection successful")
+                    self._webrtc_error = None
+                    self._webrtc_reconnect_attempts = 0
+                    return
 
-        self._webrtc_reconnect_task = None
+                except Exception as e:
+                    self._webrtc_reconnect_attempts += 1
+                    logger.error(f"WebRTC reconnection attempt {attempt} failed: {e}")
+
+            # All attempts exhausted
+            if self._webrtc_reconnect_attempts >= self._max_webrtc_reconnect_attempts:
+                self._webrtc_error = (
+                    "Remote inference connection lost. "
+                    "Reconnection failed after multiple attempts. "
+                    "Please toggle cloud mode off and on to reconnect."
+                )
+                logger.error(self._webrtc_error)
+        finally:
+            self._is_reconnecting = False
+            self._webrtc_reconnect_task = None
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a video frame to cloud.ai for processing.
@@ -770,6 +789,11 @@ class CloudConnectionManager:
         """
         if self._webrtc_client is not None and self._webrtc_client.is_connected:
             self._webrtc_client.send_parameters(params)
+            # Update last known params for reconnection (merge with existing)
+            if self._last_webrtc_params is not None:
+                self._last_webrtc_params.update(params)
+            else:
+                self._last_webrtc_params = params.copy()
         else:
             logger.warning("Cannot send parameters - WebRTC not connected")
 
