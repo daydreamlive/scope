@@ -48,7 +48,12 @@ def client(mock_plugin_manager, mock_pipeline_manager):
         with patch("scope.server.app.pipeline_manager", mock_pipeline_manager):
             with patch("scope.server.app.webrtc_manager", MagicMock()):
                 # Import app after patching
+                import scope.server.app as app_module
                 from scope.server.app import app
+
+                # Clear cached responses so each test starts fresh
+                app_module._pipeline_schemas_cache = None
+                app_module._plugins_list_cache = None
 
                 yield TestClient(app, raise_server_exceptions=False)
 

@@ -107,6 +107,11 @@ from .schema import (
     WebRTCOfferResponse,
 )
 
+# Cached responses for pipeline schemas and plugin list.
+# Server restarts after plugin install/uninstall, so these are naturally reset.
+_pipeline_schemas_cache: PipelineSchemasResponse | None = None
+_plugins_list_cache: object | None = None
+
 
 class STUNErrorFilter(logging.Filter):
     """Filter to suppress STUN/TURN connection errors that are not critical."""
@@ -647,6 +652,10 @@ async def get_pipeline_schemas(
     In cloud mode (when connected to cloud), this proxies the request to the
     cloud-hosted scope backend to get the available pipelines there.
     """
+    global _pipeline_schemas_cache
+    if _pipeline_schemas_cache is not None:
+        return _pipeline_schemas_cache
+
     from scope.core.pipelines.registry import PipelineRegistry
     from scope.core.plugins import get_plugin_manager
 
@@ -664,7 +673,9 @@ async def get_pipeline_schemas(
             )
             pipelines[pipeline_id] = schema_data
 
-    return PipelineSchemasResponse(pipelines=pipelines)
+    response = PipelineSchemasResponse(pipelines=pipelines)
+    _pipeline_schemas_cache = response
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -2209,6 +2220,10 @@ async def list_plugins(
 
     from .schema import FailedPluginInfoSchema, PluginListResponse
 
+    global _plugins_list_cache
+    if _plugins_list_cache is not None:
+        return _plugins_list_cache
+
     try:
         plugin_manager = get_plugin_manager()
         plugins_data = await plugin_manager.list_plugins_async()
@@ -2225,9 +2240,11 @@ async def list_plugins(
             for f in plugin_manager.get_failed_plugins()
         ]
 
-        return PluginListResponse(
+        response = PluginListResponse(
             plugins=plugins, total=len(plugins), failed_plugins=failed
         )
+        _plugins_list_cache = response
+        return response
     except Exception as e:
         logger.error(f"Error listing plugins: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
