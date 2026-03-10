@@ -660,9 +660,13 @@ class CloudConnectionManager:
 
     async def stop_webrtc(self) -> None:
         """Stop the WebRTC connection to cloud.ai."""
-        # Cancel any pending reconnection
+        # Cancel any pending reconnection and await its cleanup
         if self._webrtc_reconnect_task is not None:
             self._webrtc_reconnect_task.cancel()
+            try:
+                await self._webrtc_reconnect_task
+            except asyncio.CancelledError:
+                pass
             self._webrtc_reconnect_task = None
 
         if self._webrtc_client is not None:
@@ -671,9 +675,11 @@ class CloudConnectionManager:
             self._webrtc_client = None
             logger.info("WebRTC connection stopped")
 
-        # Clear error state on explicit stop
+        # Clear all reconnection state on explicit stop
         self._webrtc_error = None
         self._webrtc_reconnect_attempts = 0
+        self._last_webrtc_params = None
+        self._is_reconnecting = False
 
     def on_webrtc_connection_lost(self, reason: str = "Connection lost") -> None:
         """Handle WebRTC connection loss (called by CloudWebRTCClient).

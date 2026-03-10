@@ -74,9 +74,10 @@ test.describe("WebRTC Reconnection", () => {
     console.log("✅ WebRTC reconnection test passed");
   });
 
-  test("preserves parameters across reconnection", async ({ page }) => {
-    // Tests that parameter updates via send_parameters() are preserved
-    // when reconnection occurs (fix for stale params issue)
+  test("reconnects after disconnect while streaming", async ({ page }) => {
+    // Tests that WebRTC reconnection works while actively streaming
+    // Parameter preservation is handled internally via _last_webrtc_params
+    // (tested via unit tests, not E2E since parameters are sent via WebRTC data channel)
     test.setTimeout(300000);
 
     await page.goto("/");
@@ -91,30 +92,21 @@ test.describe("WebRTC Reconnection", () => {
     await startStream(page);
     await verifyStreamProcessing(page);
 
-    // Step 2: Update parameters via API (simulates user changing prompt)
-    const testParams = { prompt: "test-reconnection-prompt-" + Date.now() };
-    const updateResponse = await page.request.post(
-      `${API_BASE}/api/v1/pipeline/parameters`,
-      { data: testParams }
-    );
-    // Parameter update may succeed or fail depending on pipeline state
-    console.log(`Parameter update status: ${updateResponse.status()}`);
-
-    // Step 3: Force disconnect
-    console.log("Triggering WebRTC disconnect...");
+    // Step 2: Force disconnect while streaming
+    console.log("Triggering WebRTC disconnect while streaming...");
     const disconnectResponse = await page.request.post(
       `${API_BASE}/api/v1/cloud/debug/disconnect-webrtc`
     );
     expect(disconnectResponse.ok()).toBeTruthy();
 
-    // Step 4: Wait for reconnection
+    // Step 3: Wait for reconnection
     await waitForReconnection(page);
 
-    // Step 5: Verify stream recovers (parameters should be reapplied)
+    // Step 4: Verify stream recovers
     await verifyStreamProcessing(page);
 
     await stopStream(page);
-    console.log("✅ Parameter preservation test passed");
+    console.log("✅ Stream reconnection test passed");
   });
 
   test("surfaces error when reconnection fails multiple times", async ({ page }) => {
