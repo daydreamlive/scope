@@ -490,6 +490,16 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       last_frame_image?: string;
       quantize_mode?: string;
       lookahead_ms?: number;
+      modulations?: Record<
+        string,
+        {
+          enabled: boolean;
+          shape: string;
+          depth: number;
+          rate: string;
+          base_value: number;
+        }
+      >;
     }) => {
       if (
         dataChannelRef.current &&

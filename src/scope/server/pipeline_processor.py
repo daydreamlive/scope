@@ -43,6 +43,7 @@ class PipelineProcessor:
         connection_id: str | None = None,
         connection_info: dict | None = None,
         tempo_sync: Any | None = None,
+        modulation_engine: Any | None = None,
     ):
         """Initialize a pipeline processor.
 
@@ -55,6 +56,7 @@ class PipelineProcessor:
             connection_id: Connection ID from fal.ai WebSocket for event correlation
             connection_info: Connection metadata (gpu_type, region, etc.)
             tempo_sync: TempoSync instance for beat state injection
+            modulation_engine: ModulationEngine for beat-synced param modulation
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
@@ -63,6 +65,7 @@ class PipelineProcessor:
         self.connection_id = connection_id
         self.connection_info = connection_info
         self.tempo_sync = tempo_sync
+        self.modulation_engine = modulation_engine
 
         # Each processor creates its own queues
         self.input_queue = queue.Queue(maxsize=30)
@@ -455,6 +458,15 @@ class PipelineProcessor:
                     call_params["bar_position"] = beat_state.bar_position
                     call_params["beat_count"] = beat_state.beat_count
                     call_params["is_playing"] = beat_state.is_playing
+
+                    if self.modulation_engine is not None:
+                        call_params = self.modulation_engine.apply(
+                            beat_phase=beat_state.beat_phase,
+                            bar_position=beat_state.bar_position,
+                            beat_count=beat_state.beat_count,
+                            beats_per_bar=self.tempo_sync.beats_per_bar,
+                            params=call_params,
+                        )
 
             processing_start = time.time()
             output_dict = self.pipeline(**call_params)

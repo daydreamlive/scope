@@ -1168,6 +1168,13 @@ export function StreamPage() {
     sendParameterUpdateWebRTC,
   ]);
 
+  // Send modulation config to backend when it changes or stream starts.
+  useEffect(() => {
+    if (isStreaming && settings.modulations) {
+      sendParameterUpdateWebRTC({ modulations: settings.modulations });
+    }
+  }, [settings.modulations, isStreaming, sendParameterUpdateWebRTC]);
+
   // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {
     const pipeline = pipelines?.[settings.pipelineId];
@@ -1987,6 +1994,13 @@ export function StreamPage() {
             }
             lookaheadMs={settings.lookaheadMs ?? 0}
             onLookaheadMsChange={ms => updateSettings({ lookaheadMs: ms })}
+            modulations={settings.modulations}
+            onModulationsChange={modulations => {
+              updateSettings({ modulations });
+              if (isStreaming) {
+                sendParameterUpdateWebRTC({ modulations });
+              }
+            }}
           />
         </div>
       </div>
