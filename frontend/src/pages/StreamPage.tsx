@@ -57,6 +57,7 @@ import {
 } from "../lib/auth";
 import { createDaydreamImportSession } from "../lib/daydreamExport";
 import { openExternalUrl } from "../lib/openExternal";
+import { useCloudWorkflowBackup } from "../hooks/useCloudWorkflowBackup";
 
 interface OscCommand {
   key: string;
@@ -113,6 +114,10 @@ export function StreamPage() {
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
+
+  // Actual connection status (vs just being in cloud mode)
+  const isCloudConnected =
+    (isDirectCloudMode && isCloudReady) || isBackendCloudConnected;
 
   // Log stream for the log panel
   const {
@@ -1980,6 +1985,25 @@ export function StreamPage() {
     },
     [updateSettings, skipNextModeReset, settings.inputMode]
   );
+
+  // Auto-save workflow to localStorage while cloud is connected.
+  // On disconnect → reconnect, offers to restore the previous session.
+  useCloudWorkflowBackup({
+    settings,
+    timelinePrompts,
+    promptState: {
+      promptItems,
+      interpolationMethod,
+      transitionSteps,
+      temporalInterpolationMethod,
+    },
+    pipelineInfoMap: pipelines,
+    loraFiles,
+    plugins,
+    scopeVersion: scopeVersion ?? "unknown",
+    isCloudConnected,
+    onRestore: handleWorkflowLoad,
+  });
 
   return (
     <MIDIProvider
