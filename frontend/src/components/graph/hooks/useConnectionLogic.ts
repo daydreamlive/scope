@@ -87,7 +87,7 @@ export function useConnectionLogic(
 
         if (!sourceNode || !targetNode) return false;
 
-        // Primitives adapt to any type
+        // Primitives adapt
         if (sourceNode.data.nodeType === "primitive") return true;
 
         if (sourceNode.data.nodeType === "reroute") {
@@ -107,30 +107,50 @@ export function useConnectionLogic(
           return srcType === targetNode.data.valueType;
         }
 
-        // Determine source output type
+        // Get source type
         const sourceType = resolveSourceType(sourceNode, nodes, []);
 
         if (!sourceType) return false;
 
-        // VACE compound connection: only VACE → pipeline.__vace
+        // VACE: only VACE → pipeline.__vace
         if (targetParsed.name === "__vace") {
           return sourceType === "vace";
         }
         if (sourceType === "vace") {
-          // VACE output can only connect to __vace ports
+          // VACE only connects to __vace
           return targetParsed.name === "__vace";
         }
 
-        // VACE node input handles accept string (image paths)
+        // VACE inputs: images OR video (mutual exclusion)
         if (targetNode.data.nodeType === "vace") {
-          return sourceType === "string";
+          if (targetParsed.name === "video") {
+            // Video: only video_path, reject if images connected
+            if (sourceType !== "video_path") return false;
+            const hasImages = !!(
+              targetNode.data.vaceRefImage ||
+              targetNode.data.vaceFirstFrame ||
+              targetNode.data.vaceLastFrame
+            );
+            return !hasImages;
+          }
+          // Images: only string, reject if video connected
+          if (
+            targetParsed.name === "ref_image" ||
+            targetParsed.name === "first_frame" ||
+            targetParsed.name === "last_frame"
+          ) {
+            if (sourceType !== "string") return false;
+            const hasVideo = !!targetNode.data.vaceVideo;
+            return !hasVideo;
+          }
+          return false;
         }
 
         if (targetParsed.name === "__prompt") {
           return sourceType === "string";
         }
 
-        // Math nodes accept number inputs
+        // Math: numbers only
         if (targetNode.data.nodeType === "math") {
           return (
             sourceType === "number" &&
@@ -138,7 +158,7 @@ export function useConnectionLogic(
           );
         }
 
-        // UI node input handles accept specific types
+        // UI nodes: specific types
         if (
           targetNode.data.nodeType === "slider" ||
           targetNode.data.nodeType === "knobs" ||
@@ -191,7 +211,7 @@ export function useConnectionLogic(
       const targetParsed = parseHandleId(connection.targetHandle);
       if (!targetParsed || targetParsed.kind !== "param") return changed;
 
-      // Include new connection in edge list for traversal
+      // Include pending connection
       const edgesWithNew: Edge[] = [
         ...currentEdges,
         {
@@ -203,7 +223,7 @@ export function useConnectionLogic(
         },
       ];
 
-      // Case 1: Primitive → typed target
+      // Primitive → typed target
       if (sourceNode.data.nodeType === "primitive") {
         let expectedType = resolveTargetType(targetNode, targetParsed.name);
         if (!expectedType && targetNode.data.nodeType === "reroute") {
@@ -217,6 +237,7 @@ export function useConnectionLogic(
           expectedType &&
           expectedType !== "list_number" &&
           expectedType !== "vace" &&
+          expectedType !== "video_path" &&
           expectedType !== sourceNode.data.valueType
         ) {
           changed.set(sourceNode.id, expectedType);
@@ -249,7 +270,7 @@ export function useConnectionLogic(
         }
       }
 
-      // Case 2: Something → Reroute (only from concrete producers)
+      // Something → Reroute (concrete producers only)
       if (targetNode.data.nodeType === "reroute") {
         const isConcreteSource =
           sourceNode.data.nodeType !== "primitive" &&
@@ -265,6 +286,7 @@ export function useConnectionLogic(
             srcType &&
             srcType !== "list_number" &&
             srcType !== "vace" &&
+            srcType !== "video_path" &&
             srcType !== targetNode.data.valueType
           ) {
             changed.set(targetNode.id, srcType);
@@ -284,7 +306,7 @@ export function useConnectionLogic(
         }
       }
 
-      // Case 3: Reroute → typed target (propagate backward)
+      // Reroute → typed target (backward propagation)
       if (sourceNode.data.nodeType === "reroute") {
         let expectedType = resolveTargetType(targetNode, targetParsed.name);
         if (!expectedType && targetNode.data.nodeType === "reroute") {
@@ -298,7 +320,8 @@ export function useConnectionLogic(
         if (
           expectedType &&
           expectedType !== "list_number" &&
-          expectedType !== "vace"
+          expectedType !== "vace" &&
+          expectedType !== "video_path"
         ) {
           const narrowType = expectedType as "string" | "number" | "boolean";
           const { rerouteIds, rootSourceId } = collectUpstreamChain(
@@ -374,10 +397,9 @@ export function useConnectionLogic(
         return;
       }
 
-      // Single setEdges call: remove existing edge to the same target handle,
-      // add the new edge, adapt node types, and refresh colors — all in one pass.
+      // Remove old edge, adapt types, add new edge, refresh colors
       setEdges(eds => {
-        // 1. Remove existing edge to the same target handle
+        // Remove existing edge to same target handle
         const filtered = eds.filter(
           e =>
             !(
@@ -386,10 +408,10 @@ export function useConnectionLogic(
             )
         );
 
-        // 2. Adapt node types based on the new connection
+        // Adapt node types
         const changedTypes = adaptNodeTypes(connection, filtered);
 
-        // 3. Determine edge style for the new connection
+        // Determine edge style
         const sourceNode = nodes.find(n => n.id === connection.source);
         const sourceChanged = changedTypes.get(connection.source ?? "");
         let style: { stroke: string; strokeWidth: number };
@@ -406,7 +428,7 @@ export function useConnectionLogic(
           style = buildEdgeStyle(sourceNode, connection.sourceHandle);
         }
 
-        // 4. Add the new edge
+        // Add new edge
         let updated = addEdge(
           {
             ...connection,
@@ -419,7 +441,7 @@ export function useConnectionLogic(
           filtered
         );
 
-        // 5. Refresh edge colors for any nodes whose types changed
+        // Refresh edge colors for changed types
         if (changedTypes.size > 0) {
           updated = updated.map(e => {
             const newType = changedTypes.get(e.source);

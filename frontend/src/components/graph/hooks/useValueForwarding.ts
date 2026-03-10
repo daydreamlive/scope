@@ -3,7 +3,7 @@ import type { Edge, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { parseHandleId } from "../../../lib/graphUtils";
 
-/** Shallow-compare two values, handling arrays element-by-element. */
+// Shallow compare (arrays element-wise)
 function valuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (Array.isArray(a) && Array.isArray(b)) {
@@ -13,7 +13,7 @@ function valuesEqual(a: unknown, b: unknown): boolean {
     }
     return true;
   }
-  // Handle knob objects: {label, min, max, value}
+  // Knob objects
   if (a && b && typeof a === "object" && typeof b === "object") {
     const ka = Object.keys(a as Record<string, unknown>);
     const kb = Object.keys(b as Record<string, unknown>);
@@ -32,7 +32,7 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
-/** Node types that produce parameter output values. */
+// Node types that produce outputs
 const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "primitive",
   "control",
@@ -46,7 +46,7 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "vace",
 ]);
 
-/** Node types that can receive values on their input handles. */
+// Node types that receive inputs
 const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
   "slider",
   "knobs",
@@ -85,7 +85,7 @@ export function useValueForwarding(
       const connected = findConnectedPipelineParams(node.id, edges, nodes);
       if (connected.length === 0) continue;
 
-      // Get values to forward
+      // Collect values
       const valuesToForward: Array<{
         handleName: string | null;
         value: unknown;
@@ -124,13 +124,15 @@ export function useValueForwarding(
           value: node.data.tupleValues,
         });
       } else if (node.data.nodeType === "image") {
+        const mediaHandleName =
+          node.data.mediaType === "video" ? "video_value" : "value";
         valuesToForward.push({
-          handleName: "value",
+          handleName: mediaHandleName,
           value: node.data.imagePath || "",
         });
       }
 
-      // Throttle animated nodes
+      // Throttle animated
       const isAnimated =
         node.data.nodeType === "control" || node.data.nodeType === "math";
       if (isAnimated) {
@@ -140,7 +142,7 @@ export function useValueForwarding(
         lastForwardTimeRef.current[node.id] = now;
       }
 
-      // Forward to connected pipeline params
+      // Forward to pipelines
       for (const edge of edges) {
         if (edge.source !== node.id) continue;
         const sourceParsed = parseHandleId(edge.sourceHandle);
@@ -148,14 +150,14 @@ export function useValueForwarding(
         if (!sourceParsed || sourceParsed.kind !== "param") continue;
         if (!targetParsed || targetParsed.kind !== "param") continue;
 
-        // Find target node
+        // Find target
         const targetNode = nodes.find(n => n.id === edge.target);
         if (!targetNode) continue;
 
-        // Only to pipeline nodes
+        // Pipelines only
         if (targetNode.data.nodeType !== "pipeline") continue;
 
-        // VACE compound connection: expand into individual parameters
+        // VACE: expand to individual params
         if (
           node.data.nodeType === "vace" &&
           sourceParsed.name === "__vace" &&
@@ -171,32 +173,54 @@ export function useValueForwarding(
             "vace_context_scale",
             ctxScale
           );
-          const refImg = (node.data.vaceRefImage as string) || "";
-          if (refImg) {
-            onNodeParamChangeRef.current(backendId, "vace_ref_images", [
-              refImg,
-            ]);
-          }
-          const firstFrame = (node.data.vaceFirstFrame as string) || "";
-          if (firstFrame) {
+
+          const vaceVideo = (node.data.vaceVideo as string) || "";
+          if (vaceVideo) {
+            // Video mode
             onNodeParamChangeRef.current(
               backendId,
-              "first_frame_image",
-              firstFrame
+              "vace_use_input_video",
+              true
             );
-          }
-          const lastFrame = (node.data.vaceLastFrame as string) || "";
-          if (lastFrame) {
             onNodeParamChangeRef.current(
               backendId,
-              "last_frame_image",
-              lastFrame
+              "vace_video_path",
+              vaceVideo
             );
+          } else {
+            // Image mode
+            onNodeParamChangeRef.current(
+              backendId,
+              "vace_use_input_video",
+              false
+            );
+            const refImg = (node.data.vaceRefImage as string) || "";
+            if (refImg) {
+              onNodeParamChangeRef.current(backendId, "vace_ref_images", [
+                refImg,
+              ]);
+            }
+            const firstFrame = (node.data.vaceFirstFrame as string) || "";
+            if (firstFrame) {
+              onNodeParamChangeRef.current(
+                backendId,
+                "first_frame_image",
+                firstFrame
+              );
+            }
+            const lastFrame = (node.data.vaceLastFrame as string) || "";
+            if (lastFrame) {
+              onNodeParamChangeRef.current(
+                backendId,
+                "last_frame_image",
+                lastFrame
+              );
+            }
           }
           continue;
         }
 
-        // Find matching value
+        // Match value
         const entry = valuesToForward.find(v => {
           if (v.handleName === null) return true; // value/control/math: single output
           return v.handleName === sourceParsed.name;
@@ -230,7 +254,7 @@ export function useValueForwarding(
   useEffect(() => {
     if (!setNodes) return;
 
-    // Build UI node updates map
+    // Build updates map
     const updates = new Map<string, Record<string, unknown>>();
 
     for (const edge of edges) {
@@ -241,7 +265,7 @@ export function useValueForwarding(
       const targetParsed = parseHandleId(edge.targetHandle);
       if (!targetParsed || targetParsed.kind !== "param") continue;
 
-      // Find source node
+      // Find source
       const sourceNode = nodes.find(n => n.id === edge.source);
       if (!sourceNode) continue;
 
@@ -275,7 +299,7 @@ export function useValueForwarding(
 
       if (sourceValue === undefined) continue;
 
-      // Determine field to update
+      // Determine field
       const nodeUpdates = updates.get(edge.target) ?? {};
 
       if (
@@ -295,7 +319,7 @@ export function useValueForwarding(
             Math.max(Number(sourceValue), knob.min),
             knob.max
           );
-          // Merge knobs array
+          // Merge knobs
           const existingKnobs = (nodeUpdates["knobs"] as typeof knobs) ?? [
             ...knobs,
           ];
@@ -340,16 +364,18 @@ export function useValueForwarding(
           }
         }
       } else if (targetNode.data.nodeType === "vace") {
-        // Map image input handles to VACE node data fields
+        // Map handles to VACE fields
         if (targetParsed.name === "ref_image") {
           nodeUpdates["vaceRefImage"] = String(sourceValue);
         } else if (targetParsed.name === "first_frame") {
           nodeUpdates["vaceFirstFrame"] = String(sourceValue);
         } else if (targetParsed.name === "last_frame") {
           nodeUpdates["vaceLastFrame"] = String(sourceValue);
+        } else if (targetParsed.name === "video") {
+          nodeUpdates["vaceVideo"] = String(sourceValue);
         }
       } else if (targetNode.data.nodeType === "reroute") {
-        // Pass source value through to the reroute node
+        // Pass through to reroute
         nodeUpdates["value"] = sourceValue;
       }
 
@@ -358,16 +384,38 @@ export function useValueForwarding(
       }
     }
 
+    // Clear VACE fields for disconnected handles
+    const vaceHandleFields: Record<string, string> = {
+      ref_image: "vaceRefImage",
+      first_frame: "vaceFirstFrame",
+      last_frame: "vaceLastFrame",
+      video: "vaceVideo",
+    };
+    for (const node of nodes) {
+      if (node.data.nodeType !== "vace") continue;
+      for (const [handleName, dataField] of Object.entries(vaceHandleFields)) {
+        const handleId = `param:${handleName}`;
+        const hasEdge = edges.some(
+          e => e.target === node.id && e.targetHandle === handleId
+        );
+        if (!hasEdge && node.data[dataField]) {
+          const nodeUpdates = updates.get(node.id) ?? {};
+          nodeUpdates[dataField] = "";
+          updates.set(node.id, nodeUpdates);
+        }
+      }
+    }
+
     if (updates.size === 0) return;
 
-    // Apply updates (return original if unchanged to avoid loop)
+    // Apply updates (return original if unchanged)
     setNodes(nds => {
       let anyNodeChanged = false;
       const result = nds.map(n => {
         const upd = updates.get(n.id);
         if (!upd) return n;
 
-        // Check if values changed (deep compare)
+        // Check if changed
         let changed = false;
         for (const [key, val] of Object.entries(upd)) {
           if (!valuesEqual(n.data[key], val)) {

@@ -3,8 +3,8 @@ import type { FlowNodeData } from "../../lib/graphUtils";
 import { parseHandleId } from "../../lib/graphUtils";
 
 export const HANDLE_COLORS: Record<string, string> = {
-  video: "#ffffff",
-  video2: "#ffffff",
+  video: "#eeeeee",
+  video2: "#eeeeee",
   vace_input_frames: "#a78bfa",
   vace_input_masks: "#f472b6",
   source: "#4ade80",
@@ -17,6 +17,7 @@ export const PARAM_TYPE_COLORS: Record<string, string> = {
   boolean: "#34d399",
   float: "#a78bfa",
   int: "#a78bfa",
+  video_path: "#38bdf8",
 };
 
 export function getEdgeColor(
@@ -60,7 +61,9 @@ export function getEdgeColor(
       return "#fb923c"; // orange-400
     }
     if (sourceNode.data.nodeType === "image") {
-      return "#f472b6"; // pink-400
+      return sourceNode.data.mediaType === "video"
+        ? "#38bdf8" // sky-400 for video
+        : "#f472b6"; // pink-400 for image
     }
     if (sourceNode.data.nodeType === "vace") {
       return "#a78bfa"; // violet-400

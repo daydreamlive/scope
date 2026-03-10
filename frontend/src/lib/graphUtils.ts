@@ -179,9 +179,11 @@ export interface FlowNodeData {
   /** For tuple nodes: ordering direction */
   tupleOrderDirection?: "asc" | "desc";
 
-  /* ── Image node fields ── */
-  /** For image nodes: the selected image asset path */
+  /* ── Image / Media node fields ── */
+  /** For image/media nodes: the selected asset path (image or video) */
   imagePath?: string;
+  /** For image/media nodes: detected media type based on file extension */
+  mediaType?: "image" | "video";
 
   /* ── VACE node fields ── */
   /** For VACE nodes: context scale (0.0-2.0) */
@@ -192,10 +194,18 @@ export interface FlowNodeData {
   vaceFirstFrame?: string;
   /** For VACE nodes: last frame image path (set via Image node connection) */
   vaceLastFrame?: string;
+  /** For VACE nodes: video file path (set via Media node connection) */
+  vaceVideo?: string;
 
   /* ── Pipeline VACE support ── */
   /** For pipeline nodes: whether the selected pipeline supports VACE */
   supportsVace?: boolean;
+
+  /* ── Node lock / pin ── */
+  /** When true, parameter inputs on this node are disabled (read-only). */
+  locked?: boolean;
+  /** When true, the node cannot be dragged on the canvas. */
+  pinned?: boolean;
 
   [key: string]: unknown;
 }
@@ -508,6 +518,23 @@ export function graphConfigToFlow(
         targetHandle: ue.targetHandle ?? undefined,
       });
     }
+
+    // Restore lock/pin flags for all nodes (including backend nodes)
+    const savedFlags = graph.ui_state.node_flags as
+      | Record<string, { locked?: boolean; pinned?: boolean }>
+      | undefined;
+    if (savedFlags) {
+      for (const node of nodes) {
+        const flags = savedFlags[node.id];
+        if (flags) {
+          if (flags.locked) node.data.locked = true;
+          if (flags.pinned) {
+            node.data.pinned = true;
+            node.draggable = false;
+          }
+        }
+      }
+    }
   }
 
   return { nodes, edges };
@@ -651,7 +678,19 @@ export function flowToGraphConfig(
 
   // Serialize frontend-only nodes and their edges into ui_state
   let ui_state: Record<string, unknown> | undefined;
-  if (frontendNodeIds.size > 0) {
+
+  // Collect lock/pin flags for ALL nodes (including backend nodes like source/pipeline/sink)
+  const nodeFlags: Record<string, { locked?: boolean; pinned?: boolean }> = {};
+  for (const n of nodes) {
+    if (n.data.locked || n.data.pinned) {
+      nodeFlags[n.id] = {
+        ...(n.data.locked ? { locked: true } : {}),
+        ...(n.data.pinned ? { pinned: true } : {}),
+      };
+    }
+  }
+
+  if (frontendNodeIds.size > 0 || Object.keys(nodeFlags).length > 0) {
     const uiNodes: UIStateNode[] = nodes
       .filter(n => frontendNodeIds.has(n.id))
       .map(n => {
@@ -686,7 +725,11 @@ export function flowToGraphConfig(
         targetHandle: e.targetHandle ?? null,
       }));
 
-    ui_state = { nodes: uiNodes, edges: uiEdges };
+    ui_state = {
+      nodes: uiNodes,
+      edges: uiEdges,
+      ...(Object.keys(nodeFlags).length > 0 ? { node_flags: nodeFlags } : {}),
+    };
   }
 
   return {

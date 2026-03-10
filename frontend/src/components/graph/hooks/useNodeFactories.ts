@@ -2,6 +2,7 @@ import { useCallback, useMemo } from "react";
 import type { Node } from "@xyflow/react";
 import { generateNodeId } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
+import { toast } from "sonner";
 
 // Node defaults
 
@@ -232,13 +233,14 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
   },
   image: {
     type: "image",
-    idPrefix: "image",
+    idPrefix: "media",
     defaultX: 50,
     style: { width: 160, height: 140 },
     data: {
-      label: "Image",
+      label: "Media",
       nodeType: "image",
       imagePath: "",
+      mediaType: "image",
       parameterOutputs: [{ name: "value", type: "string", defaultValue: "" }],
     },
   },
@@ -254,6 +256,7 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       vaceRefImage: "",
       vaceFirstFrame: "",
       vaceLastFrame: "",
+      vaceVideo: "",
       parameterOutputs: [{ name: "__vace", type: "string", defaultValue: "" }],
     },
   },
@@ -343,6 +346,24 @@ export function useNodeFactories({
       subType?: string
     ) => {
       if (!pendingNodePosition) return;
+
+      // Enforce single source and single sink
+      if (type === "source") {
+        const hasSource = nodes.some(n => n.data.nodeType === "source");
+        if (hasSource) {
+          toast.warning("Only one Source node is allowed");
+          setPendingNodePosition(null);
+          return;
+        }
+      }
+      if (type === "sink") {
+        const hasSink = nodes.some(n => n.data.nodeType === "sink");
+        if (hasSink) {
+          toast.warning("Only one Sink node is allowed");
+          setPendingNodePosition(null);
+          return;
+        }
+      }
 
       if (type === "control") {
         if (subType === "float" || subType === "int" || subType === "string") {

@@ -33,6 +33,10 @@ import {
   GitBranch,
   Image,
   Sparkles,
+  Lock,
+  LockOpen,
+  Pin,
+  PinOff,
 } from "lucide-react";
 
 import { SourceNode } from "./nodes/SourceNode";
@@ -395,6 +399,26 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       handleSave
     );
 
+    // Auto-stop when source or sink node is removed while streaming
+    const prevHadSourceRef = useRef(false);
+    const prevHadSinkRef = useRef(false);
+
+    useEffect(() => {
+      const hasSource = nodes.some(n => n.data.nodeType === "source");
+      const hasSink = nodes.some(n => n.data.nodeType === "sink");
+
+      if (
+        isStreaming &&
+        ((prevHadSourceRef.current && !hasSource) ||
+          (prevHadSinkRef.current && !hasSink))
+      ) {
+        onStopStream?.();
+      }
+
+      prevHadSourceRef.current = hasSource;
+      prevHadSinkRef.current = hasSink;
+    }, [nodes, isStreaming, onStopStream]);
+
     // Auto-fit view after graph import
     useEffect(() => {
       if (fitViewTrigger === 0) return;
@@ -554,6 +578,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               onReconnect={onReconnect}
               reconnectRadius={25}
               isValidConnection={isValidConnection}
+              minZoom={0.1}
               onInit={instance => {
                 reactFlowInstanceRef.current = instance;
               }}
@@ -697,10 +722,18 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                           ],
                         },
                         {
-                          label: "Image",
+                          label: "Media",
                           icon: <Image />,
                           onClick: () => handleNodeTypeSelect("image"),
-                          keywords: ["image", "picture", "photo", "reference"],
+                          keywords: [
+                            "media",
+                            "image",
+                            "video",
+                            "picture",
+                            "photo",
+                            "reference",
+                            "film",
+                          ],
                         },
                         {
                           label: "VACE",
@@ -724,19 +757,81 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                         const clickedId = contextMenu.nodeId;
                         const isInSelection =
                           !!clickedId && selectedNodeIds.includes(clickedId);
-                        const idsToDelete =
+                        const targetIds =
                           isInSelection && selectedNodeIds.length > 1
                             ? selectedNodeIds
                             : clickedId
                               ? [clickedId]
                               : [];
-                        const count = idsToDelete.length;
+                        const count = targetIds.length;
+                        const targetNodes = nodes.filter(n =>
+                          targetIds.includes(n.id)
+                        );
+                        const allLocked = targetNodes.every(
+                          n => !!n.data.locked
+                        );
+                        const allPinned = targetNodes.every(
+                          n => !!n.data.pinned
+                        );
                         return [
+                          {
+                            label: allLocked
+                              ? count > 1
+                                ? `Unlock ${count} nodes`
+                                : "Unlock"
+                              : count > 1
+                                ? `Lock ${count} nodes`
+                                : "Lock",
+                            icon: allLocked ? <LockOpen /> : <Lock />,
+                            onClick: () => {
+                              const newLocked = !allLocked;
+                              setNodes(nds =>
+                                nds.map(n =>
+                                  targetIds.includes(n.id)
+                                    ? {
+                                        ...n,
+                                        data: {
+                                          ...n.data,
+                                          locked: newLocked,
+                                        },
+                                      }
+                                    : n
+                                )
+                              );
+                            },
+                          },
+                          {
+                            label: allPinned
+                              ? count > 1
+                                ? `Unpin ${count} nodes`
+                                : "Unpin"
+                              : count > 1
+                                ? `Pin ${count} nodes`
+                                : "Pin",
+                            icon: allPinned ? <PinOff /> : <Pin />,
+                            onClick: () => {
+                              const newPinned = !allPinned;
+                              setNodes(nds =>
+                                nds.map(n =>
+                                  targetIds.includes(n.id)
+                                    ? {
+                                        ...n,
+                                        draggable: !newPinned,
+                                        data: {
+                                          ...n.data,
+                                          pinned: newPinned,
+                                        },
+                                      }
+                                    : n
+                                )
+                              );
+                            },
+                          },
                           {
                             label:
                               count > 1 ? `Delete ${count} nodes` : "Delete",
                             icon: <Trash2 />,
-                            onClick: () => handleDeleteNodes(idsToDelete),
+                            onClick: () => handleDeleteNodes(targetIds),
                             danger: true,
                           },
                         ];
@@ -794,6 +889,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                 <AlertDialogAction
                   onClick={() => {
                     setShowClearConfirm(false);
+                    if (isStreaming) onStopStream?.();
                     handleClear();
                   }}
                 >

@@ -247,7 +247,11 @@ export function ContextMenu({
   );
 }
 
-/** Viewport-aware submenu that flips horizontally/vertically when needed. */
+/** Viewport-aware submenu that flips horizontally/vertically when needed.
+ *  Uses a transparent padding wrapper to bridge the gap between the parent
+ *  menu item and the visual submenu, preventing mouseleave from firing
+ *  when the cursor crosses the gap.
+ */
 function SubmenuPanel({
   items,
   flipX,
@@ -269,7 +273,10 @@ function SubmenuPanel({
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const rect = el.getBoundingClientRect();
+    // Measure the inner visual panel, not the padding wrapper
+    const inner = el.firstElementChild as HTMLElement | null;
+    if (!inner) return;
+    const rect = inner.getBoundingClientRect();
     const parent = el.parentElement?.getBoundingClientRect();
     if (!parent) return;
 
@@ -281,15 +288,17 @@ function SubmenuPanel({
       visibility: "visible",
     };
 
-    // Horizontal: open to the right by default, flip left if needed
+    // Horizontal: open to the right by default, flip left if needed.
+    // Use padding instead of margin so the transparent gap area is part of
+    // this element's hit area, keeping the parent's mouseleave from firing.
     if (flipX || parent.right + rect.width + 4 > vw - VIEWPORT_PADDING) {
       css.right = "100%";
       css.left = undefined;
-      css.marginRight = "4px";
+      css.paddingRight = "4px";
     } else {
       css.left = "100%";
       css.right = undefined;
-      css.marginLeft = "4px";
+      css.paddingLeft = "4px";
     }
 
     // Vertical: align top of submenu with the parent row, but clamp to viewport
@@ -306,25 +315,23 @@ function SubmenuPanel({
   }, [flipX, flipY]);
 
   return (
-    <div
-      ref={ref}
-      className="min-w-[140px] rounded-lg bg-[#111111] border border-[rgba(255,255,255,0.08)] shadow-xl py-1.5"
-      style={style}
-    >
-      {items.map((child, ci) => (
-        <button
-          key={ci}
-          onClick={() => onSelect(child)}
-          className="w-full text-left px-3 py-1.5 text-[13px] flex items-center gap-2.5 text-[#e0e0e0] hover:bg-[#1f1f1f] transition-colors"
-        >
-          {child.icon && (
-            <span className="text-[#777] shrink-0 [&_svg]:w-[15px] [&_svg]:h-[15px]">
-              {child.icon}
-            </span>
-          )}
-          {child.label}
-        </button>
-      ))}
+    <div ref={ref} style={style}>
+      <div className="min-w-[140px] rounded-lg bg-[#111111] border border-[rgba(255,255,255,0.08)] shadow-xl py-1.5">
+        {items.map((child, ci) => (
+          <button
+            key={ci}
+            onClick={() => onSelect(child)}
+            className="w-full text-left px-3 py-1.5 text-[13px] flex items-center gap-2.5 text-[#e0e0e0] hover:bg-[#1f1f1f] transition-colors"
+          >
+            {child.icon && (
+              <span className="text-[#777] shrink-0 [&_svg]:w-[15px] [&_svg]:h-[15px]">
+                {child.icon}
+              </span>
+            )}
+            {child.label}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

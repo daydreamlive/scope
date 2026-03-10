@@ -1,5 +1,3 @@
-import { NODE_TOKENS } from "./tokens";
-
 interface NodePillToggleProps {
   checked: boolean;
   onChange: (checked: boolean) => void;
@@ -14,16 +12,28 @@ export function NodePillToggle({
   className = "",
 }: NodePillToggleProps) {
   return (
-    <div
-      className={`${NODE_TOKENS.pill} w-[110px] flex items-center justify-center ${className}`}
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={`
+        relative inline-flex h-[16px] w-[30px] shrink-0 cursor-pointer items-center
+        rounded-full border border-[rgba(119,119,119,0.15)] transition-colors duration-200
+        focus:outline-none focus:ring-1 focus:ring-blue-400/50
+        ${checked ? "bg-blue-500/80" : "bg-[#1b1a1a]"}
+        ${disabled ? "opacity-50 cursor-not-allowed" : ""}
+        ${className}
+      `}
     >
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={e => onChange(e.target.checked)}
-        disabled={disabled}
-        className="w-3 h-3"
+      <span
+        className={`
+          pointer-events-none inline-block h-[12px] w-[12px] rounded-full
+          shadow-sm transition-transform duration-200
+          ${checked ? "translate-x-[14px] bg-white" : "translate-x-[1px] bg-[#666]"}
+        `}
       />
-    </div>
+    </button>
   );
 }

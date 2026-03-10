@@ -1,10 +1,4 @@
-/**
- * Shared type-resolution utilities for param-type connections.
- *
- * Extracted from useConnectionLogic.ts and useGraphState.ts to eliminate
- * duplicated `resolveSourceType`, `resolveTargetType`,
- * `resolveDownstreamType`, and `collectUpstreamChain` logic.
- */
+// Type resolution utilities for param connections
 import type { Edge, Node } from "@xyflow/react";
 import { parseHandleId } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
@@ -14,10 +8,11 @@ export type ResolvedType =
   | "number"
   | "boolean"
   | "list_number"
+  | "video_path"
   | "vace"
   | undefined;
 
-// Source type resolution
+// Source types
 export function resolveSourceType(
   node: Node<FlowNodeData>,
   nodes: Node<FlowNodeData>[],
@@ -35,22 +30,24 @@ export function resolveSourceType(
   if (nt === "math") return "number";
   if (nt === "slider" || nt === "knobs" || nt === "xypad") return "number";
   if (nt === "tuple") return "list_number";
-  if (nt === "image") return "string";
+  if (nt === "image") {
+    return node.data.mediaType === "video" ? "video_path" : "string";
+  }
   if (nt === "vace") return "vace";
   if (nt === "reroute") {
-    // Walk upstream to find source
+    // Walk upstream
     for (const e of edges) {
       if (e.target !== node.id) continue;
       const upstream = nodes.find(n => n.id === e.source);
       if (upstream) return resolveSourceType(upstream, nodes, edges, visited);
     }
-    // Fallback to stored valueType
+    // Fallback to valueType
     return node.data.valueType;
   }
   return undefined;
 }
 
-// Target type resolution
+// Target types
 export function resolveTargetType(
   targetNode: Node<FlowNodeData>,
   targetParamName: string
@@ -73,6 +70,9 @@ export function resolveTargetType(
     ) {
       return "string";
     }
+    if (targetParamName === "video") {
+      return "video_path";
+    }
     return undefined;
   }
   if (nt === "reroute") return undefined; // accepts any
@@ -85,14 +85,7 @@ export function resolveTargetType(
   return undefined;
 }
 
-// ---------------------------------------------------------------------------
-// Downstream type resolution
-// ---------------------------------------------------------------------------
-
-/**
- * Walk downstream from a reroute node through other reroutes until we
- * find a typed consumer. Returns the expected type or undefined.
- */
+// Downstream types
 export function resolveDownstreamType(
   nodeId: string,
   nodes: Node<FlowNodeData>[],
@@ -126,7 +119,7 @@ export function resolveDownstreamType(
   return undefined;
 }
 
-// Upstream chain collection
+// Upstream chains
 export function collectUpstreamChain(
   nodeId: string,
   nodes: Node<FlowNodeData>[],

@@ -18,6 +18,7 @@ type VaceNodeType = Node<FlowNodeData, "vace">;
 
 const VACE_COLOR = "#a78bfa"; // violet-400
 const IMAGE_COLOR = "#f472b6"; // pink-400
+const VIDEO_COLOR = "#38bdf8"; // sky-400
 
 export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
   const { updateData } = useNodeData(id);
@@ -65,19 +66,27 @@ export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
     [setValueFromMouse]
   );
 
-  // Summarize connected images
+  // Connected inputs
   const refImage = (data.vaceRefImage as string) || "";
   const firstFrame = (data.vaceFirstFrame as string) || "";
   const lastFrame = (data.vaceLastFrame as string) || "";
+  const vaceVideo = (data.vaceVideo as string) || "";
 
   const shortName = (path: string) =>
     path ? path.split(/[/\\]/).pop() || path : "—";
 
-  // Measure handle positions when image state changes
+  // Mutual exclusion: images OR video
+  const hasImages = !!(refImage || firstFrame || lastFrame);
+  const hasVideo = !!vaceVideo;
+  const imagesDimmed = hasVideo; // dim images when video is connected
+  const videoDimmed = hasImages; // dim video when images are connected
+
+  // Measure handle positions
   const { setRowRef, rowPositions } = useHandlePositions([
     refImage,
     firstFrame,
     lastFrame,
+    vaceVideo,
   ]);
 
   return (
@@ -126,22 +135,43 @@ export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
           </div>
         </div>
 
+        {/* Video input indicator */}
+        <div
+          ref={setRowRef("video")}
+          className={`transition-opacity ${videoDimmed ? "opacity-30 pointer-events-none" : ""}`}
+        >
+          <NodeParamRow label="Video">
+            <NodePill className={vaceVideo ? "" : "opacity-40"}>
+              {shortName(vaceVideo)}
+            </NodePill>
+          </NodeParamRow>
+        </div>
+
         {/* Image input indicators — each wrapped with rowRef for handle alignment */}
-        <div ref={setRowRef("ref_image")}>
+        <div
+          ref={setRowRef("ref_image")}
+          className={`transition-opacity ${imagesDimmed ? "opacity-30 pointer-events-none" : ""}`}
+        >
           <NodeParamRow label="Ref Image">
             <NodePill className={refImage ? "" : "opacity-40"}>
               {shortName(refImage)}
             </NodePill>
           </NodeParamRow>
         </div>
-        <div ref={setRowRef("first_frame")}>
+        <div
+          ref={setRowRef("first_frame")}
+          className={`transition-opacity ${imagesDimmed ? "opacity-30 pointer-events-none" : ""}`}
+        >
           <NodeParamRow label="First Frame">
             <NodePill className={firstFrame ? "" : "opacity-40"}>
               {shortName(firstFrame)}
             </NodePill>
           </NodeParamRow>
         </div>
-        <div ref={setRowRef("last_frame")}>
+        <div
+          ref={setRowRef("last_frame")}
+          className={`transition-opacity ${imagesDimmed ? "opacity-30 pointer-events-none" : ""}`}
+        >
           <NodeParamRow label="Last Frame">
             <NodePill className={lastFrame ? "" : "opacity-40"}>
               {shortName(lastFrame)}
@@ -149,6 +179,20 @@ export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
           </NodeParamRow>
         </div>
       </NodeBody>
+
+      {/* Video input handle (left) */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={buildHandleId("param", "video")}
+        className="!w-2 !h-2 !border-0"
+        style={{
+          top: rowPositions["video"] ?? 0,
+          left: 8,
+          backgroundColor: VIDEO_COLOR,
+          opacity: videoDimmed ? 0.3 : 1,
+        }}
+      />
 
       {/* Image input handles (left) — positioned by measured row offsets */}
       <Handle
@@ -160,6 +204,7 @@ export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
           top: rowPositions["ref_image"] ?? 0,
           left: 8,
           backgroundColor: IMAGE_COLOR,
+          opacity: imagesDimmed ? 0.3 : 1,
         }}
       />
       <Handle
@@ -171,6 +216,7 @@ export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
           top: rowPositions["first_frame"] ?? 0,
           left: 8,
           backgroundColor: IMAGE_COLOR,
+          opacity: imagesDimmed ? 0.3 : 1,
         }}
       />
       <Handle
@@ -182,6 +228,7 @@ export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
           top: rowPositions["last_frame"] ?? 0,
           left: 8,
           backgroundColor: IMAGE_COLOR,
+          opacity: imagesDimmed ? 0.3 : 1,
         }}
       />
 

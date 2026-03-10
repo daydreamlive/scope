@@ -1,16 +1,17 @@
 import { type ReactNode, useState, useRef, useEffect } from "react";
 import { NodeResizer } from "@xyflow/react";
 import { NODE_TOKENS } from "./tokens";
+import { useNodeFlags } from "../hooks/useNodeFlags";
 
 interface NodeCardProps {
   children: ReactNode;
   selected?: boolean;
   className?: string;
-  /** When true, measures content height and enforces it as minHeight on resize */
+  // Measures content height and enforces as minHeight on resize
   autoMinHeight?: boolean;
-  /** Override the default minimum width (240px) for the resize handles */
+  // Override default min width (240px)
   minWidth?: number;
-  /** Override the default minimum height (60px) for the resize handles */
+  // Override default min height (60px)
   minHeight?: number;
 }
 
@@ -24,6 +25,7 @@ export function NodeCard({
 }: NodeCardProps) {
   const measureRef = useRef<HTMLDivElement>(null);
   const [minH, setMinH] = useState(60);
+  const { locked } = useNodeFlags();
 
   useEffect(() => {
     if (!autoMinHeight || !measureRef.current) return;
@@ -31,7 +33,7 @@ export function NodeCard({
     const el = measureRef.current;
 
     const measure = () => {
-      // Use scrollHeight for natural content height
+      // Use scrollHeight
       const h = el.scrollHeight;
       setMinH(prev => (Math.abs(h - prev) > 2 ? h : prev));
     };
@@ -39,16 +41,21 @@ export function NodeCard({
     // Measure
     measure();
 
-    // Watch for size changes (ResizeObserver avoids infinite loops)
+    // Watch for size changes
     const ro = new ResizeObserver(measure);
     ro.observe(el);
 
     return () => ro.disconnect();
   }, [autoMinHeight]);
 
+  // Block pointer-events when locked (NodeHeader overrides to keep buttons clickable)
+  const lockStyle: React.CSSProperties | undefined = locked
+    ? { pointerEvents: "none" }
+    : undefined;
+
   return (
     <div
-      className={`${NODE_TOKENS.card} ${selected ? NODE_TOKENS.cardSelected : ""} ${className}`}
+      className={`group ${NODE_TOKENS.card} ${selected ? NODE_TOKENS.cardSelected : ""} ${className}`}
     >
       <NodeResizer
         isVisible={!!selected}
@@ -60,11 +67,17 @@ export function NodeCard({
         handleClassName="!w-2 !h-2 !bg-transparent !border !border-blue-400/20 hover:!border-blue-400/40 !rounded-sm"
       />
       {autoMinHeight ? (
-        <div ref={measureRef} className="flex flex-col w-full">
+        <div
+          ref={measureRef}
+          className="flex flex-col w-full"
+          style={lockStyle}
+        >
           {children}
         </div>
       ) : (
-        children
+        <div className="flex flex-col w-full h-full" style={lockStyle}>
+          {children}
+        </div>
       )}
     </div>
   );
