@@ -17,129 +17,29 @@ on:
       - 'v*'
 
 jobs:
-  build-and-push:
-    name: build ${{ matrix.variant }}
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      short_sha: ${{ steps.meta.outputs.short_sha }}
-      pr_number: ${{ steps.meta.outputs.pr_number }}
+  # Cloud image - faster, used for PR deploys
+  build-cloud:
+    uses: ./.github/workflows/docker-build-image.yml
+    with:
+      variant: cloud
+      suffix: '-cloud'
+      dockerfile: Dockerfile.cloud
+      description: Daydream Scope (Cloud)
+    secrets: inherit
 
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: standard
-            suffix: ''
-            dockerfile: Dockerfile
-            description: Daydream Scope
-          - variant: cloud
-            suffix: '-cloud'
-            dockerfile: Dockerfile.cloud
-            description: Daydream Scope (Cloud)
+  # Standard image - slower, not needed for PR deploys
+  build-standard:
+    uses: ./.github/workflows/docker-build-image.yml
+    with:
+      variant: standard
+      suffix: ''
+      dockerfile: Dockerfile
+      description: Daydream Scope
+    secrets: inherit
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.ref }}
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Clean up before build
-        run: |
-          # Clean up unused packages to avoid disk space issues
-          sudo rm -rf /usr/local/.ghcup
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/lib/android/sdk/ndk
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-
-          # Show disk usage before build
-          echo "Disk usage before build:"
-          df -h
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: daydreamlive
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set build metadata
-        id: meta
-        run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "short_sha=$(echo '${{ github.event.pull_request.head.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
-            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
-          else
-            echo "short_sha=$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
-            echo "pr_number=" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Set image tag
-        id: tag
-        run: |
-          DOCKERHUB="daydreamlive/scope"
-          GHCR="ghcr.io/daydreamlive/scope"
-          SUFFIX="${{ matrix.suffix }}"
-
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # Manual dispatch: use provided version + latest
-            VERSION="${{ github.event.inputs.version }}"
-            TAGS="$DOCKERHUB:$VERSION$SUFFIX,$DOCKERHUB:latest$SUFFIX"
-            TAGS="$TAGS,$GHCR:$VERSION$SUFFIX,$GHCR:latest$SUFFIX"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            # Git tag: extract version (e.g., v0.1.0 -> 0.1.0) + latest
-            VERSION_TAG="${{ github.ref_name }}"
-            VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
-            TAGS="$DOCKERHUB:$VERSION$SUFFIX,$DOCKERHUB:latest$SUFFIX"
-            TAGS="$TAGS,$GHCR:$VERSION$SUFFIX,$GHCR:latest$SUFFIX"
-          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            # Main branch
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            TAGS="$DOCKERHUB:main$SUFFIX,$DOCKERHUB:$SHORT_SHA$SUFFIX"
-            TAGS="$TAGS,$GHCR:main$SUFFIX,$GHCR:$SHORT_SHA$SUFFIX"
-          elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
-            # Runpod serverless branch
-            TAGS="$DOCKERHUB:runpod-serverless$SUFFIX"
-            TAGS="$TAGS,$GHCR:runpod-serverless$SUFFIX"
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            # Pull request: use sanitized branch name + short SHA
-            BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
-            SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-            TAGS="$DOCKERHUB:$BRANCH_TAG$SUFFIX,$DOCKERHUB:$SHORT_SHA$SUFFIX"
-            TAGS="$TAGS,$GHCR:$BRANCH_TAG$SUFFIX,$GHCR:$SHORT_SHA$SUFFIX"
-          fi
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
-
-      - name: Build and push ${{ matrix.variant }} image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ${{ matrix.dockerfile }}
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.tag.outputs.tags }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/daydreamlive/scope
-            org.opencontainers.image.description=${{ matrix.description }}
-            org.opencontainers.image.licenses=MIT
-          cache-from: type=gha,scope=${{ matrix.variant }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.variant }}
-
+  # PR deploy - only waits for cloud build
   deploy-pr:
-    needs: build-and-push
+    needs: build-cloud
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
@@ -172,7 +72,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          PR_NUMBER="${{ needs.build-and-push.outputs.pr_number }}"
+          PR_NUMBER="${{ needs.build-cloud.outputs.pr_number }}"
 
           APP_NAME="scope-pr-${PR_NUMBER}"
 
@@ -200,7 +100,7 @@ jobs:
             const prNumber = ${{ github.event.pull_request.number }};
             const falAppId = '${{ steps.deploy.outputs.fal_app_id }}';
             const falWsUrl = '${{ steps.deploy.outputs.fal_ws_url }}';
-            const shortSha = '${{ needs.build-and-push.outputs.short_sha }}';
+            const shortSha = '${{ needs.build-cloud.outputs.short_sha }}';
 
             const body = `## 🚀 fal.ai Preview Deployment
 
