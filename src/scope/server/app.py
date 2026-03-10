@@ -881,6 +881,26 @@ async def add_ice_candidate(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.delete(
+    "/api/v1/webrtc/offer/{session_id}", status_code=204, response_class=Response
+)
+async def close_webrtc_session(
+    session_id: str,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Close and remove a WebRTC session.
+
+    Used by the cloud proxy (fal_app) to tear down the WebRTC peer connection
+    when the signaling WebSocket closes (e.g. MAX_DURATION_EXCEEDED).
+    """
+    try:
+        await webrtc_manager.remove_session(session_id)
+        return Response(status_code=204)
+    except Exception as e:
+        logger.error(f"Error closing WebRTC session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
 @app.get("/api/v1/recordings/{session_id}")
 @cloud_proxy(recording_download_cloud_path, timeout=120.0)
 async def download_recording(
