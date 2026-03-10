@@ -167,6 +167,9 @@ class CloudWebRTCClient:
         self._session_id: str | None = None
         self._connected = False
         self._receive_task: asyncio.Task | None = None
+        # Flag to track intentional disconnects (user-initiated via stop_webrtc)
+        # When True, connection loss won't trigger error/reconnect
+        self._intentional_disconnect = False
 
         # Stats
         self._stats = {
@@ -198,6 +201,9 @@ class CloudWebRTCClient:
             await self.disconnect()
 
         logger.info("Creating WebRTC connection to cloud...")
+
+        # Reset intentional disconnect flag for new connection
+        self._intentional_disconnect = False
 
         # Get ICE servers from cloud
         ice_response = await self.cloud_manager.webrtc_get_ice_servers()
@@ -248,17 +254,17 @@ class CloudWebRTCClient:
                 self._connected = True
                 self._stats["connected_at"] = time.time()
                 logger.info("WebRTC connected to cloud")
-            elif state in ("disconnected", "failed"):
+            elif state in ("disconnected", "failed", "closed"):
                 was_connected = self._connected
                 self._connected = False
                 # Notify cloud manager to surface error and attempt reconnection
-                # Only notify if we were previously connected (not on initial failure)
-                if was_connected:
+                # Only notify if:
+                # 1. We were previously connected (not on initial failure)
+                # 2. This wasn't an intentional disconnect (user-initiated)
+                if was_connected and not self._intentional_disconnect:
                     self.cloud_manager.on_webrtc_connection_lost(
                         reason=f"WebRTC connection state: {state}"
                     )
-            elif state == "closed":
-                self._connected = False
 
         @self.pc.on("icecandidate")
         async def on_ice_candidate(candidate):
@@ -438,6 +444,8 @@ class CloudWebRTCClient:
         """Close the WebRTC connection to cloud."""
         logger.info("Disconnecting from cloud...")
 
+        # Mark as intentional disconnect to prevent error/reconnect triggers
+        self._intentional_disconnect = True
         self._connected = False
 
         if self._receive_task:
