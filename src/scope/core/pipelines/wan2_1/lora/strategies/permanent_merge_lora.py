@@ -169,6 +169,7 @@ class PermanentMergeLoRAStrategy:
             return loaded_adapters
 
         adapter_names = []
+        used_names: set[str] = set()
 
         for lora_config in lora_configs:
             lora_path = lora_config.get("path")
@@ -189,8 +190,22 @@ class PermanentMergeLoRAStrategy:
                         strength=scale,
                     )
                 )
+                # Ensure uniqueness for duplicate file loads.
+                if adapter_name in used_names:
+                    idx = 1
+                    while f"{adapter_name}_{idx}" in used_names:
+                        idx += 1
+                    adapter_name = f"{adapter_name}_{idx}"
+                used_names.add(adapter_name)
+
                 adapter_names.append(adapter_name)
-                loaded_adapters.append({"path": str(lora_path), "scale": scale})
+                loaded_adapters.append(
+                    {
+                        "adapter_name": adapter_name,
+                        "path": str(lora_path),
+                        "scale": scale,
+                    }
+                )
 
             except FileNotFoundError as e:
                 raise RuntimeError(

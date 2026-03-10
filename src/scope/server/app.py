@@ -102,6 +102,8 @@ from .schema import (
     IceCandidateRequest,
     IceServerConfig,
     IceServersResponse,
+    LoadedLoRAAdapterInfo,
+    LoadedLoRAAdaptersResponse,
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
@@ -563,6 +565,32 @@ async def root():
     return {"message": "Scope API - Frontend index.html not found"}
 
 
+async def _refresh_cloud_lora_cache(
+    cloud_manager: "CloudConnectionManager",
+    pipeline_manager: "PipelineManager",
+) -> None:
+    """Fetch loaded LoRA adapters from cloud and update the local cache.
+
+    Called as a fire-and-forget task after a cloud pipeline load so the OSC
+    server has authoritative adapter data without continuous polling.
+    """
+    try:
+        response = await cloud_manager.api_request(
+            method="GET",
+            path="/api/v1/loras/loaded",
+            timeout=10.0,
+        )
+        data = response.get("data", {})
+        adapters = data.get("adapters", [])
+        pipeline_manager.update_loaded_lora_cache(adapters)
+        logger.debug(
+            "_refresh_cloud_lora_cache: cached %d adapter(s) from cloud",
+            len(adapters),
+        )
+    except Exception as e:
+        logger.warning("_refresh_cloud_lora_cache: failed to fetch from cloud: %s", e)
+
+
 @app.post("/api/v1/pipeline/load")
 async def load_pipeline(
     request: PipelineLoadRequest,
@@ -592,7 +620,7 @@ async def load_pipeline(
         pipeline_manager.store_load_context(pipeline_ids, load_params_dict)
 
         if cloud_manager and cloud_manager.is_connected:
-            return await _proxy_to_cloud(
+            result = await _proxy_to_cloud(
                 cloud_manager,
                 http_request,
                 http_request.url.path,
@@ -600,6 +628,12 @@ async def load_pipeline(
                 60.0,
                 CLOUD_REQUEST_FAILED,
             )
+            # Refresh the local LoRA adapter cache from cloud so OSC stays
+            # accurate without relying on the load-params guess.
+            asyncio.create_task(
+                _refresh_cloud_lora_cache(cloud_manager, pipeline_manager)
+            )
+            return result
 
         # Local mode: start loading in background without blocking
         asyncio.create_task(
@@ -1003,6 +1037,31 @@ async def list_lora_files(
     except Exception as e:  # pragma: no cover - defensive logging
         logger.error(f"list_lora_files: Error listing LoRA files: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.get("/api/v1/loras/loaded", response_model=LoadedLoRAAdaptersResponse)
+@cloud_proxy()
+async def get_loaded_lora_adapters(
+    http_request: Request,
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Return currently loaded LoRA adapter instances.
+
+    When cloud mode is active, proxies to the cloud backend so the response
+    always reflects the actual runtime state.
+    """
+    raw = pipeline_manager.get_loaded_lora_adapters()
+    adapters = [
+        LoadedLoRAAdapterInfo(
+            adapter_name=a.get("adapter_name", a.get("path", "")),
+            path=a.get("path", ""),
+            scale=a.get("scale", 1.0),
+            merge_mode=a.get("merge_mode"),
+        )
+        for a in raw
+    ]
+    return LoadedLoRAAdaptersResponse(adapters=adapters)
 
 
 class LoRAInstallRequest(BaseModel):
@@ -2486,6 +2545,7 @@ async def connect_to_cloud(
 @app.post("/api/v1/cloud/disconnect", response_model=CloudStatusResponse)
 async def disconnect_from_cloud(
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
 ):
     """Disconnect from cloud.
 
@@ -2494,6 +2554,7 @@ async def disconnect_from_cloud(
     """
     try:
         await cloud_manager.disconnect()
+        pipeline_manager.clear_loaded_lora_cache()
         credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
         return CloudStatusResponse(
             connected=False,

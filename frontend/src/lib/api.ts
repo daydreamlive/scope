@@ -50,12 +50,22 @@ export interface PipelineLoadRequest {
   load_params?: PipelineLoadParamsGeneric | null;
 }
 
+export interface LoadedLoRAAdapterInfo {
+  adapter_name: string;
+  path: string;
+  scale: number;
+  merge_mode?: string | null;
+}
+
+export interface LoadedLoRAAdaptersResponse {
+  adapters: LoadedLoRAAdapterInfo[];
+}
+
 export interface PipelineStatusResponse {
   status: "not_loaded" | "loading" | "loaded" | "error";
   pipeline_id?: string;
   load_params?: Record<string, unknown>;
-  // Optional list of loaded LoRA adapters, provided by backend when available.
-  loaded_lora_adapters?: { path: string; scale: number }[];
+  loaded_lora_adapters?: LoadedLoRAAdapterInfo[];
   error?: string;
   loading_stage?: string | null;
 }
@@ -385,6 +395,20 @@ export const listLoRAFiles = async (): Promise<LoRAFilesResponse> => {
   const result = await response.json();
   return result;
 };
+
+export const getLoadedLoRAAdapters =
+  async (): Promise<LoadedLoRAAdaptersResponse> => {
+    const response = await fetch("/api/v1/loras/loaded", {
+      method: "GET",
+    });
+
+    if (!response.ok) {
+      const detail = await extractErrorDetail(response);
+      throw new Error(detail);
+    }
+
+    return response.json();
+  };
 
 export interface LoRAInstallRequest {
   url: string;

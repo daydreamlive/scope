@@ -103,8 +103,10 @@ class OSCServer:
 
         pipeline_ids = tuple(self._pipeline_manager.get_loaded_pipeline_ids())
         adapters = self._pipeline_manager.get_loaded_lora_adapters()
-        lora_paths = tuple(adapter.get("path", "") for adapter in adapters)
-        return (pipeline_ids, lora_paths)
+        lora_ids = tuple(
+            adapter.get("adapter_name", adapter.get("path", "")) for adapter in adapters
+        )
+        return (pipeline_ids, lora_ids)
 
     def _build_dispatcher(self) -> Dispatcher:
         dispatcher = Dispatcher()
@@ -154,9 +156,13 @@ class OSCServer:
         lora_match = re.match(r"lora/(\d+)/scale$", key)
         if lora_match:
             lora_path = path_info.get("lora_path", "")
+            adapter_name = path_info.get("lora_adapter_name", "")
+            update: dict[str, Any] = {"path": lora_path, "scale": value}
+            if adapter_name:
+                update["adapter_name"] = adapter_name
             if self._webrtc_manager:
                 self._webrtc_manager.broadcast_parameter_update(
-                    {"lora_scales": [{"path": lora_path, "scale": value}]}
+                    {"lora_scales": [update]}
                 )
         elif self._webrtc_manager:
             self._webrtc_manager.broadcast_parameter_update({key: value})

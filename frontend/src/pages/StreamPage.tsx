@@ -149,16 +149,6 @@ export function StreamPage() {
   const hasAvailableOutputs =
     spoutAvailable || ndiOutputAvailable || syphonOutputAvailable;
 
-  // Combined refresh function for pipeline schemas, pipelines list, and hardware info
-  const handlePipelinesRefresh = useCallback(async () => {
-    // Refresh all hooks to keep them in sync when cloud mode toggles
-    await Promise.all([
-      refreshPipelineSchemas(),
-      refreshPipelines(),
-      refreshHardwareInfo(),
-    ]);
-  }, [refreshPipelineSchemas, refreshPipelines, refreshHardwareInfo]);
-
   // Prompt state - use unified default prompts based on mode
   const initialMode =
     settings.inputMode || getPipelineDefaultMode(settings.pipelineId);
@@ -305,7 +295,23 @@ export function StreamPage() {
     loadPipeline,
     pipelineInfo,
     loadingStage,
+    checkStatus: checkPipelineStatus,
   } = usePipeline();
+
+  // Combined refresh function for pipeline schemas, pipelines list, and hardware info
+  const handlePipelinesRefresh = useCallback(async () => {
+    await Promise.all([
+      refreshPipelineSchemas(),
+      refreshPipelines(),
+      refreshHardwareInfo(),
+      checkPipelineStatus(),
+    ]);
+  }, [
+    refreshPipelineSchemas,
+    refreshPipelines,
+    refreshHardwareInfo,
+    checkPipelineStatus,
+  ]);
 
   // WebRTC for streaming (unified hook works in both local and cloud modes)
   const {

@@ -58,6 +58,9 @@ class PipelineManager:
         # Loading stage for frontend display (e.g., "Loading diffusion model...")
         self._loading_stage: str | None = None
 
+        # Authoritative cloud LoRA cache, populated after cloud pipeline load.
+        self._cloud_lora_cache: list[dict[str, Any]] | None = None
+
     def set_loading_stage(self, stage: str | None) -> None:
         """Set the current loading stage (thread-safe)."""
         with self._lock:
@@ -109,21 +112,44 @@ class PipelineManager:
 
         Used in cloud inference mode so the local OSC server can discover LoRA
         adapters (via the load_params fallback) even though the actual pipeline
-        runs on a remote host.
+        runs on a remote host.  The fallback is only used until
+        :meth:`update_loaded_lora_cache` is called with the authoritative
+        adapter list from the cloud.
         """
         with self._lock:
             self._load_params = load_params
             for pid in pipeline_ids:
                 self._pipeline_load_params[pid] = load_params or {}
 
+    def update_loaded_lora_cache(
+        self,
+        adapters: list[dict[str, Any]],
+    ) -> None:
+        """Replace the local LoRA adapter cache with authoritative data.
+
+        Call this after a cloud pipeline load succeeds to keep the local OSC
+        server in sync without relying on load-param guesses.
+        """
+        with self._lock:
+            self._cloud_lora_cache = self._ensure_adapter_names(list(adapters))
+
+    def clear_loaded_lora_cache(self) -> None:
+        """Clear the cloud LoRA adapter cache (e.g. on disconnect)."""
+        with self._lock:
+            self._cloud_lora_cache = None
+
     def get_loaded_lora_adapters(self) -> list[dict[str, Any]]:
         """Return currently loaded LoRA adapters across all pipelines (thread-safe).
 
-        Each entry has at least ``path`` and ``scale`` keys.
+        Each entry has at least ``adapter_name``, ``path`` and ``scale`` keys.
+
+        Resolution order:
+        1. Live runtime adapter metadata from local pipeline instances.
+        2. Authoritative cloud cache (populated by :meth:`update_loaded_lora_cache`).
+        3. Fallback from stored load params (initial hint before cloud responds).
         """
         with self._lock:
-            # Prefer runtime adapter metadata from live pipeline instances when
-            # available, because that reflects the current scale after updates.
+            # 1. Prefer live runtime metadata from locally-loaded pipelines.
             runtime_adapters: list[dict[str, Any]] = []
             for pipeline in self._pipelines.values():
                 adapters = getattr(pipeline, "loaded_lora_adapters", None)
@@ -131,11 +157,14 @@ class PipelineManager:
                     continue
                 runtime_adapters.extend(adapters)
             if runtime_adapters:
-                return runtime_adapters
+                return self._ensure_adapter_names(runtime_adapters)
 
-            # Fallback to configured LoRAs from load params so OSC docs and
-            # validation still know about enabled adapters even if the current
-            # pipeline implementation has not populated loaded_lora_adapters.
+            # 2. Authoritative cloud cache (set after a cloud pipeline load).
+            cloud_cache = getattr(self, "_cloud_lora_cache", None)
+            if cloud_cache is not None:
+                return list(cloud_cache)
+
+            # 3. Fallback to configured LoRAs from load params.
             load_param_sets: list[dict[str, Any]] = (
                 [self._load_params] if self._load_params else []
             ) + list(self._pipeline_load_params.values())
@@ -144,16 +173,35 @@ class PipelineManager:
                 loras = load_params.get("loras") if load_params else None
                 if not loras:
                     continue
-                return [
-                    {
-                        "path": lora.get("path", ""),
-                        "scale": lora.get("scale", 1.0),
-                        "merge_mode": lora.get("merge_mode"),
-                    }
-                    for lora in loras
-                ]
+                return self._ensure_adapter_names(
+                    [
+                        {
+                            "path": lora.get("path", ""),
+                            "scale": lora.get("scale", 1.0),
+                            "merge_mode": lora.get("merge_mode"),
+                        }
+                        for lora in loras
+                    ]
+                )
 
             return []
+
+    @staticmethod
+    def _ensure_adapter_names(
+        adapters: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        """Guarantee every adapter dict has a unique ``adapter_name`` key."""
+        import os
+
+        seen: dict[str, int] = {}
+        for adapter in adapters:
+            if adapter.get("adapter_name"):
+                continue
+            base = os.path.splitext(os.path.basename(adapter.get("path", "unknown")))[0]
+            count = seen.get(base, 0)
+            seen[base] = count + 1
+            adapter["adapter_name"] = f"{base}_{count}" if count else base
+        return adapters
 
     def get_pipeline_by_id(self, pipeline_id: str):
         """Get a pipeline instance by ID (thread-safe).

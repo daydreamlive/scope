@@ -162,6 +162,7 @@ def _collect_lora_paths(
     paths: list[dict[str, Any]] = []
     for i, adapter in enumerate(loaded):
         adapter_path = adapter.get("path", "")
+        adapter_name = adapter.get("adapter_name", "")
         filename = (
             adapter_path.rsplit("/", 1)[-1]
             if "/" in adapter_path
@@ -176,6 +177,7 @@ def _collect_lora_paths(
                 "max": 10.0,
                 "osc_address": f"/scope/lora/{i}/scale",
                 "lora_path": adapter_path,
+                "lora_adapter_name": adapter_name,
             }
         )
     return paths

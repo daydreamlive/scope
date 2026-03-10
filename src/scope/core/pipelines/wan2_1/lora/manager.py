@@ -213,26 +213,32 @@ class LoRAManager:
         loaded_adapters: list[dict[str, Any]],
         fallback_mode: str | None,
     ) -> dict[str, str]:
-        """Build path to merge_mode lookup map from loaded adapters.
+        """Build identifier-to-merge_mode lookup map from loaded adapters.
+
+        Both ``adapter_name`` and ``path`` are registered as keys so that
+        scale updates keyed by either field resolve to the correct strategy.
 
         Args:
             loaded_adapters: List of loaded adapter info dicts
             fallback_mode: Fallback merge_mode if not specified in adapter
 
         Returns:
-            Dictionary mapping adapter path to merge_mode
+            Dictionary mapping adapter_name/path to merge_mode
         """
-        adapter_path_to_mode: dict[str, str] = {}
+        mode_map: dict[str, str] = {}
 
         for adapter in loaded_adapters:
+            adapter_mode = LoRAManager._resolve_mode(
+                adapter.get("merge_mode"), fallback_mode
+            )
+            adapter_name = adapter.get("adapter_name")
             adapter_path = adapter.get("path")
+            if adapter_name:
+                mode_map[adapter_name] = adapter_mode
             if adapter_path:
-                adapter_mode = LoRAManager._resolve_mode(
-                    adapter.get("merge_mode"), fallback_mode
-                )
-                adapter_path_to_mode[adapter_path] = adapter_mode
+                mode_map[adapter_path] = adapter_mode
 
-        return adapter_path_to_mode
+        return mode_map
 
     @staticmethod
     def update_adapter_scales(
@@ -268,7 +274,8 @@ class LoRAManager:
         )
         updates_by_mode = LoRAManager._group_by_mode(
             scale_updates,
-            lambda upd: adapter_mode_map.get(upd.get("path")),
+            lambda upd: adapter_mode_map.get(upd.get("adapter_name"))
+            or adapter_mode_map.get(upd.get("path")),
             merge_mode,
         )
 

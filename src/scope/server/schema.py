@@ -112,7 +112,7 @@ class Parameters(BaseModel):
     )
     lora_scales: list["LoRAScaleUpdate"] | None = Field(
         default=None,
-        description="Update scales for loaded LoRA adapters. Each entry updates a specific adapter by path.",
+        description="Update scales for loaded LoRA adapters. Each entry identifies an adapter by adapter_name (preferred) or path.",
     )
     output_sinks: "dict[str, OutputSinkConfig] | None" = Field(
         default=None,
@@ -302,11 +302,48 @@ class LoRAConfig(BaseModel):
     )
 
 
+class LoadedLoRAAdapterInfo(BaseModel):
+    """Information about a single loaded LoRA adapter instance."""
+
+    adapter_name: str = Field(
+        ...,
+        description="Stable per-instance identifier (unique even when the same file is loaded twice).",
+    )
+    path: str = Field(
+        ...,
+        description="Filesystem path of the LoRA weights file.",
+    )
+    scale: float = Field(
+        ...,
+        ge=-10.0,
+        le=10.0,
+        description="Current adapter strength/weight.",
+    )
+    merge_mode: str | None = Field(
+        default=None,
+        description="Merge strategy used for this adapter instance.",
+    )
+
+
+class LoadedLoRAAdaptersResponse(BaseModel):
+    """Response from the loaded-LoRA adapters endpoint."""
+
+    adapters: list[LoadedLoRAAdapterInfo] = Field(
+        default_factory=list,
+        description="Currently loaded LoRA adapter instances.",
+    )
+
+
 class LoRAScaleUpdate(BaseModel):
     """Update scale for a loaded LoRA adapter."""
 
-    path: str = Field(
-        ..., description="Path of the LoRA to update (must match loaded path)"
+    adapter_name: str | None = Field(
+        default=None,
+        description="Stable per-instance identifier. Preferred over path for disambiguation.",
+    )
+    path: str | None = Field(
+        default=None,
+        description="Path of the LoRA to update (legacy; use adapter_name when available).",
     )
     scale: float = Field(
         ...,
@@ -485,10 +522,10 @@ class PipelineStatusResponse(BaseModel):
     load_params: dict | None = Field(
         default=None, description="Load parameters used when loading the pipeline"
     )
-    loaded_lora_adapters: list[dict] | None = Field(
+    loaded_lora_adapters: list[LoadedLoRAAdapterInfo] | list[dict] | None = Field(
         default=None,
         description=(
-            "Information about currently loaded LoRA adapters (path and scale). "
+            "Information about currently loaded LoRA adapters. "
             "Used by the frontend to decide which adapters can be updated at runtime."
         ),
     )

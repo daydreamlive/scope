@@ -487,6 +487,8 @@ class PeftLoRAStrategy:
         if not lora_configs:
             return loaded_adapters
 
+        used_names: set[str] = set()
+
         for lora_config in lora_configs:
             lora_path = lora_config.get("path")
             if not lora_path:
@@ -495,6 +497,18 @@ class PeftLoRAStrategy:
 
             scale = lora_config.get("scale", 1.0)
             adapter_name = lora_config.get("adapter_name")
+
+            # Ensure uniqueness when the same file is loaded multiple times.
+            if adapter_name is None:
+                base = Path(lora_path).stem
+                candidate = sanitize_adapter_name(base)
+                if candidate in used_names:
+                    idx = 1
+                    while f"{candidate}_{idx}" in used_names:
+                        idx += 1
+                    candidate = f"{candidate}_{idx}"
+                adapter_name = candidate
+            used_names.add(adapter_name)
 
             try:
                 returned_adapter_name = PeftLoRAStrategy.load_adapter(
