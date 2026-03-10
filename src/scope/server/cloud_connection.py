@@ -720,7 +720,9 @@ class CloudConnectionManager:
 
                 # Check if connection recovered during backoff (race condition fix)
                 if self.webrtc_connected:
-                    logger.info("WebRTC recovered during backoff, aborting reconnection")
+                    logger.info(
+                        "WebRTC recovered during backoff, aborting reconnection"
+                    )
                     self._webrtc_error = None
                     self._webrtc_reconnect_attempts = 0
                     return
