@@ -25,9 +25,6 @@ jobs:
   build:
     name: build ${{ inputs.variant }}
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
     outputs:
       short_sha: ${{ steps.meta.outputs.short_sha }}
       pr_number: ${{ steps.meta.outputs.pr_number }}

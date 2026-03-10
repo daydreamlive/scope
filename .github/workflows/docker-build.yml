@@ -16,6 +16,13 @@ on:
     tags:
       - 'v*'
 
+# Permissions for the reusable workflow jobs
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+  issues: write
+
 jobs:
   # Cloud image - faster, used for PR deploys
   build-cloud:
@@ -42,10 +49,6 @@ jobs:
     needs: build-cloud
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
 
     outputs:
       fal_app_id: ${{ steps.deploy.outputs.fal_app_id }}
@@ -150,10 +153,6 @@ jobs:
     needs: deploy-pr
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
 
     steps:
       - name: Checkout code
