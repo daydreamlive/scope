@@ -2544,6 +2544,38 @@ async def get_cloud_stats(
     return cloud_manager.get_status()
 
 
+# =============================================================================
+# Debug/Test Endpoints (for E2E testing)
+# =============================================================================
+
+
+@app.post("/api/v1/cloud/debug/disconnect-webrtc")
+async def debug_disconnect_webrtc(
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Force-close the WebRTC connection to simulate a disconnect.
+
+    This endpoint is intended for E2E testing of the reconnection logic.
+    It triggers the same code path as a real network disconnect.
+
+    Returns the cloud status after triggering the disconnect.
+    """
+    if not cloud_manager.webrtc_connected:
+        raise HTTPException(
+            status_code=400,
+            detail="WebRTC not connected",
+        )
+
+    # Access the internal WebRTC client and force-close the peer connection
+    webrtc_client = cloud_manager._webrtc_client
+    if webrtc_client is not None and webrtc_client.pc is not None:
+        logger.info("[DEBUG] Force-closing WebRTC peer connection for testing")
+        # Close the peer connection - this will trigger connectionstatechange
+        await webrtc_client.pc.close()
+
+    return cloud_manager.get_status()
+
+
 @app.get("/{path:path}")
 async def serve_frontend(request: Request, path: str):
     """Serve the frontend for all non-API routes (fallback for client-side routing)."""
