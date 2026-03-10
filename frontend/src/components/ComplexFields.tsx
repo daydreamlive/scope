@@ -563,11 +563,14 @@ export function SchemaComplexField({
           </Toggle>
         </div>
         {compileValue && (
-          <div className="flex items-start gap-1.5 p-2 rounded-md bg-blue-500/10 border border-blue-500/20">
-            <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-blue-600 dark:text-blue-400" />
-            <p className="text-xs text-blue-600 dark:text-blue-400">
-              Note: First-time compilation can take several minutes. Subsequent
-              runs will be significantly faster.
+          <div className="flex items-start gap-1.5 p-2 rounded-md bg-amber-500/10 border border-amber-500/20">
+            <Info className="h-3.5 w-3.5 mt-0.5 shrink-0 text-amber-600 dark:text-amber-500" />
+            <p className="text-xs text-amber-600 dark:text-amber-500">
+              Note: First-time compilation can take several minutes. Results are
+              cached, but changes to resolution, LoRA adapters, VACE, or
+              quantization alter tensor shapes or model structure and will
+              trigger recompilation. Other setting changes reuse the cache and
+              reload faster.
             </p>
           </div>
         )}

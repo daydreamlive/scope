@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from pydantic import Field
 
 from ..artifacts import HuggingfaceRepoArtifact
@@ -133,7 +135,7 @@ class LongLiveConfig(BasePipelineConfig):
         ),
     )
 
-    vace_fp8_compatible = True
+    vace_fp8_compatible: ClassVar[bool] = True
 
     modes = {
         "text": ModeDefaults(default=True),

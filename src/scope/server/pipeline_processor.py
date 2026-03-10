@@ -21,6 +21,21 @@ logger = logging.getLogger(__name__)
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 2
 
+
+def _has_native_vace(pipeline) -> bool:
+    """Check if a pipeline has native VACE support via model.vace_blocks.
+
+    This detects VACE initialized directly on the model (e.g. CausalWanModel.init_vace)
+    as opposed to the VACEEnabledPipeline mixin which wraps the model.
+    """
+    try:
+        model = pipeline.components.generator.model
+        if hasattr(model, "get_base_model"):
+            model = model.get_base_model()
+        return getattr(model, "vace_blocks", None) is not None
+    except (AttributeError, TypeError):
+        return False
+
 SLEEP_TIME = 0.01
 
 # FPS calculation constants
@@ -103,8 +118,12 @@ class PipelineProcessor:
             "vace_use_input_video", True
         )
 
-        # Cache VACE support check to avoid isinstance on every chunk
-        self._pipeline_supports_vace = isinstance(pipeline, VACEEnabledPipeline)
+        # Cache VACE support check to avoid isinstance on every chunk.
+        # Covers both the VACEEnabledPipeline mixin (CausalVaceWanModel wrapper)
+        # and native VACE (CausalWanModel.init_vace, used by LongLive).
+        self._pipeline_supports_vace = isinstance(
+            pipeline, VACEEnabledPipeline
+        ) or _has_native_vace(pipeline)
 
         # Flag to track pending cache initialization after queue flush
         # Set when reset_cache flushes queues, cleared after successful pipeline call

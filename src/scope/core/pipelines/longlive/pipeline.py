@@ -88,11 +88,6 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             from ..wan2_1.vace.utils.weight_loader import load_vace_weights_only
 
             vace_in_dim = getattr(config, "vace_in_dim", 96)
-            model_cfg = getattr(config, "model_config", None)
-            if model_cfg:
-                bm_kwargs = getattr(model_cfg, "base_model_kwargs", None) or {}
-                vace_in_dim = bm_kwargs.get("vace_in_dim", vace_in_dim)
-
             generator.model.init_vace(vace_in_dim=vace_in_dim)
             generator.model.vace_patch_embedding.to(device=device, dtype=dtype)
             generator.model.vace_blocks.to(device=device, dtype=dtype)
