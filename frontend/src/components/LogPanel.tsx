@@ -1,5 +1,5 @@
-import { useRef, useEffect, useState } from "react";
-import { Terminal, Copy, Trash2, X, Check } from "lucide-react";
+import { useRef, useEffect, useState, useCallback } from "react";
+import { Terminal, Copy, Trash2, X, Check, Bug } from "lucide-react";
 import { Button } from "./ui/button";
 import type { LogLine, LogLevel } from "../hooks/useLogStream";
 
@@ -26,6 +26,35 @@ export function LogPanel({ logs, isOpen, onClose, onClear }: LogPanelProps) {
   const [autoScroll, setAutoScroll] = useState(true);
   const [filter, setFilter] = useState<LogFilter>("all");
   const [copied, setCopied] = useState(false);
+  const [debugEnabled, setDebugEnabled] = useState(false);
+  const [debugLoading, setDebugLoading] = useState(false);
+
+  // Fetch initial debug state on mount
+  useEffect(() => {
+    fetch("/api/v1/logs/debug")
+      .then(r => r.json())
+      .then(data => setDebugEnabled(data.enabled))
+      .catch(() => {});
+  }, []);
+
+  const handleDebugToggle = useCallback(async () => {
+    setDebugLoading(true);
+    try {
+      const resp = await fetch("/api/v1/logs/debug", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !debugEnabled }),
+      });
+      if (resp.ok) {
+        const data = await resp.json();
+        setDebugEnabled(data.enabled);
+      }
+    } catch {
+      // Silently ignore
+    } finally {
+      setDebugLoading(false);
+    }
+  }, [debugEnabled]);
 
   // Auto-scroll to bottom when new logs arrive or panel opens
   useEffect(() => {
@@ -85,6 +114,21 @@ export function LogPanel({ logs, isOpen, onClose, onClear }: LogPanelProps) {
 
         <div className="w-px h-4 bg-border mx-1" />
 
+        <button
+          onClick={handleDebugToggle}
+          disabled={debugLoading}
+          className={`text-[11px] px-1.5 py-0.5 rounded transition-colors flex items-center gap-1 ${
+            debugEnabled
+              ? "bg-amber-900/50 text-amber-300"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          title={
+            debugEnabled ? "Disable debug logging" : "Enable debug logging"
+          }
+        >
+          <Bug className="h-3 w-3" />
+          {debugEnabled ? "Debug ON" : "Debug OFF"}
+        </button>
         <Button
           variant="ghost"
           size="icon"
