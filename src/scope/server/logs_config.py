@@ -4,14 +4,53 @@ Logs configuration module for daydream-scope.
 Provides centralized configuration for log storage location with support for:
 - Default location: ~/.daydream-scope/logs
 - Environment variable override: DAYDREAM_SCOPE_LOGS_DIR
+- Fal connection ID injection into log lines (when running on fal.ai)
 """
 
 import logging
 import os
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Fal connection ID tracking — thread-safe global for log correlation
+# ---------------------------------------------------------------------------
+
+_fal_connection_id: str | None = None
+_fal_connection_id_lock = threading.Lock()
+
+
+def set_fal_connection_id(connection_id: str | None) -> None:
+    """Set (or clear) the fal connection ID that is injected into every log line."""
+    global _fal_connection_id
+    with _fal_connection_id_lock:
+        _fal_connection_id = connection_id
+
+
+def get_fal_connection_id() -> str | None:
+    """Return the current fal connection ID, or None if not set."""
+    return _fal_connection_id
+
+
+class FalConnectionFilter(logging.Filter):
+    """Logging filter that adds a ``fal_conn`` attribute to every record.
+
+    When a fal connection ID is set, ``record.fal_conn`` is ``"[<id>] "``;
+    otherwise it is the empty string.  Use ``%(fal_conn)s`` in the format
+    string so the prefix appears only when running on fal.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        cid = _fal_connection_id
+        record.fal_conn = f"[{cid}] " if cid else ""  # type: ignore[attr-defined]
+        return True
+
+
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(fal_conn)s%(message)s"
 
 # Default logs directory
 DEFAULT_LOGS_DIR = "~/.daydream-scope/logs"

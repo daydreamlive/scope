@@ -67,11 +67,15 @@ from .kafka_publisher import (
     set_kafka_publisher,
 )
 from .logs_config import (
+    LOG_FORMAT,
+    FalConnectionFilter,
     cleanup_old_logs,
     ensure_logs_dir,
     get_current_log_file,
+    get_fal_connection_id,
     get_logs_dir,
     get_most_recent_log_file,
+    set_fal_connection_id,
 )
 from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
 from .models_config import (
@@ -124,13 +128,13 @@ cleanup_old_logs(max_age_days=1)  # Delete logs older than 1 day
 log_file = get_current_log_file()
 
 # Configure logging - set root to WARNING to keep non-app libraries quiet by default
-logging.basicConfig(
-    level=logging.WARNING, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT)
 
-# Console handler handles INFO
+# Install filter on every handler so %(fal_conn)s is always populated
+_fal_filter = FalConnectionFilter()
 root_logger = logging.getLogger()
 for handler in root_logger.handlers:
+    handler.addFilter(_fal_filter)
     if isinstance(handler, logging.StreamHandler) and not isinstance(
         handler, RotatingFileHandler
     ):
@@ -143,9 +147,8 @@ file_handler = RotatingFileHandler(
     backupCount=5,  # Keep 5 backup files
 )
 file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(
-    logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-)
+file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+file_handler.addFilter(_fal_filter)
 root_logger.addHandler(file_handler)
 
 # Add the filter to suppress STUN/TURN errors
@@ -455,6 +458,33 @@ async def health_check(
         version=version("daydream-scope"),
         git_commit=get_git_commit_hash(),
     )
+
+
+@app.put("/api/v1/internal/fal-connection-id")
+async def put_fal_connection_id(request: Request):
+    """Set the fal connection ID that is injected into every log line.
+
+    Called by the fal_app proxy when a new WebSocket connection is established.
+    This is an internal endpoint not intended for external consumers.
+    """
+    body = await request.json()
+    connection_id = body.get("connection_id")
+    set_fal_connection_id(connection_id)
+    logger.info("Fal connection ID set")
+    return {"status": "ok", "connection_id": connection_id}
+
+
+@app.delete("/api/v1/internal/fal-connection-id")
+async def delete_fal_connection_id():
+    """Clear the fal connection ID from log lines.
+
+    Called by the fal_app proxy when a WebSocket connection is closed.
+    """
+    prev = get_fal_connection_id()
+    set_fal_connection_id(None)
+    if prev:
+        logger.info("Fal connection ID cleared")
+    return {"status": "ok"}
 
 
 @app.post("/api/v1/restart")

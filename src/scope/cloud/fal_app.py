@@ -588,6 +588,19 @@ class ScopeApp(fal.App, keep_alive=300):
 
         print(f"[{log_prefix()}] ✅ WebSocket connection accepted")
 
+        # Tell the Scope subprocess to tag every log line with this connection ID
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.put(
+                    f"{SCOPE_LOCAL_URL}/api/v1/internal/fal-connection-id",
+                    json={"connection_id": connection_id},
+                    timeout=5.0,
+                )
+        except Exception as e:
+            print(
+                f"[{log_prefix()}] Warning: failed to set connection ID in subprocess: {e}"
+            )
+
         # Wait for any in-progress cleanup from the previous session before signaling ready
         await _get_cleanup_event().wait()
 
@@ -1151,6 +1164,16 @@ class ScopeApp(fal.App, keep_alive=300):
                         "session_end_time_ms": int(end_time * 1000),
                     },
                 )
+            # Clear the fal connection ID from Scope subprocess logs
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.delete(
+                        f"{SCOPE_LOCAL_URL}/api/v1/internal/fal-connection-id",
+                        timeout=5.0,
+                    )
+            except Exception:
+                pass
+
             # Clean up session data to prevent data leakage between users.
             # Block the next connection's "ready" message until cleanup finishes.
             event = _get_cleanup_event()
