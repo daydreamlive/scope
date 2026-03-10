@@ -580,12 +580,16 @@ async def _refresh_cloud_lora_cache(
             path="/api/v1/loras/loaded",
             timeout=10.0,
         )
-        data = response.get("data", {})
+        data = response.get("data", response)
         adapters = data.get("adapters", [])
         pipeline_manager.update_loaded_lora_cache(adapters)
-        logger.debug(
+        logger.info(
             "_refresh_cloud_lora_cache: cached %d adapter(s) from cloud",
             len(adapters),
+        )
+        logger.debug(
+            "_refresh_cloud_lora_cache: adapter ids=%s",
+            [a.get("adapter_name", a.get("path", "")) for a in adapters],
         )
     except Exception as e:
         logger.warning("_refresh_cloud_lora_cache: failed to fetch from cloud: %s", e)
@@ -734,11 +738,18 @@ async def osc_status():
 @app.get("/api/v1/osc/paths")
 async def osc_paths(
     pm: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Return all OSC paths split into active / available sections."""
     from .osc_docs import get_osc_paths
 
-    return get_osc_paths(pm)
+    if cloud_manager and cloud_manager.is_connected:
+        await _refresh_cloud_lora_cache(cloud_manager, pm)
+
+    result = get_osc_paths(pm)
+    lora_count = len(result.get("active", {}).get("LoRA Adapters", []))
+    logger.debug("osc_paths: active LoRA adapter paths=%d", lora_count)
+    return result
 
 
 @app.get("/api/v1/osc/stream")
@@ -778,13 +789,18 @@ async def osc_sse_stream():
 @app.get("/api/v1/osc/docs")
 async def osc_docs_page(
     pm: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Serve a self-contained HTML reference page for OSC control."""
     from .osc_docs import render_osc_docs_html
 
+    if cloud_manager and cloud_manager.is_connected:
+        await _refresh_cloud_lora_cache(cloud_manager, pm)
+
     srv = get_osc_server()
     port = srv.port if srv else 8000
     html_content = render_osc_docs_html(pm, port)
+    logger.debug("osc_docs_page: rendered docs on port=%d", port)
     return Response(content=html_content, media_type="text/html")
 
 
@@ -845,7 +861,25 @@ async def handle_webrtc_offer(
         # If connected to cloud, use cloud mode (video flows through backend)
         if cloud_manager.is_connected:
             logger.info("Using relay mode - video will flow through backend to cloud")
-            return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
+            initial_params = request.initialParameters or {}
+            pipeline_ids = initial_params.get("pipeline_ids") or []
+            if initial_params.get("loras") is not None:
+                pipeline_manager.store_load_context(pipeline_ids, initial_params)
+                logger.debug(
+                    "handle_webrtc_offer: stored cloud LoRA context from initialParameters "
+                    "(pipeline_ids=%s, loras=%d)",
+                    pipeline_ids,
+                    len(initial_params.get("loras") or []),
+                )
+
+            result = await webrtc_manager.handle_offer_with_relay(
+                request, cloud_manager
+            )
+            # Best-effort cloud refresh so OSC docs/path inventory converges quickly.
+            asyncio.create_task(
+                _refresh_cloud_lora_cache(cloud_manager, pipeline_manager)
+            )
+            return result
 
         # Local mode: ensure pipeline is loaded before proceeding
         status_info = await pipeline_manager.get_status_info_async()

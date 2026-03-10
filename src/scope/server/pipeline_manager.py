@@ -132,6 +132,14 @@ class PipelineManager:
         """
         with self._lock:
             self._cloud_lora_cache = self._ensure_adapter_names(list(adapters))
+            logger.debug(
+                "update_loaded_lora_cache: cached %d adapter(s): %s",
+                len(self._cloud_lora_cache),
+                [
+                    a.get("adapter_name", a.get("path", ""))
+                    for a in self._cloud_lora_cache
+                ],
+            )
 
     def clear_loaded_lora_cache(self) -> None:
         """Clear the cloud LoRA adapter cache (e.g. on disconnect)."""
@@ -157,11 +165,20 @@ class PipelineManager:
                     continue
                 runtime_adapters.extend(adapters)
             if runtime_adapters:
-                return self._ensure_adapter_names(runtime_adapters)
+                adapters = self._ensure_adapter_names(runtime_adapters)
+                logger.debug(
+                    "get_loaded_lora_adapters: using runtime adapters (%d)",
+                    len(adapters),
+                )
+                return adapters
 
             # 2. Authoritative cloud cache (set after a cloud pipeline load).
             cloud_cache = getattr(self, "_cloud_lora_cache", None)
             if cloud_cache is not None:
+                logger.debug(
+                    "get_loaded_lora_adapters: using cloud cache (%d)",
+                    len(cloud_cache),
+                )
                 return list(cloud_cache)
 
             # 3. Fallback to configured LoRAs from load params.
@@ -173,7 +190,7 @@ class PipelineManager:
                 loras = load_params.get("loras") if load_params else None
                 if not loras:
                     continue
-                return self._ensure_adapter_names(
+                adapters = self._ensure_adapter_names(
                     [
                         {
                             "path": lora.get("path", ""),
@@ -183,7 +200,13 @@ class PipelineManager:
                         for lora in loras
                     ]
                 )
+                logger.debug(
+                    "get_loaded_lora_adapters: using load_params fallback (%d)",
+                    len(adapters),
+                )
+                return adapters
 
+            logger.debug("get_loaded_lora_adapters: no adapters found")
             return []
 
     @staticmethod

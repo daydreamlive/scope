@@ -7,10 +7,13 @@ Builds the list of available OSC paths from:
 """
 
 import html
+import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from .pipeline_manager import PipelineManager
+
+logger = logging.getLogger(__name__)
 
 # Runtime params that are useful to control via OSC (from schema.Parameters).
 # We curate this list to exclude structural params like pipeline_ids.
@@ -159,6 +162,11 @@ def _collect_lora_paths(
     if not pipeline_manager:
         return []
     loaded = pipeline_manager.get_loaded_lora_adapters()
+    logger.debug(
+        "_collect_lora_paths: got %d loaded adapter(s): %s",
+        len(loaded),
+        [a.get("adapter_name", a.get("path", "")) for a in loaded],
+    )
     paths: list[dict[str, Any]] = []
     for i, adapter in enumerate(loaded):
         adapter_path = adapter.get("path", "")
