@@ -1,6 +1,7 @@
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
 import {
   NodeCard,
   NodeHeader,
@@ -29,7 +30,7 @@ const DEFAULT_NAMES: Record<string, string> = {
 };
 
 export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
 
   const sinkType = (data.outputSinkType as string) || "spout";
   const enabled = (data.outputSinkEnabled as boolean) ?? false;
@@ -48,15 +49,6 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
     if (opt.value === "syphon") return syphonAvailable;
     return true;
   });
-
-  const updateData = (updates: Partial<FlowNodeData>) => {
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return { ...n, data: { ...n.data, ...updates } };
-      })
-    );
-  };
 
   const handleTypeChange = (newType: string) => {
     updateData({
@@ -84,15 +76,7 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
       <NodeHeader
         title={data.customTitle || `${typeLabel} Output`}
         dotColor={dotColor}
-        onTitleChange={newTitle =>
-          setNodes(nds =>
-            nds.map(n =>
-              n.id === id
-                ? { ...n, data: { ...n.data, customTitle: newTitle } }
-                : n
-            )
-          )
-        }
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <div className="px-2 py-1.5 flex flex-col gap-1.5">
         <div className="px-2">

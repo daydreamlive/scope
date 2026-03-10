@@ -1,8 +1,9 @@
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { useCallback } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
 import {
   NodeCard,
   NodeHeader,
@@ -23,7 +24,7 @@ const HEADER_HEIGHT = 28;
 const BODY_PAD = 6;
 
 export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
 
   const values =
     data.tupleValues && data.tupleValues.length > 0 ? data.tupleValues : [0];
@@ -33,22 +34,11 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
   const enforceOrder = data.tupleEnforceOrder ?? true;
   const orderDir = data.tupleOrderDirection ?? "desc";
 
-  const updateFields = useCallback(
-    (fields: Record<string, unknown>) => {
-      setNodes(nds =>
-        nds.map(n =>
-          n.id === id ? { ...n, data: { ...n.data, ...fields } } : n
-        )
-      );
-    },
-    [id, setNodes]
-  );
-
   const updateValues = useCallback(
     (newValues: number[]) => {
-      updateFields({ tupleValues: newValues });
+      updateData({ tupleValues: newValues });
     },
-    [updateFields]
+    [updateData]
   );
 
   const setValueAt = useCallback(
@@ -111,7 +101,7 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
       <NodeHeader
         title={data.customTitle || "Tuple"}
         dotColor="bg-orange-400"
-        onTitleChange={newTitle => updateFields({ customTitle: newTitle })}
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <NodeBody>
         <div className="flex flex-col gap-1">
@@ -122,7 +112,7 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
               className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-1 !py-0`}
               type="number"
               value={tMin}
-              onChange={e => updateFields({ tupleMin: Number(e.target.value) })}
+              onChange={e => updateData({ tupleMin: Number(e.target.value) })}
               onMouseDown={e => e.stopPropagation()}
             />
             <span className={`${NODE_TOKENS.labelText} shrink-0`}>Max</span>
@@ -130,7 +120,7 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
               className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-1 !py-0`}
               type="number"
               value={tMax}
-              onChange={e => updateFields({ tupleMax: Number(e.target.value) })}
+              onChange={e => updateData({ tupleMax: Number(e.target.value) })}
               onMouseDown={e => e.stopPropagation()}
             />
             <span className={`${NODE_TOKENS.labelText} shrink-0`}>Step</span>
@@ -138,9 +128,7 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
               className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-1 !py-0`}
               type="number"
               value={tStep}
-              onChange={e =>
-                updateFields({ tupleStep: Number(e.target.value) })
-              }
+              onChange={e => updateData({ tupleStep: Number(e.target.value) })}
               onMouseDown={e => e.stopPropagation()}
             />
           </div>
@@ -151,14 +139,14 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
               <span className={NODE_TOKENS.labelText}>Order</span>
               <NodePillToggle
                 checked={enforceOrder}
-                onChange={v => updateFields({ tupleEnforceOrder: v })}
+                onChange={v => updateData({ tupleEnforceOrder: v })}
               />
             </div>
             {enforceOrder && (
               <button
                 className={`${NODE_TOKENS.pill} text-[9px] text-[#aaa] hover:text-[#fff] cursor-pointer transition-colors`}
                 onClick={() =>
-                  updateFields({
+                  updateData({
                     tupleOrderDirection: orderDir === "desc" ? "asc" : "desc",
                   })
                 }

@@ -208,7 +208,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       }
     );
 
-    // Expose refreshGraph, getCurrentGraphConfig, and getGraphNodePrompts
+    // Expose imperative methods
     useImperativeHandle(
       ref,
       () => ({ refreshGraph, getCurrentGraphConfig, getGraphNodePrompts }),
@@ -398,7 +398,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     // Auto-fit view after graph import
     useEffect(() => {
       if (fitViewTrigger === 0) return;
-      // Small delay to let React Flow measure the new nodes before fitting
+      // Delay to let React Flow measure nodes
       const timer = setTimeout(() => {
         reactFlowInstanceRef.current?.fitView({ padding: 0.1, duration: 300 });
       }, 50);
@@ -558,7 +558,16 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                 reactFlowInstanceRef.current = instance;
               }}
               onSelectionChange={({ nodes: selected }) =>
-                setSelectedNodeIds(selected.map(n => n.id))
+                setSelectedNodeIds(prev => {
+                  const next = selected.map(n => n.id);
+                  // Return same ref when identical to prevent render loop
+                  if (
+                    next.length === prev.length &&
+                    next.every((id, i) => id === prev[i])
+                  )
+                    return prev;
+                  return next;
+                })
               }
               onPaneClick={() => setContextMenu(null)}
               onPaneContextMenu={suppressContextMenu}

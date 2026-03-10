@@ -81,3 +81,20 @@ export function getEdgeColor(
 
   return HANDLE_COLORS.video;
 }
+
+/**
+ * Build the full edge style object (stroke color + width) for a given edge.
+ * Centralizes the logic that was previously duplicated in `colorEdges()`,
+ * `onConnect()`, and `onReconnect()`.
+ */
+export function buildEdgeStyle(
+  sourceNode: Node<FlowNodeData> | undefined,
+  sourceHandleId: string | null | undefined
+): { stroke: string; strokeWidth: number } {
+  const color = getEdgeColor(sourceNode, sourceHandleId);
+  const parsed = parseHandleId(sourceHandleId);
+  const isVideoEdge =
+    parsed?.kind === "stream" &&
+    (parsed.name === "video" || parsed.name === "video2");
+  return { stroke: color, strokeWidth: isVideoEdge ? 5 : 2 };
+}

@@ -1,20 +1,10 @@
-import {
-  Handle,
-  Position,
-  useReactFlow,
-  useEdges,
-  useNodes,
-} from "@xyflow/react";
+import { Handle, Position, useEdges, useNodes } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import {
-  useEffect,
-  useRef,
-  useLayoutEffect,
-  useState,
-  useCallback,
-} from "react";
+import { useEffect } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId, parseHandleId } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
+import { useHandlePositions } from "../hooks/useHandlePositions";
 import {
   NodeCard,
   NodeHeader,
@@ -150,7 +140,7 @@ function computeResult(
 }
 
 export function MathNode({ id, data, selected }: NodeProps<MathNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
   const edges = useEdges();
   const allNodes = useNodes() as Node<FlowNodeData>[];
   const operation = data.mathOp || "add";
@@ -183,78 +173,22 @@ export function MathNode({ id, data, selected }: NodeProps<MathNodeType>) {
 
   // Update currentValue
   useEffect(() => {
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            currentValue: result ?? undefined,
-          },
-        };
-      })
-    );
-  }, [id, setNodes, result]);
+    updateData({ currentValue: result ?? undefined });
+  }, [updateData, result]);
 
   const handleOperationChange = (newOp: string) => {
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            mathOp: newOp as typeof operation,
-          },
-        };
-      })
-    );
+    updateData({ mathOp: newOp as typeof operation });
   };
 
-  // Measure DOM positions for handle placement
-  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const [rowPositions, setRowPositions] = useState<Record<string, number>>({});
-
-  const setRowRef = useCallback(
-    (key: string) => (el: HTMLDivElement | null) => {
-      if (el) rowRefs.current.set(key, el);
-      else rowRefs.current.delete(key);
-    },
-    []
-  );
-
-  useLayoutEffect(() => {
-    const positions: Record<string, number> = {};
-    for (const [key, el] of rowRefs.current.entries()) {
-      positions[key] = el.offsetTop + el.offsetHeight / 2;
-    }
-    setRowPositions(prev => {
-      const keys = Object.keys(positions);
-      if (
-        keys.length === Object.keys(prev).length &&
-        keys.every(k => Math.abs((prev[k] ?? 0) - positions[k]) < 1)
-      ) {
-        return prev;
-      }
-      return positions;
-    });
-  });
+  // Measure handle positions when operation type changes
+  const { setRowRef, rowPositions } = useHandlePositions([unary]);
 
   return (
     <NodeCard selected={selected}>
       <NodeHeader
         title={data.customTitle || "Math"}
         dotColor="bg-sky-400"
-        onTitleChange={newTitle =>
-          setNodes(nds =>
-            nds.map(n =>
-              n.id === id
-                ? { ...n, data: { ...n.data, customTitle: newTitle } }
-                : n
-            )
-          )
-        }
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <NodeBody withGap>
         <NodeParamRow label="Op">

@@ -1,9 +1,10 @@
-import { useRef, useCallback, useState, useLayoutEffect } from "react";
-import { Handle, Position, useEdges, useReactFlow } from "@xyflow/react";
+import { Handle, Position, useEdges } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { RotateCcw, AlertTriangle, ArrowUp } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
+import { useHandlePositions } from "../hooks/useHandlePositions";
 import {
   NodeCard,
   NodeHeader,
@@ -49,7 +50,7 @@ export function PipelineNode({
   data,
   selected,
 }: NodeProps<PipelineNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
   const edges = useEdges();
   const pipelineIds = data.availablePipelineIds || [];
   const streamInputs = data.streamInputs ?? ["video"];
@@ -77,7 +78,7 @@ export function PipelineNode({
 
   const pipelineName = data.pipelineId || "Pipeline";
 
-  // If the current pipelineId is set but not in the available list, inject it
+  // Inject unavailable pipelineId into options
   const isUnavailable =
     !!data.pipelineId && !pipelineIds.includes(data.pipelineId);
 
@@ -111,40 +112,14 @@ export function PipelineNode({
   const listParams = parameterInputs.filter(p => p.type === "list_number");
   const primitiveParams = parameterInputs.filter(p => p.type !== "list_number");
 
-  // Measure DOM positions for handle placement
-  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const [rowPositions, setRowPositions] = useState<Record<string, number>>({});
-
-  const setRowRef = useCallback(
-    (key: string) => (el: HTMLDivElement | null) => {
-      if (el) rowRefs.current.set(key, el);
-      else rowRefs.current.delete(key);
-    },
-    []
-  );
-
-  useLayoutEffect(() => {
-    const positions: Record<string, number> = {};
-    rowRefs.current.forEach((el, key) => {
-      if (el) {
-        positions[key] = el.offsetTop + el.offsetHeight / 2;
-      }
-    });
-    setRowPositions(prev => {
-      const keysChanged =
-        Object.keys(positions).length !== Object.keys(prev).length ||
-        Object.keys(positions).some(
-          key => Math.abs((prev[key] ?? 0) - positions[key]) > 0.5
-        );
-      return keysChanged ? positions : prev;
-    });
-  }, [
+  // Measure handle positions when content changes
+  const { setRowRef, rowPositions } = useHandlePositions([
     streamInputs,
     streamOutputs,
-    parameterInputs,
+    primitiveParams.length,
+    listParams.length,
     supportsPrompts,
     supportsVace,
-    data.pipelineId,
   ]);
 
   return (
@@ -152,15 +127,7 @@ export function PipelineNode({
       <NodeHeader
         title={data.customTitle || pipelineName}
         dotColor="bg-blue-400"
-        onTitleChange={newTitle =>
-          setNodes(nds =>
-            nds.map(n =>
-              n.id === id
-                ? { ...n, data: { ...n.data, customTitle: newTitle } }
-                : n
-            )
-          )
-        }
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <NodeBody withGap>
         {/* Pipeline selector */}

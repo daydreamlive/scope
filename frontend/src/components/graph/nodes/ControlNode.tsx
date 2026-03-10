@@ -1,8 +1,9 @@
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
 import {
   NodeCard,
   NodeHeader,
@@ -85,7 +86,7 @@ export function ControlNode({
   data,
   selected,
 }: NodeProps<ControlNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData: updateNodeData } = useNodeData(id);
   const controlType = data.controlType || "float";
   const pattern = data.controlPattern || "sine";
   const speed = data.controlSpeed ?? 1.0;
@@ -107,21 +108,10 @@ export function ControlNode({
 
   // Initialize currentValue
   useEffect(() => {
+    if (data.currentValue !== undefined) return;
     const initialValue = controlType === "string" ? items[0] || "" : min;
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        if (n.data.currentValue !== undefined) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            currentValue: initialValue,
-          },
-        };
-      })
-    );
-  }, [id, setNodes, controlType, items, min]);
+    updateNodeData({ currentValue: initialValue });
+  }, [data.currentValue, updateNodeData, controlType, items, min]);
 
   useEffect(() => {
     if (!isPlaying) {
@@ -181,103 +171,33 @@ export function ControlNode({
     const now = Date.now();
     if (now - lastUpdateTimeRef.current < 100) return; // Throttle to 100ms
     lastUpdateTimeRef.current = now;
-
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            currentValue,
-          },
-        };
-      })
-    );
-  }, [currentValue, id, setNodes]);
+    updateNodeData({ currentValue });
+  }, [currentValue, updateNodeData]);
 
   const handleTogglePlay = () => {
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        const newIsPlaying = !isPlaying;
-        if (newIsPlaying) {
-          startTimeRef.current = Date.now();
-          lastValueRef.current =
-            typeof currentValue === "number" ? currentValue : min;
-        }
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            isPlaying: newIsPlaying,
-          },
-        };
-      })
-    );
+    const newIsPlaying = !isPlaying;
+    if (newIsPlaying) {
+      startTimeRef.current = Date.now();
+      lastValueRef.current =
+        typeof currentValue === "number" ? currentValue : min;
+    }
+    updateNodeData({ isPlaying: newIsPlaying });
   };
 
   const handlePatternChange = (newPattern: string) => {
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            controlPattern: newPattern as typeof pattern,
-          },
-        };
-      })
-    );
+    updateNodeData({ controlPattern: newPattern as typeof pattern });
   };
 
   const handleMinChange = (val: string | number) => {
-    const numVal = Number(val);
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            controlMin: numVal,
-          },
-        };
-      })
-    );
+    updateNodeData({ controlMin: Number(val) });
   };
 
   const handleMaxChange = (val: string | number) => {
-    const numVal = Number(val);
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            controlMax: numVal,
-          },
-        };
-      })
-    );
+    updateNodeData({ controlMax: Number(val) });
   };
 
   const handleSpeedChange = (val: string | number) => {
-    const numVal = Number(val);
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            controlSpeed: numVal,
-          },
-        };
-      })
-    );
+    updateNodeData({ controlSpeed: Number(val) });
   };
 
   const handleItemsChange = (val: string | number) => {
@@ -286,18 +206,9 @@ export function ControlNode({
       .split(",")
       .map(s => s.trim())
       .filter(s => s.length > 0);
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            controlItems: itemsArray.length > 0 ? itemsArray : ["item1"],
-          },
-        };
-      })
-    );
+    updateNodeData({
+      controlItems: itemsArray.length > 0 ? itemsArray : ["item1"],
+    });
   };
 
   const itemsDisplay = items.join(", ");
@@ -307,15 +218,7 @@ export function ControlNode({
       <NodeHeader
         title={data.customTitle || title}
         dotColor={dotColorClass}
-        onTitleChange={newTitle =>
-          setNodes(nds =>
-            nds.map(n =>
-              n.id === id
-                ? { ...n, data: { ...n.data, customTitle: newTitle } }
-                : n
-            )
-          )
-        }
+        onTitleChange={newTitle => updateNodeData({ customTitle: newTitle })}
         rightContent={
           <button
             onClick={handleTogglePlay}

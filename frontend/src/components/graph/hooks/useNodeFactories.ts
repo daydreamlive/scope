@@ -3,6 +3,262 @@ import type { Node } from "@xyflow/react";
 import { generateNodeId } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 
+// Node defaults
+
+type NodeTypeKey =
+  | "source"
+  | "pipeline"
+  | "sink"
+  | "primitive"
+  | "reroute"
+  | "control_float"
+  | "control_int"
+  | "control_string"
+  | "math"
+  | "note"
+  | "slider"
+  | "knobs"
+  | "xypad"
+  | "tuple"
+  | "output"
+  | "image"
+  | "vace";
+
+interface NodeDefaults {
+  /** The React Flow node `type` */
+  type: string;
+  /** Prefix for `generateNodeId` */
+  idPrefix: string;
+  /** Default position offset x */
+  defaultX: number;
+  /** Fixed style, if any */
+  style?: Record<string, unknown>;
+  /** Initial data (merged with `{ label, nodeType }`) */
+  data: Partial<FlowNodeData>;
+}
+
+const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
+  source: {
+    type: "source",
+    idPrefix: "input",
+    defaultX: 50,
+    style: { width: 240, height: 200 },
+    data: { nodeType: "source" },
+  },
+  pipeline: {
+    type: "pipeline",
+    idPrefix: "pipeline",
+    defaultX: 350,
+    data: {
+      nodeType: "pipeline",
+      pipelineId: null,
+      streamInputs: ["video"],
+      streamOutputs: ["video"],
+    },
+  },
+  sink: {
+    type: "sink",
+    idPrefix: "output",
+    defaultX: 650,
+    style: { width: 240, height: 200 },
+    data: { nodeType: "sink" },
+  },
+  primitive: {
+    type: "primitive",
+    idPrefix: "primitive",
+    defaultX: 50,
+    data: {
+      label: "Primitive",
+      nodeType: "primitive",
+      valueType: "string",
+      value: "",
+      parameterOutputs: [{ name: "value", type: "string", defaultValue: "" }],
+    },
+  },
+  reroute: {
+    type: "reroute",
+    idPrefix: "reroute",
+    defaultX: 50,
+    data: { label: "Reroute", nodeType: "reroute" },
+  },
+  control_float: {
+    type: "control",
+    idPrefix: "floatControl",
+    defaultX: 50,
+    data: {
+      label: "FloatControl",
+      nodeType: "control",
+      controlType: "float",
+      controlPattern: "sine",
+      controlSpeed: 1.0,
+      controlMin: 0,
+      controlMax: 1.0,
+      isPlaying: false,
+      parameterOutputs: [{ name: "value", type: "number", defaultValue: 0 }],
+    },
+  },
+  control_int: {
+    type: "control",
+    idPrefix: "intControl",
+    defaultX: 50,
+    data: {
+      label: "IntControl",
+      nodeType: "control",
+      controlType: "int",
+      controlPattern: "sine",
+      controlSpeed: 1.0,
+      controlMin: 0,
+      controlMax: 1.0,
+      isPlaying: false,
+      parameterOutputs: [{ name: "value", type: "number", defaultValue: 0 }],
+    },
+  },
+  control_string: {
+    type: "control",
+    idPrefix: "stringControl",
+    defaultX: 50,
+    data: {
+      label: "StringControl",
+      nodeType: "control",
+      controlType: "string",
+      controlPattern: "sine",
+      controlSpeed: 1.0,
+      controlMin: 0,
+      controlMax: 1.0,
+      controlItems: ["item1", "item2", "item3"],
+      isPlaying: false,
+      parameterOutputs: [{ name: "value", type: "string", defaultValue: "" }],
+    },
+  },
+  math: {
+    type: "math",
+    idPrefix: "math",
+    defaultX: 50,
+    data: {
+      label: "Math",
+      nodeType: "math",
+      mathOp: "add",
+      currentValue: undefined,
+      parameterOutputs: [{ name: "value", type: "number", defaultValue: 0 }],
+    },
+  },
+  note: {
+    type: "note",
+    idPrefix: "note",
+    defaultX: 50,
+    data: { label: "Note", nodeType: "note", noteText: "" },
+  },
+  slider: {
+    type: "slider",
+    idPrefix: "slider",
+    defaultX: 50,
+    data: {
+      label: "Slider",
+      nodeType: "slider",
+      sliderMin: 0,
+      sliderMax: 1,
+      sliderStep: 0.01,
+      value: 0.5,
+      parameterOutputs: [{ name: "value", type: "number", defaultValue: 0.5 }],
+    },
+  },
+  knobs: {
+    type: "knobs",
+    idPrefix: "knobs",
+    defaultX: 50,
+    data: {
+      label: "Knobs",
+      nodeType: "knobs",
+      knobs: [
+        { label: "Knob 1", min: 0, max: 1, value: 0 },
+        { label: "Knob 2", min: 0, max: 1, value: 0 },
+      ],
+      parameterOutputs: [
+        { name: "knob_0", type: "number", defaultValue: 0 },
+        { name: "knob_1", type: "number", defaultValue: 0 },
+      ],
+    },
+  },
+  xypad: {
+    type: "xypad",
+    idPrefix: "xypad",
+    defaultX: 50,
+    data: {
+      label: "XY Pad",
+      nodeType: "xypad",
+      padMinX: 0,
+      padMaxX: 1,
+      padMinY: 0,
+      padMaxY: 1,
+      padX: 0.5,
+      padY: 0.5,
+      parameterOutputs: [
+        { name: "x", type: "number", defaultValue: 0.5 },
+        { name: "y", type: "number", defaultValue: 0.5 },
+      ],
+    },
+  },
+  tuple: {
+    type: "tuple",
+    idPrefix: "tuple",
+    defaultX: 50,
+    data: {
+      label: "Tuple",
+      nodeType: "tuple",
+      tupleValues: [999, 800, 600],
+      tupleMin: 0,
+      tupleMax: 1000,
+      tupleStep: 1,
+      tupleEnforceOrder: true,
+      tupleOrderDirection: "desc",
+      parameterOutputs: [
+        {
+          name: "value",
+          type: "list_number",
+          defaultValue: [999, 800, 600],
+        },
+      ],
+    },
+  },
+  output: {
+    type: "output",
+    idPrefix: "output_sink",
+    defaultX: 900,
+    data: {
+      label: "Output",
+      nodeType: "output",
+      outputSinkEnabled: false,
+    },
+  },
+  image: {
+    type: "image",
+    idPrefix: "image",
+    defaultX: 50,
+    style: { width: 160, height: 140 },
+    data: {
+      label: "Image",
+      nodeType: "image",
+      imagePath: "",
+      parameterOutputs: [{ name: "value", type: "string", defaultValue: "" }],
+    },
+  },
+  vace: {
+    type: "vace",
+    idPrefix: "vace",
+    defaultX: 50,
+    style: { width: 240 },
+    data: {
+      label: "VACE",
+      nodeType: "vace",
+      vaceContextScale: 1.0,
+      vaceRefImage: "",
+      vaceFirstFrame: "",
+      vaceLastFrame: "",
+      parameterOutputs: [{ name: "__vace", type: "string", defaultValue: "" }],
+    },
+  },
+};
+
 interface UseNodeFactoriesArgs {
   nodes: Node<FlowNodeData>[];
   setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>;
@@ -38,386 +294,28 @@ export function useNodeFactories({
 }: UseNodeFactoriesArgs) {
   const existingIds = useMemo(() => new Set(nodes.map(n => n.id)), [nodes]);
 
-  const addSourceNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("input", existingIds);
+  /** Generic factory: creates a node from the NODE_DEFAULTS config map. */
+  const addNode = useCallback(
+    (
+      key: NodeTypeKey,
+      position?: { x: number; y: number },
+      extraData?: Partial<FlowNodeData>
+    ) => {
+      const def = NODE_DEFAULTS[key];
+      const id = generateNodeId(def.idPrefix, existingIds);
       const newNode: Node<FlowNodeData> = {
         id,
-        type: "source",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        style: { width: 240, height: 200 },
-        data: { label: id, nodeType: "source" },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addPipelineNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("pipeline", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "pipeline",
-        position: position ?? { x: 350, y: 50 + nodes.length * 100 },
+        type: def.type,
+        position: position ?? {
+          x: def.defaultX,
+          y: 50 + nodes.length * 100,
+        },
+        ...(def.style ? { style: def.style } : {}),
         data: {
           label: id,
-          pipelineId: null,
-          nodeType: "pipeline",
-          availablePipelineIds,
-          pipelinePortsMap: portsMap,
-          onPipelineSelect: handlePipelineSelect,
-          streamInputs: ["video"],
-          streamOutputs: ["video"],
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [
-      existingIds,
-      nodes.length,
-      setNodes,
-      availablePipelineIds,
-      portsMap,
-      handlePipelineSelect,
-    ]
-  );
-
-  const addSinkNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("output", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "sink",
-        position: position ?? { x: 650, y: 50 + nodes.length * 100 },
-        style: { width: 240, height: 200 },
-        data: { label: id, nodeType: "sink" },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addPrimitiveNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("primitive", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "primitive",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        data: {
-          label: "Primitive",
-          nodeType: "primitive",
-          valueType: "string",
-          value: "",
-          parameterOutputs: [
-            {
-              name: "value",
-              type: "string",
-              defaultValue: "",
-            },
-          ],
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addRerouteNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("reroute", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "reroute",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        data: {
-          label: "Reroute",
-          nodeType: "reroute",
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addControlNode = useCallback(
-    (
-      controlType: "float" | "int" | "string",
-      position?: { x: number; y: number }
-    ) => {
-      const id = generateNodeId(
-        controlType === "float"
-          ? "floatControl"
-          : controlType === "int"
-            ? "intControl"
-            : "stringControl",
-        existingIds
-      );
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "control",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        data: {
-          label:
-            controlType === "float"
-              ? "FloatControl"
-              : controlType === "int"
-                ? "IntControl"
-                : "StringControl",
-          nodeType: "control",
-          controlType,
-          controlPattern: "sine",
-          controlSpeed: 1.0,
-          controlMin: 0,
-          controlMax: 1.0,
-          controlItems:
-            controlType === "string" ? ["item1", "item2", "item3"] : undefined,
-          isPlaying: false,
-          parameterOutputs: [
-            {
-              name: "value",
-              type: controlType === "string" ? "string" : "number",
-              defaultValue: controlType === "string" ? "" : 0,
-            },
-          ],
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addMathNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("math", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "math",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        data: {
-          label: "Math",
-          nodeType: "math",
-          mathOp: "add",
-          currentValue: undefined,
-          parameterOutputs: [
-            {
-              name: "value",
-              type: "number",
-              defaultValue: 0,
-            },
-          ],
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addNoteNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("note", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "note",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        data: {
-          label: "Note",
-          nodeType: "note",
-          noteText: "",
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addSliderNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("slider", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "slider",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        data: {
-          label: "Slider",
-          nodeType: "slider",
-          sliderMin: 0,
-          sliderMax: 1,
-          sliderStep: 0.01,
-          value: 0.5,
-          parameterOutputs: [
-            { name: "value", type: "number", defaultValue: 0.5 },
-          ],
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addKnobsNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("knobs", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "knobs",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        data: {
-          label: "Knobs",
-          nodeType: "knobs",
-          knobs: [
-            { label: "Knob 1", min: 0, max: 1, value: 0 },
-            { label: "Knob 2", min: 0, max: 1, value: 0 },
-          ],
-          parameterOutputs: [
-            { name: "knob_0", type: "number", defaultValue: 0 },
-            { name: "knob_1", type: "number", defaultValue: 0 },
-          ],
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addXYPadNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("xypad", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "xypad",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        data: {
-          label: "XY Pad",
-          nodeType: "xypad",
-          padMinX: 0,
-          padMaxX: 1,
-          padMinY: 0,
-          padMaxY: 1,
-          padX: 0.5,
-          padY: 0.5,
-          parameterOutputs: [
-            { name: "x", type: "number", defaultValue: 0.5 },
-            { name: "y", type: "number", defaultValue: 0.5 },
-          ],
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addTupleNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("tuple", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "tuple",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        data: {
-          label: "Tuple",
-          nodeType: "tuple",
-          tupleValues: [999, 800, 600],
-          tupleMin: 0,
-          tupleMax: 1000,
-          tupleStep: 1,
-          tupleEnforceOrder: true,
-          tupleOrderDirection: "desc",
-          parameterOutputs: [
-            {
-              name: "value",
-              type: "list_number",
-              defaultValue: [999, 800, 600],
-            },
-          ],
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addOutputNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const defaultType = spoutOutputAvailable
-        ? "spout"
-        : ndiOutputAvailable
-          ? "ndi"
-          : syphonOutputAvailable
-            ? "syphon"
-            : "spout";
-      const defaultNames: Record<string, string> = {
-        spout: "ScopeOut",
-        ndi: "Scope",
-        syphon: "Scope",
-      };
-      const id = generateNodeId("output_sink", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "output",
-        position: position ?? { x: 900, y: 50 + nodes.length * 100 },
-        data: {
-          label: "Output",
-          nodeType: "output",
-          outputSinkType: defaultType,
-          outputSinkEnabled: false,
-          outputSinkName: defaultNames[defaultType] || "Scope",
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [
-      existingIds,
-      nodes.length,
-      setNodes,
-      spoutOutputAvailable,
-      ndiOutputAvailable,
-      syphonOutputAvailable,
-    ]
-  );
-
-  const addImageNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("image", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "image",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        style: { width: 160, height: 140 },
-        data: {
-          label: "Image",
-          nodeType: "image",
-          imagePath: "",
-          parameterOutputs: [
-            { name: "value", type: "string", defaultValue: "" },
-          ],
-        },
-      };
-      setNodes(nds => [...nds, newNode]);
-    },
-    [existingIds, nodes.length, setNodes]
-  );
-
-  const addVaceNode = useCallback(
-    (position?: { x: number; y: number }) => {
-      const id = generateNodeId("vace", existingIds);
-      const newNode: Node<FlowNodeData> = {
-        id,
-        type: "vace",
-        position: position ?? { x: 50, y: 50 + nodes.length * 100 },
-        style: { width: 240 },
-        data: {
-          label: "VACE",
-          nodeType: "vace",
-          vaceContextScale: 1.0,
-          vaceRefImage: "",
-          vaceFirstFrame: "",
-          vaceLastFrame: "",
-          parameterOutputs: [
-            { name: "__vace", type: "string", defaultValue: "" },
-          ],
-        },
+          ...def.data,
+          ...extraData,
+        } as FlowNodeData,
       };
       setNodes(nds => [...nds, newNode]);
     },
@@ -446,79 +344,48 @@ export function useNodeFactories({
     ) => {
       if (!pendingNodePosition) return;
 
-      switch (type) {
-        case "source":
-          addSourceNode(pendingNodePosition);
-          break;
-        case "pipeline":
-          addPipelineNode(pendingNodePosition);
-          break;
-        case "sink":
-          addSinkNode(pendingNodePosition);
-          break;
-        case "primitive":
-          addPrimitiveNode(pendingNodePosition);
-          break;
-        case "control":
-          if (
-            subType === "float" ||
-            subType === "int" ||
-            subType === "string"
-          ) {
-            addControlNode(subType, pendingNodePosition);
-          }
-          break;
-        case "math":
-          addMathNode(pendingNodePosition);
-          break;
-        case "note":
-          addNoteNode(pendingNodePosition);
-          break;
-        case "output":
-          addOutputNode(pendingNodePosition);
-          break;
-        case "slider":
-          addSliderNode(pendingNodePosition);
-          break;
-        case "knobs":
-          addKnobsNode(pendingNodePosition);
-          break;
-        case "xypad":
-          addXYPadNode(pendingNodePosition);
-          break;
-        case "tuple":
-          addTupleNode(pendingNodePosition);
-          break;
-        case "reroute":
-          addRerouteNode(pendingNodePosition);
-          break;
-        case "image":
-          addImageNode(pendingNodePosition);
-          break;
-        case "vace":
-          addVaceNode(pendingNodePosition);
-          break;
+      if (type === "control") {
+        if (subType === "float" || subType === "int" || subType === "string") {
+          addNode(`control_${subType}` as NodeTypeKey, pendingNodePosition);
+        }
+      } else if (type === "pipeline") {
+        addNode("pipeline", pendingNodePosition, {
+          availablePipelineIds,
+          pipelinePortsMap: portsMap,
+          onPipelineSelect: handlePipelineSelect,
+        });
+      } else if (type === "output") {
+        const defaultType = spoutOutputAvailable
+          ? "spout"
+          : ndiOutputAvailable
+            ? "ndi"
+            : syphonOutputAvailable
+              ? "syphon"
+              : "spout";
+        const defaultNames: Record<string, string> = {
+          spout: "ScopeOut",
+          ndi: "Scope",
+          syphon: "Scope",
+        };
+        addNode("output", pendingNodePosition, {
+          outputSinkType: defaultType,
+          outputSinkName: defaultNames[defaultType] || "Scope",
+        });
+      } else {
+        addNode(type as NodeTypeKey, pendingNodePosition);
       }
 
       setPendingNodePosition(null);
     },
     [
       pendingNodePosition,
-      addSourceNode,
-      addPipelineNode,
-      addSinkNode,
-      addPrimitiveNode,
-      addRerouteNode,
-      addControlNode,
-      addMathNode,
-      addNoteNode,
-      addOutputNode,
-      addSliderNode,
-      addKnobsNode,
-      addXYPadNode,
-      addTupleNode,
-      addImageNode,
-      addVaceNode,
+      addNode,
+      availablePipelineIds,
+      portsMap,
+      handlePipelineSelect,
+      spoutOutputAvailable,
+      ndiOutputAvailable,
+      syphonOutputAvailable,
       setPendingNodePosition,
     ]
   );
@@ -527,7 +394,9 @@ export function useNodeFactories({
     (nodeIds: string[]) => {
       const idSet = new Set(nodeIds);
       setNodes(nds => nds.filter(n => !idSet.has(n.id)));
-      setEdges(eds => eds.filter(e => !idSet.has(e.source) && !idSet.has(e.target)));
+      setEdges(eds =>
+        eds.filter(e => !idSet.has(e.source) && !idSet.has(e.target))
+      );
       setSelectedNodeIds(selectedNodeIds.filter(id => !idSet.has(id)));
     },
     [setNodes, setEdges, selectedNodeIds, setSelectedNodeIds]

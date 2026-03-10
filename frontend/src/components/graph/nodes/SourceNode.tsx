@@ -1,8 +1,9 @@
 import { useEffect, useRef, useCallback, useState } from "react";
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { getInputSourceSources, type DiscoveredSource } from "../../../lib/api";
+import { useNodeData } from "../hooks/useNodeData";
 import {
   NodeCard,
   NodeHeader,
@@ -27,7 +28,7 @@ const SOURCE_MODE_OPTIONS = [
 ];
 
 export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
   const sourceMode = data.sourceMode || "video";
   const sourceName = data.sourceName || "";
   const localStream = data.localStream as MediaStream | null | undefined;
@@ -110,76 +111,28 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   }, [syphonAvailable]);
 
   const handleSourceModeChange = (newMode: string) => {
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            sourceMode: newMode as
-              | "video"
-              | "camera"
-              | "spout"
-              | "ndi"
-              | "syphon",
-            sourceName:
-              newMode === "spout" || newMode === "ndi" || newMode === "syphon"
-                ? n.data.sourceName
-                : undefined,
-          },
-        };
-      })
-    );
+    updateData({
+      sourceMode: newMode as "video" | "camera" | "spout" | "ndi" | "syphon",
+      ...(newMode !== "spout" && newMode !== "ndi" && newMode !== "syphon"
+        ? { sourceName: undefined }
+        : {}),
+    });
     onSourceModeChange?.(newMode);
   };
 
   const handleSpoutNameChange = (value: string | number) => {
     const name = String(value);
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            sourceName: name,
-          },
-        };
-      })
-    );
+    updateData({ sourceName: name });
     onSpoutSourceChange?.(name);
   };
 
   const handleNdiSourceChange = (identifier: string) => {
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            sourceName: identifier,
-          },
-        };
-      })
-    );
+    updateData({ sourceName: identifier });
     onNdiSourceChange?.(identifier);
   };
 
   const handleSyphonSourceChange = (identifier: string) => {
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            sourceName: identifier,
-          },
-        };
-      })
-    );
+    updateData({ sourceName: identifier });
     onSyphonSourceChange?.(identifier);
   };
 
@@ -223,15 +176,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
       <NodeHeader
         title={data.customTitle || "Source"}
         dotColor="bg-green-400"
-        onTitleChange={newTitle =>
-          setNodes(nds =>
-            nds.map(n =>
-              n.id === id
-                ? { ...n, data: { ...n.data, customTitle: newTitle } }
-                : n
-            )
-          )
-        }
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <div className="px-2 py-1.5 flex flex-col gap-1.5 flex-1 min-h-0">
         <div className="px-2">

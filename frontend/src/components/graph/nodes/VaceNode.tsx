@@ -1,8 +1,10 @@
-import { useCallback, useRef, useState, useLayoutEffect } from "react";
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { useCallback, useRef } from "react";
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
+import { useHandlePositions } from "../hooks/useHandlePositions";
 import {
   NodeCard,
   NodeHeader,
@@ -18,7 +20,7 @@ const VACE_COLOR = "#a78bfa"; // violet-400
 const IMAGE_COLOR = "#f472b6"; // pink-400
 
 export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
   const sliderRef = useRef<HTMLDivElement>(null);
 
   const contextScale =
@@ -26,17 +28,6 @@ export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
   const min = 0;
   const max = 2;
   const step = 0.01;
-
-  const updateField = useCallback(
-    (field: string, v: unknown) => {
-      setNodes(nds =>
-        nds.map(n =>
-          n.id === id ? { ...n, data: { ...n.data, [field]: v } } : n
-        )
-      );
-    },
-    [id, setNodes]
-  );
 
   const clampedValue = Math.min(Math.max(contextScale, min), max);
   const pct = max > min ? ((clampedValue - min) / (max - min)) * 100 : 0;
@@ -50,9 +41,9 @@ export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
       let newVal = min + ratio * (max - min);
       newVal = min + Math.round((newVal - min) / step) * step;
       newVal = Math.min(Math.max(newVal, min), max);
-      updateField("vaceContextScale", parseFloat(newVal.toFixed(10)));
+      updateData({ vaceContextScale: parseFloat(newVal.toFixed(10)) });
     },
-    [updateField]
+    [updateData]
   );
 
   const handlePointerDown = useCallback(
@@ -82,41 +73,19 @@ export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
   const shortName = (path: string) =>
     path ? path.split(/[/\\]/).pop() || path : "—";
 
-  // ── Measure DOM positions for handle placement (same pattern as PipelineNode) ──
-  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const [rowPositions, setRowPositions] = useState<Record<string, number>>({});
-
-  const setRowRef = useCallback(
-    (key: string) => (el: HTMLDivElement | null) => {
-      if (el) rowRefs.current.set(key, el);
-      else rowRefs.current.delete(key);
-    },
-    []
-  );
-
-  useLayoutEffect(() => {
-    const positions: Record<string, number> = {};
-    rowRefs.current.forEach((el, key) => {
-      if (el) {
-        positions[key] = el.offsetTop + el.offsetHeight / 2;
-      }
-    });
-    setRowPositions(prev => {
-      const keysChanged =
-        Object.keys(positions).length !== Object.keys(prev).length ||
-        Object.keys(positions).some(
-          key => Math.abs((prev[key] ?? 0) - positions[key]) > 0.5
-        );
-      return keysChanged ? positions : prev;
-    });
-  }, [refImage, firstFrame, lastFrame, contextScale]);
+  // Measure handle positions when image state changes
+  const { setRowRef, rowPositions } = useHandlePositions([
+    refImage,
+    firstFrame,
+    lastFrame,
+  ]);
 
   return (
     <NodeCard selected={selected} autoMinHeight>
       <NodeHeader
         title={data.customTitle || "VACE"}
         dotColor="bg-violet-400"
-        onTitleChange={newTitle => updateField("customTitle", newTitle)}
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <NodeBody withGap>
         {/* Context Scale slider */}

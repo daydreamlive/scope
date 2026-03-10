@@ -3,164 +3,14 @@ import { addEdge, reconnectEdge } from "@xyflow/react";
 import type { Connection, Edge, Node } from "@xyflow/react";
 import { parseHandleId } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
-import { getEdgeColor, PARAM_TYPE_COLORS } from "../constants";
-
-/**
- * Resolve the effective output type of a source node. For reroute nodes,
- * walks upstream through the chain of reroutes until a concrete producer is
- * found. Returns undefined when no type can be determined.
- */
-type ResolvedType =
-  | "string"
-  | "number"
-  | "boolean"
-  | "list_number"
-  | "vace"
-  | undefined;
-
-function resolveSourceType(
-  node: Node<FlowNodeData>,
-  nodes: Node<FlowNodeData>[],
-  edges: Edge[],
-  visited = new Set<string>()
-): ResolvedType {
-  if (visited.has(node.id)) return undefined;
-  visited.add(node.id);
-
-  const nt = node.data.nodeType;
-  if (nt === "primitive") return node.data.valueType;
-  if (nt === "control") {
-    return node.data.controlType === "string" ? "string" : "number";
-  }
-  if (nt === "math") return "number";
-  if (nt === "slider" || nt === "knobs" || nt === "xypad") return "number";
-  if (nt === "tuple") return "list_number";
-  if (nt === "image") return "string";
-  if (nt === "vace") return "vace";
-  if (nt === "reroute") {
-    // Walk upstream to find source
-    for (const e of edges) {
-      if (e.target !== node.id) continue;
-      const upstream = nodes.find(n => n.id === e.source);
-      if (upstream) return resolveSourceType(upstream, nodes, edges, visited);
-    }
-    // Fallback to stored valueType
-    return node.data.valueType;
-  }
-  return undefined;
-}
-
-/**
- * Determine the expected type of a target parameter port.
- */
-function resolveTargetType(
-  targetNode: Node<FlowNodeData>,
-  targetParamName: string
-): ResolvedType {
-  const nt = targetNode.data.nodeType;
-  if (targetParamName === "__prompt") return "string";
-  if (targetParamName === "__vace") return "vace";
-  if (nt === "math") return "number";
-  if (nt === "slider" || nt === "knobs" || nt === "xypad") return "number";
-  if (nt === "tuple") {
-    if (targetParamName === "value") return "list_number";
-    if (targetParamName.startsWith("row_")) return "number";
-    return undefined;
-  }
-  if (nt === "vace") {
-    // VACE node accepts string (image paths) on its input handles
-    if (
-      targetParamName === "ref_image" ||
-      targetParamName === "first_frame" ||
-      targetParamName === "last_frame"
-    ) {
-      return "string";
-    }
-    return undefined;
-  }
-  if (nt === "reroute") return undefined; // accepts any
-  if (nt === "pipeline") {
-    const param = targetNode.data.parameterInputs?.find(
-      p => p.name === targetParamName
-    );
-    return param?.type;
-  }
-  return undefined;
-}
-
-/**
- * Walk downstream from a reroute node through other reroutes until we
- * find a typed consumer. Returns the expected type or undefined.
- */
-function resolveDownstreamType(
-  nodeId: string,
-  nodes: Node<FlowNodeData>[],
-  edges: Edge[],
-  visited = new Set<string>()
-): ResolvedType {
-  if (visited.has(nodeId)) return undefined;
-  visited.add(nodeId);
-
-  for (const e of edges) {
-    if (e.source !== nodeId) continue;
-    const targetParsed = parseHandleId(e.targetHandle);
-    if (!targetParsed || targetParsed.kind !== "param") continue;
-
-    const targetNode = nodes.find(n => n.id === e.target);
-    if (!targetNode) continue;
-
-    if (targetNode.data.nodeType === "reroute") {
-      // Continue downstream
-      const result = resolveDownstreamType(
-        targetNode.id,
-        nodes,
-        edges,
-        visited
-      );
-      if (result) return result;
-    } else {
-      const t = resolveTargetType(targetNode, targetParsed.name);
-      if (t) return t;
-    }
-  }
-  return undefined;
-}
-
-/**
- * Collect all nodes in an upstream reroute chain (walking backward),
- * stopping when we hit a non-reroute node. Returns the chain nodes
- * and the root source node (the first non-reroute).
- */
-function collectUpstreamChain(
-  nodeId: string,
-  nodes: Node<FlowNodeData>[],
-  edges: Edge[],
-  visited = new Set<string>()
-): { rerouteIds: string[]; rootSourceId: string | null } {
-  if (visited.has(nodeId)) return { rerouteIds: [], rootSourceId: null };
-  visited.add(nodeId);
-
-  const node = nodes.find(n => n.id === nodeId);
-  if (!node) return { rerouteIds: [], rootSourceId: null };
-
-  if (node.data.nodeType !== "reroute") {
-    return { rerouteIds: [], rootSourceId: node.id };
-  }
-
-  const rerouteIds = [node.id];
-
-  // Find the upstream edge feeding into this reroute
-  for (const e of edges) {
-    if (e.target !== nodeId) continue;
-    const upstream = collectUpstreamChain(e.source, nodes, edges, visited);
-    return {
-      rerouteIds: [...rerouteIds, ...upstream.rerouteIds],
-      rootSourceId: upstream.rootSourceId,
-    };
-  }
-
-  return { rerouteIds, rootSourceId: null };
-}
+import { buildEdgeStyle, PARAM_TYPE_COLORS } from "../constants";
+import type { ResolvedType } from "./typeResolution";
+import {
+  resolveSourceType,
+  resolveTargetType,
+  resolveDownstreamType,
+  collectUpstreamChain,
+} from "./typeResolution";
 
 export function useConnectionLogic(
   nodes: Node<FlowNodeData>[],
@@ -524,50 +374,52 @@ export function useConnectionLogic(
         return;
       }
 
-      // Remove any existing edge to the same target handle
-      let currentEdges: Edge[] = [];
+      // Single setEdges call: remove existing edge to the same target handle,
+      // add the new edge, adapt node types, and refresh colors — all in one pass.
       setEdges(eds => {
-        currentEdges = eds.filter(
+        // 1. Remove existing edge to the same target handle
+        const filtered = eds.filter(
           e =>
             !(
               e.target === connection.target &&
               e.targetHandle === connection.targetHandle
             )
         );
-        return currentEdges;
-      });
 
-      const changedTypes = adaptNodeTypes(connection, currentEdges);
-      const sourceNode = nodes.find(n => n.id === connection.source);
-      let edgeColor: string;
-      const sourceChanged = changedTypes.get(connection.source ?? "");
-      if (sourceChanged) {
-        edgeColor = PARAM_TYPE_COLORS[sourceChanged] || "#9ca3af";
-      } else {
-        edgeColor = getEdgeColor(sourceNode, connection.sourceHandle);
-      }
+        // 2. Adapt node types based on the new connection
+        const changedTypes = adaptNodeTypes(connection, filtered);
 
-      // Check if this is a video edge (white line)
-      const parsed = parseHandleId(connection.sourceHandle);
-      const isVideoEdge =
-        parsed?.kind === "stream" &&
-        (parsed?.name === "video" || parsed?.name === "video2");
-      const strokeWidth = isVideoEdge ? 5 : 2;
+        // 3. Determine edge style for the new connection
+        const sourceNode = nodes.find(n => n.id === connection.source);
+        const sourceChanged = changedTypes.get(connection.source ?? "");
+        let style: { stroke: string; strokeWidth: number };
+        if (sourceChanged) {
+          const parsed = parseHandleId(connection.sourceHandle);
+          const isVideoEdge =
+            parsed?.kind === "stream" &&
+            (parsed.name === "video" || parsed.name === "video2");
+          style = {
+            stroke: PARAM_TYPE_COLORS[sourceChanged] || "#9ca3af",
+            strokeWidth: isVideoEdge ? 5 : 2,
+          };
+        } else {
+          style = buildEdgeStyle(sourceNode, connection.sourceHandle);
+        }
 
-      setEdges(eds => {
+        // 4. Add the new edge
         let updated = addEdge(
           {
             ...connection,
             type: "default",
             reconnectable: "target" as const,
-            style: { stroke: edgeColor, strokeWidth },
+            style,
             animated: false,
             data: { onDelete: handleEdgeDelete },
           },
-          eds
+          filtered
         );
 
-        // Refresh edge colors for changed nodes
+        // 5. Refresh edge colors for any nodes whose types changed
         if (changedTypes.size > 0) {
           updated = updated.map(e => {
             const newType = changedTypes.get(e.source);
@@ -600,18 +452,12 @@ export function useConnectionLogic(
             e.targetHandle === newConnection.targetHandle
           ) {
             const sourceNode = nodes.find(n => n.id === e.source);
-            const edgeColor = getEdgeColor(sourceNode, e.sourceHandle);
-            // Check if this is a video edge (white line)
-            const parsed = parseHandleId(e.sourceHandle);
-            const isVideoEdge =
-              parsed?.kind === "stream" &&
-              (parsed?.name === "video" || parsed?.name === "video2");
-            const strokeWidth = isVideoEdge ? 5 : 2;
+            const style = buildEdgeStyle(sourceNode, e.sourceHandle);
             return {
               ...e,
               type: "default",
               reconnectable: "target" as const,
-              style: { stroke: edgeColor, strokeWidth },
+              style,
               animated: false,
               data: { onDelete: handleEdgeDelete },
             };

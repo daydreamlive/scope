@@ -1,8 +1,9 @@
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { useCallback, useRef } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
 import {
   NodeCard,
   NodeHeader,
@@ -17,7 +18,7 @@ type SliderNodeType = Node<FlowNodeData, "slider">;
 const COLOR = "#a78bfa"; // violet-400
 
 export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
   const sliderRef = useRef<HTMLDivElement>(null);
 
   const min = data.sliderMin ?? 0;
@@ -25,17 +26,6 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
   const rawStep = data.sliderStep ?? 0.01;
   const step = Number.isFinite(rawStep) && rawStep > 0 ? rawStep : 0.01;
   const value = typeof data.value === "number" ? data.value : min;
-
-  const updateField = useCallback(
-    (field: string, v: unknown) => {
-      setNodes(nds =>
-        nds.map(n =>
-          n.id === id ? { ...n, data: { ...n.data, [field]: v } } : n
-        )
-      );
-    },
-    [id, setNodes]
-  );
 
   const clampedValue = Math.min(Math.max(value, min), max);
   const pct = max > min ? ((clampedValue - min) / (max - min)) * 100 : 0;
@@ -50,9 +40,9 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
       // snap to step (anchored to min so values align to min + n*step)
       newVal = min + Math.round((newVal - min) / step) * step;
       newVal = Math.min(Math.max(newVal, min), max);
-      updateField("value", parseFloat(newVal.toFixed(10)));
+      updateData({ value: parseFloat(newVal.toFixed(10)) });
     },
-    [min, max, step, updateField]
+    [min, max, step, updateData]
   );
 
   const handlePointerDown = useCallback(
@@ -79,7 +69,7 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
       <NodeHeader
         title={data.customTitle || "Slider"}
         dotColor="bg-violet-400"
-        onTitleChange={newTitle => updateField("customTitle", newTitle)}
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <NodeBody withGap>
         {/* Slider track */}
@@ -120,21 +110,21 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
           <NodePillInput
             type="number"
             value={min}
-            onChange={v => updateField("sliderMin", Number(v))}
+            onChange={v => updateData({ sliderMin: Number(v) })}
           />
         </NodeParamRow>
         <NodeParamRow label="Max">
           <NodePillInput
             type="number"
             value={max}
-            onChange={v => updateField("sliderMax", Number(v))}
+            onChange={v => updateData({ sliderMax: Number(v) })}
           />
         </NodeParamRow>
         <NodeParamRow label="Step">
           <NodePillInput
             type="number"
             value={step}
-            onChange={v => updateField("sliderStep", Number(v))}
+            onChange={v => updateData({ sliderStep: Number(v) })}
           />
         </NodeParamRow>
       </NodeBody>

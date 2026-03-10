@@ -1,8 +1,9 @@
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { useCallback, useRef } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
 import { NodeCard, NodeHeader, NodeBody, NODE_TOKENS } from "../ui";
 
 type XYPadNodeType = Node<FlowNodeData, "xypad">;
@@ -15,7 +16,7 @@ const HEADER_HEIGHT = 28;
 const BODY_PAD = 6; // py-1.5 ≈ 6px
 
 export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
   const padRef = useRef<HTMLDivElement>(null);
 
   const minX = data.padMinX ?? 0;
@@ -24,17 +25,6 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
   const maxY = data.padMaxY ?? 1;
   const padX = typeof data.padX === "number" ? data.padX : (minX + maxX) / 2;
   const padY = typeof data.padY === "number" ? data.padY : (minY + maxY) / 2;
-
-  const updateFields = useCallback(
-    (fields: Record<string, unknown>) => {
-      setNodes(nds =>
-        nds.map(n =>
-          n.id === id ? { ...n, data: { ...n.data, ...fields } } : n
-        )
-      );
-    },
-    [id, setNodes]
-  );
 
   const clampedX = Math.min(Math.max(padX, minX), maxX);
   const clampedY = Math.min(Math.max(padY, minY), maxY);
@@ -51,9 +41,9 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
       ratioY = Math.min(Math.max(ratioY, 0), 1);
       const newX = parseFloat((minX + ratioX * (maxX - minX)).toFixed(6));
       const newY = parseFloat((maxY - ratioY * (maxY - minY)).toFixed(6));
-      updateFields({ padX: newX, padY: newY });
+      updateData({ padX: newX, padY: newY });
     },
-    [minX, maxX, minY, maxY, updateFields]
+    [minX, maxX, minY, maxY, updateData]
   );
 
   const handlePointerDown = useCallback(
@@ -92,7 +82,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
       <NodeHeader
         title={data.customTitle || "XY Pad"}
         dotColor="bg-sky-400"
-        onTitleChange={newTitle => updateFields({ customTitle: newTitle })}
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <NodeBody>
         <div className="flex flex-col gap-1">
@@ -177,9 +167,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
                 className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-0.5 !py-0`}
                 type="number"
                 value={minX}
-                onChange={e =>
-                  updateFields({ padMinX: Number(e.target.value) })
-                }
+                onChange={e => updateData({ padMinX: Number(e.target.value) })}
                 onMouseDown={e => e.stopPropagation()}
                 title="Min X"
               />
@@ -188,9 +176,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
                 className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-0.5 !py-0`}
                 type="number"
                 value={maxX}
-                onChange={e =>
-                  updateFields({ padMaxX: Number(e.target.value) })
-                }
+                onChange={e => updateData({ padMaxX: Number(e.target.value) })}
                 onMouseDown={e => e.stopPropagation()}
                 title="Max X"
               />
@@ -201,9 +187,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
                 className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-0.5 !py-0`}
                 type="number"
                 value={minY}
-                onChange={e =>
-                  updateFields({ padMinY: Number(e.target.value) })
-                }
+                onChange={e => updateData({ padMinY: Number(e.target.value) })}
                 onMouseDown={e => e.stopPropagation()}
                 title="Min Y"
               />
@@ -212,9 +196,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
                 className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-0.5 !py-0`}
                 type="number"
                 value={maxY}
-                onChange={e =>
-                  updateFields({ padMaxY: Number(e.target.value) })
-                }
+                onChange={e => updateData({ padMaxY: Number(e.target.value) })}
                 onMouseDown={e => e.stopPropagation()}
                 title="Max Y"
               />

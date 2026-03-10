@@ -1,7 +1,8 @@
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
 import {
   NodeCard,
   NodeHeader,
@@ -43,7 +44,7 @@ export function PrimitiveNode({
   data,
   selected,
 }: NodeProps<PrimitiveNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
   const valueType = data.valueType || "string";
   const currentValue = data.value ?? getDefaultForType(valueType);
 
@@ -51,39 +52,17 @@ export function PrimitiveNode({
   const dotColorClass = TYPE_DOT_CLASSES[valueType] || "bg-gray-400";
 
   const handleValueChange = (newValue: unknown) => {
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            value: newValue,
-          },
-        };
-      })
-    );
+    updateData({ value: newValue });
   };
 
   const handleTypeChange = (newType: string | number) => {
     const vt = String(newType) as "string" | "number" | "boolean";
     const defaultVal = getDefaultForType(vt);
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            valueType: vt,
-            value: defaultVal,
-            parameterOutputs: [
-              { name: "value", type: vt, defaultValue: defaultVal },
-            ],
-          },
-        };
-      })
-    );
+    updateData({
+      valueType: vt,
+      value: defaultVal,
+      parameterOutputs: [{ name: "value", type: vt, defaultValue: defaultVal }],
+    });
   };
 
   return (
@@ -91,15 +70,7 @@ export function PrimitiveNode({
       <NodeHeader
         title={data.customTitle || "Primitive"}
         dotColor={dotColorClass}
-        onTitleChange={newTitle =>
-          setNodes(nds =>
-            nds.map(n =>
-              n.id === id
-                ? { ...n, data: { ...n.data, customTitle: newTitle } }
-                : n
-            )
-          )
-        }
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <NodeBody>
         <NodeParamRow label="Type">

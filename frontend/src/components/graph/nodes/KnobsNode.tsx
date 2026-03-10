@@ -1,8 +1,9 @@
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { useCallback, useRef } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
 import { NodeCard, NodeHeader, NodeBody, NODE_TOKENS } from "../ui";
 
 type KnobsNodeType = Node<FlowNodeData, "knobs">;
@@ -201,19 +202,15 @@ function SingleKnobRow({
 }
 
 export function KnobsNode({ id, data, selected }: NodeProps<KnobsNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
   const knobs: KnobDef[] =
     data.knobs && data.knobs.length > 0 ? data.knobs : [defaultKnob(0)];
 
   const updateKnobs = useCallback(
     (newKnobs: KnobDef[]) => {
-      setNodes(nds =>
-        nds.map(n =>
-          n.id === id ? { ...n, data: { ...n.data, knobs: newKnobs } } : n
-        )
-      );
+      updateData({ knobs: newKnobs });
     },
-    [id, setNodes]
+    [updateData]
   );
 
   const handleValueChange = useCallback(
@@ -252,15 +249,7 @@ export function KnobsNode({ id, data, selected }: NodeProps<KnobsNodeType>) {
       <NodeHeader
         title={data.customTitle || "Knobs"}
         dotColor="bg-pink-400"
-        onTitleChange={newTitle =>
-          setNodes(nds =>
-            nds.map(n =>
-              n.id === id
-                ? { ...n, data: { ...n.data, customTitle: newTitle } }
-                : n
-            )
-          )
-        }
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <NodeBody>
         <div className="flex flex-col gap-0.5 py-0.5">

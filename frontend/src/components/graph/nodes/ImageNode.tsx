@@ -1,10 +1,11 @@
 import { useState, useCallback } from "react";
 import { createPortal } from "react-dom";
-import { Handle, Position, useReactFlow } from "@xyflow/react";
+import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { ImageIcon, X } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
 import { getAssetUrl } from "../../../lib/api";
 import { MediaPicker } from "../../MediaPicker";
 import { NodeCard, NodeHeader, NODE_TOKENS } from "../ui";
@@ -14,36 +15,25 @@ type ImageNodeType = Node<FlowNodeData, "image">;
 const COLOR = "#f472b6"; // pink-400
 
 export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
   const [isMediaPickerOpen, setIsMediaPickerOpen] = useState(false);
 
   const imagePath = (data.imagePath as string) || "";
 
-  const updateField = useCallback(
-    (field: string, v: unknown) => {
-      setNodes(nds =>
-        nds.map(n =>
-          n.id === id ? { ...n, data: { ...n.data, [field]: v } } : n
-        )
-      );
-    },
-    [id, setNodes]
-  );
-
   const handleSelectImage = useCallback(
     (path: string) => {
-      updateField("imagePath", path);
+      updateData({ imagePath: path });
       setIsMediaPickerOpen(false); // Auto-close on selection
     },
-    [updateField]
+    [updateData]
   );
 
   const handleRemoveImage = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      updateField("imagePath", "");
+      updateData({ imagePath: "" });
     },
-    [updateField]
+    [updateData]
   );
 
   return (
@@ -56,7 +46,7 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
       <NodeHeader
         title={data.customTitle || "Image"}
         dotColor="bg-pink-400"
-        onTitleChange={newTitle => updateField("customTitle", newTitle)}
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       {/* Image area – uses absolute positioning so the image never overflows */}
       <div className="flex-1 min-h-0 relative mx-2 my-1.5">

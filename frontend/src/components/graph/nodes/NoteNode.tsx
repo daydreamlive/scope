@@ -1,27 +1,16 @@
-import { useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
+import { useNodeData } from "../hooks/useNodeData";
 import { NodeCard, NodeHeader, NODE_TOKENS } from "../ui";
 
 type NoteNodeType = Node<FlowNodeData, "note">;
 
 export function NoteNode({ id, data, selected }: NodeProps<NoteNodeType>) {
-  const { setNodes } = useReactFlow();
+  const { updateData } = useNodeData(id);
   const noteText = data.noteText || "";
 
   const handleTextChange = (newText: string) => {
-    setNodes(nds =>
-      nds.map(n => {
-        if (n.id !== id) return n;
-        return {
-          ...n,
-          data: {
-            ...n.data,
-            noteText: newText,
-          },
-        };
-      })
-    );
+    updateData({ noteText: newText });
   };
 
   const handleWheel = (e: React.WheelEvent) => {
@@ -33,15 +22,7 @@ export function NoteNode({ id, data, selected }: NodeProps<NoteNodeType>) {
       <NodeHeader
         title={data.customTitle || "Note"}
         dotColor="bg-amber-400"
-        onTitleChange={newTitle =>
-          setNodes(nds =>
-            nds.map(n =>
-              n.id === id
-                ? { ...n, data: { ...n.data, customTitle: newTitle } }
-                : n
-            )
-          )
-        }
+        onTitleChange={newTitle => updateData({ customTitle: newTitle })}
       />
       <div className="flex-1 min-h-0 p-1.5">
         <textarea
