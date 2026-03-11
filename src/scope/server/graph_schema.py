@@ -49,22 +49,6 @@ class GraphNode(BaseModel):
         default=None,
         description="Pipeline ID (registry key) when type is 'pipeline'",
     )
-    x: float | None = Field(
-        default=None,
-        description="X position in UI canvas (optional, for layout persistence)",
-    )
-    y: float | None = Field(
-        default=None,
-        description="Y position in UI canvas (optional, for layout persistence)",
-    )
-    w: float | None = Field(
-        default=None,
-        description="Width in UI canvas (optional, for layout persistence)",
-    )
-    h: float | None = Field(
-        default=None,
-        description="Height in UI canvas (optional, for layout persistence)",
-    )
     source_mode: str | None = Field(
         default=None,
         description="Video source mode for source nodes: 'video', 'camera', 'spout', 'ndi', 'syphon'",
@@ -97,11 +81,6 @@ class GraphConfig(BaseModel):
 
     nodes: list[GraphNode] = Field(..., description="Graph nodes")
     edges: list[GraphEdge] = Field(..., description="Connections between nodes")
-    ui_state: dict | None = Field(
-        default=None,
-        description="Opaque frontend UI state (frontend-only nodes, edges, etc.). "
-        "Stored and returned as-is, never interpreted by the backend.",
-    )
 
     def get_pipeline_node_ids(self) -> list[str]:
         """Return node ids that are pipeline nodes, in definition order."""

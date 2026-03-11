@@ -908,5 +908,17 @@ export function tryExtractLinearSettings(
   return { pipelineId: mainPipelineId, preprocessorIds, postprocessorIds };
 }
 
+/**
+ * Strip frontend-only fields (position, size, ui_state) from a GraphConfig
+ * before sending to the backend. The backend only needs node identity/type,
+ * edges, and source config — not layout or UI state.
+ */
+export function stripUIFields(graph: GraphConfig): GraphConfig {
+  return {
+    nodes: graph.nodes.map(({ x, y, w, h, ...rest }) => rest),
+    edges: graph.edges,
+  };
+}
+
 // Default node dimensions for reference
 export { NODE_WIDTH, NODE_HEIGHT };

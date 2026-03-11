@@ -44,7 +44,7 @@ import type {
 import type { PromptItem, PromptTransition, GraphConfig } from "../lib/api";
 import { getInputSourceResolution, fetchDaydreamWorkflow } from "../lib/api";
 import type { ScopeWorkflow } from "../lib/workflowApi";
-import { linearGraphFromSettings } from "../lib/graphUtils";
+import { linearGraphFromSettings, stripUIFields } from "../lib/graphUtils";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -1896,8 +1896,9 @@ export function StreamPage() {
       }
 
       // Pass graph config via initialParameters for the backend to use
+      // Strip frontend-only fields (position, size, ui_state) before sending.
       if (graphConfigForStream) {
-        initialParameters.graph = graphConfigForStream;
+        initialParameters.graph = stripUIFields(graphConfigForStream);
       }
 
       // Include recording toggle state
