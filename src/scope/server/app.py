@@ -112,9 +112,16 @@ from .schema import (
 )
 
 # Cached responses for pipeline schemas and plugin list.
-# Server restarts after plugin install/uninstall, so these are naturally reset.
+# Invalidated by _invalidate_plugin_caches() on install/uninstall.
 _pipeline_schemas_cache: PipelineSchemasResponse | None = None
 _plugins_list_cache: object | None = None
+
+
+def _invalidate_plugin_caches():
+    """Reset plugin and pipeline schema caches after install/uninstall."""
+    global _pipeline_schemas_cache, _plugins_list_cache
+    _pipeline_schemas_cache = None
+    _plugins_list_cache = None
 
 
 class STUNErrorFilter(logging.Filter):
@@ -2324,6 +2331,7 @@ async def install_plugin(
             plugin_name = plugin_info.name
 
         logger.info(f"Plugin installed: {plugin_name}")
+        _invalidate_plugin_caches()
         return PluginInstallResponse(
             success=result["success"],
             message=result["message"],
@@ -2400,6 +2408,7 @@ async def uninstall_plugin(
         )
 
         logger.info(f"Plugin uninstalled: {name}")
+        _invalidate_plugin_caches()
         return PluginUninstallResponse(
             success=result["success"],
             message=result["message"],
@@ -2461,6 +2470,7 @@ async def reload_plugin(
             pipeline_manager=pipeline_manager,
         )
 
+        _invalidate_plugin_caches()
         return PluginReloadResponse(
             success=result["success"],
             message=result["message"],
