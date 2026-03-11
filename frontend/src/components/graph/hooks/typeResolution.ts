@@ -34,6 +34,8 @@ export function resolveSourceType(
     return node.data.mediaType === "video" ? "video_path" : "string";
   }
   if (nt === "vace") return "vace";
+  if (nt === "midi") return "number";
+  if (nt === "bool") return "boolean";
   if (nt === "reroute") {
     // Walk upstream
     for (const e of edges) {
@@ -56,6 +58,15 @@ export function resolveTargetType(
   if (targetParamName === "__prompt") return "string";
   if (targetParamName === "__vace") return "vace";
   if (nt === "math") return "number";
+  if (nt === "bool") return "number";
+  if (
+    nt === "control" &&
+    targetNode.data.controlType === "string" &&
+    targetNode.data.controlMode === "switch"
+  ) {
+    if (targetParamName.startsWith("item_")) return "number";
+    if (targetParamName.startsWith("str_")) return "string";
+  }
   if (nt === "slider" || nt === "knobs" || nt === "xypad") return "number";
   if (nt === "tuple") {
     if (targetParamName === "value") return "list_number";

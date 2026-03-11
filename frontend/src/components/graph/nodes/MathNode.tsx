@@ -1,6 +1,6 @@
 import { Handle, Position, useEdges, useNodes } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId, parseHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/useNodeData";
@@ -44,6 +44,12 @@ const ALL_OPERATIONS = [...BINARY_OPERATIONS, ...UNARY_OPERATIONS];
 const UNARY_OPS = new Set(UNARY_OPERATIONS.map(o => o.value));
 const COLOR = "#38bdf8"; // sky-400
 
+const OUTPUT_TYPE_OPTIONS = [
+  { value: "auto", label: "Auto" },
+  { value: "int", label: "Int" },
+  { value: "float", label: "Float" },
+];
+
 function isUnaryOp(op: string): boolean {
   return UNARY_OPS.has(op);
 }
@@ -83,6 +89,15 @@ function getValueFromNode(
     if (parsed.name === "x") return node.data.padX ?? null;
     if (parsed.name === "y") return node.data.padY ?? null;
     return null;
+  }
+  if (node.data.nodeType === "midi") {
+    const channels = node.data.midiChannels;
+    if (!channels || !sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    const idx = parseInt(parsed.name.replace("midi_", ""), 10);
+    if (isNaN(idx) || idx >= channels.length) return null;
+    return channels[idx].value;
   }
   return null;
 }
@@ -169,15 +184,37 @@ export function MathNode({ id, data, selected }: NodeProps<MathNodeType>) {
     : null;
 
   // Compute
-  const result = computeResult(operation, valueA, valueB);
+  let result = computeResult(operation, valueA, valueB);
 
-  // Update currentValue
+  // Apply output type conversion
+  const outputType = data.mathOutputType;
+  if (result !== null && outputType) {
+    if (outputType === "int") {
+      result = Math.trunc(result);
+    } else if (outputType === "float") {
+      result = result + 0.0; // Ensure float representation
+    }
+  }
+
+  // Defer update to rAF to avoid exceeding React's max update depth
+  const rafRef = useRef<number>(0);
   useEffect(() => {
-    updateData({ currentValue: result ?? undefined });
+    const next = result ?? undefined;
+    cancelAnimationFrame(rafRef.current);
+    rafRef.current = requestAnimationFrame(() => {
+      updateData({ currentValue: next });
+    });
+    return () => cancelAnimationFrame(rafRef.current);
   }, [updateData, result]);
 
   const handleOperationChange = (newOp: string) => {
     updateData({ mathOp: newOp as typeof operation });
+  };
+
+  const handleOutputTypeChange = (newType: string) => {
+    updateData({
+      mathOutputType: newType === "auto" ? null : (newType as "int" | "float"),
+    });
   };
 
   // Measure handle positions when operation type changes
@@ -196,6 +233,13 @@ export function MathNode({ id, data, selected }: NodeProps<MathNodeType>) {
             value={operation}
             onChange={handleOperationChange}
             options={ALL_OPERATIONS}
+          />
+        </NodeParamRow>
+        <NodeParamRow label="Output">
+          <NodePillSelect
+            value={outputType || "auto"}
+            onChange={handleOutputTypeChange}
+            options={OUTPUT_TYPE_OPTIONS}
           />
         </NodeParamRow>
         <div ref={setRowRef("a")} className={NODE_TOKENS.paramRow}>

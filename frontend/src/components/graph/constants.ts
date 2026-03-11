@@ -68,6 +68,12 @@ export function getEdgeColor(
     if (sourceNode.data.nodeType === "vace") {
       return "#a78bfa"; // violet-400
     }
+    if (sourceNode.data.nodeType === "midi") {
+      return "#06b6d4"; // cyan-500
+    }
+    if (sourceNode.data.nodeType === "bool") {
+      return "#34d399"; // emerald-400
+    }
     return "#9ca3af";
   }
 

@@ -158,6 +158,26 @@ export function useConnectionLogic(
           );
         }
 
+        // Bool: accepts number input
+        if (targetNode.data.nodeType === "bool") {
+          return sourceType === "number" && targetParsed.name === "input";
+        }
+
+        // StringControl switch mode
+        if (
+          targetNode.data.nodeType === "control" &&
+          targetNode.data.controlType === "string" &&
+          targetNode.data.controlMode === "switch"
+        ) {
+          if (targetParsed.name.startsWith("item_")) {
+            return sourceType === "number";
+          }
+          if (targetParsed.name.startsWith("str_")) {
+            return sourceType === "string";
+          }
+          return false;
+        }
+
         // UI nodes: specific types
         if (
           targetNode.data.nodeType === "slider" ||

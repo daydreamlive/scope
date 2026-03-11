@@ -26,7 +26,9 @@ interface AddNodeModalProps {
       | "tuple"
       | "reroute"
       | "image"
-      | "vace",
+      | "vace"
+      | "midi"
+      | "bool",
     subType?: string
   ) => void;
 }
@@ -47,7 +49,9 @@ interface NodeCatalogItem {
     | "tuple"
     | "reroute"
     | "image"
-    | "vace";
+    | "vace"
+    | "midi"
+    | "bool";
   subType?: string;
   name: string;
   description: string;
@@ -91,6 +95,14 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     description:
       "Animated integer output using the same movement patterns as FloatControl",
     color: "#38bdf8",
+    category: "Controls",
+  },
+  {
+    type: "midi",
+    name: "MIDI",
+    description:
+      "Receive MIDI CC/Note input and output normalized values to parameters",
+    color: "#06b6d4",
     category: "Controls",
   },
   {
@@ -189,6 +201,14 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     description: "Adaptive value node — auto-detects type from connected input",
     color: "#9ca3af",
     category: "Values",
+  },
+  {
+    type: "bool",
+    name: "Bool",
+    description:
+      "Convert number to boolean — gate (momentary) or toggle (latching)",
+    color: "#34d399",
+    category: "Utility",
   },
   {
     type: "reroute",

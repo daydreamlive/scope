@@ -37,6 +37,7 @@ import {
   LockOpen,
   Pin,
   PinOff,
+  Music,
 } from "lucide-react";
 
 import { SourceNode } from "./nodes/SourceNode";
@@ -54,6 +55,8 @@ import { XYPadNode } from "./nodes/XYPadNode";
 import { TupleNode } from "./nodes/TupleNode";
 import { ImageNode } from "./nodes/ImageNode";
 import { VaceNode } from "./nodes/VaceNode";
+import { MidiNode } from "./nodes/MidiNode";
+import { BoolNode } from "./nodes/BoolNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -93,6 +96,8 @@ const nodeTypes = {
   reroute: RerouteNode,
   image: ImageNode,
   vace: VaceNode,
+  midi: MidiNode,
+  bool: BoolNode,
 };
 
 const edgeTypes = {
@@ -665,6 +670,18 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                                 handleNodeTypeSelect("control", "string"),
                               keywords: ["text", "cycle", "animated"],
                             },
+                            {
+                              label: "MIDI",
+                              icon: <Music />,
+                              onClick: () => handleNodeTypeSelect("midi"),
+                              keywords: [
+                                "midi",
+                                "controller",
+                                "cc",
+                                "knob",
+                                "fader",
+                              ],
+                            },
                           ],
                         },
                         {
@@ -712,6 +729,19 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                               icon: <StickyNote />,
                               onClick: () => handleNodeTypeSelect("note"),
                               keywords: ["comment", "annotation", "text"],
+                            },
+                            {
+                              label: "Bool",
+                              icon: <ToggleLeft />,
+                              onClick: () => handleNodeTypeSelect("bool"),
+                              keywords: [
+                                "boolean",
+                                "gate",
+                                "toggle",
+                                "switch",
+                                "on",
+                                "off",
+                              ],
                             },
                             {
                               label: "Reroute",

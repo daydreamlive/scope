@@ -33,16 +33,15 @@ export function NodeCard({
     const el = measureRef.current;
 
     const measure = () => {
-      // Use scrollHeight
       const h = el.scrollHeight;
       setMinH(prev => (Math.abs(h - prev) > 2 ? h : prev));
     };
 
-    // Measure
     measure();
 
-    // Watch for size changes
-    const ro = new ResizeObserver(measure);
+    const ro = new ResizeObserver(() => {
+      requestAnimationFrame(measure);
+    });
     ro.observe(el);
 
     return () => ro.disconnect();

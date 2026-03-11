@@ -9,6 +9,7 @@ import {
   NodeBody,
   NodeParamRow,
   NodePillInput,
+  NodePillTextarea,
   NodePillToggle,
   NodePillSelect,
 } from "../ui";
@@ -81,13 +82,13 @@ export function PrimitiveNode({
           />
         </NodeParamRow>
         {valueType === "string" && (
-          <NodeParamRow label="Value">
-            <NodePillInput
-              type="text"
+          <div className="mt-1">
+            <NodePillTextarea
               value={String(currentValue)}
               onChange={handleValueChange}
+              placeholder="Enter text…"
             />
-          </NodeParamRow>
+          </div>
         )}
         {valueType === "number" && (
           <NodeParamRow label="Value">

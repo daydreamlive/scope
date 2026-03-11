@@ -52,7 +52,9 @@ export interface FlowNodeData {
     | "tuple"
     | "reroute"
     | "image"
-    | "vace";
+    | "vace"
+    | "midi"
+    | "bool";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -70,6 +72,8 @@ export interface FlowNodeData {
   value?: unknown;
   /** For control nodes: the type of control (float, int, string) */
   controlType?: "float" | "int" | "string";
+  /** For string control nodes: animated (pattern cycling) or switch (input-selected) */
+  controlMode?: "animated" | "switch";
   /** For control nodes: the animation pattern */
   controlPattern?: "sine" | "bounce" | "random_walk" | "linear" | "step";
   /** For control nodes: cycles per second */
@@ -102,6 +106,8 @@ export interface FlowNodeData {
     | "round"
     | "toInt"
     | "toFloat";
+  /** For math nodes: output type conversion (null = auto, "int" = truncate, "float" = ensure float) */
+  mathOutputType?: "int" | "float" | null;
   /** For note nodes: the note text content */
   noteText?: string;
   /** For output nodes: sink type (spout, ndi, syphon) */
@@ -184,6 +190,24 @@ export interface FlowNodeData {
   imagePath?: string;
   /** For image/media nodes: detected media type based on file extension */
   mediaType?: "image" | "video";
+
+  /* ── MIDI node fields ── */
+  /** For MIDI nodes: array of channel definitions */
+  midiChannels?: Array<{
+    label: string;
+    type: "cc" | "note";
+    channel: number;
+    cc: number;
+    value: number;
+  }>;
+  /** For MIDI nodes: selected MIDI device ID */
+  midiDeviceId?: string;
+
+  /* ── Bool node fields ── */
+  /** For bool nodes: conversion mode */
+  boolMode?: "gate" | "toggle";
+  /** For bool nodes: threshold value (input > threshold → true) */
+  boolThreshold?: number;
 
   /* ── VACE node fields ── */
   /** For VACE nodes: context scale (0.0-2.0) */
@@ -554,6 +578,8 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "reroute",
   "image",
   "vace",
+  "midi",
+  "bool",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */

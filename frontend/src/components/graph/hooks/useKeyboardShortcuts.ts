@@ -101,6 +101,8 @@ export function useKeyboardShortcuts(
         const selectedNodes = currentNodes.filter(n => n.selected);
         if (selectedNodes.length === 0) return;
 
+        e.preventDefault();
+
         const selectedIds = new Set(selectedNodes.map(n => n.id));
 
         // Capture inter-edges

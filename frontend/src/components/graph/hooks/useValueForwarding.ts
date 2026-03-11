@@ -44,6 +44,8 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "reroute",
   "image",
   "vace",
+  "midi",
+  "bool",
 ]);
 
 // Node types that receive inputs
@@ -130,6 +132,18 @@ export function useValueForwarding(
           handleName: mediaHandleName,
           value: node.data.imagePath || "",
         });
+      } else if (node.data.nodeType === "midi") {
+        const midiChannels = node.data.midiChannels;
+        if (midiChannels) {
+          for (let i = 0; i < midiChannels.length; i++) {
+            valuesToForward.push({
+              handleName: `midi_${i}`,
+              value: midiChannels[i].value,
+            });
+          }
+        }
+      } else if (node.data.nodeType === "bool") {
+        valuesToForward.push({ handleName: "value", value: node.data.value });
       }
 
       // Throttle animated
@@ -250,185 +264,210 @@ export function useValueForwarding(
     onNodeParamChangeRef,
   ]);
 
-  // Input consumption
+  // Defer input consumption to rAF to avoid exceeding React's max update depth
+  const inputRafRef = useRef<number>(0);
+  const nodesRef = useRef(nodes);
+  const edgesRef = useRef(edges);
+  nodesRef.current = nodes;
+  edgesRef.current = edges;
+
   useEffect(() => {
     if (!setNodes) return;
 
-    // Build updates map
-    const updates = new Map<string, Record<string, unknown>>();
+    cancelAnimationFrame(inputRafRef.current);
+    inputRafRef.current = requestAnimationFrame(() => {
+      const currentNodes = nodesRef.current;
+      const currentEdges = edgesRef.current;
 
-    for (const edge of edges) {
-      const targetNode = nodes.find(n => n.id === edge.target);
-      if (!targetNode || !UI_INPUT_TYPES.has(targetNode.data.nodeType))
-        continue;
+      // Build updates map
+      const updates = new Map<string, Record<string, unknown>>();
 
-      const targetParsed = parseHandleId(edge.targetHandle);
-      if (!targetParsed || targetParsed.kind !== "param") continue;
+      for (const edge of currentEdges) {
+        const targetNode = currentNodes.find(n => n.id === edge.target);
+        if (!targetNode || !UI_INPUT_TYPES.has(targetNode.data.nodeType))
+          continue;
 
-      // Find source
-      const sourceNode = nodes.find(n => n.id === edge.source);
-      if (!sourceNode) continue;
+        const targetParsed = parseHandleId(edge.targetHandle);
+        if (!targetParsed || targetParsed.kind !== "param") continue;
 
-      let sourceValue: unknown;
-      const sourceParsed = parseHandleId(edge.sourceHandle);
-      if (!sourceParsed || sourceParsed.kind !== "param") continue;
+        // Find source
+        const sourceNode = currentNodes.find(n => n.id === edge.source);
+        if (!sourceNode) continue;
 
-      if (sourceNode.data.nodeType === "primitive") {
-        sourceValue = sourceNode.data.value;
-      } else if (sourceNode.data.nodeType === "reroute") {
-        sourceValue = sourceNode.data.value;
-      } else if (
-        sourceNode.data.nodeType === "control" ||
-        sourceNode.data.nodeType === "math"
-      ) {
-        sourceValue = sourceNode.data.currentValue;
-      } else if (sourceNode.data.nodeType === "slider") {
-        sourceValue = sourceNode.data.value;
-      } else if (sourceNode.data.nodeType === "knobs") {
-        const idx = parseInt(sourceParsed.name.replace("knob_", ""), 10);
-        const knobs = sourceNode.data.knobs;
-        if (knobs && !isNaN(idx) && idx < knobs.length) {
-          sourceValue = knobs[idx].value;
-        }
-      } else if (sourceNode.data.nodeType === "xypad") {
-        if (sourceParsed.name === "x") sourceValue = sourceNode.data.padX;
-        else if (sourceParsed.name === "y") sourceValue = sourceNode.data.padY;
-      } else if (sourceNode.data.nodeType === "tuple") {
-        sourceValue = sourceNode.data.tupleValues;
-      }
+        let sourceValue: unknown;
+        const sourceParsed = parseHandleId(edge.sourceHandle);
+        if (!sourceParsed || sourceParsed.kind !== "param") continue;
 
-      if (sourceValue === undefined) continue;
-
-      // Determine field
-      const nodeUpdates = updates.get(edge.target) ?? {};
-
-      if (
-        targetNode.data.nodeType === "slider" &&
-        targetParsed.name === "value"
-      ) {
-        const min = targetNode.data.sliderMin ?? 0;
-        const max = targetNode.data.sliderMax ?? 1;
-        const clamped = Math.min(Math.max(Number(sourceValue), min), max);
-        nodeUpdates["value"] = clamped;
-      } else if (targetNode.data.nodeType === "knobs") {
-        const idx = parseInt(targetParsed.name.replace("knob_", ""), 10);
-        const knobs = targetNode.data.knobs;
-        if (knobs && !isNaN(idx) && idx < knobs.length) {
-          const knob = knobs[idx];
-          const clamped = Math.min(
-            Math.max(Number(sourceValue), knob.min),
-            knob.max
-          );
-          // Merge knobs
-          const existingKnobs = (nodeUpdates["knobs"] as typeof knobs) ?? [
-            ...knobs,
-          ];
-          existingKnobs[idx] = { ...existingKnobs[idx], value: clamped };
-          nodeUpdates["knobs"] = existingKnobs;
-        }
-      } else if (targetNode.data.nodeType === "xypad") {
-        if (targetParsed.name === "x") {
-          const min = targetNode.data.padMinX ?? 0;
-          const max = targetNode.data.padMaxX ?? 1;
-          nodeUpdates["padX"] = Math.min(
-            Math.max(Number(sourceValue), min),
-            max
-          );
-        } else if (targetParsed.name === "y") {
-          const min = targetNode.data.padMinY ?? 0;
-          const max = targetNode.data.padMaxY ?? 1;
-          nodeUpdates["padY"] = Math.min(
-            Math.max(Number(sourceValue), min),
-            max
-          );
-        }
-      } else if (targetNode.data.nodeType === "tuple") {
-        if (targetParsed.name === "value" && Array.isArray(sourceValue)) {
-          nodeUpdates["tupleValues"] = sourceValue;
-        } else if (
-          targetParsed.name.startsWith("row_") &&
-          typeof sourceValue === "number"
+        if (
+          sourceNode.data.nodeType === "primitive" ||
+          sourceNode.data.nodeType === "reroute"
         ) {
-          const rowIdx = parseInt(targetParsed.name.replace("row_", ""), 10);
-          const tupleValues = targetNode.data.tupleValues;
-          if (tupleValues && !isNaN(rowIdx) && rowIdx < tupleValues.length) {
-            const existingValues = (nodeUpdates["tupleValues"] as number[]) ?? [
-              ...tupleValues,
-            ];
+          sourceValue = sourceNode.data.value;
+        } else if (
+          sourceNode.data.nodeType === "control" ||
+          sourceNode.data.nodeType === "math"
+        ) {
+          sourceValue = sourceNode.data.currentValue;
+        } else if (sourceNode.data.nodeType === "slider") {
+          sourceValue = sourceNode.data.value;
+        } else if (sourceNode.data.nodeType === "knobs") {
+          const idx = parseInt(sourceParsed.name.replace("knob_", ""), 10);
+          const knobs = sourceNode.data.knobs;
+          if (knobs && !isNaN(idx) && idx < knobs.length) {
+            sourceValue = knobs[idx].value;
+          }
+        } else if (sourceNode.data.nodeType === "xypad") {
+          if (sourceParsed.name === "x") sourceValue = sourceNode.data.padX;
+          else if (sourceParsed.name === "y")
+            sourceValue = sourceNode.data.padY;
+        } else if (sourceNode.data.nodeType === "tuple") {
+          sourceValue = sourceNode.data.tupleValues;
+        } else if (sourceNode.data.nodeType === "midi") {
+          const idx = parseInt(sourceParsed.name.replace("midi_", ""), 10);
+          const midiChannels = sourceNode.data.midiChannels;
+          if (midiChannels && !isNaN(idx) && idx < midiChannels.length) {
+            sourceValue = midiChannels[idx].value;
+          }
+        } else if (sourceNode.data.nodeType === "bool") {
+          sourceValue = sourceNode.data.value;
+        }
+
+        if (sourceValue === undefined) continue;
+
+        // Determine field
+        const nodeUpdates = updates.get(edge.target) ?? {};
+
+        if (
+          targetNode.data.nodeType === "slider" &&
+          targetParsed.name === "value"
+        ) {
+          const min = targetNode.data.sliderMin ?? 0;
+          const max = targetNode.data.sliderMax ?? 1;
+          const clamped = Math.min(Math.max(Number(sourceValue), min), max);
+          nodeUpdates["value"] = clamped;
+        } else if (targetNode.data.nodeType === "knobs") {
+          const idx = parseInt(targetParsed.name.replace("knob_", ""), 10);
+          const knobs = targetNode.data.knobs;
+          if (knobs && !isNaN(idx) && idx < knobs.length) {
+            const knob = knobs[idx];
             const clamped = Math.min(
-              Math.max(sourceValue, targetNode.data.tupleMin ?? 0),
-              targetNode.data.tupleMax ?? 1000
+              Math.max(Number(sourceValue), knob.min),
+              knob.max
             );
-            existingValues[rowIdx] = clamped;
-            nodeUpdates["tupleValues"] = existingValues;
+            const existingKnobs = (nodeUpdates["knobs"] as typeof knobs) ?? [
+              ...knobs,
+            ];
+            existingKnobs[idx] = { ...existingKnobs[idx], value: clamped };
+            nodeUpdates["knobs"] = existingKnobs;
+          }
+        } else if (targetNode.data.nodeType === "xypad") {
+          if (targetParsed.name === "x") {
+            const min = targetNode.data.padMinX ?? 0;
+            const max = targetNode.data.padMaxX ?? 1;
+            nodeUpdates["padX"] = Math.min(
+              Math.max(Number(sourceValue), min),
+              max
+            );
+          } else if (targetParsed.name === "y") {
+            const min = targetNode.data.padMinY ?? 0;
+            const max = targetNode.data.padMaxY ?? 1;
+            nodeUpdates["padY"] = Math.min(
+              Math.max(Number(sourceValue), min),
+              max
+            );
+          }
+        } else if (targetNode.data.nodeType === "tuple") {
+          if (targetParsed.name === "value" && Array.isArray(sourceValue)) {
+            nodeUpdates["tupleValues"] = sourceValue;
+          } else if (
+            targetParsed.name.startsWith("row_") &&
+            typeof sourceValue === "number"
+          ) {
+            const rowIdx = parseInt(targetParsed.name.replace("row_", ""), 10);
+            const tupleValues = targetNode.data.tupleValues;
+            if (tupleValues && !isNaN(rowIdx) && rowIdx < tupleValues.length) {
+              const clamped = Math.min(
+                Math.max(sourceValue, targetNode.data.tupleMin ?? 0),
+                targetNode.data.tupleMax ?? 1000
+              );
+              const currentValue = tupleValues[rowIdx];
+              if (Math.abs(clamped - currentValue) > 0.0001) {
+                const existingValues = (nodeUpdates[
+                  "tupleValues"
+                ] as number[]) ?? [...tupleValues];
+                existingValues[rowIdx] = clamped;
+                nodeUpdates["tupleValues"] = existingValues;
+              }
+            }
+          }
+        } else if (targetNode.data.nodeType === "vace") {
+          if (targetParsed.name === "ref_image") {
+            nodeUpdates["vaceRefImage"] = String(sourceValue);
+          } else if (targetParsed.name === "first_frame") {
+            nodeUpdates["vaceFirstFrame"] = String(sourceValue);
+          } else if (targetParsed.name === "last_frame") {
+            nodeUpdates["vaceLastFrame"] = String(sourceValue);
+          } else if (targetParsed.name === "video") {
+            nodeUpdates["vaceVideo"] = String(sourceValue);
+          }
+        } else if (targetNode.data.nodeType === "reroute") {
+          nodeUpdates["value"] = sourceValue;
+        }
+
+        if (Object.keys(nodeUpdates).length > 0) {
+          updates.set(edge.target, nodeUpdates);
+        }
+      }
+
+      // Clear VACE fields for disconnected handles
+      const vaceHandleFields: Record<string, string> = {
+        ref_image: "vaceRefImage",
+        first_frame: "vaceFirstFrame",
+        last_frame: "vaceLastFrame",
+        video: "vaceVideo",
+      };
+      for (const node of currentNodes) {
+        if (node.data.nodeType !== "vace") continue;
+        for (const [handleName, dataField] of Object.entries(
+          vaceHandleFields
+        )) {
+          const handleId = `param:${handleName}`;
+          const hasEdge = currentEdges.some(
+            e => e.target === node.id && e.targetHandle === handleId
+          );
+          if (!hasEdge && node.data[dataField]) {
+            const nodeUpdates = updates.get(node.id) ?? {};
+            nodeUpdates[dataField] = "";
+            updates.set(node.id, nodeUpdates);
           }
         }
-      } else if (targetNode.data.nodeType === "vace") {
-        // Map handles to VACE fields
-        if (targetParsed.name === "ref_image") {
-          nodeUpdates["vaceRefImage"] = String(sourceValue);
-        } else if (targetParsed.name === "first_frame") {
-          nodeUpdates["vaceFirstFrame"] = String(sourceValue);
-        } else if (targetParsed.name === "last_frame") {
-          nodeUpdates["vaceLastFrame"] = String(sourceValue);
-        } else if (targetParsed.name === "video") {
-          nodeUpdates["vaceVideo"] = String(sourceValue);
-        }
-      } else if (targetNode.data.nodeType === "reroute") {
-        // Pass through to reroute
-        nodeUpdates["value"] = sourceValue;
       }
 
-      if (Object.keys(nodeUpdates).length > 0) {
-        updates.set(edge.target, nodeUpdates);
-      }
-    }
+      if (updates.size === 0) return;
 
-    // Clear VACE fields for disconnected handles
-    const vaceHandleFields: Record<string, string> = {
-      ref_image: "vaceRefImage",
-      first_frame: "vaceFirstFrame",
-      last_frame: "vaceLastFrame",
-      video: "vaceVideo",
-    };
-    for (const node of nodes) {
-      if (node.data.nodeType !== "vace") continue;
-      for (const [handleName, dataField] of Object.entries(vaceHandleFields)) {
-        const handleId = `param:${handleName}`;
-        const hasEdge = edges.some(
-          e => e.target === node.id && e.targetHandle === handleId
-        );
-        if (!hasEdge && node.data[dataField]) {
-          const nodeUpdates = updates.get(node.id) ?? {};
-          nodeUpdates[dataField] = "";
-          updates.set(node.id, nodeUpdates);
-        }
-      }
-    }
+      // Apply updates (return original if unchanged)
+      setNodes(nds => {
+        let anyNodeChanged = false;
+        const result = nds.map(n => {
+          const upd = updates.get(n.id);
+          if (!upd) return n;
 
-    if (updates.size === 0) return;
-
-    // Apply updates (return original if unchanged)
-    setNodes(nds => {
-      let anyNodeChanged = false;
-      const result = nds.map(n => {
-        const upd = updates.get(n.id);
-        if (!upd) return n;
-
-        // Check if changed
-        let changed = false;
-        for (const [key, val] of Object.entries(upd)) {
-          if (!valuesEqual(n.data[key], val)) {
-            changed = true;
-            break;
+          let changed = false;
+          for (const [key, val] of Object.entries(upd)) {
+            if (!valuesEqual(n.data[key], val)) {
+              changed = true;
+              break;
+            }
           }
-        }
-        if (!changed) return n;
+          if (!changed) return n;
 
-        anyNodeChanged = true;
-        return { ...n, data: { ...n.data, ...upd } };
+          anyNodeChanged = true;
+          return { ...n, data: { ...n.data, ...upd } };
+        });
+        return anyNodeChanged ? result : nds;
       });
-      return anyNodeChanged ? result : nds;
     });
+
+    return () => cancelAnimationFrame(inputRafRef.current);
   }, [nodes, edges, setNodes]);
 }

@@ -23,7 +23,9 @@ type NodeTypeKey =
   | "tuple"
   | "output"
   | "image"
-  | "vace";
+  | "vace"
+  | "midi"
+  | "bool";
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -260,6 +262,38 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       parameterOutputs: [{ name: "__vace", type: "string", defaultValue: "" }],
     },
   },
+  midi: {
+    type: "midi",
+    idPrefix: "midi",
+    defaultX: 50,
+    data: {
+      label: "MIDI",
+      nodeType: "midi",
+      midiChannels: [
+        { label: "CC 1", type: "cc", channel: 0, cc: 1, value: 0 },
+        { label: "CC 2", type: "cc", channel: 0, cc: 2, value: 0 },
+      ],
+      parameterOutputs: [
+        { name: "midi_0", type: "number", defaultValue: 0 },
+        { name: "midi_1", type: "number", defaultValue: 0 },
+      ],
+    },
+  },
+  bool: {
+    type: "bool",
+    idPrefix: "bool",
+    defaultX: 50,
+    data: {
+      label: "Bool",
+      nodeType: "bool",
+      boolMode: "gate",
+      boolThreshold: 0,
+      value: false,
+      parameterOutputs: [
+        { name: "value", type: "boolean", defaultValue: false },
+      ],
+    },
+  },
 };
 
 interface UseNodeFactoriesArgs {
@@ -342,7 +376,9 @@ export function useNodeFactories({
         | "tuple"
         | "reroute"
         | "image"
-        | "vace",
+        | "vace"
+        | "midi"
+        | "bool",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;
