@@ -232,7 +232,9 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         if compile:
             local_attn_size = getattr(model_config, "local_attn_size", 6)
             num_frame_per_block = getattr(model_config, "num_frame_per_block", 3)
-            warmup_runs = (local_attn_size // num_frame_per_block) + 1
+            warmup_runs = (
+                (local_attn_size + num_frame_per_block - 1) // num_frame_per_block
+            ) + 1
 
             if stage_callback:
                 stage_callback("Warming up model...")
