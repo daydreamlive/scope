@@ -39,6 +39,8 @@ interface InitialParameters {
 interface UseUnifiedWebRTCOptions {
   /** Callback function called when the stream stops on the backend */
   onStreamStop?: () => void;
+  /** Callback when parameters are updated externally (REST API, MCP, OSC) */
+  onParametersUpdated?: (parameters: Record<string, unknown>) => void;
 }
 
 /**
@@ -178,6 +180,15 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
               }
 
               options?.onStreamStop?.();
+            }
+
+            // Handle external parameter updates (REST API, MCP, OSC)
+            if (data.type === "parameters_updated" && data.parameters) {
+              console.log(
+                "[UnifiedWebRTC] Parameters updated externally:",
+                data.parameters
+              );
+              options?.onParametersUpdated?.(data.parameters);
             }
           } catch (error) {
             console.error(

@@ -65,6 +65,9 @@ dependencies = [
 kafka = [
     "aiokafka>=0.10.0",
 ]
+mcp = [
+    "mcp>=1.0.0",
+]
 
 [project.scripts]
 daydream-scope = "scope.server.app:main"

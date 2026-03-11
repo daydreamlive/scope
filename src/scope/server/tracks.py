@@ -183,6 +183,10 @@ class VideoProcessingTrack(MediaStreamTrack):
 
         raise Exception("Track stopped")
 
+    def get_last_frame(self):
+        """Return the most recently rendered frame, or None."""
+        return self._last_frame
+
     def pause(self, paused: bool):
         """Pause or resume the video track processing"""
         with self._paused_lock:

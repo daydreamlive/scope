@@ -419,26 +419,10 @@ export function StreamPage() {
     pipelineInfo,
   } = usePipeline();
 
-  // WebRTC for streaming (unified hook works in both local and cloud modes)
-  const {
-    remoteStream,
-    isStreaming,
-    isConnecting,
-    peerConnectionRef,
-    startStream,
-    stopStream,
-    updateVideoTrack,
-    sendParameterUpdate: sendParameterUpdateWebRTC,
-    sessionId,
-  } = useUnifiedWebRTC();
-
-  // Wrapper for sendParameterUpdate that also syncs frontend state
-  const sendParameterUpdate = useCallback(
+  // Apply backend parameter values to frontend state (used for both local
+  // sends and external updates pushed via the data channel).
+  const applyBackendParamsToSettings = useCallback(
     (params: Record<string, unknown>) => {
-      // Send to backend via WebRTC
-      sendParameterUpdateWebRTC(params);
-
-      // Also update frontend state for known parameters
       const settingsUpdate: Partial<SettingsState> = {};
 
       if (params.noise_scale !== undefined) {
@@ -483,12 +467,41 @@ export function StreamPage() {
         };
       }
 
-      // Update settings if any mappings were found
       if (Object.keys(settingsUpdate).length > 0) {
         updateSettings(settingsUpdate);
       }
+
+      if (params.prompts) {
+        setPromptItems(
+          params.prompts as Array<{ text: string; weight: number }>
+        );
+      }
     },
-    [sendParameterUpdateWebRTC, updateSettings, settings]
+    [updateSettings, settings]
+  );
+
+  // WebRTC for streaming (unified hook works in both local and cloud modes)
+  const {
+    remoteStream,
+    isStreaming,
+    isConnecting,
+    peerConnectionRef,
+    startStream,
+    stopStream,
+    updateVideoTrack,
+    sendParameterUpdate: sendParameterUpdateWebRTC,
+    sessionId,
+  } = useUnifiedWebRTC({
+    onParametersUpdated: applyBackendParamsToSettings,
+  });
+
+  // Wrapper for sendParameterUpdate that also syncs frontend state
+  const sendParameterUpdate = useCallback(
+    (params: Record<string, unknown>) => {
+      sendParameterUpdateWebRTC(params);
+      applyBackendParamsToSettings(params);
+    },
+    [sendParameterUpdateWebRTC, applyBackendParamsToSettings]
   );
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud

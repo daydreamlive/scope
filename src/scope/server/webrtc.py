@@ -29,6 +29,7 @@ from .tracks import VideoProcessingTrack
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
+    from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +91,62 @@ class Session:
 
     def __str__(self):
         return f"Session({self.id}, state={self.pc.connectionState})"
+
+
+class HeadlessSession:
+    """Pipeline session without WebRTC. Runs FrameProcessor directly."""
+
+    def __init__(
+        self,
+        frame_processor: "FrameProcessor",
+        session_id: str | None = None,
+    ):
+        from .frame_processor import FrameProcessor
+
+        self.id = session_id or str(uuid.uuid4())
+        self.frame_processor: FrameProcessor = frame_processor
+        self._last_frame = None
+        self._frame_consumer_running = False
+        self._frame_consumer_task: asyncio.Task | None = None
+
+    def start_frame_consumer(self):
+        """Start a background task that continuously pulls frames to keep the
+        pipeline moving and caches the latest one for capture_frame."""
+        if self._frame_consumer_running:
+            return
+        self._frame_consumer_running = True
+        self._frame_consumer_task = asyncio.create_task(self._consume_frames())
+
+    async def _consume_frames(self):
+        """Pull frames from FrameProcessor so pipeline workers don't stall."""
+        from av import VideoFrame
+
+        while self._frame_consumer_running and self.frame_processor.running:
+            frame_tensor = self.frame_processor.get()
+            if frame_tensor is not None:
+                frame_np = frame_tensor.numpy()
+                self._last_frame = VideoFrame.from_ndarray(frame_np, format="rgb24")
+            else:
+                await asyncio.sleep(0.01)
+
+    async def close(self):
+        """Stop the frame processor and consumer."""
+        self._frame_consumer_running = False
+        if self._frame_consumer_task is not None:
+            self._frame_consumer_task.cancel()
+            try:
+                await self._frame_consumer_task
+            except asyncio.CancelledError:
+                pass
+        self.frame_processor.stop()
+        logger.info(f"Headless session {self.id} closed")
+
+    def get_last_frame(self):
+        """Return the most recently cached frame, or None."""
+        return self._last_frame
+
+    def __str__(self):
+        return f"HeadlessSession({self.id}, running={self.frame_processor.running})"
 
 
 class NotificationSender:
@@ -187,6 +244,7 @@ class WebRTCManager:
 
     def __init__(self):
         self.sessions: dict[str, Session] = {}
+        self.headless_sessions: dict[str, HeadlessSession] = {}
         self.rtc_config = create_rtc_config()
         self.is_first_track = True
 
@@ -606,6 +664,24 @@ class WebRTCManager:
             ]
         )
 
+    def add_headless_session(self, session: HeadlessSession) -> None:
+        """Register a headless session."""
+        self.headless_sessions[session.id] = session
+
+    def get_headless_session(self, session_id: str) -> HeadlessSession | None:
+        """Get a headless session by ID."""
+        return self.headless_sessions.get(session_id)
+
+    async def remove_headless_session(self, session_id: str) -> None:
+        """Stop and remove a headless session."""
+        session = self.headless_sessions.pop(session_id, None)
+        if session:
+            await session.close()
+        else:
+            logger.warning(
+                f"Attempted to remove non-existent headless session: {session_id}"
+            )
+
     async def add_ice_candidate(
         self,
         session_id: str,
@@ -645,8 +721,36 @@ class WebRTCManager:
             logger.error(f"Failed to add ICE candidate to session {session_id}: {e}")
             raise ValueError(f"Invalid ICE candidate: {e}") from e
 
+    def iter_frame_processors(self):
+        """Yield (session_id, frame_processor, is_headless) for every active session."""
+        for sid, session in self.sessions.items():
+            if session.pc.connectionState in ("closed", "failed"):
+                continue
+            if (
+                session.video_track
+                and hasattr(session.video_track, "frame_processor")
+                and session.video_track.frame_processor
+            ):
+                yield sid, session.video_track.frame_processor, False
+        for sid, session in self.headless_sessions.items():
+            if session.frame_processor:
+                yield sid, session.frame_processor, True
+
+    def get_any_last_frame(self):
+        """Return the most recent frame from any active session, or None."""
+        for session in self.sessions.values():
+            if session.video_track and hasattr(session.video_track, "get_last_frame"):
+                frame = session.video_track.get_last_frame()
+                if frame is not None:
+                    return frame
+        for session in self.headless_sessions.values():
+            frame = session.get_last_frame()
+            if frame is not None:
+                return frame
+        return None
+
     def broadcast_parameter_update(self, parameters: dict) -> None:
-        """Send a parameter update to all active sessions (e.g. from OSC)."""
+        """Send a parameter update to all active sessions (e.g. from OSC or REST API)."""
         for session in self.sessions.values():
             if session.pc.connectionState in ("closed", "failed"):
                 continue
@@ -654,16 +758,33 @@ class WebRTCManager:
                 session.video_track.pause(parameters["paused"])
             if session.video_track and hasattr(session.video_track, "frame_processor"):
                 session.video_track.frame_processor.update_parameters(parameters)
+        for session in self.headless_sessions.values():
+            if session.frame_processor:
+                session.frame_processor.update_parameters(parameters)
+
+    def broadcast_notification(self, message: dict) -> None:
+        """Send a notification message to all active sessions via their data channels."""
+        message_str = json.dumps(message)
+        for session in self.sessions.values():
+            if session.pc.connectionState in ("closed", "failed"):
+                continue
+            if session.data_channel and session.data_channel.readyState == "open":
+                try:
+                    session.data_channel.send(message_str)
+                except Exception as e:
+                    logger.error(
+                        f"Failed to send notification to session {session.id}: {e}"
+                    )
 
     async def stop(self):
-        """Close and cleanup all sessions."""
-        # Close all sessions in parallel
+        """Close and cleanup all sessions (WebRTC and headless)."""
         close_tasks = [session.close() for session in self.sessions.values()]
+        close_tasks += [session.close() for session in self.headless_sessions.values()]
         if close_tasks:
             await asyncio.gather(*close_tasks, return_exceptions=True)
 
-        # Clear the sessions dict
         self.sessions.clear()
+        self.headless_sessions.clear()
 
 
 def create_rtc_config() -> RTCConfiguration:
