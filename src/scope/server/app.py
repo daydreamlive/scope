@@ -176,13 +176,19 @@ for _logger_name in _quiet_loggers.split(","):
     if _logger_name:
         logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
+def _set_debug_logging(enabled: bool) -> None:
+    """Enable or disable DEBUG-level logging across all scope loggers and handlers."""
+    target_level = logging.DEBUG if enabled else logging.INFO
+    for handler in root_logger.handlers:
+        if isinstance(handler, (logging.StreamHandler, RotatingFileHandler)):
+            handler.setLevel(target_level)
+    for name in ("scope.server", "scope.core", "scope.cloud"):
+        logging.getLogger(name).setLevel(target_level)
+
+
 # Enable DEBUG logging when SCOPE_DEBUG env var is set (or --debug CLI flag)
 if os.getenv("SCOPE_DEBUG"):
-    for handler in root_logger.handlers:
-        handler.setLevel(logging.DEBUG)
-    logging.getLogger("scope.server").setLevel(logging.DEBUG)
-    logging.getLogger("scope.core").setLevel(logging.DEBUG)
-    logging.getLogger("scope.cloud").setLevel(logging.DEBUG)
+    _set_debug_logging(True)
 
 # Select pipeline depending on the "PIPELINE" environment variable
 PIPELINE = os.getenv("PIPELINE", None)
@@ -2158,7 +2164,10 @@ class DebugLoggingRequest(BaseModel):
 
 @app.get("/api/v1/logs/debug")
 @cloud_proxy()
-async def get_debug_logging(http_request: Request):
+async def get_debug_logging(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Get current debug logging state."""
     scope_logger = logging.getLogger("scope.server")
     return {"enabled": scope_logger.level <= logging.DEBUG}
@@ -2166,19 +2175,13 @@ async def get_debug_logging(http_request: Request):
 
 @app.put("/api/v1/logs/debug")
 @cloud_proxy()
-async def set_debug_logging(http_request: Request, body: DebugLoggingRequest):
+async def set_debug_logging(
+    http_request: Request,
+    body: DebugLoggingRequest,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Enable or disable DEBUG-level logging at runtime."""
-    root_logger = logging.getLogger()
-    target_level = logging.DEBUG if body.enabled else logging.INFO
-
-    # Update all handlers
-    for handler in root_logger.handlers:
-        if isinstance(handler, (logging.StreamHandler, RotatingFileHandler)):
-            handler.setLevel(target_level)
-
-    # Update app loggers
-    for name in ("scope.server", "scope.core", "scope.cloud"):
-        logging.getLogger(name).setLevel(target_level)
+    _set_debug_logging(body.enabled)
 
     # Persist to env so reload preserves the setting
     if body.enabled:
@@ -2766,9 +2769,10 @@ def main(
         print_version_info()
         sys.exit(0)
 
-    # Enable debug logging via env var (picked up by module-level config on reload)
+    # Enable debug logging immediately and persist via env var for reloads
     if debug:
         os.environ["SCOPE_DEBUG"] = "1"
+        _set_debug_logging(True)
 
     # Store cloud credentials in environment for app access
     if cloud_app_id:
