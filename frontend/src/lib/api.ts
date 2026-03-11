@@ -47,6 +47,7 @@ export interface PipelineLoadParams {
 export type PipelineLoadParamsGeneric = Record<string, unknown>;
 
 export interface PipelineLoadItem {
+  node_id: string;
   pipeline_id: string;
   load_params?: PipelineLoadParamsGeneric | null;
 }

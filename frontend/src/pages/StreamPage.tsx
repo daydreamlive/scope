@@ -41,7 +41,12 @@ import type {
   DownloadProgress,
   SettingsState,
 } from "../types";
-import type { PromptItem, PromptTransition, GraphConfig } from "../lib/api";
+import type {
+  PromptItem,
+  PromptTransition,
+  GraphConfig,
+  PipelineLoadItem,
+} from "../lib/api";
 import { getInputSourceResolution, fetchDaydreamWorkflow } from "../lib/api";
 import type { ScopeWorkflow } from "../lib/workflowApi";
 import { linearGraphFromSettings, stripUIFields } from "../lib/graphUtils";
@@ -1742,10 +1747,23 @@ export function StreamPage() {
         );
       }
 
-      const loadSuccess = await loadPipeline(
-        pipelineIds,
-        loadParams || undefined
-      );
+      // Build PipelineLoadItem[] from graph nodes (always available at this
+      // point — perform mode builds a linear graph above).
+      const loadItems: PipelineLoadItem[] = graphConfigForStream
+        ? graphConfigForStream.nodes
+            .filter(n => n.type === "pipeline" && n.pipeline_id)
+            .map(n => ({
+              node_id: n.id,
+              pipeline_id: n.pipeline_id as string,
+              load_params: loadParams,
+            }))
+        : pipelineIds.map(pid => ({
+            node_id: pid,
+            pipeline_id: pid,
+            load_params: loadParams,
+          }));
+
+      const loadSuccess = await loadPipeline(loadItems);
       if (!loadSuccess) {
         console.error("Failed to load pipeline, cannot start stream");
         return false;

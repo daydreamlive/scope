@@ -274,7 +274,7 @@ async def prewarm_pipeline(pipeline_id: str):
     """Background task to pre-warm the pipeline without blocking startup."""
     try:
         await asyncio.wait_for(
-            pipeline_manager.load_pipelines([(pipeline_id, None)]),
+            pipeline_manager.load_pipelines([(pipeline_id, pipeline_id, None)]),
             timeout=300,  # 5 minute timeout for pipeline loading
         )
     except Exception as e:
@@ -575,11 +575,16 @@ async def load_pipeline(
     cloud-hosted scope backend.
     """
     try:
-        # Normalize to list of (pipeline_id, load_params) tuples
+        # Normalize to list of (node_id, pipeline_id, load_params) tuples
         if request.pipelines:
-            pipelines = [(p.pipeline_id, p.load_params) for p in request.pipelines]
+            pipelines = [
+                (p.node_id, p.pipeline_id, p.load_params) for p in request.pipelines
+            ]
         elif request.pipeline_ids:
-            pipelines = [(pid, request.load_params) for pid in request.pipeline_ids]
+            # Legacy format: use pipeline_id as node_id
+            pipelines = [
+                (pid, pid, request.load_params) for pid in request.pipeline_ids
+            ]
         else:
             raise HTTPException(
                 status_code=400,

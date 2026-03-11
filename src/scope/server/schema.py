@@ -468,6 +468,7 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
 class PipelineLoadItem(BaseModel):
     """A single pipeline with its load parameters."""
 
+    node_id: str = Field(..., description="Graph node ID for this pipeline instance")
     pipeline_id: str = Field(..., description="Pipeline ID to load")
     load_params: dict[str, Any] | None = Field(
         default=None,

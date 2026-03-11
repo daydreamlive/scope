@@ -87,7 +87,7 @@ def build_graph(
     for node in graph.nodes:
         if node.type != "pipeline" or node.pipeline_id is None:
             continue
-        pipeline = pipeline_manager.get_pipeline_by_id(node.pipeline_id)
+        pipeline = pipeline_manager.get_pipeline_by_id(node.id)
         processor = PipelineProcessor(
             pipeline=pipeline,
             pipeline_id=node.pipeline_id,

@@ -441,26 +441,9 @@ class PipelineManager:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.get_status_info)
 
-    @staticmethod
-    def _generate_instance_keys(
-        pipelines: list[tuple[str, dict | None]],
-    ) -> list[str]:
-        """Generate unique instance keys for a pipeline list.
-
-        First occurrence of a pipeline_id uses the bare id (e.g. "longlive").
-        Subsequent occurrences get a suffix (e.g. "longlive:1", "longlive:2").
-        """
-        counts: dict[str, int] = {}
-        keys: list[str] = []
-        for pipeline_id, _ in pipelines:
-            count = counts.get(pipeline_id, 0)
-            keys.append(pipeline_id if count == 0 else f"{pipeline_id}:{count}")
-            counts[pipeline_id] = count + 1
-        return keys
-
     async def load_pipelines(
         self,
-        pipelines: list[tuple[str, dict | None]],
+        pipelines: list[tuple[str, str, dict | None]],
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
         user_id: str | None = None,
@@ -468,9 +451,10 @@ class PipelineManager:
         """Load multiple pipelines asynchronously.
 
         Args:
-            pipelines: List of (pipeline_id, load_params) tuples. The same
-                pipeline_id may appear more than once with different params;
-                each entry produces a separate instance.
+            pipelines: List of (node_id, pipeline_id, load_params) tuples.
+                node_id is the graph node ID used as the instance key.
+                The same pipeline_id may appear more than once; each entry
+                produces a separate instance keyed by its node_id.
             connection_id: Optional connection ID for event correlation.
             connection_info: Optional connection info for event correlation.
             user_id: Optional user ID for event correlation.
@@ -490,7 +474,7 @@ class PipelineManager:
 
     def _load_pipelines_sync(
         self,
-        pipelines: list[tuple[str, dict | None]],
+        pipelines: list[tuple[str, str, dict | None]],
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
         user_id: str | None = None,
@@ -500,55 +484,93 @@ class PipelineManager:
             logger.error("No pipelines provided")
             return False
 
-        instance_keys = self._generate_instance_keys(pipelines)
-        pipeline_ids = [pid for pid, _ in pipelines]
-        logger.info(f"Loading {len(pipelines)} pipeline(s): {instance_keys}")
+        node_ids = [node_id for node_id, _, _ in pipelines]
+        pipeline_ids = [pid for _, pid, _ in pipelines]
+        logger.info(
+            f"Loading {len(pipelines)} pipeline(s): {list(zip(node_ids, pipeline_ids))}"
+        )
 
         # Store first load_params for backward-compat status reporting
         with self._lock:
-            self._load_params = pipelines[0][1] if pipelines else None
+            self._load_params = pipelines[0][2] if pipelines else None
 
-            # Clear stale statuses for instance keys not in the new load list
-            new_key_set = set(instance_keys)
+            new_key_set = set(node_ids)
+
+            # Phase 1: Match new entries to existing loaded pipelines.
+            # Prefer exact node_id match first, then find a compatible
+            # pipeline under a different key and re-key it (avoids
+            # expensive unload + reload when only node_id changed).
+            claimed_old_keys: set[str] = set()
+            entries_needing_load: list[tuple[str, str, dict | None]] = []
+
+            for node_id, pipeline_id, load_params in pipelines:
+                params = load_params or {}
+
+                # Exact match at same node_id?
+                if (
+                    node_id in self._pipelines
+                    and self._pipeline_statuses.get(node_id) == PipelineStatus.LOADED
+                    and self._pipeline_registry_ids.get(node_id) == pipeline_id
+                    and self._pipeline_load_params.get(node_id, {}) == params
+                ):
+                    claimed_old_keys.add(node_id)
+                    continue
+
+                # Try to find a compatible loaded pipeline under a different key
+                matched_key = None
+                for old_key in list(self._pipelines.keys()):
+                    if old_key in claimed_old_keys:
+                        continue
+                    # Don't steal a key that another new entry needs at that
+                    # exact position (it may match there perfectly).
+                    if old_key in new_key_set and old_key != node_id:
+                        continue
+                    if (
+                        self._pipeline_statuses.get(old_key) == PipelineStatus.LOADED
+                        and self._pipeline_registry_ids.get(old_key) == pipeline_id
+                        and self._pipeline_load_params.get(old_key, {}) == params
+                    ):
+                        matched_key = old_key
+                        break
+
+                if matched_key is not None:
+                    # Re-key: move pipeline from matched_key to node_id
+                    logger.info(
+                        f"Re-keying pipeline {pipeline_id} "
+                        f"from '{matched_key}' to '{node_id}'"
+                    )
+                    self._pipelines[node_id] = self._pipelines.pop(matched_key)
+                    self._pipeline_load_params[node_id] = (
+                        self._pipeline_load_params.pop(matched_key)
+                    )
+                    self._pipeline_registry_ids[node_id] = (
+                        self._pipeline_registry_ids.pop(matched_key)
+                    )
+                    self._pipeline_statuses[node_id] = self._pipeline_statuses.pop(
+                        matched_key
+                    )
+                    claimed_old_keys.add(matched_key)
+                else:
+                    entries_needing_load.append((node_id, pipeline_id, load_params))
+
+            # Phase 2: Unload old pipelines that weren't matched
+            for old_key in list(self._pipelines.keys()):
+                if old_key not in new_key_set and old_key not in claimed_old_keys:
+                    self._unload_pipeline_by_id_unsafe(
+                        old_key,
+                        connection_id=connection_id,
+                        connection_info=connection_info,
+                        user_id=user_id,
+                    )
+
+            # Clean up stale statuses
             for key in list(self._pipeline_statuses.keys()):
                 if key not in new_key_set:
                     del self._pipeline_statuses[key]
 
-            # Identify pipelines that need to be unloaded:
-            # 1. Currently loaded but not in new list
-            # 2. In new list but with different load_params
-            currently_loaded = set(self._pipelines.keys())
-            # Also check main pipeline if it exists
-            if self._pipeline_id and self._pipeline_id not in currently_loaded:
-                currently_loaded.add(self._pipeline_id)
-
-            # Build a map of new instance_key -> load_params for comparison
-            new_params_map = {
-                key: (params or {})
-                for key, (_, params) in zip(instance_keys, pipelines)
-            }
-
-            pipelines_to_unload = set()
-            for loaded_key in currently_loaded:
-                if loaded_key not in new_key_set:
-                    pipelines_to_unload.add(loaded_key)
-                else:
-                    current_params = self._pipeline_load_params.get(loaded_key, {})
-                    if current_params != new_params_map[loaded_key]:
-                        pipelines_to_unload.add(loaded_key)
-
-            # Unload pipelines that need to be unloaded
-            for key_to_unload in pipelines_to_unload:
-                self._unload_pipeline_by_id_unsafe(
-                    key_to_unload,
-                    connection_id=connection_id,
-                    connection_info=connection_info,
-                    user_id=user_id,
-                )
-
-        # Load all pipelines
+        # Phase 3: Load new entries
         success = True
-        for instance_key, (pipeline_id, load_params) in zip(instance_keys, pipelines):
+        for node_id, pipeline_id, load_params in entries_needing_load:
             try:
                 result = self._load_pipeline_by_id_sync(
                     pipeline_id,
@@ -556,13 +578,13 @@ class PipelineManager:
                     connection_id=connection_id,
                     connection_info=connection_info,
                     user_id=user_id,
-                    instance_key=instance_key,
+                    instance_key=node_id,
                 )
                 if not result:
-                    logger.error(f"Failed to load pipeline: {instance_key}")
+                    logger.error(f"Failed to load pipeline: {node_id}")
                     success = False
             except Exception as e:
-                logger.error(f"Error loading pipeline {instance_key}: {e}")
+                logger.error(f"Error loading pipeline {node_id}: {e}")
                 success = False
 
         if success:

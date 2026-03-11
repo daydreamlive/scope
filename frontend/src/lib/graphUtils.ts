@@ -787,11 +787,19 @@ export function linearGraphFromSettings(
   preprocessorIds: string[],
   postprocessorIds: string[]
 ): GraphConfig {
-  const allIds = [...preprocessorIds, pipelineId, ...postprocessorIds];
+  const allPipelineIds = [...preprocessorIds, pipelineId, ...postprocessorIds];
+  // Generate unique node IDs so duplicate pipeline_ids get distinct nodes
+  const usedIds = new Set<string>(["input", "output"]);
+  const nodeEntries = allPipelineIds.map(pid => {
+    const nodeId = generateNodeId(pid, usedIds);
+    usedIds.add(nodeId);
+    return { nodeId, pid };
+  });
+
   const nodes: GraphNode[] = [
     { id: "input", type: "source", source_mode: "video" },
-    ...allIds.map(pid => ({
-      id: pid,
+    ...nodeEntries.map(({ nodeId, pid }) => ({
+      id: nodeId,
       type: "pipeline" as const,
       pipeline_id: pid,
     })),
@@ -800,15 +808,15 @@ export function linearGraphFromSettings(
 
   const edges: GraphEdge[] = [];
   let prev = "input";
-  for (const pid of allIds) {
+  for (const { nodeId } of nodeEntries) {
     edges.push({
       from: prev,
       from_port: "video",
-      to_node: pid,
+      to_node: nodeId,
       to_port: "video",
       kind: "stream",
     });
-    prev = pid;
+    prev = nodeId;
   }
   edges.push({
     from: prev,
