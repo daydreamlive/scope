@@ -1500,6 +1500,28 @@ export function StreamPage() {
     return () => es.close();
   }, []);
 
+  // Subscribe to DMX commands via SSE (same shape as OSC commands)
+  useEffect(() => {
+    const es = new EventSource("/api/v1/dmx/stream");
+
+    es.onmessage = event => {
+      try {
+        const cmd = JSON.parse(event.data) as OscCommand;
+        oscCommandHandlerRef.current(cmd);
+      } catch (err) {
+        console.debug("[StreamPage] Failed to parse DMX SSE event:", err);
+      }
+    };
+
+    es.onerror = () => {
+      console.debug(
+        "[StreamPage] DMX SSE connection error; browser will retry"
+      );
+    };
+
+    return () => es.close();
+  }, []);
+
   // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {
     const pipeline = pipelines?.[settings.pipelineId];

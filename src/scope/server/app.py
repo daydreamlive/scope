@@ -276,6 +276,8 @@ cloud_connection_manager = None
 kafka_publisher = None
 # Global OSC server instance
 osc_server = None
+# Global DMX server instance
+dmx_server = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -305,7 +307,8 @@ async def lifespan(app: FastAPI):
         pipeline_manager, \
         cloud_connection_manager, \
         kafka_publisher, \
-        osc_server
+        osc_server, \
+        dmx_server
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -365,6 +368,19 @@ async def lifespan(app: FastAPI):
     osc_server.set_managers(pipeline_manager, webrtc_manager)
     await osc_server.start()
 
+    # Start DMX Art-Net server (loads config from disk for port + mappings)
+    from .dmx_config import load_config as load_dmx_config
+    from .dmx_config import mappings_to_dict
+    from .dmx_server import DMXServer
+
+    dmx_cfg = load_dmx_config()
+    dmx_host = os.getenv("SCOPE_HOST", "0.0.0.0")
+    dmx_server = DMXServer(dmx_host, dmx_cfg.get("preferred_port", 6454))
+    dmx_server.set_managers(pipeline_manager, webrtc_manager)
+    dmx_server.log_all_messages = dmx_cfg.get("log_all_messages", False)
+    dmx_server.set_mappings(mappings_to_dict(dmx_cfg.get("mappings", [])))
+    await dmx_server.start()
+
     # Syphon server discovery (macOS only): create the ObjC singleton and do
     # an initial NSRunLoop pump so servers are available when the UI first loads.
     # Subsequent refreshes pump on demand in the list_input_sources endpoint.
@@ -384,6 +400,11 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if dmx_server:
+        logger.info("Shutting down DMX server...")
+        await dmx_server.stop()
+        logger.info("DMX server shutdown complete")
+
     if osc_server:
         logger.info("Shutting down OSC server...")
         await osc_server.stop()
@@ -430,6 +451,12 @@ def get_osc_server():
     """Dependency to get OSC server instance."""
 
     return osc_server
+
+
+def get_dmx_server():
+    """Dependency to get DMX server instance."""
+
+    return dmx_server
 
 
 app = FastAPI(
@@ -621,6 +648,12 @@ async def load_pipeline(
         # load_params is already a dict (or None)
         load_params_dict = request.load_params
 
+        # Pipeline active/available DMX path grouping can change after load/unload.
+        # Mark the DMX known-path cache stale so it is rebuilt once on next packet.
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
+
         # Local mode: start loading in background without blocking
         asyncio.create_task(
             pipeline_manager.load_pipelines(
@@ -799,6 +832,160 @@ async def osc_docs_page(
     port = srv.port if srv else 8000
     html_content = render_osc_docs_html(pm, port)
     return Response(content=html_content, media_type="text/html")
+
+
+# ---------------------------------------------------------------------------
+# DMX endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/dmx/status")
+async def dmx_status():
+    """Return current DMX Art-Net server status."""
+    srv = get_dmx_server()
+    if srv is None:
+        return {
+            "enabled": False,
+            "listening": False,
+            "port": None,
+            "preferred_port": 6454,
+            "host": None,
+            "log_all_messages": False,
+            "mapping_count": 0,
+        }
+    return srv.status()
+
+
+class DmxSettingsRequest(BaseModel):
+    log_all_messages: bool | None = None
+    preferred_port: int | None = None
+
+
+@app.put("/api/v1/dmx/settings")
+async def update_dmx_settings(request: DmxSettingsRequest):
+    """Update DMX server runtime settings (logging, preferred port)."""
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+    if request.log_all_messages is not None:
+        srv.log_all_messages = request.log_all_messages
+        # Persist logging preference immediately without persisting other fields.
+        from .dmx_config import load_config, save_config
+
+        cfg = load_config()
+        cfg["log_all_messages"] = request.log_all_messages
+        save_config(cfg)
+    if request.preferred_port is not None:
+        srv.preferred_port = request.preferred_port
+    return srv.status()
+
+
+class DmxRestartRequest(BaseModel):
+    preferred_port: int | None = None
+
+
+@app.post("/api/v1/dmx/restart")
+async def dmx_restart(request: DmxRestartRequest):
+    """Restart the DMX server to apply a new port. Persists preferred_port to config."""
+    from .dmx_config import load_config, save_config
+
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    if request.preferred_port is not None:
+        srv.preferred_port = request.preferred_port
+        cfg = load_config()
+        cfg["preferred_port"] = request.preferred_port
+        save_config(cfg)
+
+    await srv.stop()
+    await srv.start()
+    return srv.status()
+
+
+@app.get("/api/v1/dmx/paths")
+async def dmx_paths(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Return numeric DMX-mappable paths split into active / available."""
+    from .dmx_paths import get_dmx_paths
+
+    return get_dmx_paths(pm)
+
+
+@app.get("/api/v1/dmx/config")
+async def dmx_get_config():
+    """Return the current persisted DMX mapping configuration."""
+    from .dmx_config import load_config
+
+    return load_config()
+
+
+class DmxConfigRequest(BaseModel):
+    preferred_port: int | None = None
+    log_all_messages: bool | None = None
+    mappings: list[dict] | None = None
+
+
+@app.put("/api/v1/dmx/config")
+async def dmx_put_config(request: DmxConfigRequest):
+    """Save / import a full DMX mapping configuration."""
+    from .dmx_config import (
+        load_config,
+        mappings_to_dict,
+        save_config,
+    )
+
+    cfg = load_config()
+    if request.preferred_port is not None:
+        cfg["preferred_port"] = request.preferred_port
+    if request.log_all_messages is not None:
+        cfg["log_all_messages"] = request.log_all_messages
+    if request.mappings is not None:
+        cfg["mappings"] = request.mappings
+    save_config(cfg)
+
+    # Hot-reload into the running server
+    srv = get_dmx_server()
+    if srv is not None:
+        srv.log_all_messages = cfg.get("log_all_messages", False)
+        srv.set_mappings(mappings_to_dict(cfg.get("mappings", [])))
+
+    return cfg
+
+
+@app.get("/api/v1/dmx/stream")
+async def dmx_sse_stream():
+    """Server-Sent Events stream pushing DMX commands to the frontend."""
+    srv = get_dmx_server()
+    if srv is None:
+        return Response(content="DMX server not running", status_code=503)
+
+    q = srv.subscribe()
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            srv.unsubscribe(q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
@@ -2323,6 +2510,10 @@ async def install_plugin(
             plugin_info = _convert_plugin_dict_to_info(result["plugin"])
             plugin_name = plugin_info.name
 
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
+
         logger.info(f"Plugin installed: {plugin_name}")
         return PluginInstallResponse(
             success=result["success"],
@@ -2399,6 +2590,10 @@ async def uninstall_plugin(
             pipeline_manager=pipeline_manager,
         )
 
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
+
         logger.info(f"Plugin uninstalled: {name}")
         return PluginUninstallResponse(
             success=result["success"],
@@ -2460,6 +2655,10 @@ async def reload_plugin(
             force=reload_request.force,
             pipeline_manager=pipeline_manager,
         )
+
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
 
         return PluginReloadResponse(
             success=result["success"],
