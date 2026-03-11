@@ -879,7 +879,7 @@ async def dmx_paths(
     pm: "PipelineManager" = Depends(get_pipeline_manager),
 ):
     """Return numeric DMX-mappable paths split into active / available."""
-    from .dmx_docs import get_dmx_paths
+    from .dmx_paths import get_dmx_paths
 
     return get_dmx_paths(pm)
 

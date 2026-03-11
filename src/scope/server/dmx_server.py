@@ -274,7 +274,7 @@ class DMXServer:
     def _get_known_paths(self) -> dict[str, dict[str, Any]]:
         """Return flat dict of numeric-only runtime parameters."""
         if self._known_paths_cached_version != self._known_paths_version:
-            from .dmx_docs import get_all_numeric_paths
+            from .dmx_paths import get_all_numeric_paths
 
             self._cached_known_paths = get_all_numeric_paths(self._pipeline_manager)
             self._known_paths_cached_version = self._known_paths_version

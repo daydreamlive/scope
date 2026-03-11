@@ -126,25 +126,14 @@ export class ScopePythonProcessService implements PythonProcessService {
   private setupProcessHandlers(child: ChildProcessWithoutNullStreams): void {
     let stderrBuffer = '';
 
-    const logServerLines = (prefix: 'info' | 'error', output: string) => {
-      const lines = output.trim().split(/\r?\n/).filter(Boolean);
-      for (const line of lines) {
-        if (prefix === 'info') {
-          logger.info('[SERVER]', line);
-        } else {
-          logger.error('[SERVER]', line);
-        }
-      }
-    };
-
     child.stdout?.on('data', (data) => {
-      logServerLines('info', data.toString());
+      logger.info('[SERVER]', data.toString().trim());
     });
 
     child.stderr?.on('data', (data) => {
       const output = data.toString();
       stderrBuffer += output;
-      logServerLines('error', output);
+      logger.error('[SERVER]', output.trim());
     });
 
     child.on('close', (code, signal) => {
