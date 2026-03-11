@@ -276,6 +276,8 @@ cloud_connection_manager = None
 kafka_publisher = None
 # Global OSC server instance
 osc_server = None
+# Global DMX server instance
+dmx_server = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -365,6 +367,14 @@ async def lifespan(app: FastAPI):
     osc_server.set_managers(pipeline_manager, webrtc_manager)
     await osc_server.start()
 
+    # Start DMX (Art-Net) UDP server on the standard Art-Net port
+    from .dmx_server import DMXServer
+
+    dmx_config_dir = Path.home() / ".daydream-scope"
+    dmx_server = DMXServer(port=6454, config_dir=dmx_config_dir)
+    dmx_server.set_managers(pipeline_manager, webrtc_manager)
+    await dmx_server.start()
+
     # Syphon server discovery (macOS only): create the ObjC singleton and do
     # an initial NSRunLoop pump so servers are available when the UI first loads.
     # Subsequent refreshes pump on demand in the list_input_sources endpoint.
@@ -384,6 +394,11 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if dmx_server:
+        logger.info("Shutting down DMX server...")
+        await dmx_server.stop()
+        logger.info("DMX server shutdown complete")
+
     if osc_server:
         logger.info("Shutting down OSC server...")
         await osc_server.stop()
@@ -430,6 +445,12 @@ def get_osc_server():
     """Dependency to get OSC server instance."""
 
     return osc_server
+
+
+def get_dmx_server():
+    """Dependency to get DMX server instance."""
+
+    return dmx_server
 
 
 app = FastAPI(
@@ -798,6 +819,89 @@ async def osc_docs_page(
     srv = get_osc_server()
     port = srv.port if srv else 8000
     html_content = render_osc_docs_html(pm, port)
+    return Response(content=html_content, media_type="text/html")
+
+
+# ---------------------------------------------------------------------------
+# DMX endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/dmx/status")
+async def dmx_status():
+    """Return current DMX (Art-Net) server status."""
+    srv = get_dmx_server()
+    if srv is None:
+        return {"enabled": False, "listening": False, "port": None, "mapping_count": 0}
+    return srv.status()
+
+
+@app.get("/api/v1/dmx/mappings")
+async def dmx_mappings():
+    """Return all configured DMX channel mappings."""
+    srv = get_dmx_server()
+    if srv is None:
+        return {"mappings": []}
+    return {"mappings": srv.get_mappings()}
+
+
+class DMXMappingRequest(BaseModel):
+    id: str
+    universe: int
+    channel: int
+    param_key: str
+    min_value: float = 0.0
+    max_value: float = 1.0
+    enabled: bool = True
+
+
+@app.post("/api/v1/dmx/mappings")
+async def add_dmx_mapping(request: DMXMappingRequest):
+    """Add or update a DMX channel mapping."""
+    from .dmx_server import DMXMapping
+
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    if request.channel < 1 or request.channel > 512:
+        raise HTTPException(status_code=400, detail="Channel must be between 1 and 512")
+
+    mapping = DMXMapping(
+        id=request.id,
+        universe=request.universe,
+        channel=request.channel,
+        param_key=request.param_key,
+        min_value=request.min_value,
+        max_value=request.max_value,
+        enabled=request.enabled,
+    )
+    srv.add_mapping(mapping)
+    return {"success": True, "mapping": mapping.to_dict()}
+
+
+@app.delete("/api/v1/dmx/mappings/{mapping_id}")
+async def delete_dmx_mapping(mapping_id: str):
+    """Remove a DMX channel mapping."""
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    if srv.remove_mapping(mapping_id):
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Mapping not found")
+
+
+@app.get("/api/v1/dmx/docs")
+async def dmx_docs_page(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Serve a self-contained HTML reference page for DMX control."""
+    from .dmx_docs import render_dmx_docs_html
+
+    srv = get_dmx_server()
+    port = srv.port if srv else 6454
+    html_content = render_dmx_docs_html(pm, port)
     return Response(content=html_content, media_type="text/html")
 
 
