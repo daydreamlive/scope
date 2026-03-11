@@ -20,7 +20,7 @@ This guide will get you streaming video from the Scope API in under 5 minutes. A
 uv run daydream-scope
 ```
 
-The server runs on `http://localhost:8000` by default.
+The server runs on `http://localhost:52111` by default.
 
 2. **Download models for the longlive pipeline** (if not already downloaded):
 
@@ -69,7 +69,7 @@ Create a file named `index.html` with the following content:
   <video id="video" autoplay muted playsinline></video>
 
   <script>
-    const API_BASE = "http://localhost:8000";
+    const API_BASE = "http://localhost:52111";
     const statusEl = document.getElementById("status");
     const videoEl = document.getElementById("video");
 
@@ -239,7 +239,7 @@ uv run daydream-scope [OPTIONS]
 
 Options:
   --host HOST       Host to bind to (default: 0.0.0.0)
-  --port PORT       Port to bind to (default: 8000)
+  --port PORT       Port to bind to (default: 52111)
   --reload          Enable auto-reload for development
   -N, --no-browser  Don't open browser automatically
   --version         Show version and exit

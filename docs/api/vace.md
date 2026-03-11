@@ -36,7 +36,7 @@ async function uploadReferenceImage(file) {
   const filename = encodeURIComponent(file.name);
 
   const response = await fetch(
-    `http://localhost:8000/api/v1/assets?filename=${filename}`,
+    `http://localhost:52111/api/v1/assets?filename=${filename}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/octet-stream" },
@@ -66,7 +66,7 @@ console.log("Uploaded:", assetInfo.path);
 Set reference images when starting the WebRTC connection:
 
 ```javascript
-const response = await fetch("http://localhost:8000/api/v1/webrtc/offer", {
+const response = await fetch("http://localhost:52111/api/v1/webrtc/offer", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
@@ -161,7 +161,7 @@ inputStream.getTracks().forEach((track) => {
 });
 
 // Send offer with video input mode
-const response = await fetch("http://localhost:8000/api/v1/webrtc/offer", {
+const response = await fetch("http://localhost:52111/api/v1/webrtc/offer", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({
@@ -233,7 +233,7 @@ Get existing assets in the assets directory:
 
 ```javascript
 async function listAssets(type = "image") {
-  const response = await fetch(`http://localhost:8000/api/v1/assets?type=${type}`);
+  const response = await fetch(`http://localhost:52111/api/v1/assets?type=${type}`);
   return await response.json();
 }
 

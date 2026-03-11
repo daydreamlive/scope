@@ -217,7 +217,7 @@ sendParameters({
 You can also send initial parameters when establishing the WebRTC connection:
 
 ```javascript
-const response = await fetch("http://localhost:8000/api/v1/webrtc/offer", {
+const response = await fetch("http://localhost:52111/api/v1/webrtc/offer", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({

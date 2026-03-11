@@ -580,7 +580,7 @@ async function checkServerRunning(): Promise<boolean> {
 }
 
 /**
- * Wait for server to be available on port 8000
+ * Wait for server to be available on port 52178
  * Default timeout is 10 minutes (600 attempts × 1 second) to allow for first-run dependency downloads
  */
 async function waitForServer(maxAttempts: number = 600, intervalMs: number = 1000): Promise<boolean> {

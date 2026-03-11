@@ -30,7 +30,7 @@ async def _json(resp: "httpx.Response") -> str:
     return _fmt(resp.json())
 
 
-def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
+def create_mcp_server(base_url: str = "http://localhost:52111") -> FastMCP:
     """Create and configure the MCP server with all Scope tools."""
 
     mcp = FastMCP(

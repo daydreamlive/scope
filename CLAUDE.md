@@ -11,7 +11,7 @@ Daydream Scope is a tool for running real-time, interactive generative AI video 
 ```bash
 uv sync --group dev          # Install all dependencies including dev
 uv run pre-commit install    # Install pre-commit hooks (required)
-uv run daydream-scope --reload  # Run server with hot reload (localhost:8000)
+uv run daydream-scope --reload  # Run server with hot reload (localhost:52111)
 uv run pytest                # Run tests
 ```
 

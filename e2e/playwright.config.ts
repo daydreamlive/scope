@@ -7,7 +7,7 @@ import { defineConfig, devices } from "@playwright/test";
  *   VITE_DAYDREAM_API_KEY=... uv run build
  *   SCOPE_CLOUD_APP_ID=scope-pr-<N> uv run daydream-scope
  *
- * This runs the app at localhost:8000 with the API key handling auth
+ * This runs the app at localhost:52111 with the API key handling auth
  * and SCOPE_CLOUD_APP_ID pointing to the fal deployment.
  */
 export default defineConfig({
@@ -22,7 +22,7 @@ export default defineConfig({
     ...(process.env.CI ? [["github" as const]] : []),
   ],
   use: {
-    baseURL: "http://localhost:8000",
+    baseURL: "http://localhost:52111",
     trace: "on-first-retry",
     screenshot: "on",
     video: "retain-on-failure",

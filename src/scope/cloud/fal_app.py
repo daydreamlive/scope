@@ -24,7 +24,7 @@ import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
 
-SCOPE_PORT = 8000
+SCOPE_PORT = 52111
 SCOPE_LOCAL_URL = f"http://localhost:{SCOPE_PORT}"
 
 

@@ -19,7 +19,7 @@ function getRedirectUrl(): string {
     return window.location.origin;
   }
   // Fallback for SSR or non-browser environments
-  return "http://localhost:8000";
+  return "http://localhost:52111";
 }
 
 const DAYDREAM_AUTH_URL =

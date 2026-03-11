@@ -77,7 +77,7 @@ Host <NAME>
   Port <PORT>
   IdentityFile <IDENTITY_FILE>
   PreferredAuthentications publickey
-  LocalForward 8000 127.0.0.1:8000
+  LocalForward 52111 127.0.0.1:52111
 ```
 
 - You can set `Host` to a nickname for this machine.

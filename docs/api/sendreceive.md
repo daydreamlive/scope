@@ -20,7 +20,7 @@ In video-to-video mode:
 
 ```javascript
 async function startBidirectionalStream(inputStream, initialPrompt = "A painting") {
-  const API_BASE = "http://localhost:8000";
+  const API_BASE = "http://localhost:52111";
 
   // 1. Get ICE servers
   const iceResponse = await fetch(`${API_BASE}/api/v1/webrtc/ice-servers`);
@@ -116,7 +116,7 @@ async function startBidirectionalStream(inputStream, initialPrompt = "A painting
 }
 
 async function sendIceCandidate(sessionId, candidate) {
-  await fetch(`http://localhost:8000/api/v1/webrtc/offer/${sessionId}`, {
+  await fetch(`http://localhost:52111/api/v1/webrtc/offer/${sessionId}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -135,7 +135,7 @@ async function sendIceCandidate(sessionId, candidate) {
 ### 1. Get ICE Servers
 
 ```javascript
-const iceResponse = await fetch("http://localhost:8000/api/v1/webrtc/ice-servers");
+const iceResponse = await fetch("http://localhost:52111/api/v1/webrtc/ice-servers");
 const { iceServers } = await iceResponse.json();
 ```
 
@@ -187,7 +187,7 @@ pc.ontrack = (event) => {
 ### 6. Send Offer with Initial Parameters
 
 ```javascript
-const response = await fetch("http://localhost:8000/api/v1/webrtc/offer", {
+const response = await fetch("http://localhost:52111/api/v1/webrtc/offer", {
   method: "POST",
   headers: { "Content-Type": "application/json" },
   body: JSON.stringify({

@@ -13,7 +13,7 @@ Loading a pipeline:
 
 ```javascript
 async function loadPipeline(request) {
-  const response = await fetch("http://localhost:8000/api/v1/pipeline/load", {
+  const response = await fetch("http://localhost:52111/api/v1/pipeline/load", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(request)
@@ -108,7 +108,7 @@ Poll the status endpoint to know when loading completes:
 
 ```javascript
 async function getPipelineStatus() {
-  const response = await fetch("http://localhost:8000/api/v1/pipeline/status");
+  const response = await fetch("http://localhost:52111/api/v1/pipeline/status");
 
   if (!response.ok) {
     throw new Error(`Failed to get status: ${response.statusText}`);

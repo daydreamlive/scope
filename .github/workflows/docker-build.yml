@@ -300,14 +300,14 @@ jobs:
           echo "Starting Scope with cloud app ID: $SCOPE_CLOUD_APP_ID"
           uv run daydream-scope > scope-app.log 2>&1 &
 
-          echo "Waiting for localhost:8000 to be ready..."
+          echo "Waiting for localhost:52111 to be ready..."
           MAX_ATTEMPTS=60
           ATTEMPT=0
 
           while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
             ATTEMPT=$((ATTEMPT + 1))
-            if curl -s http://localhost:8000 > /dev/null 2>&1; then
-              echo "App is ready at localhost:8000"
+            if curl -s http://localhost:52111 > /dev/null 2>&1; then
+              echo "App is ready at localhost:52111"
               break
             fi
             echo "Attempt $ATTEMPT/$MAX_ATTEMPTS - waiting..."

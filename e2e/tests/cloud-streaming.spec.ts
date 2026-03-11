@@ -19,7 +19,7 @@ test.describe("Cloud Streaming", () => {
     // Increase timeout for this test
     test.setTimeout(180000); // 3 minutes
 
-    // Navigate to the app (running at localhost:8000)
+    // Navigate to the app (running at localhost:52111)
     await page.goto("/");
     await expect(
       page.locator("h1", { hasText: "Daydream Scope" })
