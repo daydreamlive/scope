@@ -48,6 +48,8 @@ class StreamDiffusionV2Config(BasePipelineConfig):
     supports_quantization = True
     min_dimension = 16
     modified = True
+    num_frame_per_block = 1
+    vae_temporal_downsample_factor = 4
 
     vace_context_scale: float = Field(
         default=1.0,
