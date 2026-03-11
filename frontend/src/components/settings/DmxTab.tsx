@@ -72,11 +72,16 @@ export function DmxTab({ isActive }: DmxTabProps) {
   const [isApplyingPort, setIsApplyingPort] = useState(false);
   const [dirty, setDirty] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const dirtyRef = useRef(dirty);
 
   const [localMappings, setLocalMappings] = useState<DmxMapping[]>([]);
   const [localPort, setLocalPort] = useState<string>("6454");
 
   const flatParams = flattenPaths(paths);
+
+  useEffect(() => {
+    dirtyRef.current = dirty;
+  }, [dirty]);
 
   const fetchAll = useCallback(async () => {
     setIsLoading(true);
@@ -89,9 +94,11 @@ export function DmxTab({ isActive }: DmxTabProps) {
       setStatus(s);
       setConfig(c);
       setPaths(p);
-      setLocalMappings(c.mappings);
-      setLocalPort(String(c.preferred_port));
-      setDirty(false);
+      if (!dirtyRef.current) {
+        setLocalMappings(c.mappings);
+        setLocalPort(String(c.preferred_port));
+        setDirty(false);
+      }
     } catch (err) {
       console.error("Failed to fetch DMX state:", err);
     } finally {

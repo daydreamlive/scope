@@ -84,6 +84,7 @@ def save_config(cfg: dict[str, Any]) -> None:
         )
     except Exception:
         logger.exception("Failed to save DMX config to %s", path)
+        raise
 
 
 def mappings_to_dict(

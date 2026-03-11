@@ -76,6 +76,12 @@ class DMXServer:
         # One-time hint when packets arrive but no mappings configured
         self._logged_no_mappings = False
 
+        # Cached known-path inventory for DMX key validation/range mapping.
+        # The cache is refreshed lazily when marked dirty by mapping/pipeline changes.
+        self._cached_known_paths: dict[str, dict[str, Any]] = {}
+        self._known_paths_version = 0
+        self._known_paths_cached_version = -1
+
     # -- Properties -----------------------------------------------------------
 
     @property
@@ -119,6 +125,7 @@ class DMXServer:
     ) -> None:
         self._pipeline_manager = pipeline_manager
         self._webrtc_manager = webrtc_manager
+        self.invalidate_known_paths_cache()
 
     # -- Mapping management ---------------------------------------------------
 
@@ -127,6 +134,11 @@ class DMXServer:
         self._mappings = dict(mappings)
         self._last_values.clear()
         self._last_send_time.clear()
+        self.invalidate_known_paths_cache()
+
+    def invalidate_known_paths_cache(self) -> None:
+        """Mark known-path cache stale so it is rebuilt on next packet."""
+        self._known_paths_version += 1
 
     # -- SSE ------------------------------------------------------------------
 
@@ -187,10 +199,11 @@ class DMXServer:
         for (uni, ch), param_key in self._mappings.items():
             if uni != universe:
                 continue
-            if ch >= len(dmx_data):
+            index = ch - 1
+            if ch <= 0 or index >= len(dmx_data):
                 continue
 
-            raw_value = dmx_data[ch]
+            raw_value = dmx_data[index]
             path_info = known_paths.get(param_key)
             if path_info is None:
                 continue
@@ -260,15 +273,19 @@ class DMXServer:
 
     def _get_known_paths(self) -> dict[str, dict[str, Any]]:
         """Return flat dict of numeric-only runtime parameters."""
-        from .dmx_docs import get_all_numeric_paths
+        if self._known_paths_cached_version != self._known_paths_version:
+            from .dmx_docs import get_all_numeric_paths
 
-        return get_all_numeric_paths(self._pipeline_manager)
+            self._cached_known_paths = get_all_numeric_paths(self._pipeline_manager)
+            self._known_paths_cached_version = self._known_paths_version
+        return self._cached_known_paths
 
     # -- Lifecycle ------------------------------------------------------------
 
     async def start(self) -> None:
         loop = asyncio.get_running_loop()
         last_exc: Exception | None = None
+        self._bound_port = None
 
         for offset in range(ARTNET_PORT_ATTEMPTS):
             port = self._preferred_port + offset
@@ -290,6 +307,8 @@ class DMXServer:
                 last_exc = exc
                 logger.debug("DMX Art-Net port %d unavailable: %s", port, exc)
 
+        self._bound_port = None
+        self._listening = False
         logger.warning(
             "Failed to start DMX Art-Net server on ports %d-%d: %s",
             self._preferred_port,
@@ -301,6 +320,7 @@ class DMXServer:
         if self._transport:
             self._transport.close()
             self._transport = None
+        self._bound_port = None
         self._listening = False
         logger.info("DMX Art-Net server stopped")
 

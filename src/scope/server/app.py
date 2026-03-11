@@ -618,6 +618,12 @@ async def load_pipeline(
         # load_params is already a dict (or None)
         load_params_dict = request.load_params
 
+        # Pipeline active/available DMX path grouping can change after load/unload.
+        # Mark the DMX known-path cache stale so it is rebuilt once on next packet.
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
+
         # Local mode: start loading in background without blocking
         asyncio.create_task(
             pipeline_manager.load_pipelines(
@@ -833,6 +839,12 @@ async def update_dmx_settings(request: DmxSettingsRequest):
         raise HTTPException(status_code=503, detail="DMX server not running")
     if request.log_all_messages is not None:
         srv.log_all_messages = request.log_all_messages
+        # Persist logging preference immediately without persisting other fields.
+        from .dmx_config import load_config, save_config
+
+        cfg = load_config()
+        cfg["log_all_messages"] = request.log_all_messages
+        save_config(cfg)
     if request.preferred_port is not None:
         srv.preferred_port = request.preferred_port
     return srv.status()
@@ -2468,6 +2480,10 @@ async def install_plugin(
             plugin_info = _convert_plugin_dict_to_info(result["plugin"])
             plugin_name = plugin_info.name
 
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
+
         logger.info(f"Plugin installed: {plugin_name}")
         return PluginInstallResponse(
             success=result["success"],
@@ -2544,6 +2560,10 @@ async def uninstall_plugin(
             pipeline_manager=pipeline_manager,
         )
 
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
+
         logger.info(f"Plugin uninstalled: {name}")
         return PluginUninstallResponse(
             success=result["success"],
@@ -2605,6 +2625,10 @@ async def reload_plugin(
             force=reload_request.force,
             pipeline_manager=pipeline_manager,
         )
+
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
 
         return PluginReloadResponse(
             success=result["success"],
