@@ -10,9 +10,6 @@ import { useEffect, useRef } from "react";
 import { toast } from "sonner";
 import {
   buildScopeWorkflow,
-  workflowToSettings,
-  workflowTimelineToPrompts,
-  workflowToPromptState,
   type WorkflowPromptState,
 } from "../lib/workflowSettings";
 import type { ScopeWorkflow } from "../lib/workflowApi";
@@ -71,11 +68,8 @@ interface UseCloudWorkflowBackupOptions {
   plugins: PluginInfo[];
   scopeVersion: string;
   isCloudConnected: boolean;
-  onRestore: (
-    settings: Partial<SettingsState>,
-    timelinePrompts: TimelinePrompt[],
-    promptState: WorkflowPromptState | null
-  ) => void;
+  /** Opens the workflow import dialog with the backup workflow preloaded. */
+  onRestoreRequest: (workflow: ScopeWorkflow) => void;
 }
 
 export function useCloudWorkflowBackup({
@@ -87,7 +81,7 @@ export function useCloudWorkflowBackup({
   plugins,
   scopeVersion,
   isCloudConnected,
-  onRestore,
+  onRestoreRequest,
 }: UseCloudWorkflowBackupOptions) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevConnectedRef = useRef(false);
@@ -176,18 +170,9 @@ export function useCloudWorkflowBackup({
         action: {
           label: "Restore",
           onClick: () => {
-            const importedSettings = workflowToSettings(
-              backup.workflow,
-              loraFiles
-            );
-            const importedTimeline = workflowTimelineToPrompts(
-              backup.workflow.timeline
-            );
-            const importedPromptState = workflowToPromptState(backup.workflow);
-            onRestore(importedSettings, importedTimeline, importedPromptState);
+            onRestoreRequest(backup.workflow);
             clearBackup();
             finishOffer();
-            toast.success("Cloud session restored");
           },
         },
         duration: RESTORE_TOAST_DURATION_MS,
@@ -201,5 +186,5 @@ export function useCloudWorkflowBackup({
         },
       });
     }
-  }, [isCloudConnected, loraFiles, onRestore]);
+  }, [isCloudConnected, onRestoreRequest]);
 }

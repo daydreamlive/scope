@@ -1987,7 +1987,15 @@ export function StreamPage() {
   );
 
   // Auto-save workflow to localStorage while cloud is connected.
-  // On disconnect → reconnect, offers to restore the previous session.
+  // On disconnect → reconnect, opens the workflow import dialog to restore.
+  const handleCloudRestore = useCallback(
+    (workflow: ScopeWorkflow) => {
+      setPreloadedWorkflow(workflow);
+      setShowWorkflowImport(true);
+    },
+    [setPreloadedWorkflow, setShowWorkflowImport]
+  );
+
   useCloudWorkflowBackup({
     settings,
     timelinePrompts,
@@ -2002,7 +2010,7 @@ export function StreamPage() {
     plugins,
     scopeVersion: scopeVersion ?? "unknown",
     isCloudConnected,
-    onRestore: handleWorkflowLoad,
+    onRestoreRequest: handleCloudRestore,
   });
 
   return (
