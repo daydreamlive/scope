@@ -282,7 +282,7 @@ async def prewarm_pipeline(pipeline_id: str):
     """Background task to pre-warm the pipeline without blocking startup."""
     try:
         await asyncio.wait_for(
-            pipeline_manager.load_pipelines([pipeline_id]),
+            pipeline_manager.load_pipelines([(pipeline_id, pipeline_id, None)]),
             timeout=300,  # 5 minute timeout for pipeline loading
         )
     except Exception as e:
@@ -610,22 +610,26 @@ async def load_pipeline(
     cloud-hosted scope backend.
     """
     try:
-        # Get pipeline IDs to load
-        pipeline_ids = request.pipeline_ids
-        if not pipeline_ids:
+        # Normalize to list of (node_id, pipeline_id, load_params) tuples
+        if request.pipelines:
+            pipelines = [
+                (p.node_id, p.pipeline_id, p.load_params) for p in request.pipelines
+            ]
+        elif request.pipeline_ids:
+            # Legacy format: use pipeline_id as node_id
+            pipelines = [
+                (pid, pid, request.load_params) for pid in request.pipeline_ids
+            ]
+        else:
             raise HTTPException(
                 status_code=400,
-                detail="pipeline_ids must be provided and cannot be empty",
+                detail="Either 'pipelines' or 'pipeline_ids' must be provided",
             )
-
-        # load_params is already a dict (or None)
-        load_params_dict = request.load_params
 
         # Local mode: start loading in background without blocking
         asyncio.create_task(
             pipeline_manager.load_pipelines(
-                pipeline_ids,
-                load_params_dict,
+                pipelines,
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
                 user_id=request.user_id,

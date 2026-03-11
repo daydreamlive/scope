@@ -38,6 +38,9 @@ class RewardForcingConfig(BasePipelineConfig):
         ),
     ]
 
+    inputs = ["video", "vace_input_frames", "vace_input_masks"]
+    outputs = ["video"]
+
     supports_cache_management = True
     supports_quantization = True
     min_dimension = 16
