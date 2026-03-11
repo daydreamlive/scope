@@ -58,6 +58,11 @@ class PipelineManager:
         # Loading stage for frontend display (e.g., "Loading diffusion model...")
         self._loading_stage: str | None = None
 
+        # Set to True if torch._dynamo.reset() failed during an unload; stale
+        # Dynamo/FP8 compile caches may still be present, so force compile=False
+        # on all subsequent pipeline loads until the worker process restarts.
+        self._dynamo_reset_failed: bool = False
+
     def set_loading_stage(self, stage: str | None) -> None:
         """Set the current loading stage (thread-safe)."""
         with self._lock:
@@ -699,7 +704,12 @@ class PipelineManager:
             torch._dynamo.reset()
             logger.info("torch._dynamo cache reset")
         except Exception as e:
-            logger.warning(f"torch._dynamo reset failed: {e}")
+            logger.warning(
+                f"torch._dynamo reset failed: {e}. "
+                "Stale compile caches may remain in this worker; "
+                "forcing compile=False for all subsequent pipeline loads."
+            )
+            self._dynamo_reset_failed = True
 
         # Publish pipeline_unloaded event
         publish_event(
@@ -969,14 +979,23 @@ class PipelineManager:
             if load_params:
                 quantization = load_params.get("quantization", None)
 
+            # Only compile diffusion model for hopper; skip if a prior
+            # torch._dynamo.reset() failed (stale caches would cause a crash).
+            _hopper_gpu = torch.cuda.is_available() and any(
+                x in torch.cuda.get_device_name(0).lower()
+                for x in ("h100", "hopper")
+            )
+            _should_compile = _hopper_gpu and not self._dynamo_reset_failed
+            if _hopper_gpu and self._dynamo_reset_failed:
+                logger.warning(
+                    "torch._dynamo reset previously failed; disabling torch.compile "
+                    "for krea-realtime-video to avoid stale-cache crash. "
+                    "Restart the worker process to re-enable compilation."
+                )
             pipeline = KreaRealtimeVideoPipeline(
                 config,
                 quantization=quantization,
-                # Only compile diffusion model for hopper right now
-                compile=any(
-                    x in torch.cuda.get_device_name(0).lower()
-                    for x in ("h100", "hopper")
-                ),
+                compile=_should_compile,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
                 stage_callback=stage_callback,
