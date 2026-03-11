@@ -103,7 +103,12 @@ class StreamDiffusionV2Config(BasePipelineConfig):
         default=[750, 250],
         description="Denoising step schedule for progressive generation",
         json_schema_extra=ui_field_config(
-            order=6, component="denoising_steps", is_load_param=True
+            order=6,
+            component="denoising_steps",
+            is_load_param=True,
+            modulatable=True,
+            modulatable_min=100,
+            modulatable_max=1000,
         ),
     )
     noise_scale: float = Field(
@@ -112,7 +117,7 @@ class StreamDiffusionV2Config(BasePipelineConfig):
         le=1.0,
         description="Amount of noise to add during video generation (video mode only)",
         json_schema_extra=ui_field_config(
-            order=7, component="noise", modes=["video"], is_load_param=True
+            order=7, component="noise", modes=["video"], is_load_param=True,
         ),
     )
     noise_controller: bool = Field(

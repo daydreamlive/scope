@@ -30,6 +30,8 @@ class ModulationConfig(BaseModel):
     depth: float = Field(default=0.3, ge=0.0, le=1.0)
     rate: ModulationRate = "bar"
     base_value: float | None = None
+    min_value: float | None = None
+    max_value: float | None = None
 
 
 def compute_phase(
@@ -106,6 +108,52 @@ def modulate_value(
     return base + depth * wave_value
 
 
+def modulate_step_list(
+    steps: list[int],
+    depth: float,
+    wave_value: float,
+    min_value: float | None,
+    max_value: float | None,
+) -> list[int]:
+    """Apply modulation to a denoising step list with a uniform additive offset.
+
+    Shifts every step by the same amount so the relative spacing is preserved.
+    The maximum offset is derived from the smallest step and the depth:
+    at depth=1.0 and wave=±1 the smallest step can swing to min_value or
+    roughly double its original value.
+
+    The strictly-descending invariant is enforced after the shift.
+    """
+    if not steps:
+        return steps
+
+    lo = int(min_value) if min_value is not None else 1
+    hi = int(max_value) if max_value is not None else 1000
+
+    # Max offset is proportional to the smallest step so the schedule
+    # stays within a useful range (e.g. [1000,750,500,250] with depth=0.3
+    # gives max_offset=75, shifting to [1075,825,575,325] or [925,675,425,175]).
+    smallest = min(steps)
+    max_offset = smallest * depth
+    offset = int(round(max_offset * wave_value))
+
+    result = [max(lo, min(hi, s + offset)) for s in steps]
+
+    # Enforce strictly descending: walk backwards, push each value up if needed
+    for i in range(len(result) - 2, -1, -1):
+        if result[i] <= result[i + 1]:
+            result[i] = result[i + 1] + 1
+
+    return result
+
+
+# Schema field names may differ from runtime param keys.
+# The frontend modulation UI uses schema names; the engine maps them to call_params keys.
+_PARAM_ALIASES: dict[str, str] = {
+    "denoising_steps": "denoising_step_list",
+}
+
+
 class ModulationEngine:
     """Applies beat-synced modulation to pipeline parameters.
 
@@ -151,25 +199,61 @@ class ModulationEngine:
                 return params
             configs = dict(self._configs)
 
+        modulated_keys: set[str] = set()
+
         for param_name, config in configs.items():
             if not config.enabled:
                 continue
 
-            if param_name in params:
-                base = params[param_name]
-                if not isinstance(base, (int, float)):
-                    continue
-                base = float(base)
-            elif config.base_value is not None:
-                base = config.base_value
-            else:
-                continue
+            # Resolve schema name -> runtime param key
+            runtime_key = _PARAM_ALIASES.get(param_name, param_name)
 
             phase = compute_phase(
                 beat_phase, bar_position, beat_count, beats_per_bar, config.rate
             )
             w = wave(config.shape, phase)
-            params[param_name] = modulate_value(base, config.depth, w, config.shape)
+
+            current = params.get(runtime_key)
+
+            # List-of-int params (e.g. denoising_step_list): shift all elements
+            if isinstance(current, list) and all(
+                isinstance(v, int) for v in current
+            ):
+                params[runtime_key] = modulate_step_list(
+                    current, config.depth, w, config.min_value, config.max_value
+                )
+                modulated_keys.add(runtime_key)
+                continue
+
+            # Scalar numeric params
+            if current is not None:
+                if not isinstance(current, (int, float)):
+                    continue
+                base = float(current)
+            elif config.base_value is not None:
+                base = config.base_value
+            else:
+                continue
+
+            result = modulate_value(base, config.depth, w, config.shape)
+
+            if config.min_value is not None:
+                result = max(result, config.min_value)
+            if config.max_value is not None:
+                result = min(result, config.max_value)
+
+            params[runtime_key] = result
+            modulated_keys.add(runtime_key)
+
+        # Bypass motion-aware noise controller when noise_scale is being modulated,
+        # otherwise the controller overwrites the modulated value with its own.
+        if "noise_scale" in modulated_keys:
+            params["noise_controller"] = False
+
+        # Prevent SetTimestepsBlock from triggering a cache reset every frame
+        # when the step list is being continuously modulated.
+        if "denoising_step_list" in modulated_keys:
+            params["_modulated_step_list"] = True
 
         return params
 

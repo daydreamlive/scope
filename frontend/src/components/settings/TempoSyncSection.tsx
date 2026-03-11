@@ -10,7 +10,11 @@ import {
 } from "../ui/select";
 import { Button } from "../ui/button";
 import type { TempoState } from "../../hooks/useTempoSync";
-import type { TempoSourcesResponse, TempoEnableRequest } from "../../lib/api";
+import type {
+  TempoSourcesResponse,
+  TempoEnableRequest,
+  PipelineConfigSchema,
+} from "../../lib/api";
 import { ModulationSection, type ModulationsState } from "./ModulationSection";
 
 function BeatIndicator({ beatPhase }: { beatPhase: number }) {
@@ -42,6 +46,11 @@ export function TempoSyncSection({
   onLookaheadMsChange,
   modulations,
   onModulationsChange,
+  configSchema,
+  beatCacheResetRate,
+  onBeatCacheResetRateChange,
+  promptCycleRate,
+  onPromptCycleRateChange,
 }: {
   tempoState: TempoState;
   sources: TempoSourcesResponse | null;
@@ -57,6 +66,11 @@ export function TempoSyncSection({
   onLookaheadMsChange?: (ms: number) => void;
   modulations?: ModulationsState;
   onModulationsChange?: (modulations: ModulationsState) => void;
+  configSchema?: PipelineConfigSchema;
+  beatCacheResetRate?: string;
+  onBeatCacheResetRateChange?: (rate: string) => void;
+  promptCycleRate?: string;
+  onPromptCycleRateChange?: (rate: string) => void;
 }) {
   const [selectedSource, setSelectedSource] = useState<"link" | "midi_clock">(
     "link"
@@ -337,10 +351,61 @@ export function TempoSyncSection({
           </div>
         )}
 
+      {tempoState.enabled && onBeatCacheResetRateChange && (
+        <div className="space-y-1">
+          <LabelWithTooltip
+            label="Beat Reset"
+            tooltip="Reset the KV cache at rhythmic intervals, producing a visual 'hard cut' on the beat. Pairs well with prompt changes for scene transitions."
+            className="text-xs text-muted-foreground"
+          />
+          <Select
+            value={beatCacheResetRate ?? "none"}
+            onValueChange={onBeatCacheResetRateChange}
+          >
+            <SelectTrigger className="h-7 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Off</SelectItem>
+              <SelectItem value="beat">Beat</SelectItem>
+              <SelectItem value="bar">Bar</SelectItem>
+              <SelectItem value="2_bar">2 Bars</SelectItem>
+              <SelectItem value="4_bar">4 Bars</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
+      {tempoState.enabled && onPromptCycleRateChange && (
+        <div className="space-y-1">
+          <LabelWithTooltip
+            label="Prompt Cycle"
+            tooltip="Cycle through timeline prompts on beat boundaries. Add multiple prompts to the timeline, then set a rate to advance to the next prompt automatically."
+            className="text-xs text-muted-foreground"
+          />
+          <Select
+            value={promptCycleRate ?? "none"}
+            onValueChange={onPromptCycleRateChange}
+          >
+            <SelectTrigger className="h-7 text-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Off</SelectItem>
+              <SelectItem value="beat">Beat</SelectItem>
+              <SelectItem value="bar">Bar</SelectItem>
+              <SelectItem value="2_bar">2 Bars</SelectItem>
+              <SelectItem value="4_bar">4 Bars</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      )}
+
       {tempoState.enabled && onModulationsChange && (
         <ModulationSection
           modulations={modulations ?? {}}
           onModulationsChange={onModulationsChange}
+          configSchema={configSchema}
         />
       )}
 

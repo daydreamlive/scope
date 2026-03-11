@@ -4,6 +4,7 @@ import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { OutputsPanel } from "../components/OutputsPanel";
+import { TempoSyncPanel } from "../components/TempoSyncPanel";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
@@ -1561,6 +1562,71 @@ export function StreamPage() {
     }
   }, [settings.modulations, isStreaming, sendParameterUpdateWebRTC]);
 
+  // Send beat cache reset rate to backend when it changes or stream starts.
+  useEffect(() => {
+    if (isStreaming) {
+      sendParameterUpdateWebRTC({
+        beat_cache_reset_rate: settings.beatCacheResetRate || "none",
+      });
+    }
+  }, [settings.beatCacheResetRate, isStreaming, sendParameterUpdateWebRTC]);
+
+  // Beat-synced prompt cycling: rotate through the queued prompt items on beat
+  // boundaries. Each prompt item is applied individually at full weight in sequence.
+  // The promptItems list in the UI stays unchanged; only the backend receives the
+  // currently-active single prompt.
+  const promptCycleBoundaryRef = useRef(-1);
+  const promptCycleIndexRef = useRef(0);
+  const promptCycleItemsRef = useRef<PromptItem[]>([]);
+  // Snapshot the prompt list when cycling is enabled so edits don't disrupt the cycle
+  useEffect(() => {
+    if ((settings.promptCycleRate || "none") !== "none" && promptItems.length >= 2) {
+      promptCycleItemsRef.current = promptItems;
+      promptCycleIndexRef.current = 0;
+      promptCycleBoundaryRef.current = -1;
+    }
+  }, [settings.promptCycleRate, promptItems]);
+
+  useEffect(() => {
+    const rate = settings.promptCycleRate || "none";
+    const items = promptCycleItemsRef.current;
+    if (rate === "none" || !isStreaming || !tempoState.enabled || items.length < 2) {
+      promptCycleBoundaryRef.current = -1;
+      return;
+    }
+
+    const { beatCount, beatsPerBar } = tempoState;
+    let boundary: number;
+    if (rate === "beat") boundary = beatCount;
+    else if (rate === "bar") boundary = Math.floor(beatCount / beatsPerBar);
+    else if (rate === "2_bar")
+      boundary = Math.floor(beatCount / (beatsPerBar * 2));
+    else if (rate === "4_bar")
+      boundary = Math.floor(beatCount / (beatsPerBar * 4));
+    else return;
+
+    if (
+      boundary !== promptCycleBoundaryRef.current &&
+      promptCycleBoundaryRef.current >= 0
+    ) {
+      promptCycleIndexRef.current =
+        (promptCycleIndexRef.current + 1) % items.length;
+      const active = items[promptCycleIndexRef.current];
+
+      sendParameterUpdate({
+        prompts: [{ text: active.text, weight: 100 }],
+      });
+    }
+    promptCycleBoundaryRef.current = boundary;
+  }, [
+    settings.promptCycleRate,
+    tempoState.beatCount,
+    tempoState.beatsPerBar,
+    tempoState.enabled,
+    isStreaming,
+    sendParameterUpdate,
+  ]);
+
   // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {
     const pipeline = pipelines?.[settings.pipelineId];
@@ -2075,7 +2141,63 @@ export function StreamPage() {
               mode={mode}
               onModeChange={handleModeChange}
               isStreaming={isStreaming}
-              isConnecting={isConnecting || isCloudConnecting}
+            />
+          )}
+          {tempoState && (
+            <TempoSyncPanel
+              className="flex-shrink-0"
+              tempoState={tempoState}
+              tempoSources={tempoSources}
+              tempoLoading={tempoLoading}
+              tempoError={tempoError}
+              onTempoEnable={enableTempoSync}
+              onTempoDisable={disableTempoSync}
+              onTempoSetBpm={setTempoSessionBpm}
+              onTempoRefreshSources={refreshTempoSources}
+              quantizeMode={settings.quantizeMode || "none"}
+              onQuantizeModeChange={mode =>
+                updateSettings({
+                  quantizeMode: mode as SettingsState["quantizeMode"],
+                })
+              }
+              lookaheadMs={settings.lookaheadMs ?? 0}
+              onLookaheadMsChange={ms => updateSettings({ lookaheadMs: ms })}
+              modulations={settings.modulations}
+              onModulationsChange={modulations => {
+                updateSettings({ modulations });
+                if (isStreaming) {
+                  sendParameterUpdateWebRTC({ modulations });
+                }
+              }}
+              configSchema={pipelines?.[settings.pipelineId]?.configSchema}
+              beatCacheResetRate={settings.beatCacheResetRate || "none"}
+              onBeatCacheResetRateChange={rate => {
+                updateSettings({
+                  beatCacheResetRate:
+                    rate as SettingsState["beatCacheResetRate"],
+                });
+                if (isStreaming) {
+                  sendParameterUpdateWebRTC({ beat_cache_reset_rate: rate });
+                }
+              }}
+              promptCycleRate={settings.promptCycleRate || "none"}
+              onPromptCycleRateChange={rate => {
+                updateSettings({
+                  promptCycleRate:
+                    rate as SettingsState["promptCycleRate"],
+                });
+              }}
+            />
+          )}
+        </div>
+
+        {/* Center Panel - Video Output + Timeline */}
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Video area - takes remaining space but can shrink */}
+          <div className="flex-1 min-h-0">
+            <VideoOutput
+              className="h-full"
+              remoteStream={remoteStream}
               isPipelineLoading={isPipelineLoading}
               canStartStream={
                 settings.inputMode === "text"
@@ -2472,29 +2594,6 @@ export function StreamPage() {
             }}
             isCloudMode={isCloudMode}
             onOpenLoRAsSettings={() => setOpenSettingsTab("loras")}
-            tempoState={tempoState}
-            tempoSources={tempoSources}
-            tempoLoading={tempoLoading}
-            tempoError={tempoError}
-            onTempoEnable={enableTempoSync}
-            onTempoDisable={disableTempoSync}
-            onTempoSetBpm={setTempoSessionBpm}
-            onTempoRefreshSources={refreshTempoSources}
-            quantizeMode={settings.quantizeMode || "none"}
-            onQuantizeModeChange={mode =>
-              updateSettings({
-                quantizeMode: mode as SettingsState["quantizeMode"],
-              })
-            }
-            lookaheadMs={settings.lookaheadMs ?? 0}
-            onLookaheadMsChange={ms => updateSettings({ lookaheadMs: ms })}
-            modulations={settings.modulations}
-            onModulationsChange={modulations => {
-              updateSettings({ modulations });
-              if (isStreaming) {
-                sendParameterUpdateWebRTC({ modulations });
-              }
-            }}
           />
         )}
 

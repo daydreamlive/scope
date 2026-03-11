@@ -106,6 +106,10 @@ export interface SettingsState {
   quantizeMode?: "none" | "beat" | "bar" | "2_bar" | "4_bar";
   // Lookahead in ms for beat-sync scheduling (compensates for pipeline latency)
   lookaheadMs?: number;
+  // Beat-synced cache reset rate (fires init_cache=True at rhythmic intervals)
+  beatCacheResetRate?: "none" | "beat" | "bar" | "2_bar" | "4_bar";
+  // Beat-synced prompt cycling rate (advances to next timeline prompt on boundary)
+  promptCycleRate?: "none" | "beat" | "bar" | "2_bar" | "4_bar";
   // Beat-synced parameter modulation configs
   modulations?: Record<
     string,

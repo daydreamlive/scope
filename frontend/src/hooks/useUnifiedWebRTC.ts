@@ -500,6 +500,8 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           base_value: number;
         }
       >;
+      beat_cache_reset_rate?: string;
+      [key: string]: unknown;
     }) => {
       if (
         dataChannelRef.current &&

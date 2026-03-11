@@ -60,10 +60,6 @@ import {
   type SchemaComplexFieldContext,
 } from "./ComplexFields";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
-import { TempoSyncSection } from "./settings/TempoSyncSection";
-import type { ModulationsState } from "./settings/ModulationSection";
-import type { TempoState } from "../hooks/useTempoSync";
-import type { TempoSourcesResponse, TempoEnableRequest } from "../lib/api";
 
 // Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
 const DEFAULT_MIN_DIMENSION = 1;
@@ -360,24 +356,6 @@ interface SettingsPanelProps {
   ) => void;
   isCloudMode?: boolean;
   onOpenLoRAsSettings?: () => void;
-  // Tempo sync
-  tempoState?: TempoState;
-  tempoSources?: TempoSourcesResponse | null;
-  tempoLoading?: boolean;
-  tempoError?: string | null;
-  onTempoEnable?: (request: TempoEnableRequest) => void;
-  onTempoDisable?: () => void;
-  onTempoSetBpm?: (bpm: number) => void;
-  onTempoRefreshSources?: () => void;
-  // Beat-quantize mode
-  quantizeMode?: string;
-  onQuantizeModeChange?: (mode: string) => void;
-  // Beat-sync lookahead
-  lookaheadMs?: number;
-  onLookaheadMsChange?: (ms: number) => void;
-  // Beat-synced modulation
-  modulations?: ModulationsState;
-  onModulationsChange?: (modulations: ModulationsState) => void;
 }
 
 export function SettingsPanel({
@@ -426,20 +404,6 @@ export function SettingsPanel({
   onPostprocessorSchemaFieldOverrideChange,
   isCloudMode = false,
   onOpenLoRAsSettings,
-  tempoState,
-  tempoSources,
-  tempoLoading = false,
-  tempoError = null,
-  onTempoEnable,
-  onTempoDisable,
-  onTempoSetBpm,
-  onTempoRefreshSources,
-  quantizeMode,
-  onQuantizeModeChange,
-  lookaheadMs,
-  onLookaheadMsChange,
-  modulations,
-  onModulationsChange,
 }: SettingsPanelProps) {
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
@@ -1254,25 +1218,6 @@ export function SettingsPanel({
           );
         })()}
 
-        {/* Tempo Sync */}
-        {tempoState && onTempoEnable && onTempoDisable && (
-          <TempoSyncSection
-            tempoState={tempoState}
-            sources={tempoSources ?? null}
-            loading={tempoLoading}
-            error={tempoError}
-            onEnable={onTempoEnable}
-            onDisable={onTempoDisable}
-            onSetBpm={onTempoSetBpm}
-            onRefreshSources={onTempoRefreshSources ?? (() => {})}
-            quantizeMode={quantizeMode}
-            onQuantizeModeChange={onQuantizeModeChange}
-            lookaheadMs={lookaheadMs}
-            onLookaheadMsChange={onLookaheadMsChange}
-            modulations={modulations}
-            onModulationsChange={onModulationsChange}
-          />
-        )}
       </CardContent>
     </Card>
   );

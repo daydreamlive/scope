@@ -2,6 +2,7 @@
 
 import logging
 import queue
+import random
 import threading
 import time
 from collections import deque
@@ -115,6 +116,10 @@ class PipelineProcessor:
         # Flag to track pending cache initialization after queue flush
         # Set when reset_cache flushes queues, cleared after successful pipeline call
         self._pending_cache_init = False
+
+        # Beat-synced cache reset: fire init_cache=True at rhythmic intervals
+        self._beat_cache_reset_rate: str = "none"
+        self._last_reset_boundary: int = -1
 
         # Throttler for controlling processing rate in chained pipelines
         # Throttling is applied when this pipeline produces frames faster than
@@ -470,6 +475,25 @@ class PipelineProcessor:
                             params=call_params,
                         )
 
+                    # Beat-synced cache reset: check if we crossed a boundary
+                    if self._beat_cache_reset_rate != "none":
+                        boundary = self._get_beat_boundary(
+                            beat_state.beat_count,
+                            self.tempo_sync.beats_per_bar,
+                        )
+                        if (
+                            boundary != self._last_reset_boundary
+                            and self._last_reset_boundary >= 0
+                        ):
+                            call_params["init_cache"] = True
+                            call_params["base_seed"] = random.randint(0, 2**31)
+                            logger.info(
+                                "[BEAT RESET] Cache reset + seed change at boundary %d (rate=%s)",
+                                boundary,
+                                self._beat_cache_reset_rate,
+                            )
+                        self._last_reset_boundary = boundary
+
             processing_start = time.time()
             output_dict = self.pipeline(**call_params)
             processing_time = time.time() - processing_start
@@ -564,8 +588,24 @@ class PipelineProcessor:
         self.is_prepared = True
         self._pending_cache_init = False
 
-    def _track_output_batch(self, num_frames: int, processing_time: float):
-        """Track batch-level production throughput for FPS calculation.
+    def _get_beat_boundary(self, beat_count: int, beats_per_bar: int) -> int:
+        """Return an integer boundary index for the current beat position.
+
+        The boundary increments each time we cross the configured rate's period.
+        """
+        rate = self._beat_cache_reset_rate
+        if rate == "beat":
+            return beat_count
+        elif rate == "bar":
+            return beat_count // max(beats_per_bar, 1)
+        elif rate == "2_bar":
+            return beat_count // max(beats_per_bar * 2, 1)
+        elif rate == "4_bar":
+            return beat_count // max(beats_per_bar * 4, 1)
+        return -1
+
+    def _track_output_frame(self):
+        """Track when a frame is added to the output queue (production rate).
 
         Stores (num_frames, interval) tuples and computes FPS as
         sum(frames) / sum(intervals). This correctly handles variable

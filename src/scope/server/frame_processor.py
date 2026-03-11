@@ -646,6 +646,13 @@ class FrameProcessor:
         if self.modulation_engine is not None and "modulations" in parameters:
             self.modulation_engine.update(parameters.pop("modulations"))
 
+        # Intercept beat-synced cache reset rate and route to all processors
+        if "beat_cache_reset_rate" in parameters:
+            rate = parameters.pop("beat_cache_reset_rate")
+            for processor in self.pipeline_processors:
+                processor._beat_cache_reset_rate = rate
+                processor._last_reset_boundary = -1
+
         # Intercept client-forwarded beat state and route to TempoSync
         # (beat state is injected into call_params by PipelineProcessor,
         # not through the regular parameter queue)

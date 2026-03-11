@@ -533,6 +533,13 @@ export interface SchemaFieldUI {
   modes?: ("text" | "video")[];
   /** If true, field is a load param (disabled when streaming); if false, runtime param (editable when streaming). Omit = treated as load param. */
   is_load_param?: boolean;
+  label?: string;
+  /** If true, this field can be targeted by the beat-synced modulation engine. */
+  modulatable?: boolean;
+  /** Safe lower bound for modulation (tighter than field validation range). */
+  modulatable_min?: number;
+  /** Safe upper bound for modulation. */
+  modulatable_max?: number;
 }
 
 // Pipeline schema types - matches output of get_schema_with_metadata()

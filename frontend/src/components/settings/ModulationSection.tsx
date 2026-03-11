@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { LabelWithTooltip } from "../ui/label-with-tooltip";
 import {
   Select,
@@ -8,6 +8,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Toggle } from "../ui/toggle";
+import type { PipelineConfigSchema } from "../../lib/api";
 
 export interface ModulationConfig {
   enabled: boolean;
@@ -15,23 +16,56 @@ export interface ModulationConfig {
   depth: number;
   rate: string;
   base_value: number;
+  min_value?: number;
+  max_value?: number;
 }
 
 export type ModulationsState = Record<string, ModulationConfig>;
 
-const TARGETS = [
-  { value: "noise_scale", label: "Noise Scale", defaultBase: 0.5 },
-  {
-    value: "vace_context_scale",
-    label: "VACE Context Scale",
-    defaultBase: 1.0,
-  },
-  {
-    value: "kv_cache_attention_bias",
-    label: "KV Cache Bias",
-    defaultBase: 0.3,
-  },
-] as const;
+interface ModulationTarget {
+  value: string;
+  label: string;
+  defaultBase: number;
+  min: number;
+  max: number;
+  isList?: boolean;
+}
+
+function formatFieldName(key: string): string {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function extractModulatableTargets(
+  configSchema: PipelineConfigSchema | undefined
+): ModulationTarget[] {
+  if (!configSchema?.properties) return [];
+
+  const targets: ModulationTarget[] = [];
+  for (const [key, prop] of Object.entries(configSchema.properties)) {
+    if (!prop.ui?.modulatable) continue;
+
+    // For list params (e.g. denoising_steps), base_value is unused by the engine
+    // (it shifts elements additively), but we still need a placeholder.
+    const isList = prop.type === "array" || Array.isArray(prop.default);
+    const defaultBase = isList
+      ? 0
+      : typeof prop.default === "number"
+        ? prop.default
+        : 0.5;
+
+    targets.push({
+      value: key,
+      label: prop.ui?.label || formatFieldName(key),
+      defaultBase,
+      min: prop.ui?.modulatable_min ?? prop.minimum ?? 0,
+      max: prop.ui?.modulatable_max ?? prop.maximum ?? 1,
+      isList,
+    });
+  }
+  return targets;
+}
 
 const SHAPES = [
   { value: "sine", label: "Sine" },
@@ -51,44 +85,60 @@ const RATES = [
   { value: "4_bar", label: "4 Bars" },
 ] as const;
 
-function defaultConfigFor(target: string): ModulationConfig {
-  const t = TARGETS.find(t => t.value === target);
+function defaultConfigFor(target: ModulationTarget): ModulationConfig {
   return {
     enabled: true,
-    shape: "cosine",
-    depth: 0.3,
-    rate: "bar",
-    base_value: t?.defaultBase ?? 0.5,
+    shape: "sine",
+    depth: target.isList ? 0.15 : 0.3,
+    rate: target.isList ? "2_bar" : "bar",
+    base_value: target.defaultBase,
+    min_value: target.min,
+    max_value: target.max,
   };
 }
 
 export function ModulationSection({
   modulations,
   onModulationsChange,
+  configSchema,
 }: {
   modulations: ModulationsState;
   onModulationsChange: (modulations: ModulationsState) => void;
+  configSchema?: PipelineConfigSchema;
 }) {
-  const [selectedTarget, setSelectedTarget] = useState<string>(
-    TARGETS[0].value
+  const targets = useMemo(
+    () => extractModulatableTargets(configSchema),
+    [configSchema]
   );
 
+  const [selectedTarget, setSelectedTarget] = useState<string>("");
+
+  // Sync selectedTarget when targets change (pipeline switch)
+  useEffect(() => {
+    if (targets.length > 0 && !targets.some(t => t.value === selectedTarget)) {
+      setSelectedTarget(targets[0].value);
+    }
+  }, [targets, selectedTarget]);
+
+  const currentTarget = targets.find(t => t.value === selectedTarget);
   const config = modulations[selectedTarget];
   const isActive = config?.enabled ?? false;
 
   const updateConfig = useCallback(
     (target: string, patch: Partial<ModulationConfig>) => {
-      const existing = modulations[target] ?? defaultConfigFor(target);
+      const tgt = targets.find(t => t.value === target);
+      const existing = modulations[target] ?? (tgt ? defaultConfigFor(tgt) : null);
+      if (!existing) return;
       const updated = { ...existing, ...patch };
       onModulationsChange({ ...modulations, [target]: updated });
     },
-    [modulations, onModulationsChange]
+    [modulations, onModulationsChange, targets]
   );
 
   const handleToggle = useCallback(
     (pressed: boolean) => {
-      if (pressed) {
-        const cfg = defaultConfigFor(selectedTarget);
+      if (pressed && currentTarget) {
+        const cfg = defaultConfigFor(currentTarget);
         onModulationsChange({ ...modulations, [selectedTarget]: cfg });
       } else {
         const next = { ...modulations };
@@ -96,15 +146,21 @@ export function ModulationSection({
         onModulationsChange(next);
       }
     },
-    [selectedTarget, modulations, onModulationsChange]
+    [selectedTarget, currentTarget, modulations, onModulationsChange]
   );
 
-  // Keep selectedTarget in sync if it gets removed
+  // Clear modulations for targets that no longer exist after pipeline switch
   useEffect(() => {
-    if (selectedTarget && !TARGETS.some(t => t.value === selectedTarget)) {
-      setSelectedTarget(TARGETS[0].value);
+    const targetKeys = new Set(targets.map(t => t.value));
+    const staleKeys = Object.keys(modulations).filter(k => !targetKeys.has(k));
+    if (staleKeys.length > 0) {
+      const cleaned = { ...modulations };
+      for (const k of staleKeys) delete cleaned[k];
+      onModulationsChange(cleaned);
     }
-  }, [selectedTarget]);
+  }, [targets]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (targets.length === 0) return null;
 
   return (
     <div className="space-y-2">
@@ -131,7 +187,7 @@ export function ModulationSection({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {TARGETS.map(t => (
+            {targets.map(t => (
               <SelectItem key={t.value} value={t.value}>
                 {t.label}
                 {modulations[t.value]?.enabled ? " ●" : ""}
