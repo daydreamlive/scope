@@ -140,6 +140,11 @@ class Parameters(BaseModel):
         default=None,
         description="List of pipeline IDs to execute in a chain. If not provided, uses the currently loaded pipeline.",
     )
+    graph: dict[str, Any] | None = Field(
+        default=None,
+        description="Graph configuration (nodes + edges) for graph execution mode. "
+        "When provided, pipelines are wired according to the graph topology instead of a linear chain.",
+    )
     first_frame_image: str | None = Field(
         default=None,
         description="Path to first frame reference image for extension mode. When provided alone, enables 'firstframe' mode (reference at start, generate continuation). When provided with last_frame_image, enables 'firstlastframe' mode (references at both ends). Images should be located in the assets directory.",
@@ -460,14 +465,40 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     )
 
 
-class PipelineLoadRequest(BaseModel):
-    """Pipeline load request schema."""
+class PipelineLoadItem(BaseModel):
+    """A single pipeline with its load parameters."""
 
-    pipeline_ids: list[str] = Field(..., description="List of pipeline IDs to load")
+    pipeline_id: str = Field(..., description="Pipeline ID to load")
     load_params: dict[str, Any] | None = Field(
         default=None,
-        description="Pipeline-specific load parameters (applies to all pipelines). "
-        "Accepts raw dict; keys match pipeline config (e.g. base_seed).",
+        description="Load parameters for this specific pipeline.",
+    )
+
+
+class PipelineLoadRequest(BaseModel):
+    """Pipeline load request schema.
+
+    Supports two formats:
+    - ``pipelines``: list of (pipeline_id, load_params) pairs, allowing
+      per-pipeline params and duplicate pipeline_ids.
+    - ``pipeline_ids`` + ``load_params``: legacy shorthand where the same
+      load_params apply to every pipeline.
+    """
+
+    pipelines: list[PipelineLoadItem] | None = Field(
+        default=None,
+        description="List of pipelines with per-pipeline load parameters. "
+        "Supports loading the same pipeline_id multiple times with different params.",
+    )
+    pipeline_ids: list[str] | None = Field(
+        default=None,
+        description="List of pipeline IDs to load (legacy). "
+        "Use 'pipelines' for per-pipeline load parameters.",
+    )
+    load_params: dict[str, Any] | None = Field(
+        default=None,
+        description="Load parameters applied to every pipeline (legacy). "
+        "Ignored when 'pipelines' is provided.",
     )
     connection_id: str | None = Field(
         default=None,

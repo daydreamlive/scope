@@ -280,7 +280,6 @@ export function useGraphState(
 
     // Persistence
     status: persistence.status,
-    graphSource: persistence.graphSource,
     fitViewTrigger: persistence.fitViewTrigger,
     handleSave: persistence.handleSave,
     handleClear: persistence.handleClear,

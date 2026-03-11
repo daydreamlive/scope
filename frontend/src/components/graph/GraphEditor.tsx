@@ -175,7 +175,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setEdges,
       onEdgesChange,
       status,
-      graphSource,
       availablePipelineIds,
       portsMap,
       selectedNodeIds,
@@ -527,14 +526,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             <div className="flex-1" />
 
             {status && (
-              <span className={NODE_TOKENS.toolbarStatus}>
-                {status}
-                {graphSource && (
-                  <span className="text-[#8c8c8d]/70 ml-1">
-                    ({graphSource})
-                  </span>
-                )}
-              </span>
+              <span className={NODE_TOKENS.toolbarStatus}>{status}</span>
             )}
 
             <button

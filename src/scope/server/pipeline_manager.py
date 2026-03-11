@@ -47,13 +47,19 @@ class PipelineManager:
         self._error_message = None
         self._lock = threading.RLock()  # Single reentrant lock for all access
 
-        # Support for multiple pipelines (for pipeline chaining)
-        self._pipelines: dict[str, Any] = {}  # pipeline_id -> pipeline instance
-        self._pipeline_statuses: dict[str, PipelineStatus] = {}  # pipeline_id -> status
-        self._pipeline_load_params: dict[str, dict] = {}  # pipeline_id -> load_params
+        # Support for multiple pipelines (for pipeline chaining / graph)
+        # Keyed by instance_key (e.g. "longlive", "longlive:1" for duplicates)
+        self._pipelines: dict[str, Any] = {}  # instance_key -> pipeline instance
+        self._pipeline_statuses: dict[
+            str, PipelineStatus
+        ] = {}  # instance_key -> status
+        self._pipeline_load_params: dict[str, dict] = {}  # instance_key -> load_params
+        self._pipeline_registry_ids: dict[
+            str, str
+        ] = {}  # instance_key -> pipeline_id (registry key)
         self._load_events: dict[
             str, threading.Event
-        ] = {}  # pipeline_id -> load completion event
+        ] = {}  # instance_key -> load completion event
 
         # Loading stage for frontend display (e.g., "Loading diffusion model...")
         self._loading_stage: str | None = None
@@ -162,18 +168,27 @@ class PipelineManager:
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
         user_id: str | None = None,
+        instance_key: str | None = None,
     ) -> bool:
-        """Synchronous wrapper for loading a pipeline by ID."""
+        """Synchronous wrapper for loading a pipeline by ID.
+
+        Args:
+            pipeline_id: Registry key used to look up the pipeline class.
+            load_params: Parameters for pipeline initialization.
+            instance_key: Unique storage key. Defaults to ``pipeline_id``
+                when there is only one instance of a given pipeline.
+        """
+        key = instance_key or pipeline_id
         with self._lock:
             # Check if already loaded with same params
-            current_params = self._pipeline_load_params.get(pipeline_id, {})
+            current_params = self._pipeline_load_params.get(key, {})
             new_params = load_params or {}
 
             # Check if pipeline is already loaded (either in _pipelines or as main pipeline)
             is_loaded = False
-            if pipeline_id in self._pipelines:
+            if key in self._pipelines:
                 if (
-                    self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADED
+                    self._pipeline_statuses.get(key) == PipelineStatus.LOADED
                     and current_params == new_params
                 ):
                     is_loaded = True
@@ -186,23 +201,22 @@ class PipelineManager:
                 if current_main_params == new_params:
                     # Main pipeline is loaded, register it in _pipelines for chaining
                     if self._pipeline is not None:
-                        self._pipelines[pipeline_id] = self._pipeline
-                        self._pipeline_load_params[pipeline_id] = current_main_params
-                        self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADED
+                        self._pipelines[key] = self._pipeline
+                        self._pipeline_load_params[key] = current_main_params
+                        self._pipeline_registry_ids[key] = pipeline_id
+                        self._pipeline_statuses[key] = PipelineStatus.LOADED
                         is_loaded = True
 
             if is_loaded:
-                logger.info(
-                    f"Pipeline {pipeline_id} already loaded with matching parameters"
-                )
+                logger.info(f"Pipeline {key} already loaded with matching parameters")
                 return True
 
             # If already loading, wait for it to complete
-            if self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADING:
+            if self._pipeline_statuses.get(key) == PipelineStatus.LOADING:
                 logger.info(
-                    f"Pipeline {pipeline_id} already loading by another thread, waiting..."
+                    f"Pipeline {key} already loading by another thread, waiting..."
                 )
-                load_event = self._load_events.get(pipeline_id)
+                load_event = self._load_events.get(key)
                 if load_event:
                     # Release lock while waiting
                     self._lock.release()
@@ -213,31 +227,28 @@ class PipelineManager:
                         self._lock.acquire()
 
                     # Check if pipeline is now loaded
-                    if (
-                        self._pipeline_statuses.get(pipeline_id)
-                        == PipelineStatus.LOADED
-                    ):
-                        logger.info(f"Pipeline {pipeline_id} loaded by another thread")
+                    if self._pipeline_statuses.get(key) == PipelineStatus.LOADED:
+                        logger.info(f"Pipeline {key} loaded by another thread")
                         return True
                     else:
                         logger.warning(
-                            f"Pipeline {pipeline_id} load by another thread did not succeed, "
-                            f"status: {self._pipeline_statuses.get(pipeline_id)}"
+                            f"Pipeline {key} load by another thread did not succeed, "
+                            f"status: {self._pipeline_statuses.get(key)}"
                         )
                         return False
                 else:
                     # No event found (shouldn't happen), fall through to load
                     logger.warning(
-                        f"Pipeline {pipeline_id} marked as LOADING but no event found"
+                        f"Pipeline {key} marked as LOADING but no event found"
                     )
 
             # Mark as loading and create event for waiters
-            self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADING
+            self._pipeline_statuses[key] = PipelineStatus.LOADING
             load_event = threading.Event()
-            self._load_events[pipeline_id] = load_event
+            self._load_events[key] = load_event
 
         # Release lock during slow loading operation
-        logger.info(f"Loading pipeline: {pipeline_id}")
+        logger.info(f"Loading pipeline: {key} (registry: {pipeline_id})")
         logger.info("Initial load params: %s", load_params or {})
 
         # Publish pipeline_load_start event
@@ -261,14 +272,15 @@ class PipelineManager:
             # Hold lock while updating state
             self.set_loading_stage(None)
             with self._lock:
-                self._pipelines[pipeline_id] = pipeline
-                self._pipeline_load_params[pipeline_id] = load_params or {}
-                self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADED
+                self._pipelines[key] = pipeline
+                self._pipeline_load_params[key] = load_params or {}
+                self._pipeline_registry_ids[key] = pipeline_id
+                self._pipeline_statuses[key] = PipelineStatus.LOADED
                 # Signal waiters that load is complete
-                if pipeline_id in self._load_events:
-                    self._load_events[pipeline_id].set()
+                if key in self._load_events:
+                    self._load_events[key].set()
 
-            logger.info(f"Pipeline {pipeline_id} loaded successfully")
+            logger.info(f"Pipeline {key} loaded successfully")
 
             # Publish pipeline_loaded event with load duration
             load_duration_ms = int((time.monotonic() - load_start_time) * 1000)
@@ -293,7 +305,7 @@ class PipelineManager:
             from .models_config import get_models_dir
 
             models_dir = get_models_dir()
-            error_msg = f"Failed to load pipeline {pipeline_id}: {e}"
+            error_msg = f"Failed to load pipeline {key}: {e}"
             logger.error(
                 f"{error_msg}. If this error persists, consider removing the models "
                 f"directory '{models_dir}' and re-downloading models."
@@ -301,14 +313,16 @@ class PipelineManager:
 
             # Hold lock while updating state with error
             with self._lock:
-                self._pipeline_statuses[pipeline_id] = PipelineStatus.ERROR
-                if pipeline_id in self._pipelines:
-                    del self._pipelines[pipeline_id]
-                if pipeline_id in self._pipeline_load_params:
-                    del self._pipeline_load_params[pipeline_id]
+                self._pipeline_statuses[key] = PipelineStatus.ERROR
+                if key in self._pipelines:
+                    del self._pipelines[key]
+                if key in self._pipeline_load_params:
+                    del self._pipeline_load_params[key]
+                if key in self._pipeline_registry_ids:
+                    del self._pipeline_registry_ids[key]
                 # Signal waiters that load is complete (even though it failed)
-                if pipeline_id in self._load_events:
-                    self._load_events[pipeline_id].set()
+                if key in self._load_events:
+                    self._load_events[key].set()
 
             # Publish error event for pipeline load failure
             publish_event(
@@ -427,23 +441,39 @@ class PipelineManager:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self.get_status_info)
 
+    @staticmethod
+    def _generate_instance_keys(
+        pipelines: list[tuple[str, dict | None]],
+    ) -> list[str]:
+        """Generate unique instance keys for a pipeline list.
+
+        First occurrence of a pipeline_id uses the bare id (e.g. "longlive").
+        Subsequent occurrences get a suffix (e.g. "longlive:1", "longlive:2").
+        """
+        counts: dict[str, int] = {}
+        keys: list[str] = []
+        for pipeline_id, _ in pipelines:
+            count = counts.get(pipeline_id, 0)
+            keys.append(pipeline_id if count == 0 else f"{pipeline_id}:{count}")
+            counts[pipeline_id] = count + 1
+        return keys
+
     async def load_pipelines(
         self,
-        pipeline_ids: list[str],
-        load_params: dict | None = None,
+        pipelines: list[tuple[str, dict | None]],
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
         user_id: str | None = None,
     ) -> bool:
-        """
-        Load multiple pipelines asynchronously.
+        """Load multiple pipelines asynchronously.
 
         Args:
-            pipeline_ids: List of pipeline IDs to load
-            load_params: Pipeline-specific load parameters (applies to all pipelines)
-            connection_id: Optional connection ID from fal.ai WebSocket for event correlation
-            connection_info: Optional connection info (gpu_type, fal_host) for event correlation
-            user_id: Optional user ID for event correlation
+            pipelines: List of (pipeline_id, load_params) tuples. The same
+                pipeline_id may appear more than once with different params;
+                each entry produces a separate instance.
+            connection_id: Optional connection ID for event correlation.
+            connection_info: Optional connection info for event correlation.
+            user_id: Optional user ID for event correlation.
 
         Returns:
             bool: True if all pipelines loaded successfully, False otherwise.
@@ -452,8 +482,7 @@ class PipelineManager:
         return await loop.run_in_executor(
             None,
             self._load_pipelines_sync,
-            pipeline_ids,
-            load_params,
+            pipelines,
             connection_id,
             connection_info,
             user_id,
@@ -461,52 +490,57 @@ class PipelineManager:
 
     def _load_pipelines_sync(
         self,
-        pipeline_ids: list[str],
-        load_params: dict | None = None,
+        pipelines: list[tuple[str, dict | None]],
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
         user_id: str | None = None,
     ) -> bool:
         """Synchronous wrapper for loading multiple pipelines."""
-        if not pipeline_ids:
-            logger.error("No pipeline IDs provided")
+        if not pipelines:
+            logger.error("No pipelines provided")
             return False
 
-        logger.info(f"Loading {len(pipeline_ids)} pipeline(s): {pipeline_ids}")
+        instance_keys = self._generate_instance_keys(pipelines)
+        pipeline_ids = [pid for pid, _ in pipelines]
+        logger.info(f"Loading {len(pipelines)} pipeline(s): {instance_keys}")
 
-        # Store load_params for use by frame processor
+        # Store first load_params for backward-compat status reporting
         with self._lock:
-            self._load_params = load_params
+            self._load_params = pipelines[0][1] if pipelines else None
 
-            # Clear stale statuses for pipelines not in the new load list
-            # This prevents ERROR statuses from a previous failed load from
-            # poisoning the overall status when loading new pipelines
-            new_pipeline_set = set(pipeline_ids)
-            for pid in list(self._pipeline_statuses.keys()):
-                if pid not in new_pipeline_set:
-                    del self._pipeline_statuses[pid]
+            # Clear stale statuses for instance keys not in the new load list
+            new_key_set = set(instance_keys)
+            for key in list(self._pipeline_statuses.keys()):
+                if key not in new_key_set:
+                    del self._pipeline_statuses[key]
 
             # Identify pipelines that need to be unloaded:
             # 1. Currently loaded but not in new list
-            # 2. In new list but with different load_params (e.g., different resolution)
+            # 2. In new list but with different load_params
             currently_loaded = set(self._pipelines.keys())
             # Also check main pipeline if it exists
             if self._pipeline_id and self._pipeline_id not in currently_loaded:
                 currently_loaded.add(self._pipeline_id)
 
-            new_params = load_params or {}
-            pipelines_to_unload = set()
+            # Build a map of new instance_key -> load_params for comparison
+            new_params_map = {
+                key: (params or {})
+                for key, (_, params) in zip(instance_keys, pipelines)
+            }
 
-            for loaded_id in currently_loaded:
-                # Unload if pipeline not in new list or if load_params changed
-                current_params = self._pipeline_load_params.get(loaded_id, {})
-                if loaded_id not in pipeline_ids or current_params != new_params:
-                    pipelines_to_unload.add(loaded_id)
+            pipelines_to_unload = set()
+            for loaded_key in currently_loaded:
+                if loaded_key not in new_key_set:
+                    pipelines_to_unload.add(loaded_key)
+                else:
+                    current_params = self._pipeline_load_params.get(loaded_key, {})
+                    if current_params != new_params_map[loaded_key]:
+                        pipelines_to_unload.add(loaded_key)
 
             # Unload pipelines that need to be unloaded
-            for pipeline_id_to_unload in pipelines_to_unload:
+            for key_to_unload in pipelines_to_unload:
                 self._unload_pipeline_by_id_unsafe(
-                    pipeline_id_to_unload,
+                    key_to_unload,
                     connection_id=connection_id,
                     connection_info=connection_info,
                     user_id=user_id,
@@ -514,7 +548,7 @@ class PipelineManager:
 
         # Load all pipelines
         success = True
-        for pipeline_id in pipeline_ids:
+        for instance_key, (pipeline_id, load_params) in zip(instance_keys, pipelines):
             try:
                 result = self._load_pipeline_by_id_sync(
                     pipeline_id,
@@ -522,12 +556,13 @@ class PipelineManager:
                     connection_id=connection_id,
                     connection_info=connection_info,
                     user_id=user_id,
+                    instance_key=instance_key,
                 )
                 if not result:
-                    logger.error(f"Failed to load pipeline: {pipeline_id}")
+                    logger.error(f"Failed to load pipeline: {instance_key}")
                     success = False
             except Exception as e:
-                logger.error(f"Error loading pipeline {pipeline_id}: {e}")
+                logger.error(f"Error loading pipeline {instance_key}: {e}")
                 success = False
 
         if success:
@@ -672,6 +707,8 @@ class PipelineManager:
             del self._pipeline_statuses[pipeline_id]
         if pipeline_id in self._pipeline_load_params:
             del self._pipeline_load_params[pipeline_id]
+        if pipeline_id in self._pipeline_registry_ids:
+            del self._pipeline_registry_ids[pipeline_id]
 
         # If this was the main pipeline, also clear main pipeline state
         if self._pipeline_id == pipeline_id:

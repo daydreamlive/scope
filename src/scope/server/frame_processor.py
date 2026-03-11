@@ -938,15 +938,17 @@ class FrameProcessor:
     def _setup_pipeline_chain_sync(self):
         """Create pipeline execution graph (synchronous).
 
-        If a graph config is available from the API, uses build_graph() to create
-        the execution graph. Otherwise, builds an implicit linear graph from
-        pipeline_ids. Assumes all pipelines are already loaded by the pipeline
-        manager.
+        If a graph config is provided via initial parameters, uses build_graph()
+        to create the execution graph. Otherwise, builds an implicit linear graph
+        from pipeline_ids. Assumes all pipelines are already loaded by the
+        pipeline manager.
         """
-        from .graph_state import get_api_graph
+        from .graph_schema import GraphConfig
 
-        api_graph = get_api_graph()
-        if api_graph is None:
+        graph_data = self.parameters.get("graph")
+        if graph_data is not None:
+            api_graph = GraphConfig.model_validate(graph_data)
+        else:
             # No explicit graph — build implicit linear graph from pipeline_ids
             api_graph = self._build_linear_graph(self.pipeline_ids)
 

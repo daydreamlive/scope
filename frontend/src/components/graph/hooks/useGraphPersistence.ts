@@ -7,7 +7,6 @@ import {
 } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import type { PipelineSchemaInfo } from "../../../lib/api";
-import { getGraph, setGraph, clearGraph } from "../../../lib/api";
 import { buildEdgeStyle } from "../constants";
 
 // localStorage helpers
@@ -238,7 +237,6 @@ export function useGraphPersistence({
   onGraphClear,
 }: UseGraphPersistenceArgs) {
   const [status, setStatus] = useState<string>("");
-  const [graphSource, setGraphSource] = useState<string | null>(null);
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
 
   const nodesRef = useRef(nodes);
@@ -251,84 +249,50 @@ export function useGraphPersistence({
 
   const initialLoadDone = useRef(false);
 
-  // Load graph from backend
+  // Load graph from localStorage
 
-  const loadGraphFromBackend = useCallback(() => {
+  const loadGraph = useCallback(() => {
     if (Object.keys(portsMap).length === 0) return;
 
-    const restoreFromLocalStorage = () => {
-      const backup = loadGraphFromLocalStorage();
-      if (
-        backup &&
-        typeof backup === "object" &&
-        backup !== null &&
-        "nodes" in backup &&
-        "edges" in backup
-      ) {
-        try {
-          const graphConfig = backup as Parameters<typeof graphConfigToFlow>[0];
-          const { nodes: flowNodes, edges: flowEdges } = graphConfigToFlow(
-            graphConfig,
-            portsMap
-          );
-          const restoredParams = extractNodeParams(
-            (backup as Record<string, unknown>).ui_state as
-              | Record<string, unknown>
-              | null
-              | undefined
-          );
-          setNodeParams(restoredParams);
-          const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
-          setNodes(enriched);
-          setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
-          setGraphSource(null);
-          setStatus("Restored from local backup");
-          setGraph(graphConfig as Parameters<typeof setGraph>[0]).catch(
-            () => {}
-          );
-          return true;
-        } catch {
-          // backup was corrupt
-        }
+    const backup = loadGraphFromLocalStorage();
+    if (
+      backup &&
+      typeof backup === "object" &&
+      backup !== null &&
+      "nodes" in backup &&
+      "edges" in backup
+    ) {
+      try {
+        const graphConfig = backup as Parameters<typeof graphConfigToFlow>[0];
+        const { nodes: flowNodes, edges: flowEdges } = graphConfigToFlow(
+          graphConfig,
+          portsMap
+        );
+        const restoredParams = extractNodeParams(
+          (backup as Record<string, unknown>).ui_state as
+            | Record<string, unknown>
+            | null
+            | undefined
+        );
+        setNodeParams(restoredParams);
+        const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
+        setNodes(enriched);
+        setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
+        setStatus("Restored from local storage");
+      } catch {
+        setStatus("No graph configured");
       }
-      return false;
-    };
-
-    getGraph()
-      .then(response => {
-        if (response.graph) {
-          const { nodes: flowNodes, edges: flowEdges } = graphConfigToFlow(
-            response.graph,
-            portsMap
-          );
-          const restoredParams = extractNodeParams(response.graph.ui_state);
-          setNodeParams(restoredParams);
-          const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
-          setNodes(enriched);
-          setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
-          setGraphSource(response.source);
-          setStatus(`Loaded from ${response.source}`);
-        } else {
-          if (!restoreFromLocalStorage()) {
-            setStatus("No graph configured");
-          }
-        }
-        initialLoadDone.current = true;
-      })
-      .catch(err => {
-        console.error("Failed to load graph:", err);
-        if (!restoreFromLocalStorage()) {
-          setStatus("Failed to load graph");
-        }
-        initialLoadDone.current = true;
-      });
+    } else {
+      setStatus("No graph configured");
+    }
+    initialLoadDone.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portsMap]);
 
   // Load graph on mount
   useEffect(() => {
-    loadGraphFromBackend();
-  }, [loadGraphFromBackend]);
+    loadGraph();
+  }, [loadGraph]);
 
   // Notify parent
   useEffect(() => {
@@ -337,12 +301,12 @@ export function useGraphPersistence({
     onGraphChangeRef.current?.();
   }, [nodes, edges]);
 
-  // Auto-save graph (debounced)
+  // Auto-save graph to localStorage (debounced)
   useEffect(() => {
     if (!initialLoadDone.current) return;
     if (nodes.length === 0 && edges.length === 0) return;
 
-    const timer = setTimeout(async () => {
+    const timer = setTimeout(() => {
       try {
         const graphConfig = attachNodeParams(
           flowToGraphConfig(nodes, edges),
@@ -350,13 +314,9 @@ export function useGraphPersistence({
         );
         const graphJson = JSON.stringify(graphConfig);
         saveGraphToLocalStorage(graphJson);
-        try {
-          const result = await setGraph(graphConfig);
-          setGraphSource("api");
-          setStatus(`Saved: ${result.nodes} nodes, ${result.edges} edges`);
-        } catch {
-          setStatus("Saved locally");
-        }
+        setStatus(
+          `Saved: ${graphConfig.nodes.length} nodes, ${graphConfig.edges.length} edges`
+        );
       } catch (err) {
         const message = err instanceof Error ? err.message : "Unknown error";
         setStatus(`Save failed: ${message}`);
@@ -367,7 +327,7 @@ export function useGraphPersistence({
   }, [nodes, edges, nodeParamsRef]);
 
   // Manual save (immediate, no debounce)
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(() => {
     if (nodes.length === 0 && edges.length === 0) {
       setStatus("Nothing to save");
       return;
@@ -379,13 +339,9 @@ export function useGraphPersistence({
       );
       const graphJson = JSON.stringify(graphConfig);
       saveGraphToLocalStorage(graphJson);
-      try {
-        const result = await setGraph(graphConfig);
-        setGraphSource("api");
-        setStatus(`Saved: ${result.nodes} nodes, ${result.edges} edges`);
-      } catch {
-        setStatus("Saved locally (incomplete graph)");
-      }
+      setStatus(
+        `Saved: ${graphConfig.nodes.length} nodes, ${graphConfig.edges.length} edges`
+      );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Unknown error";
       setStatus(`Save failed: ${message}`);
@@ -415,19 +371,12 @@ export function useGraphPersistence({
   }, [nodeParamsRef]);
 
   // Clear graph
-  const handleClear = useCallback(async () => {
-    try {
-      await clearGraph();
-      clearGraphFromLocalStorage();
-      setNodes([]);
-      setEdges([]);
-      setGraphSource(null);
-      setStatus("Graph cleared");
-      onGraphClear?.();
-    } catch (err) {
-      const message = err instanceof Error ? err.message : "Unknown error";
-      setStatus(`Clear failed: ${message}`);
-    }
+  const handleClear = useCallback(() => {
+    clearGraphFromLocalStorage();
+    setNodes([]);
+    setEdges([]);
+    setStatus("Graph cleared");
+    onGraphClear?.();
   }, [setNodes, setEdges, onGraphClear]);
 
   // Import graph from JSON file
@@ -453,7 +402,6 @@ export function useGraphPersistence({
           const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
           setNodes(enriched);
           setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
-          setGraphSource(null);
           setStatus(`Imported from ${file.name}`);
           setFitViewTrigger(c => c + 1);
         } catch {
@@ -463,7 +411,7 @@ export function useGraphPersistence({
       reader.readAsText(file);
       event.target.value = "";
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
     [
       portsMap,
       setNodes,
@@ -518,13 +466,12 @@ export function useGraphPersistence({
 
   return {
     status,
-    graphSource,
     fitViewTrigger,
     handleSave,
     handleClear,
     handleImport,
     handleExport,
-    refreshGraph: loadGraphFromBackend,
+    refreshGraph: loadGraph,
     getCurrentGraphConfig,
     getGraphNodePrompts,
     initialLoadDone,

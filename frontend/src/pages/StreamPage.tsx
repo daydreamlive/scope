@@ -41,13 +41,8 @@ import type {
   DownloadProgress,
   SettingsState,
 } from "../types";
-import type { PromptItem, PromptTransition } from "../lib/api";
-import {
-  getInputSourceResolution,
-  fetchDaydreamWorkflow,
-  setGraph,
-  getGraph,
-} from "../lib/api";
+import type { PromptItem, PromptTransition, GraphConfig } from "../lib/api";
+import { getInputSourceResolution, fetchDaydreamWorkflow } from "../lib/api";
 import type { ScopeWorkflow } from "../lib/workflowApi";
 import { linearGraphFromSettings } from "../lib/graphUtils";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
@@ -1524,41 +1519,20 @@ export function StreamPage() {
         source_type: string;
         source_name: string;
       } | null = null;
+      // The graph config to pass via initialParameters (sent over WebRTC)
+      let graphConfigForStream: ReturnType<
+        NonNullable<typeof graphEditorRef.current>["getCurrentGraphConfig"]
+      > | null = null;
+
       if (graphMode || nonLinearGraph) {
         try {
-          // In graph mode, read directly from the frontend React state
-          // (always up-to-date, no debounce / backend round-trip).
-          // When nonLinearGraph is true (perform mode with a custom graph),
-          // fall back to reading from the backend.
-          let graphNodes:
-            | {
-                type: string;
-                pipeline_id?: string | null;
-                source_mode?: string | null;
-                source_name?: string | null;
-              }[]
-            | null = null;
-
-          if (graphMode) {
-            const frontendGraph =
-              graphEditorRef.current?.getCurrentGraphConfig();
-            if (frontendGraph) {
-              graphNodes = frontendGraph.nodes;
-              // Force-save to backend so load_pipeline & graph_executor
-              // also use the latest graph (best-effort, don't block on failure).
-              setGraph(frontendGraph).catch(err =>
-                console.warn("Failed to force-save graph before stream:", err)
-              );
-            }
+          // Read graph from frontend React state (always up-to-date)
+          const frontendGraph = graphEditorRef.current?.getCurrentGraphConfig();
+          if (frontendGraph) {
+            graphConfigForStream = frontendGraph;
           }
 
-          // Fallback: read from backend (for nonLinearGraph / if frontend read failed)
-          if (!graphNodes) {
-            const graphResponse = await getGraph();
-            if (graphResponse.graph) {
-              graphNodes = graphResponse.graph.nodes;
-            }
-          }
+          const graphNodes = frontendGraph?.nodes ?? null;
 
           if (graphNodes) {
             const graphPipelineIds = graphNodes
@@ -1758,20 +1732,14 @@ export function StreamPage() {
         );
       }
 
-      // Build and save a linear graph so backend uses the unified graph path.
-      // Skip when user has a custom graph from Graph Mode (nonLinearGraph=true)
-      // — the backend already has their graph and should use it.
+      // Build a linear graph for perform mode so backend uses the unified graph path.
+      // In graph/nonLinearGraph mode, graphConfigForStream is already set above.
       if (!graphMode && !nonLinearGraph) {
-        try {
-          const linearGraph = linearGraphFromSettings(
-            pipelineIdToUse,
-            settings.preprocessorIds ?? [],
-            settings.postprocessorIds ?? []
-          );
-          await setGraph(linearGraph);
-        } catch (err) {
-          console.warn("Failed to save linear graph:", err);
-        }
+        graphConfigForStream = linearGraphFromSettings(
+          pipelineIdToUse,
+          settings.preprocessorIds ?? [],
+          settings.postprocessorIds ?? []
+        );
       }
 
       const loadSuccess = await loadPipeline(
@@ -1829,6 +1797,7 @@ export function StreamPage() {
           source_type: string;
           source_name: string;
         };
+        graph?: GraphConfig;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -1924,6 +1893,11 @@ export function StreamPage() {
         initialParameters.input_source = graphInputSource;
       } else if (settings.inputSource?.enabled) {
         initialParameters.input_source = settings.inputSource;
+      }
+
+      // Pass graph config via initialParameters for the backend to use
+      if (graphConfigForStream) {
+        initialParameters.graph = graphConfigForStream;
       }
 
       // Include recording toggle state
@@ -2032,36 +2006,41 @@ export function StreamPage() {
           openSettingsTab={openSettingsTab}
           onSettingsTabOpened={() => setOpenSettingsTab(null)}
           graphMode={graphMode}
-          onGraphModeToggle={async () => {
+          onGraphModeToggle={() => {
             if (!graphMode) {
-              // Switching Perform → Graph: only seed a graph if none exists yet
-              try {
-                const response = await getGraph();
-                if (!response.graph) {
-                  const graph = linearGraphFromSettings(
-                    settings.pipelineId,
-                    settings.preprocessorIds ?? [],
-                    settings.postprocessorIds ?? []
+              // Switching Perform → Graph: seed a linear graph if none exists in localStorage
+              const currentGraph =
+                graphEditorRef.current?.getCurrentGraphConfig();
+              if (
+                !currentGraph ||
+                (currentGraph.nodes.length === 0 &&
+                  currentGraph.edges.length === 0)
+              ) {
+                // No graph yet — create a linear one from current settings
+                // and save to localStorage so the graph editor picks it up
+                const graph = linearGraphFromSettings(
+                  settings.pipelineId,
+                  settings.preprocessorIds ?? [],
+                  settings.postprocessorIds ?? []
+                );
+                try {
+                  localStorage.setItem(
+                    "scope:graph:backup",
+                    JSON.stringify(graph)
                   );
-                  await setGraph(graph);
+                } catch {
+                  /* ignore */
                 }
-                // Always refresh the graph editor so it picks up the
-                // current graph (either existing or just-created)
-                graphEditorRef.current?.refreshGraph();
-              } catch {
-                /* ignore */
               }
+              // Refresh the graph editor so it picks up the current graph
+              graphEditorRef.current?.refreshGraph();
             } else {
               // Switching Graph → Perform: sync pipeline ID and source mode
               // from the graph so perform mode reflects the workflow builder.
               try {
-                // Read directly from frontend state (always current)
                 const frontendGraph =
                   graphEditorRef.current?.getCurrentGraphConfig();
-                const graphNodes =
-                  frontendGraph?.nodes ??
-                  (await getGraph()).graph?.nodes ??
-                  null;
+                const graphNodes = frontendGraph?.nodes ?? null;
 
                 if (graphNodes) {
                   // Sync pipeline ID from the graph's first pipeline node
