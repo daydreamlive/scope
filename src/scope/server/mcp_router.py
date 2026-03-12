@@ -187,7 +187,7 @@ async def start_stream(
 
     Creates a FrameProcessor directly and begins generating frames.
     Use capture_frame to see output, update_parameters to control it,
-    and POST /api/v1/session/{session_id}/stop to tear it down.
+    and POST /api/v1/session/stop to tear it down.
     """
     from .frame_processor import FrameProcessor
     from .webrtc import HeadlessSession
@@ -237,17 +237,15 @@ async def start_stream(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/session/{session_id}/stop")
+@router.post("/session/stop")
 async def stop_stream(
-    session_id: str,
     webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
 ):
-    """Stop a headless pipeline session."""
-    session = webrtc_manager.get_headless_session(session_id)
-    if not session:
-        raise HTTPException(
-            status_code=404, detail=f"Headless session {session_id} not found"
-        )
+    """Stop the active headless pipeline session."""
+    sessions = webrtc_manager.headless_sessions
+    if not sessions:
+        raise HTTPException(status_code=404, detail="No active headless session")
+    session_id = next(iter(sessions))
     try:
         await webrtc_manager.remove_headless_session(session_id)
         return {"status": "ok", "message": f"Session {session_id} stopped"}
@@ -279,45 +277,45 @@ async def unload_pipeline(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/session/{session_id}/recording/start")
+@router.post("/session/recording/start")
 async def start_recording(
-    session_id: str,
     webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
 ):
-    """Start recording the output of a WebRTC session."""
-    session = webrtc_manager.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    """Start recording the output of the active session."""
+    sessions = webrtc_manager.list_sessions()
+    if not sessions:
+        raise HTTPException(status_code=404, detail="No active session")
+    session = next(iter(sessions.values()))
     if not session.recording_manager:
         raise HTTPException(
             status_code=404,
-            detail=f"Recording not available for session {session_id}",
+            detail="Recording not available for the active session",
         )
     try:
         await session.recording_manager.start_recording()
         return {"status": "ok", "message": "Recording started"}
     except Exception as e:
-        logger.error(f"Error starting recording for session {session_id}: {e}")
+        logger.error(f"Error starting recording: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
-@router.post("/session/{session_id}/recording/stop")
+@router.post("/session/recording/stop")
 async def stop_recording(
-    session_id: str,
     webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
 ):
-    """Stop recording the output of a WebRTC session."""
-    session = webrtc_manager.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    """Stop recording the output of the active session."""
+    sessions = webrtc_manager.list_sessions()
+    if not sessions:
+        raise HTTPException(status_code=404, detail="No active session")
+    session = next(iter(sessions.values()))
     if not session.recording_manager:
         raise HTTPException(
             status_code=404,
-            detail=f"Recording not available for session {session_id}",
+            detail="Recording not available for the active session",
         )
     try:
         await session.recording_manager.stop_recording()
         return {"status": "ok", "message": "Recording stopped"}
     except Exception as e:
-        logger.error(f"Error stopping recording for session {session_id}: {e}")
+        logger.error(f"Error stopping recording: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

@@ -78,6 +78,7 @@ from .logs_config import (
     set_fal_connection_id,
 )
 from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
+from .mcp_router import router as mcp_router
 from .models_config import (
     ensure_models_dir,
     get_assets_dir,
@@ -110,7 +111,6 @@ from .schema import (
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
-from .session_router import router as session_router
 
 # Cached responses for pipeline schemas and plugin list.
 # Invalidated by _invalidate_plugin_caches() on install/uninstall.
@@ -455,8 +455,8 @@ app = FastAPI(
     version=version("daydream-scope"),
 )
 
-# Session management endpoints (headless sessions, parameters, frame capture, etc.)
-app.include_router(session_router)
+# MCP server endpoints (headless sessions, parameters, frame capture, etc.)
+app.include_router(mcp_router)
 
 # Add CORS middleware
 app.add_middleware(
