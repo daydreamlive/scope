@@ -28,6 +28,10 @@ SCOPE_PORT = 8000
 SCOPE_LOCAL_URL = f"http://localhost:{SCOPE_PORT}"
 
 
+def get_daydream_api_base() -> str:
+    return os.getenv("DAYDREAM_API_BASE", "https://api.daydream.live")
+
+
 async def validate_user_access(user_id: str) -> tuple[bool, str]:
     """
     Validate that a user has access to cloud mode.
@@ -40,7 +44,7 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
     if not user_id:
         return False, "No user ID provided"
 
-    url = f"{os.getenv('DAYDREAM_API_BASE', 'https://api.daydream.live')}/v1/users/{user_id}"
+    url = f"{get_daydream_api_base()}/v1/users/{user_id}"
     print(f"Validating user access for {user_id} via {url}")
 
     def fetch_user():
@@ -588,6 +592,19 @@ class ScopeApp(fal.App, keep_alive=300):
 
         print(f"[{log_prefix()}] ✅ WebSocket connection accepted")
 
+        # Tell the Scope subprocess to tag every log line with this connection ID
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.put(
+                    f"{SCOPE_LOCAL_URL}/api/v1/internal/fal-connection-id",
+                    json={"connection_id": connection_id},
+                    timeout=5.0,
+                )
+        except Exception as e:
+            print(
+                f"[{log_prefix()}] Warning: failed to set connection ID in subprocess: {e}"
+            )
+
         # Wait for any in-progress cleanup from the previous session before signaling ready
         await _get_cleanup_event().wait()
 
@@ -819,41 +836,65 @@ class ScopeApp(fal.App, keep_alive=300):
                     body.get("package", "") if isinstance(body, dict) else ""
                 )
 
-                # Check if the requested package is in the cloud plugins whitelist
-                def normalize_plugin_url(url: str) -> str:
-                    """Normalize a plugin URL for comparison."""
+                # Check if the requested plugin is allowed via the Daydream API
+                async def is_plugin_allowed(package: str) -> bool | None:
                     import re
 
-                    normalized = url.lower().strip()
-                    # Remove URL protocols
-                    normalized = re.sub(r"^git\+https?://", "", normalized)
-                    normalized = re.sub(r"^https?://", "", normalized)
-                    # Remove .git suffix
-                    if normalized.endswith(".git"):
-                        normalized = normalized[:-4]
-                    # Remove trailing slashes
-                    normalized = normalized.rstrip("/")
-                    return normalized
-
-                def is_plugin_whitelisted(package: str) -> bool:
-                    raw = os.getenv("CLOUD_PLUGINS_WHITELIST", "")
-                    if not raw:
-                        return False
+                    def normalize_plugin_url(url: str) -> str:
+                        normalized = url.lower().strip()
+                        normalized = re.sub(r"^git\+https?://", "", normalized)
+                        normalized = re.sub(r"^https?://", "", normalized)
+                        if normalized.endswith(".git"):
+                            normalized = normalized[:-4]
+                        return normalized.rstrip("/")
 
                     normalized_package = normalize_plugin_url(package)
+                    base_url = f"{get_daydream_api_base()}/v1/plugins"
+                    limit = 100
+                    offset = 0
 
-                    for line in raw.splitlines():
-                        line = line.strip()
-                        if not line or line.startswith("#"):
-                            continue
-                        whitelist_entry = line.split("#")[0].strip()
-                        if not whitelist_entry:
-                            continue
-                        if normalized_package == normalize_plugin_url(whitelist_entry):
-                            return True
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            while True:
+                                resp = await client.get(
+                                    base_url,
+                                    params={
+                                        "remoteOnly": "true",
+                                        "limit": limit,
+                                        "offset": offset,
+                                    },
+                                    timeout=10.0,
+                                )
+                                resp.raise_for_status()
+                                data = resp.json()
+                                for plugin in data.get("plugins", []):
+                                    plugin_url = plugin.get("repositoryUrl", "")
+                                    if (
+                                        plugin_url
+                                        and normalized_package
+                                        == normalize_plugin_url(plugin_url)
+                                    ):
+                                        return True
+                                if not data.get("hasMore", False):
+                                    break
+                                offset += limit
+                    except Exception as e:
+                        print(
+                            f"[{log_prefix()}] Failed to fetch allowed plugins from {base_url}: {e}"
+                        )
+                        return None
+
                     return False
 
-                if not is_plugin_whitelisted(requested_package):
+                allowed = await is_plugin_allowed(requested_package)
+                if allowed is None:
+                    return {
+                        "type": "api_response",
+                        "request_id": request_id,
+                        "status": 503,
+                        "error": "Unable to verify plugin allowlist — the Daydream API is currently unavailable. Please try again later.",
+                    }
+                if not allowed:
                     return {
                         "type": "api_response",
                         "request_id": request_id,
@@ -1151,6 +1192,16 @@ class ScopeApp(fal.App, keep_alive=300):
                         "session_end_time_ms": int(end_time * 1000),
                     },
                 )
+            # Clear the fal connection ID from Scope subprocess logs
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.delete(
+                        f"{SCOPE_LOCAL_URL}/api/v1/internal/fal-connection-id",
+                        timeout=5.0,
+                    )
+            except Exception:
+                print(f"[{log_prefix()}] Warning: Failed to clear fal connection ID")
+
             # Close the WebRTC session on the local Scope backend.
             # The WebRTC peer connection (UDP) is independent of this WebSocket,
             # so it must be explicitly torn down to stop video streaming.

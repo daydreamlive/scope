@@ -67,11 +67,15 @@ from .kafka_publisher import (
     set_kafka_publisher,
 )
 from .logs_config import (
+    LOG_FORMAT,
+    FalConnectionFilter,
     cleanup_old_logs,
     ensure_logs_dir,
     get_current_log_file,
+    get_fal_connection_id,
     get_logs_dir,
     get_most_recent_log_file,
+    set_fal_connection_id,
 )
 from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
 from .models_config import (
@@ -109,9 +113,16 @@ from .schema import (
 from .session_router import router as session_router
 
 # Cached responses for pipeline schemas and plugin list.
-# Server restarts after plugin install/uninstall, so these are naturally reset.
+# Invalidated by _invalidate_plugin_caches() on install/uninstall.
 _pipeline_schemas_cache: PipelineSchemasResponse | None = None
 _plugins_list_cache: object | None = None
+
+
+def _invalidate_plugin_caches():
+    """Reset plugin and pipeline schema caches after install/uninstall."""
+    global _pipeline_schemas_cache, _plugins_list_cache
+    _pipeline_schemas_cache = None
+    _plugins_list_cache = None
 
 
 class STUNErrorFilter(logging.Filter):
@@ -137,14 +148,13 @@ def _configure_logging():
     log_file = get_current_log_file()
 
     # Set root to WARNING to keep non-app libraries quiet by default
-    logging.basicConfig(
-        level=logging.WARNING,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT)
 
-    # Console handler handles INFO
+    # Install filter on every handler so %(fal_conn)s is always populated
+    _fal_filter = FalConnectionFilter()
     root_logger = logging.getLogger()
     for handler in root_logger.handlers:
+        handler.addFilter(_fal_filter)
         if isinstance(handler, logging.StreamHandler) and not isinstance(
             handler, RotatingFileHandler
         ):
@@ -157,9 +167,8 @@ def _configure_logging():
         backupCount=5,  # Keep 5 backup files
     )
     file_handler.setLevel(logging.INFO)
-    file_handler.setFormatter(
-        logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    )
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    file_handler.addFilter(_fal_filter)
     root_logger.addHandler(file_handler)
 
     # Add the filter to suppress STUN/TURN errors
@@ -473,6 +482,33 @@ async def health_check(
         version=version("daydream-scope"),
         git_commit=get_git_commit_hash(),
     )
+
+
+@app.put("/api/v1/internal/fal-connection-id")
+async def put_fal_connection_id(request: Request):
+    """Set the fal connection ID that is injected into every log line.
+
+    Called by the fal_app proxy when a new WebSocket connection is established.
+    This is an internal endpoint not intended for external consumers.
+    """
+    body = await request.json()
+    connection_id = body.get("connection_id")
+    set_fal_connection_id(connection_id)
+    logger.info("Fal connection ID set")
+    return {"status": "ok", "connection_id": connection_id}
+
+
+@app.delete("/api/v1/internal/fal-connection-id")
+async def delete_fal_connection_id():
+    """Clear the fal connection ID from log lines.
+
+    Called by the fal_app proxy when a WebSocket connection is closed.
+    """
+    prev = get_fal_connection_id()
+    set_fal_connection_id(None)
+    if prev:
+        logger.info("Fal connection ID cleared")
+    return {"status": "ok"}
 
 
 @app.post("/api/v1/restart")
@@ -1553,13 +1589,15 @@ async def upload_asset(
         # Read file content from request body
         content = await request.body()
 
-        # Validate file size (50MB limit)
-        max_size = 50 * 1024 * 1024  # 50MB
-        if len(content) > max_size:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
-            )
+        # Apply upload size validation only for cloud uploads.
+        # Local mode keeps files on the same machine, so no explicit cap is enforced.
+        if cloud_manager.is_connected:
+            max_size = 50 * 1024 * 1024  # 50MB
+            if len(content) > max_size:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
+                )
 
         # If cloud mode is active, upload to cloud AND save locally for thumbnails
         if cloud_manager.is_connected:
@@ -2307,6 +2345,7 @@ async def install_plugin(
             plugin_name = plugin_info.name
 
         logger.info(f"Plugin installed: {plugin_name}")
+        _invalidate_plugin_caches()
         return PluginInstallResponse(
             success=result["success"],
             message=result["message"],
@@ -2383,6 +2422,7 @@ async def uninstall_plugin(
         )
 
         logger.info(f"Plugin uninstalled: {name}")
+        _invalidate_plugin_caches()
         return PluginUninstallResponse(
             success=result["success"],
             message=result["message"],
@@ -2444,6 +2484,7 @@ async def reload_plugin(
             pipeline_manager=pipeline_manager,
         )
 
+        _invalidate_plugin_caches()
         return PluginReloadResponse(
             success=result["success"],
             message=result["message"],

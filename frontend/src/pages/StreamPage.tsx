@@ -109,6 +109,7 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
+    connectStage: cloudConnectStage,
   } = useCloudStatus();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
@@ -417,6 +418,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
+    loadingStage: pipelineLoadingStage,
   } = usePipeline();
 
   // Apply backend parameter values to frontend state (used for both local
@@ -2145,6 +2147,8 @@ export function StreamPage() {
                 isCloudConnecting={isCloudConnecting}
                 isConnecting={isConnecting}
                 pipelineError={pipelineError}
+                pipelineLoadingStage={pipelineLoadingStage}
+                cloudConnectStage={cloudConnectStage}
                 isPlaying={!settings.paused}
                 isDownloading={isDownloading}
                 onPlayPauseToggle={() => {
