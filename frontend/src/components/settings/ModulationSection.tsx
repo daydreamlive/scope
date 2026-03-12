@@ -32,9 +32,7 @@ interface ModulationTarget {
 }
 
 function formatFieldName(key: string): string {
-  return key
-    .replace(/_/g, " ")
-    .replace(/\b\w/g, c => c.toUpperCase());
+  return key.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function extractModulatableTargets(
@@ -127,7 +125,8 @@ export function ModulationSection({
   const updateConfig = useCallback(
     (target: string, patch: Partial<ModulationConfig>) => {
       const tgt = targets.find(t => t.value === target);
-      const existing = modulations[target] ?? (tgt ? defaultConfigFor(tgt) : null);
+      const existing =
+        modulations[target] ?? (tgt ? defaultConfigFor(tgt) : null);
       if (!existing) return;
       const updated = { ...existing, ...patch };
       onModulationsChange({ ...modulations, [target]: updated });

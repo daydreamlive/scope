@@ -216,9 +216,7 @@ class ModulationEngine:
             current = params.get(runtime_key)
 
             # List-of-int params (e.g. denoising_step_list): shift all elements
-            if isinstance(current, list) and all(
-                isinstance(v, int) for v in current
-            ):
+            if isinstance(current, list) and all(isinstance(v, int) for v in current):
                 params[runtime_key] = modulate_step_list(
                     current, config.depth, w, config.min_value, config.max_value
                 )

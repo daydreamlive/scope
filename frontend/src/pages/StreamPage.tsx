@@ -1580,7 +1580,10 @@ export function StreamPage() {
   const promptCycleItemsRef = useRef<PromptItem[]>([]);
   // Snapshot the prompt list when cycling is enabled so edits don't disrupt the cycle
   useEffect(() => {
-    if ((settings.promptCycleRate || "none") !== "none" && promptItems.length >= 2) {
+    if (
+      (settings.promptCycleRate || "none") !== "none" &&
+      promptItems.length >= 2
+    ) {
       promptCycleItemsRef.current = promptItems;
       promptCycleIndexRef.current = 0;
       promptCycleBoundaryRef.current = -1;
@@ -1590,7 +1593,12 @@ export function StreamPage() {
   useEffect(() => {
     const rate = settings.promptCycleRate || "none";
     const items = promptCycleItemsRef.current;
-    if (rate === "none" || !isStreaming || !tempoState.enabled || items.length < 2) {
+    if (
+      rate === "none" ||
+      !isStreaming ||
+      !tempoState.enabled ||
+      items.length < 2
+    ) {
       promptCycleBoundaryRef.current = -1;
       return;
     }
@@ -2291,6 +2299,51 @@ export function StreamPage() {
                 }
               }}
             />
+            {tempoState && (
+              <TempoSyncPanel
+                className="flex-shrink-0"
+                tempoState={tempoState}
+                tempoSources={tempoSources}
+                tempoLoading={tempoLoading}
+                tempoError={tempoError}
+                onTempoEnable={enableTempoSync}
+                onTempoDisable={disableTempoSync}
+                onTempoSetBpm={setTempoSessionBpm}
+                onTempoRefreshSources={refreshTempoSources}
+                quantizeMode={settings.quantizeMode || "none"}
+                onQuantizeModeChange={mode =>
+                  updateSettings({
+                    quantizeMode: mode as SettingsState["quantizeMode"],
+                  })
+                }
+                lookaheadMs={settings.lookaheadMs ?? 0}
+                onLookaheadMsChange={ms => updateSettings({ lookaheadMs: ms })}
+                modulations={settings.modulations}
+                onModulationsChange={modulations => {
+                  updateSettings({ modulations });
+                  if (isStreaming) {
+                    sendParameterUpdateWebRTC({ modulations });
+                  }
+                }}
+                configSchema={pipelines?.[settings.pipelineId]?.configSchema}
+                beatCacheResetRate={settings.beatCacheResetRate || "none"}
+                onBeatCacheResetRateChange={rate => {
+                  updateSettings({
+                    beatCacheResetRate:
+                      rate as SettingsState["beatCacheResetRate"],
+                  });
+                  if (isStreaming) {
+                    sendParameterUpdateWebRTC({ beat_cache_reset_rate: rate });
+                  }
+                }}
+                promptCycleRate={settings.promptCycleRate || "none"}
+                onPromptCycleRateChange={rate => {
+                  updateSettings({
+                    promptCycleRate: rate as SettingsState["promptCycleRate"],
+                  });
+                }}
+              />
+            )}
             {hasAvailableOutputs && (
               <OutputsPanel
                 className="flex-shrink-0"
