@@ -78,6 +78,7 @@ from .logs_config import (
     set_fal_connection_id,
 )
 from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
+from .mcp_router import router as mcp_router
 from .models_config import (
     ensure_models_dir,
     get_assets_dir,
@@ -134,51 +135,59 @@ class STUNErrorFilter(logging.Filter):
         return True
 
 
-# Ensure logs directory exists and clean up old logs
-logs_dir = ensure_logs_dir()
-cleanup_old_logs(max_age_days=1)  # Delete logs older than 1 day
-log_file = get_current_log_file()
+def _configure_logging():
+    """Set up file and console logging for the main server process.
 
-# Configure logging - set root to WARNING to keep non-app libraries quiet by default
-logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT)
+    Called from run_server() rather than at module import time so that the MCP
+    subprocess (which also imports this module) doesn't create a competing log
+    file that shadows the real server logs.
+    """
+    # Ensure logs directory exists and clean up old logs
+    ensure_logs_dir()
+    cleanup_old_logs(max_age_days=1)
+    log_file = get_current_log_file()
 
-# Install filter on every handler so %(fal_conn)s is always populated
-_fal_filter = FalConnectionFilter()
-root_logger = logging.getLogger()
-for handler in root_logger.handlers:
-    handler.addFilter(_fal_filter)
-    if isinstance(handler, logging.StreamHandler) and not isinstance(
-        handler, RotatingFileHandler
-    ):
-        handler.setLevel(logging.INFO)
+    # Set root to WARNING to keep non-app libraries quiet by default
+    logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT)
 
-# Add rotating file handler
-file_handler = RotatingFileHandler(
-    log_file,
-    maxBytes=5 * 1024 * 1024,  # 5 MB per file
-    backupCount=5,  # Keep 5 backup files
-)
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
-file_handler.addFilter(_fal_filter)
-root_logger.addHandler(file_handler)
+    # Install filter on every handler so %(fal_conn)s is always populated
+    _fal_filter = FalConnectionFilter()
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        handler.addFilter(_fal_filter)
+        if isinstance(handler, logging.StreamHandler) and not isinstance(
+            handler, RotatingFileHandler
+        ):
+            handler.setLevel(logging.INFO)
 
-# Add the filter to suppress STUN/TURN errors
-stun_filter = STUNErrorFilter()
-logging.getLogger("asyncio").addFilter(stun_filter)
+    # Add rotating file handler
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=5 * 1024 * 1024,  # 5 MB per file
+        backupCount=5,  # Keep 5 backup files
+    )
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    file_handler.addFilter(_fal_filter)
+    root_logger.addHandler(file_handler)
 
-# Set INFO level for your app modules
-logging.getLogger("scope.server").setLevel(logging.INFO)
-logging.getLogger("scope.core").setLevel(logging.INFO)
+    # Add the filter to suppress STUN/TURN errors
+    stun_filter = STUNErrorFilter()
+    logging.getLogger("asyncio").addFilter(stun_filter)
 
-# Set INFO level for uvicorn
-logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+    # Set INFO level for app modules
+    logging.getLogger("scope.server").setLevel(logging.INFO)
+    logging.getLogger("scope.core").setLevel(logging.INFO)
 
-# Enable verbose logging for other libraries when needed
-if os.getenv("VERBOSE_LOGGING"):
-    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
-    logging.getLogger("fastapi").setLevel(logging.INFO)
+    # Set INFO level for uvicorn
+    logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+
+    # Enable verbose logging for other libraries when needed
+    if os.getenv("VERBOSE_LOGGING"):
+        logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+        logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
+
 
 # Set INFO for the cloud log re-emitter so cloud lines reach console and file
 logging.getLogger("scope.cloud").setLevel(logging.INFO)
@@ -445,6 +454,9 @@ app = FastAPI(
     description="A tool for running and customizing real-time, interactive generative AI pipelines and models",
     version=version("daydream-scope"),
 )
+
+# MCP server endpoints (headless sessions, parameters, frame capture, etc.)
+app.include_router(mcp_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -2700,6 +2712,7 @@ def open_browser_when_ready(host: str, port: int, server):
 
 def run_server(reload: bool, host: str, port: int, no_browser: bool):
     """Run the Daydream Scope server."""
+    _configure_logging()
 
     from scope.core.pipelines.registry import (
         PipelineRegistry,  # noqa: F401 - imported for side effects (registry initialization)
@@ -2781,6 +2794,12 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     envvar="SCOPE_CLOUD_API_KEY",
     help="Cloud API key for cloud mode",
 )
+@click.option(
+    "--mcp",
+    is_flag=True,
+    help="Run as an MCP (Model Context Protocol) server over stdio instead of the HTTP server. "
+    "Connects to a running Scope instance on --port. Requires: pip install daydream-scope[mcp]",
+)
 @click.pass_context
 def main(
     ctx,
@@ -2791,11 +2810,25 @@ def main(
     no_browser: bool,
     cloud_app_id: str | None,
     cloud_api_key: str | None,
+    mcp: bool,
 ):
     # Handle version flag
     if version:
         print_version_info()
         sys.exit(0)
+
+    # MCP mode: run the MCP stdio server instead of the HTTP server
+    if mcp:
+        try:
+            from .mcp_server import run_mcp_server
+        except ImportError:
+            click.echo(
+                "MCP dependencies not installed. Install with: pip install daydream-scope[mcp]",
+                err=True,
+            )
+            sys.exit(1)
+        run_mcp_server(port=port)
+        return
 
     # Store cloud credentials in environment for app access
     if cloud_app_id:
