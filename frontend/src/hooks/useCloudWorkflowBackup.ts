@@ -19,7 +19,7 @@ import type { LoRAFileInfo, PluginInfo } from "../lib/api";
 
 const BACKUP_KEY = "scope-cloud-workflow-backup";
 const DISCONNECT_FLAG_KEY = "scope-cloud-workflow-disconnected";
-const DEBOUNCE_MS = 2000;
+const DEBOUNCE_MS = 250;
 const RESTORE_TOAST_DURATION_MS = 30_000;
 
 interface BackupData {

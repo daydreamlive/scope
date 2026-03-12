@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
@@ -1996,15 +1996,20 @@ export function StreamPage() {
     [setPreloadedWorkflow, setShowWorkflowImport]
   );
 
-  useCloudWorkflowBackup({
-    settings,
-    timelinePrompts,
-    promptState: {
+  const promptState = useMemo(
+    () => ({
       promptItems,
       interpolationMethod,
       transitionSteps,
       temporalInterpolationMethod,
-    },
+    }),
+    [promptItems, interpolationMethod, transitionSteps, temporalInterpolationMethod]
+  );
+
+  useCloudWorkflowBackup({
+    settings,
+    timelinePrompts,
+    promptState,
     pipelineInfoMap: pipelines,
     loraFiles,
     plugins,
