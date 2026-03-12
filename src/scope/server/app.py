@@ -2545,11 +2545,6 @@ async def reload_plugin(
 # =============================================================================
 
 
-def get_tempo_sync():
-    """Dependency to get TempoSync manager instance."""
-    return tempo_sync
-
-
 @app.get("/api/v1/tempo/status", response_model=TempoStatusResponse)
 async def get_tempo_status():
     """Get current tempo sync status including beat state."""

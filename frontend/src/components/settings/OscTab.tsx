@@ -42,9 +42,7 @@ export function OscTab({ isActive }: OscTabProps) {
     setIsTogglingLog(true);
     try {
       const updated = await updateOscSettings({ log_all_messages: checked });
-      setStatus((prev: OscStatusResponse | null) =>
-        prev ? { ...prev, ...updated } : prev
-      );
+      setStatus(prev => (prev ? { ...prev, ...updated } : prev));
     } catch (err) {
       console.error("Failed to update OSC logging setting:", err);
     } finally {

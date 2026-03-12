@@ -95,15 +95,17 @@ function defaultConfigFor(target: ModulationTarget): ModulationConfig {
   };
 }
 
+interface ModulationSectionProps {
+  modulations: ModulationsState;
+  onModulationsChange: (modulations: ModulationsState) => void;
+  configSchema?: PipelineConfigSchema;
+}
+
 export function ModulationSection({
   modulations,
   onModulationsChange,
   configSchema,
-}: {
-  modulations: ModulationsState;
-  onModulationsChange: (modulations: ModulationsState) => void;
-  configSchema?: PipelineConfigSchema;
-}) {
+}: ModulationSectionProps) {
   const targets = useMemo(
     () => extractModulatableTargets(configSchema),
     [configSchema]

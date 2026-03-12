@@ -31,6 +31,35 @@ function BeatIndicator({ beatPhase }: { beatPhase: number }) {
   );
 }
 
+const BEAT_RATE_OPTIONS = [
+  { value: "beat", label: "Beat" },
+  { value: "bar", label: "Bar" },
+  { value: "2_bar", label: "2 Bars" },
+  { value: "4_bar", label: "4 Bars" },
+] as const;
+
+interface TempoSyncSectionProps {
+  tempoState: TempoState;
+  sources: TempoSourcesResponse | null;
+  loading: boolean;
+  error: string | null;
+  onEnable: (request: TempoEnableRequest) => void;
+  onDisable: () => void;
+  onSetBpm?: (bpm: number) => void;
+  onRefreshSources: () => void;
+  quantizeMode?: string;
+  onQuantizeModeChange?: (mode: string) => void;
+  lookaheadMs?: number;
+  onLookaheadMsChange?: (ms: number) => void;
+  modulations?: ModulationsState;
+  onModulationsChange?: (modulations: ModulationsState) => void;
+  configSchema?: PipelineConfigSchema;
+  beatCacheResetRate?: string;
+  onBeatCacheResetRateChange?: (rate: string) => void;
+  promptCycleRate?: string;
+  onPromptCycleRateChange?: (rate: string) => void;
+}
+
 export function TempoSyncSection({
   tempoState,
   sources,
@@ -51,27 +80,7 @@ export function TempoSyncSection({
   onBeatCacheResetRateChange,
   promptCycleRate,
   onPromptCycleRateChange,
-}: {
-  tempoState: TempoState;
-  sources: TempoSourcesResponse | null;
-  loading: boolean;
-  error: string | null;
-  onEnable: (request: TempoEnableRequest) => void;
-  onDisable: () => void;
-  onSetBpm?: (bpm: number) => void;
-  onRefreshSources: () => void;
-  quantizeMode?: string;
-  onQuantizeModeChange?: (mode: string) => void;
-  lookaheadMs?: number;
-  onLookaheadMsChange?: (ms: number) => void;
-  modulations?: ModulationsState;
-  onModulationsChange?: (modulations: ModulationsState) => void;
-  configSchema?: PipelineConfigSchema;
-  beatCacheResetRate?: string;
-  onBeatCacheResetRateChange?: (rate: string) => void;
-  promptCycleRate?: string;
-  onPromptCycleRateChange?: (rate: string) => void;
-}) {
+}: TempoSyncSectionProps) {
   const [selectedSource, setSelectedSource] = useState<"link" | "midi_clock">(
     "link"
   );
@@ -316,10 +325,11 @@ export function TempoSyncSection({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">Immediate</SelectItem>
-              <SelectItem value="beat">Beat</SelectItem>
-              <SelectItem value="bar">Bar</SelectItem>
-              <SelectItem value="2_bar">2 Bars</SelectItem>
-              <SelectItem value="4_bar">4 Bars</SelectItem>
+              {BEAT_RATE_OPTIONS.map(opt => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -367,10 +377,11 @@ export function TempoSyncSection({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">Off</SelectItem>
-              <SelectItem value="beat">Beat</SelectItem>
-              <SelectItem value="bar">Bar</SelectItem>
-              <SelectItem value="2_bar">2 Bars</SelectItem>
-              <SelectItem value="4_bar">4 Bars</SelectItem>
+              {BEAT_RATE_OPTIONS.map(opt => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>
@@ -392,10 +403,11 @@ export function TempoSyncSection({
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">Off</SelectItem>
-              <SelectItem value="beat">Beat</SelectItem>
-              <SelectItem value="bar">Bar</SelectItem>
-              <SelectItem value="2_bar">2 Bars</SelectItem>
-              <SelectItem value="4_bar">4 Bars</SelectItem>
+              {BEAT_RATE_OPTIONS.map(opt => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
             </SelectContent>
           </Select>
         </div>

@@ -4,7 +4,13 @@ import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { OutputsPanel } from "../components/OutputsPanel";
-import { TempoSyncPanel } from "../components/TempoSyncPanel";
+import { TempoSyncSection } from "../components/settings/TempoSyncSection";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
@@ -179,7 +185,7 @@ export function StreamPage() {
   // Prompt state - use unified default prompts based on mode
   const initialMode =
     settings.inputMode || getPipelineDefaultMode(settings.pipelineId);
-  const [, setIsChangePending] = useState(false);
+
 
   // Ref to access latest settings without re-creating sendParameterUpdate on every change
   const settingsRef = useRef(settings);
@@ -521,8 +527,6 @@ export function StreamPage() {
   } = useUnifiedWebRTC({
     onParametersUpdated: applyBackendParamsToSettings,
     onTempoUpdate: updateTempoFromNotification,
-    onChangeScheduled: () => setIsChangePending(true),
-    onChangeApplied: () => setIsChangePending(false),
   });
 
   // Whether beat-quantized output gating is active
@@ -2261,51 +2265,54 @@ export function StreamPage() {
                 }
               }}
             />
-            {tempoState && (
-              <TempoSyncPanel
-                className="flex-shrink-0"
-                tempoState={tempoState}
-                tempoSources={tempoSources}
-                tempoLoading={tempoLoading}
-                tempoError={tempoError}
-                onTempoEnable={enableTempoSync}
-                onTempoDisable={disableTempoSync}
-                onTempoSetBpm={setTempoSessionBpm}
-                onTempoRefreshSources={refreshTempoSources}
-                quantizeMode={settings.quantizeMode || "none"}
-                onQuantizeModeChange={mode =>
-                  updateSettings({
-                    quantizeMode: mode as SettingsState["quantizeMode"],
-                  })
-                }
-                lookaheadMs={settings.lookaheadMs ?? 0}
-                onLookaheadMsChange={ms => updateSettings({ lookaheadMs: ms })}
-                modulations={settings.modulations}
-                onModulationsChange={modulations => {
-                  updateSettings({ modulations });
-                  if (isStreaming) {
-                    sendParameterUpdateWebRTC({ modulations });
+            <Card className="flex-shrink-0">
+              <CardHeader className="px-4 py-3">
+                <CardTitle className="text-base font-medium">
+                  Tempo Sync
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-4 pt-0">
+                <TempoSyncSection
+                  tempoState={tempoState}
+                  sources={tempoSources ?? null}
+                  loading={tempoLoading}
+                  error={tempoError}
+                  onEnable={enableTempoSync}
+                  onDisable={disableTempoSync}
+                  onSetBpm={setTempoSessionBpm}
+                  onRefreshSources={refreshTempoSources}
+                  quantizeMode={settings.quantizeMode || "none"}
+                  onQuantizeModeChange={mode =>
+                    updateSettings({
+                      quantizeMode: mode as SettingsState["quantizeMode"],
+                    })
                   }
-                }}
-                configSchema={pipelines?.[settings.pipelineId]?.configSchema}
-                beatCacheResetRate={settings.beatCacheResetRate || "none"}
-                onBeatCacheResetRateChange={rate => {
-                  updateSettings({
-                    beatCacheResetRate:
-                      rate as SettingsState["beatCacheResetRate"],
-                  });
-                  if (isStreaming) {
-                    sendParameterUpdateWebRTC({ beat_cache_reset_rate: rate });
+                  lookaheadMs={settings.lookaheadMs ?? 0}
+                  onLookaheadMsChange={ms =>
+                    updateSettings({ lookaheadMs: ms })
                   }
-                }}
-                promptCycleRate={settings.promptCycleRate || "none"}
-                onPromptCycleRateChange={rate => {
-                  updateSettings({
-                    promptCycleRate: rate as SettingsState["promptCycleRate"],
-                  });
-                }}
-              />
-            )}
+                  modulations={settings.modulations}
+                  onModulationsChange={modulations =>
+                    updateSettings({ modulations })
+                  }
+                  configSchema={pipelines?.[settings.pipelineId]?.configSchema}
+                  beatCacheResetRate={settings.beatCacheResetRate || "none"}
+                  onBeatCacheResetRateChange={rate =>
+                    updateSettings({
+                      beatCacheResetRate:
+                        rate as SettingsState["beatCacheResetRate"],
+                    })
+                  }
+                  promptCycleRate={settings.promptCycleRate || "none"}
+                  onPromptCycleRateChange={rate =>
+                    updateSettings({
+                      promptCycleRate:
+                        rate as SettingsState["promptCycleRate"],
+                    })
+                  }
+                />
+              </CardContent>
+            </Card>
             {hasAvailableOutputs && (
               <OutputsPanel
                 className="flex-shrink-0"

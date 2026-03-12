@@ -17,7 +17,6 @@ export interface TempoState {
   barPosition: number;
   beatCount: number;
   isPlaying: boolean;
-  sourceName: string | null;
   sourceType: string | null;
   numPeers: number | null;
   beatsPerBar: number;
@@ -30,7 +29,6 @@ const INITIAL_STATE: TempoState = {
   barPosition: 0,
   beatCount: 0,
   isPlaying: false,
-  sourceName: null,
   sourceType: null,
   numPeers: null,
   beatsPerBar: 4,
@@ -51,7 +49,6 @@ export function useTempoSync() {
       barPosition: status.beat_state?.bar_position ?? 0,
       beatCount: status.beat_state?.beat_count ?? 0,
       isPlaying: status.beat_state?.is_playing ?? false,
-      sourceName: status.source?.type ?? null,
       sourceType: status.source?.type ?? null,
       numPeers: status.source?.num_peers ?? null,
       beatsPerBar: status.beats_per_bar,

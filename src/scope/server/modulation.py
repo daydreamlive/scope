@@ -97,9 +97,7 @@ def wave(shape: WaveShape, phase: float) -> float:
     return 0.0
 
 
-def modulate_value(
-    base: float, depth: float, wave_value: float, shape: WaveShape
-) -> float:
+def modulate_value(base: float, depth: float, wave_value: float) -> float:
     """Apply modulation to a base value.
 
     For symmetric oscillators: base + depth * wave_value
@@ -233,7 +231,7 @@ class ModulationEngine:
             else:
                 continue
 
-            result = modulate_value(base, config.depth, w, config.shape)
+            result = modulate_value(base, config.depth, w)
 
             if config.min_value is not None:
                 result = max(result, config.min_value)
