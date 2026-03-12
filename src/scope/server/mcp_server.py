@@ -158,25 +158,53 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
         Requires an active stream (start one with start_stream or via the UI).
 
         The parameters dict accepts any combination of:
+
+        Prompts:
         - prompts: list of {"text": str, "weight": float (0-100)}, e.g. [{"text": "a forest", "weight": 100}]
-        - prompt_interpolation_method: "linear" or "slerp"
-        - noise_scale: float 0.0-1.0 (video mode only)
-        - noise_controller: bool, automatic noise adjustment based on motion
+        - prompt_interpolation_method: "linear" or "slerp" (spatial blending of multiple prompts)
+        - transition: {"target_prompts": [{"text": str, "weight": float}], "num_steps": int, "temporal_interpolation_method": "linear"|"slerp"}
+          Smoothly interpolate from current prompts to target prompts over num_steps frames.
+
+        Generation:
+        - noise_scale: float 0.0-1.0 (video mode only, controls noise injection)
+        - noise_controller: bool, automatic noise scale adjustment based on motion detection
         - denoising_step_list: list of ints, e.g. [1000, 750, 500, 250]
-        - manage_cache: bool, automatic cache management
-        - reset_cache: bool, trigger a one-shot cache reset
-        - kv_cache_attention_bias: float 0.01-1.0 (lower = less repetition)
-        - lora_scales: list of {"path": str, "scale": float}
+
+        Cache:
+        - manage_cache: bool, automatic cache management on parameter changes
+        - reset_cache: bool, trigger a one-shot cache reset (cleared after use)
+        - kv_cache_attention_bias: float 0.01-1.0 (lower = less reliance on past frames, reduces repetition)
+
+        LoRA:
+        - lora_scales: list of {"path": str, "scale": float (-10.0 to 10.0)}, update loaded adapter strengths
+
+        Input:
         - input_mode: "text" or "video"
-        - input_source: {"enabled": true, "source_type": "<type>", "source_name": "<name>"}
-        - paused: bool
-        - vace_ref_images: list of file paths
-        - vace_use_input_video: bool
-        - vace_context_scale: float 0.0-2.0
-        - first_frame_image: str file path
-        - last_frame_image: str file path
-        - images: list of file paths
-        - Plus any pipeline-specific parameters (passed through to the pipeline)
+        - input_source: {"enabled": bool, "source_type": "<type>", "source_name": "<name>"}
+          Use list_input_source_types and list_input_sources to discover available types and names.
+
+        Output:
+        - output_sinks: dict of output configs keyed by type, e.g.
+          {"spout": {"enabled": true, "name": "DaydreamScope"}}
+          Available types: "spout" (Windows), "ndi" (all platforms), "syphon" (macOS).
+          Use get_hardware_info to check which are available on this machine.
+
+        VACE (reference image conditioning):
+        - vace_ref_images: list of file paths (one-shot, cleared after use)
+        - vace_use_input_video: bool, when true input video is used for VACE conditioning instead of latent init
+        - vace_context_scale: float 0.0-2.0 (higher = reference images more influential)
+
+        Frame references:
+        - first_frame_image: str file path (one-shot, enables firstframe extension mode)
+        - last_frame_image: str file path (one-shot, enables lastframe extension mode)
+        - images: list of file paths (one-shot, non-VACE visual conditioning)
+
+        Session:
+        - paused: bool, pause/resume processing
+        - recording: bool, enable/disable recording
+        - pipeline_ids: list of str, pipeline chain to execute
+
+        Pipeline-specific parameters are also accepted and passed through to the loaded pipeline.
 
         Args:
             parameters: Dict of parameter names to values
