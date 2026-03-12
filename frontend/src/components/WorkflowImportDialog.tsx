@@ -67,6 +67,8 @@ interface WorkflowImportDialogProps {
     promptState: WorkflowPromptState | null
   ) => void;
   initialWorkflow?: ScopeWorkflow | null;
+  /** When true, the dialog shows cloud-restore-specific copy and actions. */
+  isCloudRestore?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -146,6 +148,7 @@ export function WorkflowImportDialog({
   onClose,
   onLoad,
   initialWorkflow,
+  isCloudRestore = false,
 }: WorkflowImportDialogProps) {
   const [step, setStep] = useState<ImportStep>("select");
   const [workflow, setWorkflow] = useState<ScopeWorkflow | null>(null);
@@ -221,6 +224,18 @@ export function WorkflowImportDialog({
     setValidating(false);
     onClose();
   }, [onClose, loras.reset, plugins.reset]);
+
+  // For cloud restore, confirm before discarding the backup
+  const handleDismiss = useCallback(async () => {
+    if (isCloudRestore) {
+      const confirmed = await showConfirm(
+        "Discard Backup",
+        "Are you sure you want to discard your saved cloud session? This cannot be undone."
+      );
+      if (!confirmed) return;
+    }
+    handleClose();
+  }, [isCloudRestore, showConfirm, handleClose]);
 
   // -----------------------------------------------------------------------
   // Auto-resolve when opened with a preloaded workflow (e.g. from deeplink)
@@ -372,11 +387,13 @@ export function WorkflowImportDialog({
   const handleLoad = useCallback(async () => {
     if (!workflow) return;
 
-    const confirmed = await showConfirm(
-      "Load Workflow",
-      "Loading this workflow will replace your current settings and timeline. Continue?"
-    );
-    if (!confirmed) return;
+    if (!isCloudRestore) {
+      const confirmed = await showConfirm(
+        "Load Workflow",
+        "Loading this workflow will replace your current settings and timeline. Continue?"
+      );
+      if (!confirmed) return;
+    }
 
     // Fetch fresh LoRA files to avoid stale closure after downloads
     const freshLoraFiles = await refreshLoRAs();
@@ -385,11 +402,21 @@ export function WorkflowImportDialog({
     const promptState = workflowToPromptState(workflow);
 
     onLoad(importedSettings, timelinePrompts, promptState);
-    toast.success("Workflow loaded", {
-      description: `"${workflow.metadata.name}" loaded into the interface`,
-    });
+    toast.success(
+      isCloudRestore ? "Cloud session restored" : "Workflow loaded",
+      {
+        description: `"${workflow.metadata.name}" loaded into the interface`,
+      }
+    );
     handleClose();
-  }, [workflow, onLoad, handleClose, showConfirm, refreshLoRAs]);
+  }, [
+    workflow,
+    onLoad,
+    handleClose,
+    showConfirm,
+    refreshLoRAs,
+    isCloudRestore,
+  ]);
 
   // -----------------------------------------------------------------------
   // Derived state
@@ -412,18 +439,22 @@ export function WorkflowImportDialog({
   // -----------------------------------------------------------------------
 
   return (
-    <Dialog open={open} onOpenChange={isOpen => !isOpen && handleClose()}>
+    <Dialog open={open} onOpenChange={isOpen => !isOpen && handleDismiss()}>
       <DialogContent className="sm:max-w-lg max-h-[80vh] flex flex-col">
         <DialogHeader>
           <DialogTitle>
-            {step === "select" && "Import Workflow"}
-            {step === "review" && "Review Workflow"}
+            {isCloudRestore
+              ? "Restore Cloud Session"
+              : step === "select"
+                ? "Import Workflow"
+                : "Review Workflow"}
           </DialogTitle>
           <DialogDescription>
-            {step === "select" &&
-              "Select a .scope-workflow.json file to import."}
-            {step === "review" &&
-              "Review dependencies, then load into the interface."}
+            {isCloudRestore
+              ? "Your previous session was saved before disconnection. Restore to continue where you left off, or discard."
+              : step === "select"
+                ? "Select a .scope-workflow.json file to import."
+                : "Review dependencies, then load into the interface."}
           </DialogDescription>
         </DialogHeader>
 
@@ -593,8 +624,11 @@ export function WorkflowImportDialog({
         )}
 
         <DialogFooter>
-          <Button variant="ghost" onClick={handleClose}>
-            Cancel
+          <Button
+            variant={isCloudRestore ? "destructive" : "ghost"}
+            onClick={handleDismiss}
+          >
+            {isCloudRestore ? "Discard Backup" : "Cancel"}
           </Button>
           {step === "review" && (
             <Button
@@ -605,7 +639,7 @@ export function WorkflowImportDialog({
                 hasUnresolvedDeps
               }
             >
-              Load Workflow
+              {isCloudRestore ? "Restore Session" : "Load Workflow"}
             </Button>
           )}
         </DialogFooter>

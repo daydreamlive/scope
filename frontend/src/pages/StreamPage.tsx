@@ -57,7 +57,10 @@ import {
 } from "../lib/auth";
 import { createDaydreamImportSession } from "../lib/daydreamExport";
 import { openExternalUrl } from "../lib/openExternal";
-import { useCloudWorkflowBackup } from "../hooks/useCloudWorkflowBackup";
+import {
+  useCloudWorkflowBackup,
+  clearCloudWorkflowBackup,
+} from "../hooks/useCloudWorkflowBackup";
 
 interface OscCommand {
   key: string;
@@ -278,6 +281,7 @@ export function StreamPage() {
   const [showWorkflowImport, setShowWorkflowImport] = useState(false);
   const [preloadedWorkflow, setPreloadedWorkflow] =
     useState<ScopeWorkflow | null>(null);
+  const [isCloudRestore, setIsCloudRestore] = useState(false);
 
   // Daydream export state
   const [isExportingToDaydream, setIsExportingToDaydream] = useState(false);
@@ -1988,13 +1992,11 @@ export function StreamPage() {
 
   // Auto-save workflow to localStorage while cloud is connected.
   // On disconnect → reconnect, opens the workflow import dialog to restore.
-  const handleCloudRestore = useCallback(
-    (workflow: ScopeWorkflow) => {
-      setPreloadedWorkflow(workflow);
-      setShowWorkflowImport(true);
-    },
-    [setPreloadedWorkflow, setShowWorkflowImport]
-  );
+  const handleCloudRestore = useCallback((workflow: ScopeWorkflow) => {
+    setPreloadedWorkflow(workflow);
+    setIsCloudRestore(true);
+    setShowWorkflowImport(true);
+  }, []);
 
   const promptState = useMemo(
     () => ({
@@ -2003,7 +2005,12 @@ export function StreamPage() {
       transitionSteps,
       temporalInterpolationMethod,
     }),
-    [promptItems, interpolationMethod, transitionSteps, temporalInterpolationMethod]
+    [
+      promptItems,
+      interpolationMethod,
+      transitionSteps,
+      temporalInterpolationMethod,
+    ]
   );
 
   useCloudWorkflowBackup({
@@ -2467,11 +2474,16 @@ export function StreamPage() {
         <WorkflowImportDialog
           open={showWorkflowImport}
           onClose={() => {
+            if (isCloudRestore) {
+              clearCloudWorkflowBackup();
+              setIsCloudRestore(false);
+            }
             setShowWorkflowImport(false);
             setPreloadedWorkflow(null);
           }}
           onLoad={handleWorkflowLoad}
           initialWorkflow={preloadedWorkflow}
+          isCloudRestore={isCloudRestore}
         />
       </div>
     </MIDIProvider>

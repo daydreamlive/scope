@@ -2,12 +2,11 @@
  * Auto-saves the current workflow to localStorage while cloud mode is connected.
  *
  * On cloud disconnect (manual or unexpected), marks the backup as needing
- * restore. When cloud reconnects, offers the user a toast to restore the
- * previous session state via the same workflow import path.
+ * restore. When cloud reconnects, opens the workflow import dialog so the
+ * user can choose to restore or discard.
  */
 
 import { useEffect, useRef } from "react";
-import { toast } from "sonner";
 import {
   buildScopeWorkflow,
   type WorkflowPromptState,
@@ -20,7 +19,6 @@ import type { LoRAFileInfo, PluginInfo } from "../lib/api";
 const BACKUP_KEY = "scope-cloud-workflow-backup";
 const DISCONNECT_FLAG_KEY = "scope-cloud-workflow-disconnected";
 const DEBOUNCE_MS = 250;
-const RESTORE_TOAST_DURATION_MS = 30_000;
 
 interface BackupData {
   workflow: ScopeWorkflow;
@@ -46,7 +44,7 @@ function writeBackup(data: BackupData): void {
   }
 }
 
-function clearBackup(): void {
+export function clearCloudWorkflowBackup(): void {
   localStorage.removeItem(BACKUP_KEY);
   localStorage.removeItem(DISCONNECT_FLAG_KEY);
 }
@@ -85,7 +83,6 @@ export function useCloudWorkflowBackup({
 }: UseCloudWorkflowBackupOptions) {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prevConnectedRef = useRef(false);
-  const restoreOfferPendingRef = useRef(false);
 
   // Auto-save workflow to localStorage while cloud is connected.
   // Debounced to avoid writing on every keystroke / slider drag.
@@ -97,8 +94,6 @@ export function useCloudWorkflowBackup({
     }
 
     debounceRef.current = setTimeout(() => {
-      if (restoreOfferPendingRef.current) return;
-
       try {
         const pluginInfoMap = new Map<string, PluginInfo>(
           plugins.map(p => [p.name, p])
@@ -141,7 +136,8 @@ export function useCloudWorkflowBackup({
     scopeVersion,
   ]);
 
-  // Detect disconnect → reconnect transitions and offer restore.
+  // Detect disconnect → reconnect transitions.
+  // On reconnect, open the import dialog with the saved backup.
   useEffect(() => {
     const wasConnected = prevConnectedRef.current;
     prevConnectedRef.current = isCloudConnected;
@@ -152,39 +148,11 @@ export function useCloudWorkflowBackup({
     }
 
     if (!wasConnected && isCloudConnected && isMarkedDisconnected()) {
+      localStorage.removeItem(DISCONNECT_FLAG_KEY);
       const backup = readBackup();
-      if (!backup) {
-        localStorage.removeItem(DISCONNECT_FLAG_KEY);
-        return;
+      if (backup) {
+        onRestoreRequest(backup.workflow);
       }
-
-      restoreOfferPendingRef.current = true;
-
-      const finishOffer = () => {
-        restoreOfferPendingRef.current = false;
-        localStorage.removeItem(DISCONNECT_FLAG_KEY);
-      };
-
-      toast("Restore previous cloud session?", {
-        description: `Pipeline: ${backup.pipelineId}`,
-        action: {
-          label: "Restore",
-          onClick: () => {
-            onRestoreRequest(backup.workflow);
-            clearBackup();
-            finishOffer();
-          },
-        },
-        duration: RESTORE_TOAST_DURATION_MS,
-        onDismiss: () => {
-          clearBackup();
-          finishOffer();
-        },
-        onAutoClose: () => {
-          clearBackup();
-          finishOffer();
-        },
-      });
     }
   }, [isCloudConnected, onRestoreRequest]);
 }
