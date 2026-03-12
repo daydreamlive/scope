@@ -221,12 +221,9 @@ async def start_stream(
         session.start_frame_consumer()
         webrtc_manager.add_headless_session(session)
 
-        logger.info(
-            f"Started headless session {session.id} with pipeline {request.pipeline_id}"
-        )
+        logger.info(f"Started headless session with pipeline {request.pipeline_id}")
         return {
             "status": "ok",
-            "session_id": session.id,
             "pipeline_id": request.pipeline_id,
             "input_mode": request.input_mode,
         }
@@ -242,80 +239,11 @@ async def stop_stream(
     webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
 ):
     """Stop the active headless pipeline session."""
-    sessions = webrtc_manager.headless_sessions
-    if not sessions:
+    if not webrtc_manager.headless_session:
         raise HTTPException(status_code=404, detail="No active headless session")
-    session_id = next(iter(sessions))
     try:
-        await webrtc_manager.remove_headless_session(session_id)
-        return {"status": "ok", "message": f"Session {session_id} stopped"}
+        await webrtc_manager.remove_headless_session()
+        return {"status": "ok", "message": "Headless session stopped"}
     except Exception as e:
-        logger.error(f"Error stopping headless session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-# ---------------------------------------------------------------------------
-# Pipeline Unload
-# ---------------------------------------------------------------------------
-
-
-@router.post("/pipeline/unload")
-async def unload_pipeline(
-    pipeline_manager: "PipelineManager" = Depends(_get_pipeline_manager),
-):
-    """Unload all currently loaded pipelines and free GPU memory."""
-    try:
-        pipeline_manager.unload_all_pipelines()
-        return {"status": "ok", "message": "All pipelines unloaded"}
-    except Exception as e:
-        logger.error(f"Error unloading pipelines: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-# ---------------------------------------------------------------------------
-# Recording
-# ---------------------------------------------------------------------------
-
-
-@router.post("/session/recording/start")
-async def start_recording(
-    webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
-):
-    """Start recording the output of the active session."""
-    sessions = webrtc_manager.list_sessions()
-    if not sessions:
-        raise HTTPException(status_code=404, detail="No active session")
-    session = next(iter(sessions.values()))
-    if not session.recording_manager:
-        raise HTTPException(
-            status_code=404,
-            detail="Recording not available for the active session",
-        )
-    try:
-        await session.recording_manager.start_recording()
-        return {"status": "ok", "message": "Recording started"}
-    except Exception as e:
-        logger.error(f"Error starting recording: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@router.post("/session/recording/stop")
-async def stop_recording(
-    webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
-):
-    """Stop recording the output of the active session."""
-    sessions = webrtc_manager.list_sessions()
-    if not sessions:
-        raise HTTPException(status_code=404, detail="No active session")
-    session = next(iter(sessions.values()))
-    if not session.recording_manager:
-        raise HTTPException(
-            status_code=404,
-            detail="Recording not available for the active session",
-        )
-    try:
-        await session.recording_manager.stop_recording()
-        return {"status": "ok", "message": "Recording stopped"}
-    except Exception as e:
-        logger.error(f"Error stopping recording: {e}")
+        logger.error(f"Error stopping headless session: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

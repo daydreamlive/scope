@@ -100,11 +100,9 @@ class HeadlessSession:
     def __init__(
         self,
         frame_processor: "FrameProcessor",
-        session_id: str | None = None,
     ):
         from .frame_processor import FrameProcessor
 
-        self.id = session_id or str(uuid.uuid4())
         self.frame_processor: FrameProcessor = frame_processor
         self._last_frame = None
         self._frame_lock = threading.Lock()
@@ -142,7 +140,7 @@ class HeadlessSession:
             except asyncio.CancelledError:
                 pass
         self.frame_processor.stop()
-        logger.info(f"Headless session {self.id} closed")
+        logger.info("Headless session closed")
 
     def get_last_frame(self):
         """Return the most recently cached frame, or None."""
@@ -150,7 +148,7 @@ class HeadlessSession:
             return self._last_frame
 
     def __str__(self):
-        return f"HeadlessSession({self.id}, running={self.frame_processor.running})"
+        return f"HeadlessSession(running={self.frame_processor.running})"
 
 
 class NotificationSender:
@@ -248,7 +246,7 @@ class WebRTCManager:
 
     def __init__(self):
         self.sessions: dict[str, Session] = {}
-        self.headless_sessions: dict[str, HeadlessSession] = {}
+        self.headless_session: HeadlessSession | None = None
         self.rtc_config = create_rtc_config()
         self.is_first_track = True
 
@@ -669,22 +667,17 @@ class WebRTCManager:
         )
 
     def add_headless_session(self, session: HeadlessSession) -> None:
-        """Register a headless session."""
-        self.headless_sessions[session.id] = session
+        """Register the headless session (only one supported at a time)."""
+        self.headless_session = session
 
-    def get_headless_session(self, session_id: str) -> HeadlessSession | None:
-        """Get a headless session by ID."""
-        return self.headless_sessions.get(session_id)
-
-    async def remove_headless_session(self, session_id: str) -> None:
-        """Stop and remove a headless session."""
-        session = self.headless_sessions.pop(session_id, None)
+    async def remove_headless_session(self) -> None:
+        """Stop and remove the active headless session."""
+        session = self.headless_session
+        self.headless_session = None
         if session:
             await session.close()
         else:
-            logger.warning(
-                f"Attempted to remove non-existent headless session: {session_id}"
-            )
+            logger.warning("Attempted to remove non-existent headless session")
 
     async def add_ice_candidate(
         self,
@@ -736,9 +729,8 @@ class WebRTCManager:
                 and session.video_track.frame_processor
             ):
                 return sid, session.video_track.frame_processor, False
-        for sid, session in self.headless_sessions.items():
-            if session.frame_processor:
-                return sid, session.frame_processor, True
+        if self.headless_session and self.headless_session.frame_processor:
+            return "headless", self.headless_session.frame_processor, True
         return None
 
     def get_last_frame(self):
@@ -748,8 +740,8 @@ class WebRTCManager:
                 frame = session.video_track.get_last_frame()
                 if frame is not None:
                     return frame
-        for session in self.headless_sessions.values():
-            frame = session.get_last_frame()
+        if self.headless_session:
+            frame = self.headless_session.get_last_frame()
             if frame is not None:
                 return frame
         return None
@@ -763,9 +755,8 @@ class WebRTCManager:
                 session.video_track.pause(parameters["paused"])
             if session.video_track and hasattr(session.video_track, "frame_processor"):
                 session.video_track.frame_processor.update_parameters(parameters)
-        for session in self.headless_sessions.values():
-            if session.frame_processor:
-                session.frame_processor.update_parameters(parameters)
+        if self.headless_session and self.headless_session.frame_processor:
+            self.headless_session.frame_processor.update_parameters(parameters)
 
     def broadcast_notification(self, message: dict) -> None:
         """Send a notification message to all active sessions via their data channels."""
@@ -784,12 +775,13 @@ class WebRTCManager:
     async def stop(self):
         """Close and cleanup all sessions (WebRTC and headless)."""
         close_tasks = [session.close() for session in self.sessions.values()]
-        close_tasks += [session.close() for session in self.headless_sessions.values()]
+        if self.headless_session:
+            close_tasks.append(self.headless_session.close())
         if close_tasks:
             await asyncio.gather(*close_tasks, return_exceptions=True)
 
         self.sessions.clear()
-        self.headless_sessions.clear()
+        self.headless_session = None
 
 
 def create_rtc_config() -> RTCConfiguration:
