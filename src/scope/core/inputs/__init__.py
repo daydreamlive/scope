@@ -41,6 +41,13 @@ def get_input_source_classes() -> dict[str, type[InputSource]]:
     except Exception:
         pass
 
+    try:
+        from .video_file import VideoFileInputSource
+
+        sources[VideoFileInputSource.source_id] = VideoFileInputSource
+    except Exception:
+        pass
+
     return sources
 
 

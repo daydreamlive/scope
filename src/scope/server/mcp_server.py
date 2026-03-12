@@ -251,7 +251,7 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
             pipeline_id: Pipeline ID to run (must already be loaded)
             input_mode: "text" for prompt-only generation, "video" for input source processing
             prompts: Initial prompts, e.g. [{"text": "a forest", "weight": 100}]
-            input_source: Server-side input source config for video mode. Format: {"enabled": true, "source_type": "<type>", "source_name": "<name>"}
+            input_source: Server-side input source config for video mode. Format: {"enabled": true, "source_type": "<type>", "source_name": "<name>"}. For video_file, source_name can be a full file path or an asset name.
         """
         body: dict = {"pipeline_id": pipeline_id, "input_mode": input_mode}
         if prompts is not None:
