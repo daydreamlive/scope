@@ -186,7 +186,6 @@ export function StreamPage() {
   const initialMode =
     settings.inputMode || getPipelineDefaultMode(settings.pipelineId);
 
-
   // Ref to access latest settings without re-creating sendParameterUpdate on every change
   const settingsRef = useRef(settings);
   settingsRef.current = settings;
@@ -2306,8 +2305,7 @@ export function StreamPage() {
                   promptCycleRate={settings.promptCycleRate || "none"}
                   onPromptCycleRateChange={rate =>
                     updateSettings({
-                      promptCycleRate:
-                        rate as SettingsState["promptCycleRate"],
+                      promptCycleRate: rate as SettingsState["promptCycleRate"],
                     })
                   }
                 />
