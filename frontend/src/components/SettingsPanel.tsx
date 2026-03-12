@@ -1218,6 +1218,21 @@ export function SettingsPanel({
           );
         })()}
 
+        {/* MIDI Input */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between gap-2">
+            <LabelWithTooltip
+              label="MIDI Input"
+              tooltip="Enable MIDI controller input to map knobs and pads to parameters."
+              className="text-sm font-medium"
+            />
+            <MIDIToggle />
+          </div>
+
+          <MIDIDeviceSelector />
+
+          <MIDIMappingButton />
+        </div>
       </CardContent>
     </Card>
   );

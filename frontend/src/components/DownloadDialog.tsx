@@ -28,6 +28,8 @@ interface DownloadDialogProps {
   progress?: DownloadProgress | null;
   error?: string | null;
   onOpenSettings?: (tab: string) => void;
+  isCloudMode?: boolean;
+  onOpenLoRAsSettings?: () => void;
 }
 
 export function DownloadDialog({
@@ -41,6 +43,7 @@ export function DownloadDialog({
   progress = null,
   error = null,
   onOpenSettings,
+  // isCloudMode, onOpenLoRAsSettings accepted for StreamPage compatibility
 }: DownloadDialogProps) {
   if (pipelineIds.length === 0) return null;
 

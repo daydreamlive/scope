@@ -912,6 +912,111 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   URL.revokeObjectURL(url);
 };
 
+// ---------------------------------------------------------------------------
+// Workflow
+// ---------------------------------------------------------------------------
+
+export const resolveWorkflow = async (
+  workflow: ScopeWorkflow
+): Promise<WorkflowResolutionPlan> => {
+  const response = await fetch("/api/v1/workflow/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(workflow),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+export const downloadLoRA = async (
+  request: LoRADownloadRequest
+): Promise<LoRADownloadResult> => {
+  const response = await fetch("/api/v1/lora/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// OSC settings
+// ---------------------------------------------------------------------------
+
+export interface OscSettingsRequest {
+  log_all_messages: boolean;
+}
+
+export interface OscStatusResponse {
+  enabled: boolean;
+  listening: boolean;
+  port: number | null;
+  host: string | null;
+  log_all_messages: boolean;
+}
+
+export const updateOscSettings = async (
+  settings: OscSettingsRequest
+): Promise<OscStatusResponse> => {
+  const response = await fetch("/api/v1/osc/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Update OSC settings failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// Daydream API – workflow import from community hub
+// ---------------------------------------------------------------------------
+
+const DAYDREAM_API_BASE =
+  (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
+  "https://api.daydream.live";
+
+export const fetchDaydreamWorkflow = async (
+  workflowId: string
+): Promise<ScopeWorkflow> => {
+  const response = await fetch(
+    `${DAYDREAM_API_BASE}/v1/workflows/${encodeURIComponent(workflowId)}`
+  );
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(`Failed to fetch workflow: ${detail}`);
+  }
+  const data = await response.json();
+
+  const workflow: ScopeWorkflow | undefined = data.workflowData;
+  if (
+    !workflow ||
+    workflow.format !== "scope-workflow" ||
+    !workflow.metadata?.name ||
+    !Array.isArray(workflow.pipelines) ||
+    workflow.pipelines.length === 0
+  ) {
+    throw new Error(
+      "The fetched workflow is missing required data (workflowData, metadata, or pipelines)."
+    );
+  }
+
+  return workflow;
+};
+
 // =============================================================================
 // Tempo Sync API
 // =============================================================================

@@ -241,18 +241,20 @@ export function WorkflowImportDialog({
 
         loras.initialize(
           resolution.items
-            .filter(i => i.kind === "lora" && i.status === "missing")
-            .map(i => i.name)
+            .filter(
+              (i: ResolutionItem) => i.kind === "lora" && i.status === "missing"
+            )
+            .map((i: ResolutionItem) => i.name)
         );
         plugins.initialize(
           resolution.items
             .filter(
-              i =>
+              (i: ResolutionItem) =>
                 i.kind === "plugin" &&
                 i.status === "missing" &&
                 i.can_auto_resolve
             )
-            .map(i => i.name)
+            .map((i: ResolutionItem) => i.name)
         );
 
         setStep("review");
@@ -319,18 +321,20 @@ export function WorkflowImportDialog({
         // Initialize dependency states from resolution items
         loras.initialize(
           resolution.items
-            .filter(i => i.kind === "lora" && i.status === "missing")
-            .map(i => i.name)
+            .filter(
+              (i: ResolutionItem) => i.kind === "lora" && i.status === "missing"
+            )
+            .map((i: ResolutionItem) => i.name)
         );
         plugins.initialize(
           resolution.items
             .filter(
-              i =>
+              (i: ResolutionItem) =>
                 i.kind === "plugin" &&
                 i.status === "missing" &&
                 i.can_auto_resolve
             )
-            .map(i => i.name)
+            .map((i: ResolutionItem) => i.name)
         );
 
         setStep("review");

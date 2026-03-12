@@ -18,6 +18,7 @@ import { StatusBar } from "../components/StatusBar";
 import { LogPanel } from "../components/LogPanel";
 import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useTempoSync } from "../hooks/useTempoSync";
+import { MIDIProvider } from "../contexts/MIDIContext";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
@@ -388,11 +389,11 @@ export function StreamPage() {
       const workflowId = data.id;
       toast.info("Fetching workflow...");
       fetchDaydreamWorkflow(workflowId)
-        .then(workflow => {
+        .then((workflow: ScopeWorkflow) => {
           setPreloadedWorkflow(workflow);
           setShowWorkflowImport(true);
         })
-        .catch(err => {
+        .catch((err: unknown) => {
           console.error("Failed to fetch workflow from deep link:", err);
           toast.error("Failed to import workflow", {
             description: err instanceof Error ? err.message : String(err),
@@ -2149,63 +2150,7 @@ export function StreamPage() {
               mode={mode}
               onModeChange={handleModeChange}
               isStreaming={isStreaming}
-            />
-          )}
-          {tempoState && (
-            <TempoSyncPanel
-              className="flex-shrink-0"
-              tempoState={tempoState}
-              tempoSources={tempoSources}
-              tempoLoading={tempoLoading}
-              tempoError={tempoError}
-              onTempoEnable={enableTempoSync}
-              onTempoDisable={disableTempoSync}
-              onTempoSetBpm={setTempoSessionBpm}
-              onTempoRefreshSources={refreshTempoSources}
-              quantizeMode={settings.quantizeMode || "none"}
-              onQuantizeModeChange={mode =>
-                updateSettings({
-                  quantizeMode: mode as SettingsState["quantizeMode"],
-                })
-              }
-              lookaheadMs={settings.lookaheadMs ?? 0}
-              onLookaheadMsChange={ms => updateSettings({ lookaheadMs: ms })}
-              modulations={settings.modulations}
-              onModulationsChange={modulations => {
-                updateSettings({ modulations });
-                if (isStreaming) {
-                  sendParameterUpdateWebRTC({ modulations });
-                }
-              }}
-              configSchema={pipelines?.[settings.pipelineId]?.configSchema}
-              beatCacheResetRate={settings.beatCacheResetRate || "none"}
-              onBeatCacheResetRateChange={rate => {
-                updateSettings({
-                  beatCacheResetRate:
-                    rate as SettingsState["beatCacheResetRate"],
-                });
-                if (isStreaming) {
-                  sendParameterUpdateWebRTC({ beat_cache_reset_rate: rate });
-                }
-              }}
-              promptCycleRate={settings.promptCycleRate || "none"}
-              onPromptCycleRateChange={rate => {
-                updateSettings({
-                  promptCycleRate:
-                    rate as SettingsState["promptCycleRate"],
-                });
-              }}
-            />
-          )}
-        </div>
-
-        {/* Center Panel - Video Output + Timeline */}
-        <div className="flex-1 flex flex-col min-h-0">
-          {/* Video area - takes remaining space but can shrink */}
-          <div className="flex-1 min-h-0">
-            <VideoOutput
-              className="h-full"
-              remoteStream={remoteStream}
+              isConnecting={isConnecting || isCloudConnecting}
               isPipelineLoading={isPipelineLoading}
               canStartStream={
                 settings.inputMode === "text"
