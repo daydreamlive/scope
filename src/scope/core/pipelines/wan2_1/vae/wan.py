@@ -4,12 +4,15 @@ This module provides a unified VAE wrapper that supports both the full WanVAE
 and the 75% pruned LightVAE through a single interface with a `use_lightvae` parameter.
 """
 
+import logging
 import os
 
 import torch
 
 from .constants import WAN_VAE_LATENT_MEAN, WAN_VAE_LATENT_STD
 from .modules.vae import _video_vae, count_conv3d
+
+logger = logging.getLogger(__name__)
 
 # Default filenames for VAE checkpoints
 DEFAULT_VAE_FILENAME = "Wan2.1_VAE.pth"
@@ -205,3 +208,48 @@ class WanVAEWrapper(torch.nn.Module):
     def clear_cache(self):
         """Clear encoder/decoder cache for next sequence."""
         self.model.first_batch = True
+
+    def compile_decoder(self, height: int, width: int):
+        """Apply torch.compile to the decoder and conv2, then warmup.
+
+        Compiles the steady-state streaming decode path (cache_bufs) for ~1.4x
+        speedup. First-time compilation takes several minutes (triton kernel
+        generation); subsequent runs use the cached kernels.
+
+        Args:
+            height: Output video height in pixels (needed for warmup latent shape).
+            width: Output video width in pixels (needed for warmup latent shape).
+        """
+        import time
+
+        latents = torch.zeros(
+            1, 3, 16, height // 8, width // 8, device="cuda", dtype=torch.bfloat16
+        )
+
+        # Run first_batch pass EAGERLY (before compile) to allocate decoder
+        # cache buffers. The cache path uses @torch.compiler.disable which
+        # causes graph breaks; running it before compile prevents those breaks
+        # from polluting dynamo's recompile counters.
+        self.model.first_batch = True
+        self.decode_to_pixel(latents, use_cache=True)
+
+        # Now compile. With cache buffers pre-allocated, stream_decode's
+        # first_batch path will use cache_bufs (no graph breaks).
+        logger.info("Compiling VAE decoder with torch.compile...")
+        start = time.time()
+
+        self.model.decoder = torch.compile(
+            self.model.decoder, mode="max-autotune-no-cudagraphs", fullgraph=False
+        )
+        self.model.conv2 = torch.compile(
+            self.model.conv2, mode="max-autotune-no-cudagraphs", fullgraph=False
+        )
+
+        # Warmup the compiled cache_bufs path
+        for _ in range(9):
+            self.decode_to_pixel(latents, use_cache=True)
+
+        # Reset for real generation
+        self.model.first_batch = True
+
+        logger.info(f"VAE decoder compilation completed in {time.time() - start:.2f}s")

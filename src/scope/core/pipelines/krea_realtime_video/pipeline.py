@@ -46,6 +46,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         config,
         quantization: Quantization | None = None,
         compile: bool = False,
+        compile_vae: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
         stage_callback=None,
@@ -217,6 +218,13 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
             )
 
         print(f"Warmed up ({warmup_runs} runs) in {time.time() - start:.2f}s")
+
+        if compile_vae:
+            if stage_callback:
+                stage_callback(
+                    "Compiling VAE decoder (this may take several minutes)..."
+                )
+            self.components.vae.compile_decoder(config.height, config.width)
 
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
