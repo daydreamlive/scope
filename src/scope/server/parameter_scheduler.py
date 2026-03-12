@@ -55,6 +55,7 @@ class ParameterScheduler:
         if mode not in valid:
             logger.warning(f"[SCHEDULER] Invalid quantize mode '{mode}', ignoring")
             return
+        self.cancel_pending()
         self._quantize_mode = mode
         logger.info(f"[SCHEDULER] Quantize mode set to '{mode}'")
 
@@ -64,6 +65,7 @@ class ParameterScheduler:
 
     @lookahead_ms.setter
     def lookahead_ms(self, ms: float) -> None:
+        self.cancel_pending()
         self._lookahead_ms = max(0.0, float(ms))
         logger.info(f"[SCHEDULER] Lookahead set to {self._lookahead_ms:.0f}ms")
 

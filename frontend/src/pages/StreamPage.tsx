@@ -1642,9 +1642,13 @@ export function StreamPage() {
         (promptCycleIndexRef.current + 1) % items.length;
       const active = items[promptCycleIndexRef.current];
 
-      sendParameterUpdate({
+      // Send directly via WebRTC to bypass the quantize logic in
+      // sendParameterUpdate — this effect already fires on the boundary.
+      const promptParams = {
         prompts: [{ text: active.text, weight: 100 }],
-      });
+      };
+      sendParameterUpdateWebRTC(promptParams);
+      applyBackendParamsToSettings(promptParams);
     }
     promptCycleBoundaryRef.current = boundary;
   }, [
@@ -1653,7 +1657,8 @@ export function StreamPage() {
     tempoState.beatsPerBar,
     tempoState.enabled,
     isStreaming,
-    sendParameterUpdate,
+    sendParameterUpdateWebRTC,
+    applyBackendParamsToSettings,
   ]);
 
   // Update temporal interpolation defaults and clear prompts when pipeline changes

@@ -94,9 +94,12 @@ class TempoSync:
     def get_beat_state(self) -> BeatState | None:
         """Get the current beat state. Thread-safe.
 
-        Returns client-forwarded state if fresh, otherwise falls back
-        to the server-side tempo source.
+        Returns None when disabled. Otherwise returns client-forwarded
+        state if fresh, falling back to the server-side tempo source.
         """
+        if not self._enabled:
+            return None
+
         with self._client_state_lock:
             client_state = self._client_beat_state
 
@@ -166,7 +169,14 @@ class TempoSync:
             raise ValueError(f"Unknown tempo source type: {source_type}")
 
         if source is None:
-            return
+            hints = {
+                "link": "Install with: uv sync --group link",
+                "midi_clock": "Install with: uv sync --group midi",
+            }
+            raise RuntimeError(
+                f"Failed to create {source_type} tempo source. "
+                f"{hints.get(source_type, '')}"
+            )
 
         await source.start()
 
@@ -190,7 +200,11 @@ class TempoSync:
 
     async def disable(self) -> None:
         """Disable tempo sync and stop the current source."""
+        self._enabled = False
         self._stop_notifications()
+
+        with self._client_state_lock:
+            self._client_beat_state = None
 
         with self._source_lock:
             source = self._source
@@ -199,8 +213,6 @@ class TempoSync:
         if source is not None:
             await source.stop()
             logger.info(f"Tempo sync disabled (was: {source.name})")
-
-        self._enabled = False
 
     async def stop(self) -> None:
         """Shutdown the tempo sync manager."""

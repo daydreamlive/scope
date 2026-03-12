@@ -11,7 +11,10 @@ import logging
 import threading
 import time
 
-from aalink import Link
+try:
+    from aalink import Link
+except ImportError:
+    Link = None
 
 from ..tempo_sync import BeatState, TempoSource
 
@@ -51,6 +54,10 @@ class LinkTempoSource(TempoSource):
             return self._cached_state
 
     async def start(self) -> None:
+        if Link is None:
+            raise ImportError(
+                "aalink is not installed. Install with: uv sync --group link"
+            )
         loop = asyncio.get_running_loop()
         self._link = Link(self._initial_bpm, loop)
         self._link.quantum = self._beats_per_bar

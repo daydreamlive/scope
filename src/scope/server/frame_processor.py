@@ -245,6 +245,10 @@ class FrameProcessor:
 
         self.running = False
 
+        # Cancel any pending scheduled parameter changes
+        if self.parameter_scheduler is not None:
+            self.parameter_scheduler.cancel_pending()
+
         # Stop all pipeline processors
         for processor in self.pipeline_processors:
             processor.stop()
@@ -625,12 +629,18 @@ class FrameProcessor:
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
-        # Intercept quantize_mode and lookahead_ms, route to scheduler
-        if self.parameter_scheduler is not None:
-            if "quantize_mode" in parameters:
-                self.parameter_scheduler.quantize_mode = parameters.pop("quantize_mode")
-            if "lookahead_ms" in parameters:
-                self.parameter_scheduler.lookahead_ms = parameters.pop("lookahead_ms")
+        # Always strip tempo-control keys so they never leak into pipelines,
+        # even when the corresponding helper (scheduler/engine/tempo_sync) is absent.
+
+        if "quantize_mode" in parameters:
+            mode = parameters.pop("quantize_mode")
+            if self.parameter_scheduler is not None:
+                self.parameter_scheduler.quantize_mode = mode
+
+        if "lookahead_ms" in parameters:
+            ms = parameters.pop("lookahead_ms")
+            if self.parameter_scheduler is not None:
+                self.parameter_scheduler.lookahead_ms = ms
 
         # Handle generic output sinks config
         if "output_sinks" in parameters:
@@ -642,22 +652,28 @@ class FrameProcessor:
             input_source_config = parameters.pop("input_source")
             self._update_input_source(input_source_config)
 
-        # Intercept modulation config and route to ModulationEngine
-        if self.modulation_engine is not None and "modulations" in parameters:
-            self.modulation_engine.update(parameters.pop("modulations"))
+        if "modulations" in parameters:
+            raw = parameters.pop("modulations")
+            if self.modulation_engine is not None:
+                self.modulation_engine.update(raw)
 
-        # Intercept beat-synced cache reset rate and route to all processors
         if "beat_cache_reset_rate" in parameters:
             rate = parameters.pop("beat_cache_reset_rate")
             for processor in self.pipeline_processors:
                 processor._beat_cache_reset_rate = rate
                 processor._last_reset_boundary = -1
 
-        # Intercept client-forwarded beat state and route to TempoSync
-        # (beat state is injected into call_params by PipelineProcessor,
-        # not through the regular parameter queue)
+        # Strip client-forwarded beat state keys so they are never forwarded
+        # as regular pipeline parameters (they are injected separately by
+        # PipelineProcessor). Route to TempoSync when available.
         if self.tempo_sync is not None:
             parameters = self.tempo_sync.update_client_beat_state(parameters)
+        else:
+            from .tempo_sync import BEAT_STATE_KEYS
+
+            parameters = {
+                k: v for k, v in parameters.items() if k not in BEAT_STATE_KEYS
+            }
 
         # Update parameters for all pipeline processors
         for processor in self.pipeline_processors:
