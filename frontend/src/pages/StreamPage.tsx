@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { Header } from "../components/Header";
 import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
@@ -57,6 +57,10 @@ import {
 } from "../lib/auth";
 import { createDaydreamImportSession } from "../lib/daydreamExport";
 import { openExternalUrl } from "../lib/openExternal";
+import {
+  useCloudWorkflowBackup,
+  clearCloudWorkflowBackup,
+} from "../hooks/useCloudWorkflowBackup";
 
 interface OscCommand {
   key: string;
@@ -114,6 +118,10 @@ export function StreamPage() {
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
+
+  // Actual connection status (vs just being in cloud mode)
+  const isCloudConnected =
+    (isDirectCloudMode && isCloudReady) || isBackendCloudConnected;
 
   // Log stream for the log panel
   const {
@@ -274,6 +282,7 @@ export function StreamPage() {
   const [showWorkflowImport, setShowWorkflowImport] = useState(false);
   const [preloadedWorkflow, setPreloadedWorkflow] =
     useState<ScopeWorkflow | null>(null);
+  const [isCloudRestore, setIsCloudRestore] = useState(false);
 
   // Daydream export state
   const [isExportingToDaydream, setIsExportingToDaydream] = useState(false);
@@ -1983,6 +1992,41 @@ export function StreamPage() {
     [updateSettings, skipNextModeReset, settings.inputMode]
   );
 
+  // Auto-save workflow to localStorage while cloud is connected.
+  // On disconnect → reconnect, opens the workflow import dialog to restore.
+  const handleCloudRestore = useCallback((workflow: ScopeWorkflow) => {
+    setPreloadedWorkflow(workflow);
+    setIsCloudRestore(true);
+    setShowWorkflowImport(true);
+  }, []);
+
+  const promptState = useMemo(
+    () => ({
+      promptItems,
+      interpolationMethod,
+      transitionSteps,
+      temporalInterpolationMethod,
+    }),
+    [
+      promptItems,
+      interpolationMethod,
+      transitionSteps,
+      temporalInterpolationMethod,
+    ]
+  );
+
+  useCloudWorkflowBackup({
+    settings,
+    timelinePrompts,
+    promptState,
+    pipelineInfoMap: pipelines,
+    loraFiles,
+    plugins,
+    scopeVersion: scopeVersion ?? "unknown",
+    isCloudConnected,
+    onRestoreRequest: handleCloudRestore,
+  });
+
   return (
     <MIDIProvider
       sendParameterUpdate={sendParameterUpdate}
@@ -2434,11 +2478,16 @@ export function StreamPage() {
         <WorkflowImportDialog
           open={showWorkflowImport}
           onClose={() => {
+            if (isCloudRestore) {
+              clearCloudWorkflowBackup();
+              setIsCloudRestore(false);
+            }
             setShowWorkflowImport(false);
             setPreloadedWorkflow(null);
           }}
           onLoad={handleWorkflowLoad}
           initialWorkflow={preloadedWorkflow}
+          isCloudRestore={isCloudRestore}
         />
       </div>
     </MIDIProvider>
