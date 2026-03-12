@@ -150,7 +150,11 @@ class RecacheFramesBlock(ModularPipelineBlocks):
 
         # Set fill_level to sink_tokens so only the sink is valid context initially.
         # Each chunk will grow fill_level as it processes.
-        components.generator.model.fill_level = sink_tokens
+        # Must target the base model (not PEFT wrapper) so CausalWanModel sees it.
+        model = components.generator.model
+        if hasattr(model, "get_base_model"):
+            model = model.get_base_model()
+        model.fill_level = sink_tokens
 
         # Get the number of frames to recache (min of what we've generated and buffer size)
         num_recache_frames = min(

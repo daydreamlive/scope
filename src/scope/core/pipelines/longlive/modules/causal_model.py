@@ -213,7 +213,9 @@ class CausalWanAttentionBlock(nn.Module):
         cx = self.norm3(x)
         b_ca, n_ca, d_ca = cx.size(0), self.num_heads, self.head_dim
         cq = self.cross_attn.norm_q(self.cross_attn.q(cx)).view(b_ca, -1, n_ca, d_ca)
-        ck = self.cross_attn.norm_k(self.cross_attn.k(context)).view(b_ca, -1, n_ca, d_ca)
+        ck = self.cross_attn.norm_k(self.cross_attn.k(context)).view(
+            b_ca, -1, n_ca, d_ca
+        )
         cv = self.cross_attn.v(context).view(b_ca, -1, n_ca, d_ca)
         ca_out = flash_attention(cq, ck, cv).flatten(2)
         x = x + self.cross_attn.o(ca_out)
@@ -226,9 +228,9 @@ class CausalWanAttentionBlock(nn.Module):
                 + e[3]
             ).flatten(1, 2)
         )
-        x = x + (
-            y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[5]
-        ).flatten(1, 2)
+        x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[5]).flatten(
+            1, 2
+        )
 
         return x, new_kv
 
@@ -276,7 +278,9 @@ class VaceBlock(CausalWanAttentionBlock):
             all_c = list(torch.unbind(c))
             c = all_c.pop(-1)
 
-        c, _ = super().forward(c, e0, freqs_cos, freqs_sin, context, empty_cache, empty_cache)
+        c, _ = super().forward(
+            c, e0, freqs_cos, freqs_sin, context, empty_cache, empty_cache
+        )
 
         hint = self.after_proj(c)
         all_c += [hint, c]
@@ -430,20 +434,30 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         with torch.device("cpu"):
             self.vace_patch_embedding = nn.Conv3d(
-                vace_in_dim, self.dim,
-                kernel_size=self.patch_size, stride=self.patch_size,
+                vace_in_dim,
+                self.dim,
+                kernel_size=self.patch_size,
+                stride=self.patch_size,
             )
 
             cross_attn_type = "t2v_cross_attn"
-            self.vace_blocks = nn.ModuleList([
-                VaceBlock(
-                    cross_attn_type, self.dim, self.ffn_dim, self.num_heads,
-                    self.local_attn_size, self.sink_size,
-                    self.qk_norm, self.cross_attn_norm, self.eps,
-                    block_id=i,
-                )
-                for i in range(num_vace_blocks)
-            ])
+            self.vace_blocks = nn.ModuleList(
+                [
+                    VaceBlock(
+                        cross_attn_type,
+                        self.dim,
+                        self.ffn_dim,
+                        self.num_heads,
+                        self.local_attn_size,
+                        self.sink_size,
+                        self.qk_norm,
+                        self.cross_attn_norm,
+                        self.eps,
+                        block_id=i,
+                    )
+                    for i in range(num_vace_blocks)
+                ]
+            )
 
     def _embed_vace_context(self, vace_context, seq_len):
         """Embed and pad VACE context. Runs outside the compiled region.
@@ -457,12 +471,19 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         """
         target_dtype = next(self.vace_patch_embedding.parameters()).dtype
 
-        c = [self.vace_patch_embedding(u.unsqueeze(0).to(dtype=target_dtype)) for u in vace_context]
+        c = [
+            self.vace_patch_embedding(u.unsqueeze(0).to(dtype=target_dtype))
+            for u in vace_context
+        ]
         c = [u.flatten(2).transpose(1, 2) for u in c]
-        return torch.cat([
-            torch.cat([u, u.new_zeros(1, max(0, seq_len - u.size(1)), u.size(2))], dim=1)
-            for u in c
-        ])
+        return torch.cat(
+            [
+                torch.cat(
+                    [u, u.new_zeros(1, max(0, seq_len - u.size(1)), u.size(2))], dim=1
+                )
+                for u in c
+            ]
+        )
 
     def _roll_update_cache(self, kv_cache, new_kvs):
         """Update the KV cache with new key-value pairs.
@@ -478,23 +499,38 @@ class CausalWanModel(ModelMixin, ConfigMixin):
 
         for i, (new_k, new_v) in enumerate(new_kvs):
             if self.fill_level >= self.cache_tokens:
-                kv_cache[i]["k"][:, self.sink_tokens:] = torch.roll(
-                    kv_cache[i]["k"][:, self.sink_tokens:], -take, dims=1
+                kv_cache[i]["k"][:, self.sink_tokens :] = torch.roll(
+                    kv_cache[i]["k"][:, self.sink_tokens :], -take, dims=1
                 )
-                kv_cache[i]["v"][:, self.sink_tokens:] = torch.roll(
-                    kv_cache[i]["v"][:, self.sink_tokens:], -take, dims=1
+                kv_cache[i]["v"][:, self.sink_tokens :] = torch.roll(
+                    kv_cache[i]["v"][:, self.sink_tokens :], -take, dims=1
                 )
                 kv_cache[i]["k"][:, -take:] = new_k[:, -take:]
                 kv_cache[i]["v"][:, -take:] = new_v[:, -take:]
             else:
-                kv_cache[i]["k"][:, self.fill_level:self.fill_level + take] = new_k[:, -take:]
-                kv_cache[i]["v"][:, self.fill_level:self.fill_level + take] = new_v[:, -take:]
+                kv_cache[i]["k"][:, self.fill_level : self.fill_level + take] = new_k[
+                    :, -take:
+                ]
+                kv_cache[i]["v"][:, self.fill_level : self.fill_level + take] = new_v[
+                    :, -take:
+                ]
 
         self.fill_level = min(self.fill_level + num_new, self.cache_tokens)
 
-    def _inner_forward(self, x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs,
-                       vace_embedded=None, context_scale=None,
-                       freqs_cos_vace=None, freqs_sin_vace=None):
+    def _inner_forward(
+        self,
+        x,
+        e0,
+        freqs_cos,
+        freqs_sin,
+        context,
+        cache_ks,
+        cache_vs,
+        vace_embedded=None,
+        context_scale=None,
+        freqs_cos_vace=None,
+        freqs_sin_vace=None,
+    ):
         """Pure-tensor inner forward through all blocks. Compiled with reduce-overhead
         when cache is full. With SDPA (no graph breaks), the entire block loop
         is captured as a single CUDA graph for maximum performance.
@@ -507,11 +543,17 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         if vace_embedded is not None:
             c = vace_embedded
             empty_cache = torch.empty(
-                c.shape[0], 0, self.num_heads, self.dim // self.num_heads,
-                dtype=c.dtype, device=c.device,
+                c.shape[0],
+                0,
+                self.num_heads,
+                self.dim // self.num_heads,
+                dtype=c.dtype,
+                device=c.device,
             )
             for block in self.vace_blocks:
-                c = block.forward_vace(c, x, e0, freqs_cos_vace, freqs_sin_vace, context, empty_cache)
+                c = block.forward_vace(
+                    c, x, e0, freqs_cos_vace, freqs_sin_vace, context, empty_cache
+                )
             hints = torch.unbind(c)[:-1]
 
         new_ks = []
@@ -529,7 +571,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             if hints is not None and block_index % 2 == 0:
                 hint = hints[block_index // 2]
                 if hint.shape[1] > x.shape[1]:
-                    hint = hint[:, :x.shape[1], :]
+                    hint = hint[:, : x.shape[1], :]
                 x = x + hint * context_scale
             new_ks.append(new_k)
             new_vs.append(new_v)
@@ -600,23 +642,48 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         context_scale_t = None
         if vace_context is not None and self.vace_blocks is not None:
             vace_embedded = self._embed_vace_context(vace_context, seq_len=x.shape[1])
-            freqs_cos_vace, freqs_sin_vace = precompute_freqs_i(self.freqs, f, h, w, start_frame=0)
+            freqs_cos_vace, freqs_sin_vace = precompute_freqs_i(
+                self.freqs, f, h, w, start_frame=0
+            )
             scale = vace_context_scale if vace_context_scale is not None else 1.0
             context_scale_t = torch.tensor(scale, dtype=x.dtype, device=x.device)
 
         if self.fill_level > 0:
-            cache_ks = [kv_cache[i]["k"][:, :self.fill_level] for i in range(len(self.blocks))]
-            cache_vs = [kv_cache[i]["v"][:, :self.fill_level] for i in range(len(self.blocks))]
+            cache_ks = [
+                kv_cache[i]["k"][:, : self.fill_level] for i in range(len(self.blocks))
+            ]
+            cache_vs = [
+                kv_cache[i]["v"][:, : self.fill_level] for i in range(len(self.blocks))
+            ]
         else:
-            empty_k = torch.empty(1, 0, self.num_heads, self.dim // self.num_heads,
-                                  dtype=x.dtype, device=x.device)
+            empty_k = torch.empty(
+                1,
+                0,
+                self.num_heads,
+                self.dim // self.num_heads,
+                dtype=x.dtype,
+                device=x.device,
+            )
             cache_ks = [empty_k] * len(self.blocks)
             cache_vs = [empty_k] * len(self.blocks)
 
-        forward_fn = self._compiled_inner_forward if self.fill_level >= self.cache_tokens else self._inner_forward
+        forward_fn = (
+            self._compiled_inner_forward
+            if self.fill_level >= self.cache_tokens
+            else self._inner_forward
+        )
         x, new_kvs = forward_fn(
-            x, e0, freqs_cos, freqs_sin, context, cache_ks, cache_vs,
-            vace_embedded, context_scale_t, freqs_cos_vace, freqs_sin_vace,
+            x,
+            e0,
+            freqs_cos,
+            freqs_sin,
+            context,
+            cache_ks,
+            cache_vs,
+            vace_embedded,
+            context_scale_t,
+            freqs_cos_vace,
+            freqs_sin_vace,
         )
 
         if update_cache:

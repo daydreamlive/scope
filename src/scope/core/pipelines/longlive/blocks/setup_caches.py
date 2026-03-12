@@ -257,8 +257,12 @@ class SetupCachesBlock(ModularPipelineBlocks):
                 num_frame_per_block=components.config.num_frame_per_block,
                 kv_cache_existing=block_state.kv_cache,
             )
-            # Reset fill_level when cache is (re)initialized
-            components.generator.model.fill_level = 0
+            # Reset fill_level on the base model (not the PEFT wrapper)
+            # so that CausalWanModel._roll_update_cache sees the reset.
+            model = components.generator.model
+            if hasattr(model, "get_base_model"):
+                model = model.get_base_model()
+            model.fill_level = 0
 
         if init_cache:
             logger.info(
