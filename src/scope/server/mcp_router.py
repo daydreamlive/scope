@@ -190,7 +190,7 @@ async def start_stream(
     and POST /api/v1/session/stop to tear it down.
     """
     from .frame_processor import FrameProcessor
-    from .headless_session import HeadlessSession
+    from .headless import HeadlessSession
 
     # Build initial parameters
     initial_params: dict = {

@@ -21,7 +21,7 @@ from aiortc.sdp import candidate_from_sdp
 
 from .cloud_track import CloudTrack
 from .credentials import get_turn_credentials
-from .headless_session import HeadlessSession
+from .headless import HeadlessSession
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
