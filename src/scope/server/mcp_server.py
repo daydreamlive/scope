@@ -200,30 +200,25 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
     async def capture_frame(quality: int = 85) -> str:
         """Capture the current pipeline output frame as a JPEG screenshot.
         Saves the image to a temp file and returns the file path so you can
-        view it. Requires an active WebRTC stream.
+        read it. Requires an active stream (WebRTC or headless).
 
         Args:
             quality: JPEG quality (1-100, default 85)
         """
-        import base64
         import tempfile
 
         resp = await client.get("/api/v1/session/frame", params={"quality": quality})
         resp.raise_for_status()
 
-        # Save to a temp file so Claude can read the image
         with tempfile.NamedTemporaryFile(
             suffix=".jpg", prefix="scope_frame_", delete=False
         ) as f:
             f.write(resp.content)
             file_path = f.name
 
-        # Also return base64 for inline viewing
-        b64 = base64.b64encode(resp.content).decode("ascii")
         return json.dumps(
             {
                 "file_path": file_path,
-                "base64_jpeg": b64,
                 "size_bytes": len(resp.content),
             },
             indent=2,
