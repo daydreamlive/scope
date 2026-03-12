@@ -111,6 +111,7 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
+    connectStage: cloudConnectStage,
   } = useCloudStatus();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
@@ -425,6 +426,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
+    loadingStage: pipelineLoadingStage,
   } = usePipeline();
 
   // Tempo sync
@@ -440,63 +442,10 @@ export function StreamPage() {
     updateFromNotification: updateTempoFromNotification,
   } = useTempoSync();
 
-  // WebRTC for streaming (unified hook works in both local and cloud modes)
-  const {
-    remoteStream,
-    isStreaming,
-    isConnecting,
-    peerConnectionRef,
-    startStream,
-    stopStream,
-    updateVideoTrack,
-    sendParameterUpdate: sendParameterUpdateWebRTC,
-    sessionId,
-  } = useUnifiedWebRTC({
-    onTempoUpdate: updateTempoFromNotification,
-    onChangeScheduled: () => setIsChangePending(true),
-    onChangeApplied: () => setIsChangePending(false),
-  });
-
-  // Whether beat-quantized output gating is active
-  const isQuantizeActive =
-    isStreaming &&
-    tempoState.enabled &&
-    (settings.quantizeMode || "none") !== "none";
-
-  // Wrapper for sendParameterUpdate that also syncs frontend state.
-  // Uses settingsRef to avoid depending on the full `settings` object,
-  // which would cause this callback (and dependent useEffects) to
-  // re-fire on every settings change, flooding the backend with
-  // unnecessary parameter messages.
-  const sendParameterUpdate = useCallback(
+  // Apply backend parameter values to frontend state (used for both local
+  // sends and external updates pushed via the data channel).
+  const applyBackendParamsToSettings = useCallback(
     (params: Record<string, unknown>) => {
-      // Auto-flag discrete params for beat-quantized gating
-      if (isQuantizeActive) {
-        const NEVER_QUANTIZE = new Set([
-          "paused",
-          "quantize_mode",
-          "lookahead_ms",
-          "_quantized",
-          "prompt_interpolation_method",
-        ]);
-        const hasDiscrete = Object.entries(params).some(([key, value]) => {
-          if (NEVER_QUANTIZE.has(key)) return false;
-          return (
-            typeof value === "boolean" ||
-            typeof value === "string" ||
-            key === "prompts" ||
-            key === "reset_cache"
-          );
-        });
-        if (hasDiscrete) {
-          params = { ...params, _quantized: true };
-        }
-      }
-
-      // Send to backend via WebRTC
-      sendParameterUpdateWebRTC(params);
-
-      // Also update frontend state for known parameters
       const settingsUpdate: Partial<SettingsState> = {};
 
       if (params.noise_scale !== undefined) {
@@ -545,12 +494,80 @@ export function StreamPage() {
         };
       }
 
-      // Update settings if any mappings were found
       if (Object.keys(settingsUpdate).length > 0) {
         updateSettings(settingsUpdate);
       }
+
+      if (params.prompts) {
+        setPromptItems(
+          params.prompts as Array<{ text: string; weight: number }>
+        );
+      }
     },
-    [sendParameterUpdateWebRTC, updateSettings, isQuantizeActive]
+    [updateSettings, settings]
+  );
+
+  // WebRTC for streaming (unified hook works in both local and cloud modes)
+  const {
+    remoteStream,
+    isStreaming,
+    isConnecting,
+    peerConnectionRef,
+    startStream,
+    stopStream,
+    updateVideoTrack,
+    sendParameterUpdate: sendParameterUpdateWebRTC,
+    sessionId,
+  } = useUnifiedWebRTC({
+    onParametersUpdated: applyBackendParamsToSettings,
+    onTempoUpdate: updateTempoFromNotification,
+    onChangeScheduled: () => setIsChangePending(true),
+    onChangeApplied: () => setIsChangePending(false),
+  });
+
+  // Whether beat-quantized output gating is active
+  const isQuantizeActive =
+    isStreaming &&
+    tempoState.enabled &&
+    (settings.quantizeMode || "none") !== "none";
+
+  // Wrapper for sendParameterUpdate that also syncs frontend state.
+  // Uses settingsRef to avoid depending on the full `settings` object,
+  // which would cause this callback (and dependent useEffects) to
+  // re-fire on every settings change, flooding the backend with
+  // unnecessary parameter messages.
+  const sendParameterUpdate = useCallback(
+    (params: Record<string, unknown>) => {
+      // Auto-flag discrete params for beat-quantized gating
+      if (isQuantizeActive) {
+        const NEVER_QUANTIZE = new Set([
+          "paused",
+          "quantize_mode",
+          "lookahead_ms",
+          "_quantized",
+          "prompt_interpolation_method",
+        ]);
+        const hasDiscrete = Object.entries(params).some(([key, value]) => {
+          if (NEVER_QUANTIZE.has(key)) return false;
+          return (
+            typeof value === "boolean" ||
+            typeof value === "string" ||
+            key === "prompts" ||
+            key === "reset_cache"
+          );
+        });
+        if (hasDiscrete) {
+          params = { ...params, _quantized: true };
+        }
+      }
+
+      // Send to backend via WebRTC
+      sendParameterUpdateWebRTC(params);
+
+      // Also update frontend state for known parameters
+      applyBackendParamsToSettings(params);
+    },
+    [sendParameterUpdateWebRTC, applyBackendParamsToSettings, isQuantizeActive]
   );
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
@@ -2313,6 +2330,8 @@ export function StreamPage() {
                 isCloudConnecting={isCloudConnecting}
                 isConnecting={isConnecting}
                 pipelineError={pipelineError}
+                pipelineLoadingStage={pipelineLoadingStage}
+                cloudConnectStage={cloudConnectStage}
                 isPlaying={!settings.paused}
                 isDownloading={isDownloading}
                 onPlayPauseToggle={() => {

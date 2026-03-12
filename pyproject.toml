@@ -68,6 +68,9 @@ kafka = [
 link = [
     "aalink>=0.1.1",
 ]
+mcp = [
+    "mcp>=1.0.0",
+]
 midi = [
     "mido>=1.3.0",
     "python-rtmidi>=1.5.0",

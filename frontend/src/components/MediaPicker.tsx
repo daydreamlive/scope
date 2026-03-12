@@ -106,10 +106,10 @@ export function MediaPicker({
       return;
     }
 
-    const maxSize = 50 * 1024 * 1024;
-    if (file.size > maxSize) {
+    const maxCloudUploadSize = 50 * 1024 * 1024;
+    if (isCloudConnected && file.size > maxCloudUploadSize) {
       console.error(
-        `handleFileUpload: File size exceeds maximum of ${maxSize / (1024 * 1024)}MB`
+        `handleFileUpload: File size exceeds maximum of ${maxCloudUploadSize / (1024 * 1024)}MB while connected to cloud`
       );
       return;
     }

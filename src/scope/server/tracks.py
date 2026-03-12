@@ -48,6 +48,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused = False
         self._paused_lock = threading.Lock()
         self._last_frame = None
+        self._frame_lock = threading.Lock()
 
         # Server-side input mode - when enabled, frames come from the backend
         # instead of WebRTC (no browser video track needed)
@@ -174,7 +175,8 @@ class VideoProcessingTrack(MediaStreamTrack):
                     frame.pts = pts
                     frame.time_base = time_base
 
-                    self._last_frame = frame
+                    with self._frame_lock:
+                        self._last_frame = frame
                     return frame
 
                 # No frame available, wait a bit before trying again
@@ -185,6 +187,11 @@ class VideoProcessingTrack(MediaStreamTrack):
                 raise
 
         raise Exception("Track stopped")
+
+    def get_last_frame(self):
+        """Return the most recently rendered frame, or None."""
+        with self._frame_lock:
+            return self._last_frame
 
     def pause(self, paused: bool):
         """Pause or resume the video track processing"""
