@@ -604,8 +604,8 @@ class PipelineProcessor:
             return beat_count // max(beats_per_bar * 4, 1)
         return -1
 
-    def _track_output_frame(self):
-        """Track when a frame is added to the output queue (production rate).
+    def _track_output_batch(self, num_frames: int, processing_time: float):
+        """Track batch-level production throughput for FPS calculation.
 
         Stores (num_frames, interval) tuples and computes FPS as
         sum(frames) / sum(intervals). This correctly handles variable
