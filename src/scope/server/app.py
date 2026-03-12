@@ -287,6 +287,8 @@ cloud_connection_manager = None
 kafka_publisher = None
 # Global tempo sync manager instance
 tempo_sync = None
+# Global OSC server instance
+osc_server = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -317,7 +319,8 @@ async def lifespan(app: FastAPI):
         pipeline_manager, \
         cloud_connection_manager, \
         kafka_publisher, \
-        tempo_sync
+        tempo_sync, \
+        osc_server
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
