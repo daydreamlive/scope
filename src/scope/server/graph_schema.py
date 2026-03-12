@@ -156,3 +156,53 @@ class GraphConfig(BaseModel):
                 )
 
         return errors
+
+
+def build_linear_graph(
+    pipeline_ids: list[str],
+    vace_input_video_ids: set[str] | None = None,
+) -> GraphConfig:
+    """Build a linear GraphConfig: source → pipeline_a → pipeline_b → … → sink.
+
+    Args:
+        pipeline_ids: Ordered list of pipeline IDs to chain.
+        vace_input_video_ids: Pipeline IDs that should receive input video as
+            ``vace_input_frames`` instead of ``video``.  When VACE is enabled
+            with ``vace_use_input_video``, callers resolve which pipelines
+            support VACE and pass their IDs here.
+    """
+    nodes = [GraphNode(id="input", type="source")]
+    edges: list[GraphEdge] = []
+    _vace_ids = vace_input_video_ids or set()
+
+    prev_node_id = "input"
+    for pid in pipeline_ids:
+        nodes.append(GraphNode(id=pid, type="pipeline", pipeline_id=pid))
+        to_port = "vace_input_frames" if pid in _vace_ids else "video"
+        edges.append(
+            GraphEdge(
+                **{
+                    "from": prev_node_id,
+                    "from_port": "video",
+                    "to_node": pid,
+                    "to_port": to_port,
+                    "kind": "stream",
+                }
+            )
+        )
+        prev_node_id = pid
+
+    nodes.append(GraphNode(id="output", type="sink"))
+    edges.append(
+        GraphEdge(
+            **{
+                "from": prev_node_id,
+                "from_port": "video",
+                "to_node": "output",
+                "to_port": "video",
+                "kind": "stream",
+            }
+        )
+    )
+
+    return GraphConfig(nodes=nodes, edges=edges)

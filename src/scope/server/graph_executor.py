@@ -63,24 +63,31 @@ def build_graph(
 
     Returns:
         GraphRun with source_queues, sink_processor, processors, pipeline_ids.
+
+    Raises:
+        ValueError: If the graph structure is invalid.
     """
+    errors = graph.validate_structure()
+    if errors:
+        raise ValueError(f"Invalid graph: {'; '.join(errors)}")
+
+    # Validate edge ports against pipeline input/output declarations
+    _validate_edge_ports(graph, pipeline_manager)
+
     # 1) Create one queue per edge (all edges are stream; frame-by-frame)
     stream_queues: dict[tuple[str, str], queue.Queue] = {}
     for e in graph.edges:
         if e.kind == "stream":
-            stream_queues[(e.to_node, e.to_port)] = queue.Queue(
-                maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE
-            )
+            key = (e.to_node, e.to_port)
+            if key in stream_queues:
+                raise ValueError(
+                    f"Duplicate stream edges to the same input port: "
+                    f"node={e.to_node!r}, port={e.to_port!r}. "
+                    f"Fan-in to a single port is not supported."
+                )
+            stream_queues[key] = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
 
-    # 2) Source queues: all queues that receive from a source node
-    source_queues: list[queue.Queue] = []
-    for node_id in graph.get_source_node_ids():
-        for e in graph.stream_edges_from(node_id):
-            q = stream_queues.get((e.to_node, e.to_port))
-            if q is not None:
-                source_queues.append(q)
-
-    # 3) Create a processor per pipeline node and wire input_queues per port
+    # 2) Create a processor per pipeline node and wire input_queues per port
     node_processors: dict[str, PipelineProcessor] = {}
     pipeline_ids: list[str] = []
 
@@ -108,7 +115,7 @@ def build_graph(
             if q is not None:
                 processor.input_queues[e.to_port] = q
 
-    # 4) Set each producer's output_queues per port and wire consumer input to same queue
+    # 3) Set each producer's output_queues per port
     for node in graph.nodes:
         if node.type != "pipeline" or node.id not in node_processors:
             continue
@@ -120,26 +127,10 @@ def build_graph(
             q = stream_queues.get((e.to_node, e.to_port))
             if q is not None and q not in out_by_port.get(e.from_port, []):
                 out_by_port.setdefault(e.from_port, []).append(q)
-                # Symmetric wiring: ensure consumer reads from this queue
-                consumer = node_processors.get(e.to_node)
-                if consumer is not None:
-                    consumer.input_queues[e.to_port] = q
         for port, qlist in out_by_port.items():
             proc.output_queues[port] = qlist
 
-    # 4b) Remove unwired default input queues so processors only wait for
-    # ports that are actually connected via stream edges.
-    for node in graph.nodes:
-        if node.type != "pipeline" or node.id not in node_processors:
-            continue
-        proc = node_processors[node.id]
-        wired_ports = {e.to_port for e in graph.edges_to(node.id) if e.kind == "stream"}
-        if wired_ports:
-            proc.input_queues = {
-                port: q for port, q in proc.input_queues.items() if port in wired_ports
-            }
-
-    # 4c) Populate output_consumers so processors can update downstream
+    # 3c) Populate output_consumers so processors can update downstream
     # input queue references at runtime when output queues are resized.
     for e in graph.edges:
         if e.kind != "stream":
@@ -151,24 +142,11 @@ def build_graph(
                 (consumer, e.to_port)
             )
 
-    # 4d) Wire throttler: for each producer with a video consumer,
-    # set the throttler reference for downstream FPS-based throttling.
-    for e in graph.edges:
-        if e.kind != "stream" or e.from_port != "video":
-            continue
-        producer = node_processors.get(e.from_node)
-        consumer = node_processors.get(e.to_node)
-        if producer is not None and consumer is not None:
-            producer.throttler.set_next_processor(consumer)
-            break  # Only throttle based on first video consumer
-
-    # 4e) Resize inter-pipeline queues based on downstream pipeline requirements
+    # 3d) Resize inter-pipeline queues based on downstream pipeline requirements
     _resize_graph_queues(graph, node_processors)
 
-    # 4f) Re-derive source_queues from processor input_queues (post-resize).
-    # _resize_graph_queues may have replaced queue objects, so the references
-    # captured in step 2 can be stale.
-    source_queues = []
+    # 3e) Derive source_queues from processor input_queues (post-resize).
+    source_queues: list[queue.Queue] = []
     for node_id in graph.get_source_node_ids():
         for e in graph.stream_edges_from(node_id):
             consumer = node_processors.get(e.to_node)
@@ -177,23 +155,17 @@ def build_graph(
                 if q is not None and q not in source_queues:
                     source_queues.append(q)
 
-    # 5) Identify sink: node that has an edge to "output" (or type sink)
+    # 4) Identify sink: find the pipeline node that feeds into a sink node
     sink_node_id: str | None = None
-    for e in graph.edges:
-        if e.to_node == "output" and e.kind == "stream":
-            sink_node_id = e.from_node
+    for sink_id in graph.get_sink_node_ids():
+        for e in graph.edges_to(sink_id):
+            if e.kind == "stream":
+                sink_node_id = e.from_node
+                break
+        if sink_node_id:
             break
     if sink_node_id is None:
-        # Check other sink nodes
-        for sink_id in graph.get_sink_node_ids():
-            for e in graph.edges:
-                if e.to_node == sink_id and e.kind == "stream":
-                    sink_node_id = e.from_node
-                    break
-            if sink_node_id:
-                break
-    if sink_node_id is None:
-        # No explicit output node: treat last pipeline node as sink (linear)
+        # No explicit sink node: treat last pipeline node as sink (linear)
         pipeline_node_ids = graph.get_pipeline_node_ids()
         if pipeline_node_ids:
             sink_node_id = pipeline_node_ids[-1]
@@ -207,7 +179,7 @@ def build_graph(
     elif sink_node_id:
         logger.info("Graph sink for playback: node_id=%s", sink_node_id)
 
-    # 5b) Resize sink's default output queues (initially 8) to match
+    # 4b) Resize sink's default output queues (initially 8) to match
     # inter-pipeline queue size so output batches don't get dropped.
     if sink_processor is not None:
         for port, qlist in list(sink_processor.output_queues.items()):
@@ -227,6 +199,48 @@ def build_graph(
         sink_node_id=sink_node_id,
         output_node_ids=output_node_ids,
     )
+
+
+def _validate_edge_ports(
+    graph: GraphConfig,
+    pipeline_manager: PipelineManager,
+) -> None:
+    """Validate that edge ports match pipeline input/output declarations.
+
+    Raises:
+        ValueError: If any edge references an undeclared port.
+    """
+    # Build a map of node_id -> (declared_inputs, declared_outputs)
+    port_map: dict[str, tuple[set[str], set[str]]] = {}
+    for node in graph.nodes:
+        if node.type != "pipeline" or node.pipeline_id is None:
+            continue
+        pipeline = pipeline_manager.get_pipeline_by_id(node.id)
+        config_class = pipeline.get_config_class()
+        port_map[node.id] = (set(config_class.inputs), set(config_class.outputs))
+
+    errors: list[str] = []
+    for e in graph.edges:
+        if e.kind != "stream":
+            continue
+        # Check output port on the producing pipeline
+        if e.from_node in port_map:
+            _, declared_outputs = port_map[e.from_node]
+            if e.from_port not in declared_outputs:
+                errors.append(
+                    f"Node {e.from_node!r} has no output port {e.from_port!r} "
+                    f"(declared: {sorted(declared_outputs)})"
+                )
+        # Check input port on the consuming pipeline
+        if e.to_node in port_map:
+            declared_inputs, _ = port_map[e.to_node]
+            if e.to_port not in declared_inputs:
+                errors.append(
+                    f"Node {e.to_node!r} has no input port {e.to_port!r} "
+                    f"(declared: {sorted(declared_inputs)})"
+                )
+    if errors:
+        raise ValueError(f"Invalid graph ports: {'; '.join(errors)}")
 
 
 def _resize_graph_queues(
@@ -251,6 +265,11 @@ def _resize_graph_queues(
         try:
             requirements = pipeline.prepare(video=True)
         except Exception:
+            logger.warning(
+                "Failed to call prepare() on pipeline %s, skipping queue resize",
+                node.id,
+                exc_info=True,
+            )
             continue
         if requirements is None:
             continue
@@ -260,26 +279,27 @@ def _resize_graph_queues(
             requirements.input_size * OUTPUT_QUEUE_MAX_SIZE_FACTOR,
         )
 
-        for port, old_q in list(proc.input_queues.items()):
-            if old_q.maxsize >= target_size:
-                continue
-            new_q = queue.Queue(maxsize=target_size)
-            proc.input_queues[port] = new_q
-            logger.info(
-                "Node %s port '%s': resized queue %d -> %d",
-                node.id,
-                port,
-                old_q.maxsize,
-                target_size,
-            )
-            # Update the producing processor's output_queues reference
-            for e in graph.edges_to(node.id):
-                if e.to_port != port or e.kind != "stream":
+        with proc.input_queue_lock:
+            for port, old_q in list(proc.input_queues.items()):
+                if old_q.maxsize >= target_size:
                     continue
-                producer = node_processors.get(e.from_node)
-                if producer is None:
-                    continue
-                out_list = producer.output_queues.get(e.from_port, [])
-                for i, oq in enumerate(out_list):
-                    if oq is old_q:
-                        out_list[i] = new_q
+                new_q = queue.Queue(maxsize=target_size)
+                proc.input_queues[port] = new_q
+                logger.info(
+                    "Node %s port '%s': resized queue %d -> %d",
+                    node.id,
+                    port,
+                    old_q.maxsize,
+                    target_size,
+                )
+                # Update the producing processor's output_queues reference
+                for e in graph.edges_to(node.id):
+                    if e.to_port != port or e.kind != "stream":
+                        continue
+                    producer = node_processors.get(e.from_node)
+                    if producer is None:
+                        continue
+                    out_list = producer.output_queues.get(e.from_port, [])
+                    for i, oq in enumerate(out_list):
+                        if oq is old_q:
+                            out_list[i] = new_q

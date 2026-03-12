@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 # Import enums from torch-free module to avoid loading torch at CLI startup
 from scope.core.pipelines.enums import Quantization, VaeType
 
+from .graph_schema import GraphConfig
+
 # Default values for pipeline load params (duplicated from pipeline configs to avoid
 # importing torch-dependent modules). These should match the defaults in:
 # - StreamDiffusionV2Config: height=512, width=512, base_seed=42
@@ -140,7 +142,7 @@ class Parameters(BaseModel):
         default=None,
         description="List of pipeline IDs to execute in a chain. If not provided, uses the currently loaded pipeline.",
     )
-    graph: dict[str, Any] | None = Field(
+    graph: GraphConfig | None = Field(
         default=None,
         description="Graph configuration (nodes + edges) for graph execution mode. "
         "When provided, pipelines are wired according to the graph topology instead of a linear chain.",

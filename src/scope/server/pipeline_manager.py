@@ -472,6 +472,54 @@ class PipelineManager:
             user_id,
         )
 
+    def _is_pipeline_loaded_with(
+        self, key: str, pipeline_id: str, params: dict
+    ) -> bool:
+        """Check if the pipeline at *key* is loaded and matches the given type and params.
+
+        Must be called with ``self._lock`` held.
+        """
+        return (
+            key in self._pipelines
+            and self._pipeline_statuses.get(key) == PipelineStatus.LOADED
+            and self._pipeline_registry_ids.get(key) == pipeline_id
+            and self._pipeline_load_params.get(key, {}) == params
+        )
+
+    def _rekey_pipeline(self, old_key: str, new_key: str) -> None:
+        """Move a pipeline instance from *old_key* to *new_key* in all tracking dicts.
+
+        Must be called with ``self._lock`` held.
+        """
+        self._pipelines[new_key] = self._pipelines.pop(old_key)
+        self._pipeline_load_params[new_key] = self._pipeline_load_params.pop(old_key)
+        self._pipeline_registry_ids[new_key] = self._pipeline_registry_ids.pop(old_key)
+        self._pipeline_statuses[new_key] = self._pipeline_statuses.pop(old_key)
+
+    def _find_reusable_pipeline(
+        self,
+        node_id: str,
+        pipeline_id: str,
+        params: dict,
+        claimed_keys: set[str],
+        reserved_keys: set[str],
+    ) -> str | None:
+        """Find an existing loaded pipeline that can be re-keyed to *node_id*.
+
+        Skips keys that are already claimed or reserved by other new entries
+        (to avoid stealing a key that another entry needs at that exact position).
+
+        Must be called with ``self._lock`` held.
+        """
+        for old_key in self._pipelines:
+            if old_key in claimed_keys:
+                continue
+            if old_key in reserved_keys and old_key != node_id:
+                continue
+            if self._is_pipeline_loaded_with(old_key, pipeline_id, params):
+                return old_key
+        return None
+
     def _load_pipelines_sync(
         self,
         pipelines: list[tuple[str, str, dict | None]],
@@ -487,7 +535,7 @@ class PipelineManager:
         node_ids = [node_id for node_id, _, _ in pipelines]
         pipeline_ids = [pid for _, pid, _ in pipelines]
         logger.info(
-            f"Loading {len(pipelines)} pipeline(s): {list(zip(node_ids, pipeline_ids))}"
+            f"Loading {len(pipelines)} pipeline(s): {list(zip(node_ids, pipeline_ids, strict=True))}"
         )
 
         # Store first load_params for backward-compat status reporting
@@ -496,64 +544,52 @@ class PipelineManager:
 
             new_key_set = set(node_ids)
 
-            # Phase 1: Match new entries to existing loaded pipelines.
-            # Prefer exact node_id match first, then find a compatible
-            # pipeline under a different key and re-key it (avoids
-            # expensive unload + reload when only node_id changed).
+            # --- Phase 1: Match requested pipelines to already-loaded instances ---
+            #
+            # Goal: avoid expensive unload + reload when we can reuse an
+            # existing pipeline instance.  Each requested entry is matched:
+            #
+            #   1. Exact match — same node_id already holds a compatible instance.
+            #   2. Re-key match — a compatible instance exists under a *different*
+            #      key; rename it to the new node_id (cheap vs. full reload).
+            #   3. No match — schedule a fresh load in Phase 3.
+            #
+            # NOTE: Even if two entries share the same pipeline_id and params,
+            # each gets its own instance because we don't yet support multiple
+            # graph nodes sharing a single pipeline instance.
+
             claimed_old_keys: set[str] = set()
             entries_needing_load: list[tuple[str, str, dict | None]] = []
 
             for node_id, pipeline_id, load_params in pipelines:
                 params = load_params or {}
 
-                # Exact match at same node_id?
-                if (
-                    node_id in self._pipelines
-                    and self._pipeline_statuses.get(node_id) == PipelineStatus.LOADED
-                    and self._pipeline_registry_ids.get(node_id) == pipeline_id
-                    and self._pipeline_load_params.get(node_id, {}) == params
-                ):
+                # 1. Exact match — same key, same pipeline type and params.
+                if self._is_pipeline_loaded_with(node_id, pipeline_id, params):
                     claimed_old_keys.add(node_id)
                     continue
 
-                # Try to find a compatible loaded pipeline under a different key
-                matched_key = None
-                for old_key in list(self._pipelines.keys()):
-                    if old_key in claimed_old_keys:
-                        continue
-                    # Don't steal a key that another new entry needs at that
-                    # exact position (it may match there perfectly).
-                    if old_key in new_key_set and old_key != node_id:
-                        continue
-                    if (
-                        self._pipeline_statuses.get(old_key) == PipelineStatus.LOADED
-                        and self._pipeline_registry_ids.get(old_key) == pipeline_id
-                        and self._pipeline_load_params.get(old_key, {}) == params
-                    ):
-                        matched_key = old_key
-                        break
-
+                # 2. Re-key match — find a compatible instance under a different key.
+                matched_key = self._find_reusable_pipeline(
+                    node_id, pipeline_id, params, claimed_old_keys, new_key_set
+                )
                 if matched_key is not None:
-                    # Re-key: move pipeline from matched_key to node_id
                     logger.info(
                         f"Re-keying pipeline {pipeline_id} "
                         f"from '{matched_key}' to '{node_id}'"
                     )
-                    self._pipelines[node_id] = self._pipelines.pop(matched_key)
-                    self._pipeline_load_params[node_id] = (
-                        self._pipeline_load_params.pop(matched_key)
-                    )
-                    self._pipeline_registry_ids[node_id] = (
-                        self._pipeline_registry_ids.pop(matched_key)
-                    )
-                    self._pipeline_statuses[node_id] = self._pipeline_statuses.pop(
-                        matched_key
-                    )
+                    self._rekey_pipeline(matched_key, node_id)
                     claimed_old_keys.add(matched_key)
-                else:
-                    entries_needing_load.append((node_id, pipeline_id, load_params))
+                    continue
 
-            # Phase 2: Unload old pipelines that weren't matched
+                # 3. No match — needs a fresh load.
+                entries_needing_load.append((node_id, pipeline_id, load_params))
+
+            # --- Phase 2: Unload stale pipelines ---
+            #
+            # Any old instance that wasn't claimed in Phase 1 and isn't in the
+            # new request set is no longer needed — free its resources.
+
             for old_key in list(self._pipelines.keys()):
                 if old_key not in new_key_set and old_key not in claimed_old_keys:
                     self._unload_pipeline_by_id_unsafe(
@@ -563,7 +599,7 @@ class PipelineManager:
                         user_id=user_id,
                     )
 
-            # Clean up stale statuses
+            # Clean up stale status entries (e.g. from previously errored loads).
             for key in list(self._pipeline_statuses.keys()):
                 if key not in new_key_set:
                     del self._pipeline_statuses[key]
@@ -731,6 +767,8 @@ class PipelineManager:
             del self._pipeline_load_params[pipeline_id]
         if pipeline_id in self._pipeline_registry_ids:
             del self._pipeline_registry_ids[pipeline_id]
+        if pipeline_id in self._load_events:
+            del self._load_events[pipeline_id]
 
         # If this was the main pipeline, also clear main pipeline state
         if self._pipeline_id == pipeline_id:

@@ -21,9 +21,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Multiply the # of output frames from pipeline by this to get the max size of the output queue
-OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
-
 # FPS calculation constants
 DEFAULT_FPS = 30.0  # Default FPS
 
@@ -97,7 +94,7 @@ class FrameProcessor:
         # Input mode: video waits for frames, text generates immediately
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
-        # Pipeline chaining support
+        # Pipeline processors and IDs (populated by _setup_graph)
         self.pipeline_processors: list[PipelineProcessor] = []
         self.pipeline_ids: list[str] = []
 
@@ -168,7 +165,7 @@ class FrameProcessor:
             )
             return
 
-        # Local mode: setup pipeline chain
+        # Local mode: setup pipeline graph
         if not self.pipeline_ids:
             error_msg = "No pipeline IDs provided, cannot start"
             logger.error(error_msg)
@@ -191,9 +188,9 @@ class FrameProcessor:
             return
 
         try:
-            self._setup_pipeline_chain_sync()
+            self._setup_pipelines_sync()
         except Exception as e:
-            logger.error(f"Pipeline chain setup failed: {e}")
+            logger.error(f"Pipeline setup failed: {e}")
             self.running = False
             # Publish error for pipeline setup failure
             publish_event(
@@ -376,7 +373,10 @@ class FrameProcessor:
                     return False
             return False
 
-        # Local mode: convert frame to tensor
+        # Local mode: put into graph source queues
+        if not self._graph_source_queues:
+            return False
+
         frame_array = frame.to_ndarray(format="rgb24")
 
         if torch.cuda.is_available():
@@ -402,14 +402,6 @@ class FrameProcessor:
 
         return True
 
-    def last_processor(self) -> PipelineProcessor | None:
-        """Return the sink processor."""
-        if not self.pipeline_processors:
-            return None
-        if self._sink_processor:
-            return self._sink_processor
-        return self.pipeline_processors[-1]
-
     def get(self) -> torch.Tensor | None:
         if not self.running:
             return None
@@ -429,12 +421,11 @@ class FrameProcessor:
             if not self.pipeline_processors:
                 return None
 
-            last_processor = self.last_processor()
-            if last_processor is None or not last_processor.output_queue:
+            if self._sink_processor is None or not self._sink_processor.output_queue:
                 return None
 
             try:
-                frame = last_processor.output_queue.get_nowait()
+                frame = self._sink_processor.output_queue.get_nowait()
                 # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
                 # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
                 frame = frame.squeeze(0)
@@ -514,11 +505,9 @@ class FrameProcessor:
         if not self.pipeline_processors:
             return DEFAULT_FPS
 
-        # Get FPS from the sink processor (graph mode) or last processor (chain mode)
-        last_processor = self.last_processor()
-        if last_processor is None:
+        if self._sink_processor is None:
             return DEFAULT_FPS
-        return last_processor.get_fps()
+        return self._sink_processor.get_fps()
 
     def _log_frame_stats(self):
         """Log frame processing statistics and emit heartbeat event."""
@@ -626,8 +615,13 @@ class FrameProcessor:
 
         # Route to specific node or broadcast to all pipeline processors
         node_id = parameters.pop("node_id", None)
-        if node_id and node_id in self._processors_by_node_id:
-            self._processors_by_node_id[node_id].update_parameters(parameters)
+        if node_id:
+            if node_id in self._processors_by_node_id:
+                self._processors_by_node_id[node_id].update_parameters(parameters)
+            else:
+                logger.warning(
+                    f"Unknown node_id '{node_id}', ignoring parameter update"
+                )
         else:
             for processor in self.pipeline_processors:
                 processor.update_parameters(parameters)
@@ -894,9 +888,7 @@ class FrameProcessor:
                         if self._video_mode and self.cloud_manager:
                             if self.cloud_manager.send_frame(rgb_frame):
                                 self._frames_to_cloud += 1
-                    elif self.pipeline_processors:
-                        first_processor = self.pipeline_processors[0]
-
+                    elif self._graph_source_queues:
                         if torch.cuda.is_available():
                             shape = rgb_frame.shape
                             pinned_buffer = self._get_or_create_pinned_buffer(shape)
@@ -909,13 +901,14 @@ class FrameProcessor:
 
                         frame_tensor = frame_tensor.unsqueeze(0)
 
-                        try:
-                            first_processor.input_queue.put_nowait(frame_tensor)
-                        except queue.Full:
-                            logger.debug(
-                                f"First processor input queue full, "
-                                f"dropping {self.input_source_type} frame"
-                            )
+                        for sq in self._graph_source_queues:
+                            try:
+                                sq.put_nowait(frame_tensor)
+                            except queue.Full:
+                                logger.debug(
+                                    f"Graph source queue full, "
+                                    f"dropping {self.input_source_type} frame"
+                                )
 
                     frame_count += 1
                     if frame_count % 100 == 0:
@@ -935,7 +928,7 @@ class FrameProcessor:
             f"after {frame_count} frames"
         )
 
-    def _setup_pipeline_chain_sync(self):
+    def _setup_pipelines_sync(self):
         """Create pipeline execution graph (synchronous).
 
         If a graph config is provided via initial parameters, uses build_graph()
@@ -943,55 +936,30 @@ class FrameProcessor:
         from pipeline_ids. Assumes all pipelines are already loaded by the
         pipeline manager.
         """
-        from .graph_schema import GraphConfig
+        from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
+
+        from .graph_schema import GraphConfig, build_linear_graph
 
         graph_data = self.parameters.get("graph")
         if graph_data is not None:
             api_graph = GraphConfig.model_validate(graph_data)
         else:
-            # No explicit graph — build implicit linear graph from pipeline_ids
-            api_graph = self._build_linear_graph(self.pipeline_ids)
+            # Determine which pipelines should receive input as vace_input_frames
+            vace_input_video_ids: set[str] = set()
+            if self.parameters.get("vace_enabled") and self.parameters.get(
+                "vace_use_input_video", True
+            ):
+                for pid in self.pipeline_ids:
+                    pipeline = self.pipeline_manager.get_pipeline_by_id(pid)
+                    if isinstance(pipeline, VACEEnabledPipeline):
+                        vace_input_video_ids.add(pid)
+
+            api_graph = build_linear_graph(
+                self.pipeline_ids,
+                vace_input_video_ids=vace_input_video_ids or None,
+            )
 
         self._setup_graph(api_graph)
-
-    @staticmethod
-    def _build_linear_graph(pipeline_ids: list[str]):
-        """Build a linear GraphConfig: source → pipeline_a → pipeline_b → … → sink."""
-        from .graph_schema import GraphConfig, GraphEdge, GraphNode
-
-        nodes = [GraphNode(id="input", type="source")]
-        edges = []
-
-        prev_node_id = "input"
-        for pid in pipeline_ids:
-            nodes.append(GraphNode(id=pid, type="pipeline", pipeline_id=pid))
-            edges.append(
-                GraphEdge(
-                    **{
-                        "from": prev_node_id,
-                        "from_port": "video",
-                        "to_node": pid,
-                        "to_port": "video",
-                        "kind": "stream",
-                    }
-                )
-            )
-            prev_node_id = pid
-
-        nodes.append(GraphNode(id="output", type="sink"))
-        edges.append(
-            GraphEdge(
-                **{
-                    "from": prev_node_id,
-                    "from_port": "video",
-                    "to_node": "output",
-                    "to_port": "video",
-                    "kind": "stream",
-                }
-            )
-        )
-
-        return GraphConfig(nodes=nodes, edges=edges)
 
     def _setup_graph(self, graph):
         """Set up graph-based execution from a GraphConfig."""

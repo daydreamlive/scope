@@ -10,11 +10,9 @@ from typing import Any
 import torch
 
 from scope.core.pipelines.controller import parse_ctrl_input
-from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
 
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineNotAvailableException
-from .pipeline_throttler import PipelineThrottler
 
 logger = logging.getLogger(__name__)
 
@@ -63,13 +61,9 @@ class PipelineProcessor:
         self.connection_id = connection_id
         self.connection_info = connection_info
 
-        # Unified port-based queues: all frame streams (video, vace_input_frames, etc.) use queues
-        self.input_queues: dict[str, queue.Queue] = {
-            "video": queue.Queue(maxsize=30),
-        }
-        self.output_queues: dict[str, list[queue.Queue]] = {
-            "video": [queue.Queue(maxsize=8)],
-        }
+        # Port-based queues wired by graph_executor.build_graph()
+        self.input_queues: dict[str, queue.Queue] = {}
+        self.output_queues: dict[str, list[queue.Queue]] = {}
         # Lock to protect input_queues assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
@@ -104,24 +98,9 @@ class PipelineProcessor:
         # a queue is replaced. Populated by graph_executor.build_graph.
         self.output_consumers: dict[str, list[tuple[PipelineProcessor, str]]] = {}
 
-        # Route based on frontend's VACE intent (not pipeline.vace_enabled which is lazy-loaded)
-        # This fixes the chicken-and-egg problem where VACE isn't enabled until vace_input_frames arrives
-        self.vace_enabled = (initial_parameters or {}).get("vace_enabled", False)
-        self.vace_use_input_video = (initial_parameters or {}).get(
-            "vace_use_input_video", True
-        )
-
-        # Cache VACE support check to avoid isinstance on every chunk
-        self._pipeline_supports_vace = isinstance(pipeline, VACEEnabledPipeline)
-
         # Flag to track pending cache initialization after queue flush
         # Set when reset_cache flushes queues, cleared after successful pipeline call
         self._pending_cache_init = False
-
-        # Throttler for controlling processing rate in chained pipelines
-        # Throttling is applied when this pipeline produces frames faster than
-        # the next pipeline in the chain can consume them
-        self.throttler = PipelineThrottler()
 
     def _resize_output_queue(self, port: str, target_size: int):
         """Resize output queues for a given port, transferring existing frames.
@@ -168,13 +147,8 @@ class PipelineProcessor:
             self.output_queues[port] = new_list
 
     @property
-    def input_queue(self) -> queue.Queue | None:
-        """Primary video input queue (chain mode, get_fps, resize)."""
-        return self.input_queues.get("video")
-
-    @property
     def output_queue(self) -> queue.Queue | None:
-        """Primary video output queue (for chain mode and sink get())."""
+        """Primary video output queue (used by sink to read frames)."""
         queues = self.output_queues.get("video")
         return queues[0] if queues else None
 
@@ -198,7 +172,6 @@ class PipelineProcessor:
 
         self.running = False
         self.shutdown_event.set()
-        self.throttler.interrupt()
 
         if self.worker_thread and self.worker_thread.is_alive():
             if threading.current_thread() != self.worker_thread:
@@ -384,7 +357,6 @@ class PipelineProcessor:
             requirements = self.pipeline.prepare(**prepare_params)
 
         chunks: dict[str, list[torch.Tensor]] = {}
-        input_frame_count = 0
         if requirements is not None:
             current_chunk_size = requirements.input_size
             with self.input_queue_lock:
@@ -403,24 +375,15 @@ class PipelineProcessor:
                 chunks[port] = self.prepare_chunk(q, current_chunk_size)
             else:
                 chunks = self.prepare_multi_chunk(input_queues_ref, current_chunk_size)
-            input_frame_count = max(
-                (len(frames) for frames in chunks.values()), default=0
-            )
 
         try:
             # Pass parameters (excluding prepare-only parameters)
             call_params = dict(self.parameters.items())
-            if not self.is_prepared:
-                logger.info(
-                    f"[DEBUG] First call for {self.pipeline_id}: "
-                    f"params keys={sorted(self.parameters.keys())}, "
-                    f"has_prompts={'prompts' in self.parameters}"
-                )
 
             # Pass reset_cache as init_cache to pipeline
             call_params["init_cache"] = not self.is_prepared or self._pending_cache_init
-            if reset_cache is not None:
-                call_params["init_cache"] = reset_cache
+            if reset_cache:
+                call_params["init_cache"] = True
 
             # Pass lora_scales only when present
             if lora_scales is not None:
@@ -433,34 +396,15 @@ class PipelineProcessor:
                 # Reset mouse accumulator, keep key state
                 self.parameters["ctrl_input"]["mouse"] = [0.0, 0.0]
 
-            # Fill call_params from stream chunks
+            # Fill call_params from stream chunks (port names are set by graph edges)
             if chunks:
-                # Handle VACE inputs from graph edges (each port independently)
-                if chunks.get("vace_input_frames"):
-                    call_params["vace_input_frames"] = chunks["vace_input_frames"]
-                if chunks.get("vace_input_masks"):
-                    call_params["vace_input_masks"] = chunks["vace_input_masks"]
-                if chunks.get("video"):
-                    if (
-                        self._pipeline_supports_vace
-                        and self.vace_enabled
-                        and self.vace_use_input_video
-                        and "vace_input_frames" not in call_params
-                    ):
-                        call_params["vace_input_frames"] = chunks["video"]
-                    else:
-                        call_params["video"] = chunks["video"]
-                # Pass any other stream ports (e.g. video2 for combine_streams)
                 for port, frame_list in chunks.items():
-                    if port in ("video", "vace_input_frames", "vace_input_masks"):
-                        continue
                     call_params[port] = frame_list
 
             processing_start = time.time()
             output_dict = self.pipeline(**call_params)
             processing_time = time.time() - processing_start
 
-            output = output_dict.get("video")
             if not output_dict:
                 return
 
@@ -488,26 +432,10 @@ class PipelineProcessor:
                 if not transition_active or transition is None:
                     self.parameters.pop("transition", None)
 
+            output = output_dict.get("video")
+            num_frames = 0
             if output is not None:
                 num_frames = output.shape[0]
-
-                # Record batch timing for throttling calculations
-                if input_frame_count > 0:
-                    self.throttler.record_input_batch(
-                        input_frame_count, processing_time
-                    )
-                if num_frames > 0:
-                    self.throttler.record_output_batch(num_frames, processing_time)
-
-                # Normalize to [0, 255] and convert to uint8
-                # Keep frames on GPU - frame_processor handles CPU transfer for streaming
-                output = (
-                    (output * 255.0)
-                    .clamp(0, 255)
-                    .to(dtype=torch.uint8)
-                    .contiguous()
-                    .detach()
-                )
 
             # Put each output port's frames to its queues (all frame ports are streamed)
             for port, value in output_dict.items():
@@ -516,18 +444,14 @@ class PipelineProcessor:
                 queues = self.output_queues.get(port)
                 if not queues:
                     continue
-                # Resize output queues to meet target max size.
-                # Only resize when there are downstream pipeline consumers;
-                # the sink has no consumers so its queues stay fixed for
-                # frame_processor.get().
-                if self.output_consumers.get(port):
-                    target_size = value.shape[0] * OUTPUT_QUEUE_MAX_SIZE_FACTOR
-                    self._resize_output_queue(port, target_size)
-                    # Re-read queues after potential resize – _resize_output_queue
-                    # may replace self.output_queues[port] with a new list.
-                    queues = self.output_queues.get(port)
-                    if not queues:
-                        continue
+                # Resize output queues to fit at least one full batch
+                target_size = value.shape[0] * OUTPUT_QUEUE_MAX_SIZE_FACTOR
+                self._resize_output_queue(port, target_size)
+                # Re-read queues after potential resize – _resize_output_queue
+                # may replace self.output_queues[port] with a new list.
+                queues = self.output_queues.get(port)
+                if not queues:
+                    continue
                 if value.dtype != torch.uint8:
                     value = (
                         (value * 255.0)
@@ -542,11 +466,9 @@ class PipelineProcessor:
                         try:
                             q.put_nowait(frame if q is queues[0] else frame.clone())
                         except queue.Full:
-                            if port == "video":
-                                logger.info(
-                                    f"Output queue full for {self.pipeline_id}, dropping frame"
-                                )
-                            break
+                            logger.debug(
+                                f"Output queue full for {self.pipeline_id} port '{port}', dropping frame"
+                            )
 
             # Track batch-level throughput for FPS calculation
             if output is not None and num_frames > 0:
@@ -565,9 +487,6 @@ class PipelineProcessor:
                         if proc_id not in seen:
                             seen.add(proc_id)
                             consumer_proc.update_parameters(extra_params)
-
-            if chunks and self.output_consumers:
-                self.throttler.throttle()
 
         except Exception as e:
             if self._is_recoverable(e):
