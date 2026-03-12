@@ -1577,13 +1577,15 @@ async def upload_asset(
         # Read file content from request body
         content = await request.body()
 
-        # Validate file size (50MB limit)
-        max_size = 50 * 1024 * 1024  # 50MB
-        if len(content) > max_size:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
-            )
+        # Apply upload size validation only for cloud uploads.
+        # Local mode keeps files on the same machine, so no explicit cap is enforced.
+        if cloud_manager.is_connected:
+            max_size = 50 * 1024 * 1024  # 50MB
+            if len(content) > max_size:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
+                )
 
         # If cloud mode is active, upload to cloud AND save locally for thumbnails
         if cloud_manager.is_connected:

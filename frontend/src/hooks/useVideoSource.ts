@@ -263,13 +263,6 @@ export function useVideoSource(props?: UseVideoSourceProps) {
 
   const handleVideoFileUpload = useCallback(
     async (file: File) => {
-      // Validate file size (10MB limit)
-      const maxSize = 10 * 1024 * 1024; // 10MB in bytes
-      if (file.size > maxSize) {
-        setError("File size must be less than 10MB");
-        return false;
-      }
-
       // Validate file type
       if (!file.type.startsWith("video/")) {
         setError("Please select a video file");
