@@ -191,6 +191,20 @@ for _logger_name in _quiet_loggers.split(","):
     if _logger_name:
         logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
+def _set_debug_logging(enabled: bool) -> None:
+    """Enable or disable DEBUG-level logging across all scope loggers and handlers."""
+    target_level = logging.DEBUG if enabled else logging.INFO
+    for handler in root_logger.handlers:
+        if isinstance(handler, (logging.StreamHandler, RotatingFileHandler)):
+            handler.setLevel(target_level)
+    for name in ("scope.server", "scope.core", "scope.cloud"):
+        logging.getLogger(name).setLevel(target_level)
+
+
+# Enable DEBUG logging when SCOPE_DEBUG env var is set (or --debug CLI flag)
+if os.getenv("SCOPE_DEBUG"):
+    _set_debug_logging(True)
+
 # Select pipeline depending on the "PIPELINE" environment variable
 PIPELINE = os.getenv("PIPELINE", None)
 
@@ -2214,6 +2228,41 @@ async def tail_logs(
         return {"lines": tail, "offset": file_size}
 
 
+class DebugLoggingRequest(BaseModel):
+    enabled: bool
+
+
+@app.get("/api/v1/logs/debug")
+@cloud_proxy()
+async def get_debug_logging(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Get current debug logging state."""
+    scope_logger = logging.getLogger("scope.server")
+    return {"enabled": scope_logger.level <= logging.DEBUG}
+
+
+@app.put("/api/v1/logs/debug")
+@cloud_proxy()
+async def set_debug_logging(
+    http_request: Request,
+    body: DebugLoggingRequest,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Enable or disable DEBUG-level logging at runtime."""
+    _set_debug_logging(body.enabled)
+
+    # Persist to env so reload preserves the setting
+    if body.enabled:
+        os.environ["SCOPE_DEBUG"] = "1"
+    else:
+        os.environ.pop("SCOPE_DEBUG", None)
+
+    logger.info(f"Debug logging {'enabled' if body.enabled else 'disabled'}")
+    return {"enabled": body.enabled}
+
+
 # Plugin Management API Endpoints
 
 
@@ -2781,6 +2830,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     envvar="SCOPE_CLOUD_API_KEY",
     help="Cloud API key for cloud mode",
 )
+@click.option("--debug", is_flag=True, help="Enable DEBUG-level logging")
 @click.pass_context
 def main(
     ctx,
@@ -2791,11 +2841,17 @@ def main(
     no_browser: bool,
     cloud_app_id: str | None,
     cloud_api_key: str | None,
+    debug: bool,
 ):
     # Handle version flag
     if version:
         print_version_info()
         sys.exit(0)
+
+    # Enable debug logging immediately and persist via env var for reloads
+    if debug:
+        os.environ["SCOPE_DEBUG"] = "1"
+        _set_debug_logging(True)
 
     # Store cloud credentials in environment for app access
     if cloud_app_id:
