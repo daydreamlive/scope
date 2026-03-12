@@ -55,8 +55,7 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
             "Typical workflows:\n"
             "- Setup: get_pipeline_status -> load_pipeline -> start_stream (headless) -> update_parameters\n"
             "- Observe: capture_frame (see output), get_parameters (read state), get_session_metrics (fps/VRAM)\n"
-            "- Record: get_session_metrics (get session_id) -> start_recording -> stop_recording\n"
-            "- Cleanup: stop_stream -> unload_pipeline (frees VRAM before loading a different pipeline)\n\n"
+            "- Cleanup: stop_stream (frees session resources)\n\n"
             "Key constraints:\n"
             "- Use start_stream to begin a headless session, or wait for the user to click Start in the UI for WebRTC.\n"
             "- capture_frame returns a file_path to a JPEG you can read to see the pipeline's visual output.\n"
@@ -237,13 +236,6 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
     # -------------------------------------------------------------------------
 
     @mcp.tool()
-    async def unload_pipeline() -> str:
-        """Unload all currently loaded pipelines and free GPU memory.
-        Use this before loading a different pipeline or to reclaim VRAM."""
-        resp = await client.post("/api/v1/pipeline/unload")
-        return await _json(resp)
-
-    @mcp.tool()
     async def start_stream(
         pipeline_id: str,
         input_mode: str = "text",
@@ -252,8 +244,8 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
     ) -> str:
         """Start a headless pipeline session (no browser needed).
         The pipeline must already be loaded via load_pipeline.
-        Returns a session_id for use with capture_frame, update_parameters,
-        start_recording, stop_recording, and stop_stream.
+        Once started, use capture_frame, update_parameters,
+        and stop_stream to control it.
 
         Args:
             pipeline_id: Pipeline ID to run (must already be loaded)
@@ -270,37 +262,9 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
         return await _json(resp)
 
     @mcp.tool()
-    async def stop_stream(session_id: str) -> str:
-        """Stop a headless pipeline session and free its resources.
-
-        Args:
-            session_id: The session ID returned by start_stream
-        """
-        resp = await client.post(f"/api/v1/session/{session_id}/stop")
-        return await _json(resp)
-
-    # -------------------------------------------------------------------------
-    # Recording Control
-    # -------------------------------------------------------------------------
-
-    @mcp.tool()
-    async def start_recording(session_id: str) -> str:
-        """Start recording the output of a WebRTC session to an MP4 file.
-
-        Args:
-            session_id: The session ID to start recording for (get from get_session_metrics)
-        """
-        resp = await client.post(f"/api/v1/session/{session_id}/recording/start")
-        return await _json(resp)
-
-    @mcp.tool()
-    async def stop_recording(session_id: str) -> str:
-        """Stop recording the output of a WebRTC session.
-
-        Args:
-            session_id: The session ID to stop recording for
-        """
-        resp = await client.post(f"/api/v1/session/{session_id}/recording/stop")
+    async def stop_stream() -> str:
+        """Stop the active headless pipeline session and free its resources."""
+        resp = await client.post("/api/v1/session/stop")
         return await _json(resp)
 
     # -------------------------------------------------------------------------
