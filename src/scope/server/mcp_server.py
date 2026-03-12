@@ -32,6 +32,19 @@ async def _json(resp: "httpx.Response") -> str:
 
 def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
     """Create and configure the MCP server with all Scope tools."""
+    from contextlib import asynccontextmanager
+
+    client: httpx.AsyncClient | None = None
+
+    @asynccontextmanager
+    async def _lifespan(_server: FastMCP):
+        nonlocal client
+        client = httpx.AsyncClient(base_url=base_url, timeout=300.0)
+        try:
+            yield
+        finally:
+            await client.aclose()
+            client = None
 
     mcp = FastMCP(
         "daydream-scope",
@@ -49,9 +62,8 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
             "- capture_frame returns a file_path to a JPEG you can read to see the pipeline's visual output.\n"
             "- get_logs with log_level='ERROR' is useful for diagnosing failures."
         ),
+        lifespan=_lifespan,
     )
-
-    client = httpx.AsyncClient(base_url=base_url, timeout=300.0)
 
     # -------------------------------------------------------------------------
     # Pipeline Management
@@ -533,7 +545,10 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
         Args:
             workflow_json: The workflow JSON string to resolve dependencies for
         """
-        workflow = json.loads(workflow_json)
+        try:
+            workflow = json.loads(workflow_json)
+        except json.JSONDecodeError as e:
+            return json.dumps({"error": f"Invalid JSON: {e}"})
         resp = await client.post("/api/v1/workflow/resolve", json=workflow)
         return await _json(resp)
 

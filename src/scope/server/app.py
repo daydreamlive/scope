@@ -100,13 +100,13 @@ from .schema import (
     IceCandidateRequest,
     IceServerConfig,
     IceServersResponse,
-    Parameters,
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
+from .session_router import router as session_router
 
 # Cached responses for pipeline schemas and plugin list.
 # Server restarts after plugin install/uninstall, so these are naturally reset.
@@ -445,6 +445,9 @@ app = FastAPI(
     description="A tool for running and customizing real-time, interactive generative AI pipelines and models",
     version=version("daydream-scope"),
 )
+
+# Session management endpoints (headless sessions, parameters, frame capture, etc.)
+app.include_router(session_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -919,268 +922,6 @@ async def close_webrtc_session(
         return Response(status_code=204)
     except Exception as e:
         logger.error(f"Error closing WebRTC session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@app.post("/api/v1/session/parameters")
-async def update_session_parameters(
-    parameters: Parameters,
-    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-):
-    """Update runtime parameters for all active WebRTC sessions.
-
-    Applies parameter changes to the pipeline (same path as the WebRTC data
-    channel) and notifies connected frontends so their UI stays in sync.
-    """
-    params_dict = parameters.model_dump(exclude_none=True)
-    if not params_dict:
-        raise HTTPException(status_code=400, detail="No parameters provided")
-
-    webrtc_manager.broadcast_parameter_update(params_dict)
-    webrtc_manager.broadcast_notification(
-        {"type": "parameters_updated", "parameters": params_dict}
-    )
-
-    return {"status": "ok", "applied_parameters": params_dict}
-
-
-@app.get("/api/v1/session/parameters")
-async def get_session_parameters(
-    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-):
-    """Get the current runtime parameters from all active sessions.
-
-    Returns the merged parameter state from each session's frame processor.
-    Includes both WebRTC and headless sessions.
-    """
-    all_params = {}
-    count = 0
-    for _sid, fp, _headless in webrtc_manager.iter_frame_processors():
-        all_params.update(fp.parameters)
-        count += 1
-
-    return {"parameters": all_params, "session_count": count}
-
-
-@app.get("/api/v1/session/frame")
-async def capture_frame(
-    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-    quality: int = Query(default=85, ge=1, le=100),
-):
-    """Capture the current pipeline output frame as a JPEG image.
-
-    Returns the most recent rendered frame from the first active session
-    (WebRTC or headless).
-    """
-    frame = webrtc_manager.get_any_last_frame()
-    if frame is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No frame available (no active session or pipeline not running)",
-        )
-
-    try:
-        from PIL import Image
-
-        frame_np = frame.to_ndarray(format="rgb24")
-        img = Image.fromarray(frame_np)
-        buf = io.BytesIO()
-        img.save(buf, format="JPEG", quality=quality)
-        buf.seek(0)
-        return Response(content=buf.getvalue(), media_type="image/jpeg")
-    except Exception as e:
-        logger.error(f"Error capturing frame: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@app.get("/api/v1/session/metrics")
-async def get_session_metrics(
-    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-):
-    """Get performance metrics from all active sessions.
-
-    Aggregates frame stats from each session's frame processor and includes
-    GPU VRAM usage when CUDA is available. Includes both WebRTC and headless sessions.
-    """
-    session_stats = {}
-    for sid, fp, is_headless in webrtc_manager.iter_frame_processors():
-        if is_headless and not fp.running:
-            continue
-        stats = fp.get_frame_stats()
-        if is_headless:
-            stats["headless"] = True
-        session_stats[sid] = stats
-
-    total_count = len(webrtc_manager.list_sessions()) + len(
-        webrtc_manager.headless_sessions
-    )
-
-    gpu_info = {}
-    try:
-        import torch
-
-        if torch.cuda.is_available():
-            gpu_info = {
-                "vram_allocated_mb": round(
-                    torch.cuda.memory_allocated() / (1024 * 1024), 1
-                ),
-                "vram_reserved_mb": round(
-                    torch.cuda.memory_reserved() / (1024 * 1024), 1
-                ),
-                "vram_total_mb": round(
-                    torch.cuda.get_device_properties(0).total_mem / (1024 * 1024), 1
-                ),
-            }
-    except Exception:
-        pass
-
-    return {
-        "session_count": total_count,
-        "sessions": session_stats,
-        "gpu": gpu_info,
-    }
-
-
-class StartStreamRequest(BaseModel):
-    pipeline_id: str
-    input_mode: str = "text"
-    prompts: list[dict] | None = None
-    input_source: dict | None = None
-
-
-@app.post("/api/v1/session/start")
-async def start_stream(
-    request: StartStreamRequest,
-    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-):
-    """Start a headless pipeline session without WebRTC.
-
-    Creates a FrameProcessor directly and begins generating frames.
-    Use capture_frame to see output, update_parameters to control it,
-    and POST /api/v1/session/{session_id}/stop to tear it down.
-    """
-    from .frame_processor import FrameProcessor
-    from .webrtc import HeadlessSession
-
-    # Build initial parameters
-    initial_params: dict = {
-        "pipeline_ids": [request.pipeline_id],
-        "input_mode": request.input_mode,
-    }
-    if request.prompts is not None:
-        initial_params["prompts"] = request.prompts
-    if request.input_source is not None:
-        initial_params["input_source"] = request.input_source
-
-    try:
-        frame_processor = FrameProcessor(
-            pipeline_manager=pipeline_manager,
-            initial_parameters=initial_params,
-        )
-        frame_processor.start()
-
-        if not frame_processor.running:
-            raise HTTPException(
-                status_code=500,
-                detail="FrameProcessor failed to start (check logs for details)",
-            )
-
-        session = HeadlessSession(
-            frame_processor=frame_processor,
-        )
-        session.start_frame_consumer()
-        webrtc_manager.add_headless_session(session)
-
-        logger.info(
-            f"Started headless session {session.id} with pipeline {request.pipeline_id}"
-        )
-        return {
-            "status": "ok",
-            "session_id": session.id,
-            "pipeline_id": request.pipeline_id,
-            "input_mode": request.input_mode,
-        }
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Error starting headless session: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@app.post("/api/v1/session/{session_id}/stop")
-async def stop_stream(
-    session_id: str,
-    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-):
-    """Stop a headless pipeline session."""
-    session = webrtc_manager.get_headless_session(session_id)
-    if not session:
-        raise HTTPException(
-            status_code=404, detail=f"Headless session {session_id} not found"
-        )
-    try:
-        await webrtc_manager.remove_headless_session(session_id)
-        return {"status": "ok", "message": f"Session {session_id} stopped"}
-    except Exception as e:
-        logger.error(f"Error stopping headless session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@app.post("/api/v1/pipeline/unload")
-async def unload_pipeline(
-    pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-):
-    """Unload all currently loaded pipelines and free GPU memory."""
-    try:
-        pipeline_manager.unload_all_pipelines()
-        return {"status": "ok", "message": "All pipelines unloaded"}
-    except Exception as e:
-        logger.error(f"Error unloading pipelines: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@app.post("/api/v1/session/{session_id}/recording/start")
-async def start_recording(
-    session_id: str,
-    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-):
-    """Start recording the output of a WebRTC session."""
-    session = webrtc_manager.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    if not session.recording_manager:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Recording not available for session {session_id}",
-        )
-    try:
-        await session.recording_manager.start_recording()
-        return {"status": "ok", "message": "Recording started"}
-    except Exception as e:
-        logger.error(f"Error starting recording for session {session_id}: {e}")
-        raise HTTPException(status_code=500, detail=str(e)) from e
-
-
-@app.post("/api/v1/session/{session_id}/recording/stop")
-async def stop_recording(
-    session_id: str,
-    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-):
-    """Stop recording the output of a WebRTC session."""
-    session = webrtc_manager.get_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
-    if not session.recording_manager:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Recording not available for session {session_id}",
-        )
-    try:
-        await session.recording_manager.stop_recording()
-        return {"status": "ok", "message": "Recording stopped"}
-    except Exception as e:
-        logger.error(f"Error stopping recording for session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 

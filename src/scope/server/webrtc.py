@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import uuid
 
 # Type checking imports
@@ -106,6 +107,7 @@ class HeadlessSession:
         self.id = session_id or str(uuid.uuid4())
         self.frame_processor: FrameProcessor = frame_processor
         self._last_frame = None
+        self._frame_lock = threading.Lock()
         self._frame_consumer_running = False
         self._frame_consumer_task: asyncio.Task | None = None
 
@@ -125,7 +127,8 @@ class HeadlessSession:
             frame_tensor = self.frame_processor.get()
             if frame_tensor is not None:
                 frame_np = frame_tensor.numpy()
-                self._last_frame = VideoFrame.from_ndarray(frame_np, format="rgb24")
+                with self._frame_lock:
+                    self._last_frame = VideoFrame.from_ndarray(frame_np, format="rgb24")
             else:
                 await asyncio.sleep(0.01)
 
@@ -143,7 +146,8 @@ class HeadlessSession:
 
     def get_last_frame(self):
         """Return the most recently cached frame, or None."""
-        return self._last_frame
+        with self._frame_lock:
+            return self._last_frame
 
     def __str__(self):
         return f"HeadlessSession({self.id}, running={self.frame_processor.running})"
@@ -721,8 +725,8 @@ class WebRTCManager:
             logger.error(f"Failed to add ICE candidate to session {session_id}: {e}")
             raise ValueError(f"Invalid ICE candidate: {e}") from e
 
-    def iter_frame_processors(self):
-        """Yield (session_id, frame_processor, is_headless) for every active session."""
+    def get_frame_processor(self) -> tuple[str, "FrameProcessor", bool] | None:
+        """Return (session_id, frame_processor, is_headless) for the active session, or None."""
         for sid, session in self.sessions.items():
             if session.pc.connectionState in ("closed", "failed"):
                 continue
@@ -731,13 +735,14 @@ class WebRTCManager:
                 and hasattr(session.video_track, "frame_processor")
                 and session.video_track.frame_processor
             ):
-                yield sid, session.video_track.frame_processor, False
+                return sid, session.video_track.frame_processor, False
         for sid, session in self.headless_sessions.items():
             if session.frame_processor:
-                yield sid, session.frame_processor, True
+                return sid, session.frame_processor, True
+        return None
 
-    def get_any_last_frame(self):
-        """Return the most recent frame from any active session, or None."""
+    def get_last_frame(self):
+        """Return the most recent frame from the active session, or None."""
         for session in self.sessions.values():
             if session.video_track and hasattr(session.video_track, "get_last_frame"):
                 frame = session.video_track.get_last_frame()
