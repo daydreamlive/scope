@@ -550,13 +550,18 @@ export function StreamPage() {
           "_quantized",
           "prompt_interpolation_method",
         ]);
+        const DISCRETE_PARAM_KEYS = new Set([
+          "prompts",
+          "reset_cache",
+          "transition",
+          "denoising_step_list",
+        ]);
         const hasDiscrete = Object.entries(params).some(([key, value]) => {
           if (NEVER_QUANTIZE.has(key)) return false;
           return (
+            DISCRETE_PARAM_KEYS.has(key) ||
             typeof value === "boolean" ||
-            typeof value === "string" ||
-            key === "prompts" ||
-            key === "reset_cache"
+            typeof value === "string"
           );
         });
         if (hasDiscrete) {
