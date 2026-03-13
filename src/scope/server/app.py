@@ -108,13 +108,10 @@ from .schema import (
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
-    TempoEnableRequest,
-    TempoSetTempoRequest,
-    TempoSourcesResponse,
-    TempoStatusResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
+from .tempo_router import router as tempo_router
 
 # Cached responses for pipeline schemas and plugin list.
 # Invalidated by _invalidate_plugin_caches() on install/uninstall.
@@ -473,6 +470,8 @@ app = FastAPI(
 
 # MCP server endpoints (headless sessions, parameters, frame capture, etc.)
 app.include_router(mcp_router)
+# Tempo sync endpoints (enable/disable, status, sources, BPM control)
+app.include_router(tempo_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -2542,83 +2541,6 @@ async def reload_plugin(
             status_code=500,
             detail=f"Failed to reload {name}. Check server logs for details.",
         ) from e
-
-
-# =============================================================================
-# Tempo Sync Endpoints
-# =============================================================================
-
-
-@app.get("/api/v1/tempo/status", response_model=TempoStatusResponse)
-async def get_tempo_status():
-    """Get current tempo sync status including beat state."""
-    if tempo_sync is None:
-        return TempoStatusResponse(enabled=False, beats_per_bar=4)
-    status = tempo_sync.get_status()
-    return TempoStatusResponse(**status)
-
-
-@app.post("/api/v1/tempo/enable", response_model=TempoStatusResponse)
-async def enable_tempo(request: TempoEnableRequest):
-    """Enable tempo synchronization with the specified source."""
-    if tempo_sync is None:
-        raise HTTPException(status_code=500, detail="Tempo sync not initialized")
-
-    try:
-        await tempo_sync.enable(
-            source_type=request.source,
-            bpm=request.bpm,
-            midi_device=request.midi_device,
-            beats_per_bar=request.beats_per_bar,
-        )
-    except ImportError as e:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Required dependency not installed: {e}",
-        ) from e
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-
-    status = tempo_sync.get_status()
-    return TempoStatusResponse(**status)
-
-
-@app.post("/api/v1/tempo/disable", response_model=TempoStatusResponse)
-async def disable_tempo():
-    """Disable tempo synchronization."""
-    if tempo_sync is None:
-        raise HTTPException(status_code=500, detail="Tempo sync not initialized")
-
-    await tempo_sync.disable()
-    status = tempo_sync.get_status()
-    return TempoStatusResponse(**status)
-
-
-@app.post("/api/v1/tempo/set_tempo", response_model=TempoStatusResponse)
-async def set_tempo(request: TempoSetTempoRequest):
-    """Set the session tempo (BPM). Only supported by some sources (e.g. Link)."""
-    if tempo_sync is None:
-        raise HTTPException(status_code=500, detail="Tempo sync not initialized")
-    if not tempo_sync.enabled:
-        raise HTTPException(status_code=400, detail="Tempo sync is not enabled")
-    try:
-        tempo_sync.set_tempo(request.bpm)
-    except RuntimeError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    # get_status reads from the poll-loop cache which may be stale.
-    # Patch the BPM to reflect what we just set so the response is correct.
-    status = tempo_sync.get_status()
-    if status.get("beat_state"):
-        status["beat_state"]["bpm"] = request.bpm
-    return TempoStatusResponse(**status)
-
-
-@app.get("/api/v1/tempo/sources", response_model=TempoSourcesResponse)
-async def get_tempo_sources():
-    """Get available tempo sources and their capabilities."""
-    if tempo_sync is None:
-        return TempoSourcesResponse(sources={})
-    return TempoSourcesResponse(sources=tempo_sync.get_available_sources())
 
 
 # =============================================================================
