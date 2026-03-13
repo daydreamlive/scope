@@ -76,6 +76,13 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         description="VAE type to use. 'wan' is the full VAE, 'lightvae' is 75% pruned (faster but lower quality).",
         json_schema_extra=ui_field_config(order=3, is_load_param=True, label="VAE"),
     )
+    compile_vae: bool = Field(
+        default=False,
+        description="Use torch.compile on the VAE decoder for ~1.4x faster decoding. First-time compilation takes several minutes.",
+        json_schema_extra=ui_field_config(
+            order=3, is_load_param=True, label="Compile VAE"
+        ),
+    )
     height: int = Field(
         default=320,
         ge=1,
