@@ -21,9 +21,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Multiply the # of output frames from pipeline by this to get the max size of the output queue
-OUTPUT_QUEUE_MAX_SIZE_FACTOR = 3
-
 # FPS calculation constants
 DEFAULT_FPS = 30.0  # Default FPS
 
@@ -97,9 +94,16 @@ class FrameProcessor:
         # Input mode: video waits for frames, text generates immediately
         self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
 
-        # Pipeline chaining support
+        # Pipeline processors and IDs (populated by _setup_graph)
         self.pipeline_processors: list[PipelineProcessor] = []
         self.pipeline_ids: list[str] = []
+
+        # Graph support: processors indexed by node_id for per-node routing
+        self._processors_by_node_id: dict[str, PipelineProcessor] = {}
+        # Graph source queues for fan-out from source nodes
+        self._graph_source_queues: list[queue.Queue] = []
+        # The processor whose output we read in graph mode
+        self._sink_processor: PipelineProcessor | None = None
 
         # Frame counting for debug logging
         self._frames_in = 0
@@ -161,7 +165,7 @@ class FrameProcessor:
             )
             return
 
-        # Local mode: setup pipeline chain
+        # Local mode: setup pipeline graph
         if not self.pipeline_ids:
             error_msg = "No pipeline IDs provided, cannot start"
             logger.error(error_msg)
@@ -184,9 +188,9 @@ class FrameProcessor:
             return
 
         try:
-            self._setup_pipeline_chain_sync()
+            self._setup_pipelines_sync()
         except Exception as e:
-            logger.error(f"Pipeline chain setup failed: {e}")
+            logger.error(f"Pipeline setup failed: {e}")
             self.running = False
             # Publish error for pipeline setup failure
             publish_event(
@@ -369,32 +373,32 @@ class FrameProcessor:
                     return False
             return False
 
-        # Local mode: put into first processor's input queue
-        if self.pipeline_processors:
-            first_processor = self.pipeline_processors[0]
+        # Local mode: put into graph source queues
+        if not self._graph_source_queues:
+            return False
 
-            frame_array = frame.to_ndarray(format="rgb24")
+        frame_array = frame.to_ndarray(format="rgb24")
 
-            if torch.cuda.is_available():
-                shape = frame_array.shape
-                pinned_buffer = self._get_or_create_pinned_buffer(shape)
-                # Note: We reuse pinned buffers for performance. This assumes the copy_()
-                # operation completes before the next frame arrives.
-                # In practice, copy_() is very fast (~microseconds) and frames arrive at 60 FPS max
-                pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
-                frame_tensor = pinned_buffer.cuda(non_blocking=True)
-            else:
-                frame_tensor = torch.as_tensor(frame_array, dtype=torch.uint8)
+        if torch.cuda.is_available():
+            shape = frame_array.shape
+            pinned_buffer = self._get_or_create_pinned_buffer(shape)
+            # Note: We reuse pinned buffers for performance. This assumes the copy_()
+            # operation completes before the next frame arrives.
+            # In practice, copy_() is very fast (~microseconds) and frames arrive at 60 FPS max
+            pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
+            frame_tensor = pinned_buffer.cuda(non_blocking=True)
+        else:
+            frame_tensor = torch.as_tensor(frame_array, dtype=torch.uint8)
 
-            frame_tensor = frame_tensor.unsqueeze(0)
+        frame_tensor = frame_tensor.unsqueeze(0)
 
-            # Put frame into first processor's input queue
-            try:
-                first_processor.input_queue.put_nowait(frame_tensor)
-            except queue.Full:
-                # Queue full, drop frame (non-blocking)
-                logger.debug("First processor input queue full, dropping frame")
-                return False
+        if self._graph_source_queues:
+            # Fan-out to all source queues (graph always active)
+            for sq in self._graph_source_queues:
+                try:
+                    sq.put_nowait(frame_tensor)
+                except queue.Full:
+                    logger.debug("Graph source queue full, dropping frame")
 
         return True
 
@@ -417,12 +421,11 @@ class FrameProcessor:
             if not self.pipeline_processors:
                 return None
 
-            last_processor = self.pipeline_processors[-1]
-            if not last_processor.output_queue:
+            if self._sink_processor is None or not self._sink_processor.output_queue:
                 return None
 
             try:
-                frame = last_processor.output_queue.get_nowait()
+                frame = self._sink_processor.output_queue.get_nowait()
                 # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
                 # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
                 frame = frame.squeeze(0)
@@ -502,9 +505,9 @@ class FrameProcessor:
         if not self.pipeline_processors:
             return DEFAULT_FPS
 
-        # Get FPS from the last processor in the chain
-        last_processor = self.pipeline_processors[-1]
-        return last_processor.get_fps()
+        if self._sink_processor is None:
+            return DEFAULT_FPS
+        return self._sink_processor.get_fps()
 
     def _log_frame_stats(self):
         """Log frame processing statistics and emit heartbeat event."""
@@ -610,9 +613,18 @@ class FrameProcessor:
             input_source_config = parameters.pop("input_source")
             self._update_input_source(input_source_config)
 
-        # Update parameters for all pipeline processors
-        for processor in self.pipeline_processors:
-            processor.update_parameters(parameters)
+        # Route to specific node or broadcast to all pipeline processors
+        node_id = parameters.pop("node_id", None)
+        if node_id:
+            if node_id in self._processors_by_node_id:
+                self._processors_by_node_id[node_id].update_parameters(parameters)
+            else:
+                logger.warning(
+                    f"Unknown node_id '{node_id}', ignoring parameter update"
+                )
+        else:
+            for processor in self.pipeline_processors:
+                processor.update_parameters(parameters)
 
         # Update local parameters
         self.parameters = {**self.parameters, **parameters}
@@ -876,9 +888,7 @@ class FrameProcessor:
                         if self._video_mode and self.cloud_manager:
                             if self.cloud_manager.send_frame(rgb_frame):
                                 self._frames_to_cloud += 1
-                    elif self.pipeline_processors:
-                        first_processor = self.pipeline_processors[0]
-
+                    elif self._graph_source_queues:
                         if torch.cuda.is_available():
                             shape = rgb_frame.shape
                             pinned_buffer = self._get_or_create_pinned_buffer(shape)
@@ -891,13 +901,14 @@ class FrameProcessor:
 
                         frame_tensor = frame_tensor.unsqueeze(0)
 
-                        try:
-                            first_processor.input_queue.put_nowait(frame_tensor)
-                        except queue.Full:
-                            logger.debug(
-                                f"First processor input queue full, "
-                                f"dropping {self.input_source_type} frame"
-                            )
+                        for sq in self._graph_source_queues:
+                            try:
+                                sq.put_nowait(frame_tensor)
+                            except queue.Full:
+                                logger.debug(
+                                    f"Graph source queue full, "
+                                    f"dropping {self.input_source_type} frame"
+                                )
 
                     frame_count += 1
                     if frame_count % 100 == 0:
@@ -917,44 +928,69 @@ class FrameProcessor:
             f"after {frame_count} frames"
         )
 
-    def _setup_pipeline_chain_sync(self):
-        """Create pipeline processor chain (synchronous).
+    def _setup_pipelines_sync(self):
+        """Create pipeline execution graph (synchronous).
 
-        Assumes all pipelines are already loaded by the pipeline manager.
+        If a graph config is provided via initial parameters, uses build_graph()
+        to create the execution graph. Otherwise, builds an implicit linear graph
+        from pipeline_ids. Assumes all pipelines are already loaded by the
+        pipeline manager.
         """
-        if not self.pipeline_ids:
-            logger.error("No pipeline IDs provided")
-            return
+        from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
 
-        # Create pipeline processors (each creates its own queues)
-        for pipeline_id in self.pipeline_ids:
-            # Get pipeline instance from manager
-            pipeline = self.pipeline_manager.get_pipeline_by_id(pipeline_id)
+        from .graph_schema import GraphConfig, build_linear_graph
 
-            # Create processor with its own queues
-            processor = PipelineProcessor(
-                pipeline=pipeline,
-                pipeline_id=pipeline_id,
-                initial_parameters=self.parameters.copy(),
-                session_id=self.session_id,
-                user_id=self.user_id,
-                connection_id=self.connection_id,
-                connection_info=self.connection_info,
+        graph_data = self.parameters.get("graph")
+        if graph_data is not None:
+            api_graph = GraphConfig.model_validate(graph_data)
+        else:
+            # Determine which pipelines should receive input as vace_input_frames
+            vace_input_video_ids: set[str] = set()
+            if self.parameters.get("vace_enabled") and self.parameters.get(
+                "vace_use_input_video", True
+            ):
+                for pid in self.pipeline_ids:
+                    pipeline = self.pipeline_manager.get_pipeline_by_id(pid)
+                    if isinstance(pipeline, VACEEnabledPipeline):
+                        vace_input_video_ids.add(pid)
+
+            api_graph = build_linear_graph(
+                self.pipeline_ids,
+                vace_input_video_ids=vace_input_video_ids or None,
             )
 
-            self.pipeline_processors.append(processor)
+        self._setup_graph(api_graph)
 
-        for i in range(1, len(self.pipeline_processors)):
-            prev_processor = self.pipeline_processors[i - 1]
-            curr_processor = self.pipeline_processors[i]
-            prev_processor.set_next_processor(curr_processor)
+    def _setup_graph(self, graph):
+        """Set up graph-based execution from a GraphConfig."""
+        from .graph_executor import build_graph
+
+        graph_run = build_graph(
+            graph=graph,
+            pipeline_manager=self.pipeline_manager,
+            initial_parameters=self.parameters.copy(),
+            session_id=self.session_id,
+            user_id=self.user_id,
+            connection_id=self.connection_id,
+            connection_info=self.connection_info,
+        )
+
+        self._graph_source_queues = graph_run.source_queues
+        self._sink_processor = graph_run.sink_processor
+        self.pipeline_processors = graph_run.processors
+        self.pipeline_ids = graph_run.pipeline_ids
+
+        # Index processors by node_id for per-node parameter routing
+        for proc in self.pipeline_processors:
+            self._processors_by_node_id[proc.node_id] = proc
 
         # Start all processors
         for processor in self.pipeline_processors:
             processor.start()
 
         logger.info(
-            f"Created pipeline chain with {len(self.pipeline_processors)} processors"
+            f"Created graph with {len(self.pipeline_processors)} processors, "
+            f"sink={graph_run.sink_node_id}"
         )
 
     def __enter__(self):
