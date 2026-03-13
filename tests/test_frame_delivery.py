@@ -55,6 +55,7 @@ def _measure_delivery(
         pipeline=pipeline,
         pipeline_id="test-stub",
     )
+    processor.output_queues["video"] = [queue.Queue(maxsize=30)]
     processor.start()
 
     intervals = []

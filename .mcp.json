@@ -3,7 +3,7 @@
     "scope": {
       "type": "stdio",
       "command": "uv",
-      "args": ["run", "daydream-scope", "--mcp", "--port", "8002"]
+      "args": ["run", "daydream-scope", "--mcp"]
     }
   }
 }
