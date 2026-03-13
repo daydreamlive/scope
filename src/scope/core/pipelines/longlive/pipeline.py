@@ -19,6 +19,7 @@ from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
+from ..wan2_1.masked_pruning import MaskedPruningEnabledPipeline
 from ..wan2_1.vace import VACEEnabledPipeline
 from ..wan2_1.vae import create_vae
 from .modular_blocks import LongLiveBlocks
@@ -32,7 +33,9 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
-class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
+class LongLivePipeline(
+    Pipeline, LoRAEnabledPipeline, MaskedPruningEnabledPipeline, VACEEnabledPipeline
+):
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return LongLiveConfig
@@ -91,6 +94,10 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         generator.model = self._init_vace(
             config, generator.model, device=device, dtype=dtype
         )
+
+        # Apply masked pruning wrapper if enabled (after VACE, before LoRA)
+        # Composition order: LoRA -> MaskedPruning -> VACE -> CausalWanModel (base)
+        generator.model = self._init_masked_pruning(config, generator.model)
 
         # Apply LongLive's built-in performance LoRA using the module-targeted strategy.
         # This mirrors the original LongLive behavior and is independent of any
@@ -194,6 +201,12 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         self.state.set("height", config.height)
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "base_seed", 42))
+
+        # Masked pruning config
+        self.state.set(
+            "masked_pruning_enabled",
+            getattr(config, "masked_pruning_enabled", False),
+        )
 
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection

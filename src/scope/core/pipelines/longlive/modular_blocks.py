@@ -15,6 +15,7 @@ from ..wan2_1.blocks import (
     SetupCachesBlock,
     TextConditioningBlock,
 )
+from ..wan2_1.masked_pruning import PreparePruneMaskBlock
 from ..wan2_1.vace.blocks import VaceEncodingBlock
 from .blocks import (
     PrepareRecacheFramesBlock,
@@ -39,6 +40,7 @@ ALL_BLOCKS = InsertableDict(
         ),
         ("auto_preprocess_video", AutoPreprocessVideoBlock),
         ("auto_prepare_latents", AutoPrepareLatentsBlock),
+        ("prepare_prune_mask", PreparePruneMaskBlock),
         ("recache_frames", RecacheFramesBlock),
         ("vace_encoding", VaceEncodingBlock),
         ("denoise", DenoiseBlock),

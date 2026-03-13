@@ -125,6 +125,13 @@ class LongLiveConfig(BasePipelineConfig):
             order=8, component="quantization", is_load_param=True
         ),
     )
+    masked_pruning_enabled: bool = Field(
+        default=False,
+        description="Enable masked token pruning for faster V2V inference with external masks",
+        json_schema_extra=ui_field_config(
+            order=10, component="masked_pruning", modes=["video"], is_load_param=True
+        ),
+    )
 
     modes = {
         "text": ModeDefaults(default=True),

@@ -71,6 +71,11 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
                 description="Noisy latents to denoise",
             ),
             OutputParam("generator", description="Random number generator"),
+            OutputParam(
+                "source_latent",
+                type_hint=torch.Tensor,
+                description="Clean VAE-encoded latent before noise addition",
+            ),
         ]
 
     @torch.no_grad()
@@ -80,6 +85,7 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
         # Encode frames to latents using VAE
         # VAE returns [B, F, C, H, W] which is what DenoiseBlock/Generator expect
         latents = components.vae.encode_to_latent(block_state.video)
+        block_state.source_latent = latents
 
         # The default param for InputParam does not work right now
         # The workaround is to set the default values here

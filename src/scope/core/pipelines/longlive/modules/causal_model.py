@@ -13,6 +13,7 @@ from torch.nn.attention.flex_attention import (
 )
 
 from scope.core.pipelines.wan2_1.modules.attention import attention
+
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
     MLPProj,
@@ -249,6 +250,7 @@ class CausalWanSelfAttention(nn.Module):
         else:
             frame_seqlen = math.prod(grid_sizes[0][1:]).item()
             current_start_frame = current_start // frame_seqlen
+
             roped_query = causal_rope_apply(
                 q, grid_sizes, freqs, start_frame=current_start_frame
             ).type_as(v)
@@ -257,10 +259,12 @@ class CausalWanSelfAttention(nn.Module):
             ).type_as(v)
 
             current_end = current_start + roped_query.shape[1]
+
             sink_tokens = self.sink_size * frame_seqlen
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
-            num_new_tokens = roped_query.shape[1]
+            # Cache stores full-resolution K/V even when Q is pruned
+            num_new_tokens = roped_key.shape[1]
 
             # Compute cache update parameters without modifying kv_cache directly
             cache_update_info = None
@@ -498,11 +502,10 @@ class CausalWanAttentionBlock(nn.Module):
             grid_sizes(Tensor): Shape [B, 3], the second dimension contains (F, H, W)
             freqs(Tensor): Rope freqs, shape [1024, C / num_heads / 2]
         """
-        num_frames, frame_seqlen = e.shape[1], x.shape[1] // e.shape[1]
-        # assert e.dtype == torch.float32
-        # with amp.autocast(dtype=torch.float32):
+        num_frames = e.shape[1]
+        frame_seqlen = x.shape[1] // num_frames
+
         e = (self.modulation.unsqueeze(1) + e).chunk(6, dim=2)
-        # assert e[0].dtype == torch.float32
 
         # self-attention
         self_attn_result = self.self_attn(
@@ -527,7 +530,6 @@ class CausalWanAttentionBlock(nn.Module):
             y = self_attn_result
             cache_update_info = None
 
-        # with amp.autocast(dtype=torch.float32):
         x = x + (y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[2]).flatten(
             1, 2
         )
@@ -544,7 +546,6 @@ class CausalWanAttentionBlock(nn.Module):
                     + e[3]
                 ).flatten(1, 2)
             )
-            # with amp.autocast(dtype=torch.float32):
             x = x + (
                 y.unflatten(dim=1, sizes=(num_frames, frame_seqlen)) * e[5]
             ).flatten(1, 2)
@@ -553,7 +554,6 @@ class CausalWanAttentionBlock(nn.Module):
         x = cross_attn_ffn(x, context, context_lens, e, crossattn_cache)
 
         if cache_update_info is not None:
-            # cache_update_info is already in the format (current_end, local_end_index, cache_update_info)
             return x, cache_update_info
         else:
             return x
@@ -1099,11 +1099,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         if y is not None:
             x = [torch.cat([u, v], dim=0) for u, v in zip(x, y, strict=False)]
 
-        # print(f"x.device: {x[0].device}, t.device: {t.device}, context.device: {context.device}, seq_len: {seq_len}")
-
         # embeddings
         x = [self.patch_embedding(u.unsqueeze(0)) for u in x]
-        # print("patch embedding done")
         grid_sizes = torch.stack(
             [torch.tensor(u.shape[2:], dtype=torch.long) for u in x]
         )
@@ -1111,12 +1108,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         seq_lens = torch.tensor([u.size(1) for u in x], dtype=torch.long)
         assert seq_lens.max() <= seq_len
         x = torch.cat(x)
-        """
-        torch.cat([
-            torch.cat([u, u.new_zeros(1, seq_len - u.size(1), u.size(2))],
-                      dim=1) for u in x
-        ])
-        """
 
         # time embeddings
         # with amp.autocast(dtype=torch.float32):
@@ -1157,7 +1148,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             sink_recache_after_switch=sink_recache_after_switch,
         )
 
-        # print("kwargs done")
         def create_custom_forward(module):
             def custom_forward(*inputs, **kwargs):
                 return module(*inputs, **kwargs)
@@ -1167,7 +1157,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         cache_update_info = None
         cache_update_infos = []  # Collect cache update info for all blocks
         for block_index, block in enumerate(self.blocks):
-            # print(f"block_index: {block_index}")
             if torch.is_grad_enabled() and self.gradient_checkpointing:
                 kwargs.update(
                     {
@@ -1176,7 +1165,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         "cache_start": cache_start,
                     }
                 )
-                # print(f"forward checkpointing")
                 result = torch.utils.checkpoint.checkpoint(
                     create_custom_forward(block),
                     x,
@@ -1187,7 +1175,6 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 if kv_cache is not None and isinstance(result, tuple):
                     x, block_cache_update_info = result
                     cache_update_infos.append((block_index, block_cache_update_info))
-                    # Extract base info for subsequent blocks (without concrete cache update details)
                     cache_update_info = block_cache_update_info[
                         :2
                     ]  # (current_end, local_end_index)
@@ -1202,19 +1189,17 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                         "cache_start": cache_start,
                     }
                 )
-                # print(f"forward no checkpointing")
                 result = block(x, **kwargs)
                 # Handle the result
                 if kv_cache is not None and isinstance(result, tuple):
                     x, block_cache_update_info = result
                     cache_update_infos.append((block_index, block_cache_update_info))
-                    # Extract base info for subsequent blocks (without concrete cache update details)
                     cache_update_info = block_cache_update_info[
                         :2
                     ]  # (current_end, local_end_index)
                 else:
                     x = result
-        # log_gpu_memory(f"in _forward_inference: {x[0].device}")
+
         # After all blocks are processed, apply cache updates in a single pass
         if kv_cache is not None and cache_update_infos:
             self._apply_cache_updates(kv_cache, cache_update_infos)

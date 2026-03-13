@@ -123,6 +123,18 @@ class DenoiseBlock(ModularPipelineBlocks):
                 type_hint=float,
                 description="Scaling factor for VACE hint injection",
             ),
+            InputParam(
+                "prune_mask",
+                default=None,
+                type_hint=torch.Tensor | None,
+                description="Spatial prune mask [H'*W']",
+            ),
+            InputParam(
+                "source_latent",
+                default=None,
+                type_hint=torch.Tensor | None,
+                description="Clean VAE-encoded latent before noise (for latent restore)",
+            ),
         ]
 
     @property
@@ -165,6 +177,10 @@ class DenoiseBlock(ModularPipelineBlocks):
             # Lower noise scale -> less denoising steps, less intense changes to input
             denoising_step_list[0] = int(1000 * block_state.noise_scale) - 100
 
+        # Pruning params
+        prune_mask = block_state.prune_mask
+        source_latent = block_state.source_latent
+
         # Denoising loop
         for index, current_timestep in enumerate(denoising_step_list):
             if index == 0:
@@ -196,7 +212,16 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
+                    prune_mask=prune_mask,
                 )
+
+                # Override pruned positions with source latent in latent space
+                if prune_mask is not None and source_latent is not None:
+                    from ..masked_pruning.utils import restore_latent_space
+
+                    denoised_pred = restore_latent_space(
+                        denoised_pred, source_latent, prune_mask
+                    )
 
                 next_timestep = denoising_step_list[index + 1]
                 # Create noise with same shape and properties as denoised_pred
@@ -232,7 +257,16 @@ class DenoiseBlock(ModularPipelineBlocks):
                     kv_cache_attention_bias=block_state.kv_cache_attention_bias,
                     vace_context=block_state.vace_context,
                     vace_context_scale=block_state.vace_context_scale,
+                    prune_mask=prune_mask,
                 )
+
+                # Override pruned positions with source latent in latent space
+                if prune_mask is not None and source_latent is not None:
+                    from ..masked_pruning.utils import restore_latent_space
+
+                    denoised_pred = restore_latent_space(
+                        denoised_pred, source_latent, prune_mask
+                    )
 
         block_state.latents = denoised_pred
 

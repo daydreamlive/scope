@@ -125,6 +125,7 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
         )
 
         # Run the generator with the clean latent at timestep = 0 to update the KV cache
+        # Clean pass always runs at full resolution (no pruning)
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
         components.generator(
             noisy_image_or_video=block_state.latents,
