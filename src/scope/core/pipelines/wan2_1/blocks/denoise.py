@@ -150,6 +150,14 @@ class DenoiseBlock(ModularPipelineBlocks):
         noise = block_state.latents
         batch_size = noise.shape[0]
         num_frames = noise.shape[1]
+
+        # Guard: skip denoising when there are zero frames to avoid
+        # KV cache tensor dimension mismatches (e.g. expand size 0 vs existing cache size)
+        if num_frames == 0:
+            block_state.latents = noise
+            self.set_block_state(state, block_state)
+            return components, state
+
         denoising_step_list = block_state.current_denoising_step_list.clone()
 
         conditional_dict = {"prompt_embeds": block_state.conditioning_embeds}
