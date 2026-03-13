@@ -209,7 +209,9 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         from .modules.causal_model import KV_CACHE_ATTENTION_BIAS_DISABLED
 
         initial_kv_bias = (
-            DEFAULT_KV_CACHE_ATTENTION_BIAS if compile else KV_CACHE_ATTENTION_BIAS_DISABLED
+            DEFAULT_KV_CACHE_ATTENTION_BIAS
+            if compile
+            else KV_CACHE_ATTENTION_BIAS_DISABLED
         )
         self.state.set("kv_cache_attention_bias", initial_kv_bias)
 
@@ -247,7 +249,9 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
 
             print(f"Warmed up ({warmup_runs} runs) in {time.time() - start:.2f}s")
         else:
-            logger.info("torch.compile disabled — skipping warmup (no compiled kernel to prime)")
+            logger.info(
+                "torch.compile disabled — skipping warmup (no compiled kernel to prime)"
+            )
 
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection

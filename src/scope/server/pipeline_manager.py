@@ -982,8 +982,7 @@ class PipelineManager:
             # Only compile diffusion model for hopper; skip if a prior
             # torch._dynamo.reset() failed (stale caches would cause a crash).
             _hopper_gpu = torch.cuda.is_available() and any(
-                x in torch.cuda.get_device_name(0).lower()
-                for x in ("h100", "hopper")
+                x in torch.cuda.get_device_name(0).lower() for x in ("h100", "hopper")
             )
             _should_compile = _hopper_gpu and not self._dynamo_reset_failed
             if _hopper_gpu and self._dynamo_reset_failed:
