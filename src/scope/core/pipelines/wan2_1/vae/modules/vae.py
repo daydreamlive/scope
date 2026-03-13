@@ -10,7 +10,7 @@ import torch.nn.functional as F
 from einops import rearrange
 
 __all__ = [
-    "DecoderCacheState",
+    "CacheState",
     "WanVAE",
     "_video_vae",
 ]
@@ -20,14 +20,14 @@ CACHE_T = 2
 
 def _compute_new_cache(x: torch.Tensor, old_buf: torch.Tensor) -> torch.Tensor:
     """Compute new cache from input x and old buffer. Compile-safe (no list ops)."""
-    cache_x = x[:, :, -CACHE_T:, :, :].clone()
+    cache_x = x[:, :, -CACHE_T:, :, :].contiguous().clone()
     if cache_x.shape[2] < CACHE_T:
         cache_x = torch.cat([old_buf[:, :, -1:, :, :], cache_x], dim=2)
     return cache_x
 
 
-class DecoderCacheState:
-    """Pre-allocated, type-stable cache for the VAE decoder.
+class CacheState:
+    """Pre-allocated, type-stable cache for the VAE encoder and decoder.
 
     Replaces the mutable list-of-None/string/tensor pattern with structured
     tensor buffers. Zero-initialized buffers produce identical results to None
@@ -38,6 +38,10 @@ class DecoderCacheState:
     reused across sequence resets. After the first forward pass populates all
     slots, reset() zeros buffers without deallocating, so torch.compile never
     sees a None-to-Tensor type transition.
+
+    Supports two buffer types:
+    - Conv cache (CACHE_T frames): for CausalConv3d layers via update_conv_cache
+    - Downsample cache (1 frame): for Downsample3d layers via update_downsample_cache
     """
 
     __slots__ = ("buffers", "populated", "is_rep_phase", "num_slots")
@@ -78,7 +82,7 @@ class DecoderCacheState:
         buf = self.buffers[idx]
         if buf is None:
             buf = self._alloc_buffer(idx, x)
-        cache_x = x[:, :, -CACHE_T:, :, :].clone()
+        cache_x = x[:, :, -CACHE_T:, :, :].contiguous().clone()
         if cache_x.shape[2] < CACHE_T:
             if self.populated[idx]:
                 cache_x = torch.cat([buf[:, :, -1:, :, :], cache_x], dim=2)
@@ -97,18 +101,49 @@ class DecoderCacheState:
         self.populated[idx] = True
         return buf
 
+    @torch.compiler.disable
+    def _alloc_downsample_buffer(self, idx: int, like: torch.Tensor) -> torch.Tensor:
+        """Allocate a 1-frame zero buffer for a downsample slot."""
+        buf = torch.zeros(
+            like.shape[0],
+            like.shape[1],
+            1,
+            like.shape[3],
+            like.shape[4],
+            device=like.device,
+            dtype=like.dtype,
+        )
+        self.buffers[idx] = buf
+        return buf
+
+    @torch.compiler.disable
+    def update_downsample_cache(self, idx: int, x: torch.Tensor) -> torch.Tensor:
+        """Prepare cache for a Downsample3d time_conv. Returns the OLD 1-frame buffer.
+
+        On the first call (not populated), stores x's last frame and returns
+        a zero buffer. The caller must check populated[idx] beforehand to know
+        whether to skip time_conv (first call) or run it (subsequent calls).
+        """
+        buf = self.buffers[idx]
+        if buf is None:
+            buf = self._alloc_downsample_buffer(idx, x)
+        old = buf.contiguous().clone()
+        self.buffers[idx] = x[:, :, -1:, :, :].contiguous().clone()
+        self.populated[idx] = True
+        return old
+
     @property
     def is_allocated(self) -> bool:
         """True when all buffer slots have been allocated (no None entries)."""
         return all(b is not None for b in self.buffers)
 
     def get_bufs(self) -> tuple[torch.Tensor, ...]:
-        """Extract all buffers as a tuple for passing to compiled decoder."""
+        """Extract all buffers as a tuple for passing to compiled encoder/decoder."""
         return tuple(self.buffers)
 
     @torch.compiler.disable
     def set_bufs(self, new_bufs: list[torch.Tensor]):
-        """Update buffers from list returned by compiled decoder."""
+        """Update buffers from list returned by compiled encoder/decoder."""
         for i, buf in enumerate(new_bufs):
             self.buffers[i] = buf
         self.populated[:] = True
@@ -294,7 +329,25 @@ class Resample(nn.Module):
         x = rearrange(x, "(b t) c h w -> b c t h w", t=t)
 
         if self.mode == "downsample3d":
-            if feat_cache is not None:
+            if cache_bufs is not None:
+                idx = self.time_conv._cache_idx
+                old = cache_bufs[idx]
+                cache_x = x[:, :, -1:, :, :].contiguous().clone()
+                combined = torch.cat([old, x], 2)
+                # Skip time_conv when combined frames < kernel size (first-frame
+                # case with zero-init buffer). Dynamo creates separate traces
+                # for each shape branch and caches them.
+                if combined.shape[2] >= 3:
+                    x = self.time_conv(combined)
+                new_bufs.append(cache_x)
+            elif cache is not None:
+                idx = self.time_conv._cache_idx
+                if not cache.populated[idx]:
+                    cache.update_downsample_cache(idx, x)
+                else:
+                    old = cache.update_downsample_cache(idx, x)
+                    x = self.time_conv(torch.cat([old, x], 2))
+            elif feat_cache is not None:
                 idx = feat_idx[0]
                 if feat_cache[idx] is None:
                     feat_cache[idx] = x.clone()
@@ -505,12 +558,53 @@ class Encoder3d(nn.Module):
             CausalConv3d(out_dim, z_dim, 3, padding=1),
         )
 
-    def forward(self, x, feat_cache=None, feat_idx=[0]):
-        if feat_cache is not None:
+        self._assign_cache_indices()
+
+    def _assign_cache_indices(self):
+        """Walk encoder layers in forward-pass order and set _cache_idx on each cacheable layer."""
+        idx = 0
+        # conv1
+        self.conv1._cache_idx = idx
+        idx += 1
+        # downsamples
+        for layer in self.downsamples:
+            if isinstance(layer, ResidualBlock):
+                for sublayer in layer.residual:
+                    if isinstance(sublayer, CausalConv3d):
+                        sublayer._cache_idx = idx
+                        idx += 1
+            elif isinstance(layer, Resample) and layer.mode == "downsample3d":
+                layer.time_conv._cache_idx = idx
+                idx += 1
+        # middle
+        for layer in self.middle:
+            if isinstance(layer, ResidualBlock):
+                for sublayer in layer.residual:
+                    if isinstance(sublayer, CausalConv3d):
+                        sublayer._cache_idx = idx
+                        idx += 1
+        # head
+        for layer in self.head:
+            if isinstance(layer, CausalConv3d):
+                layer._cache_idx = idx
+                idx += 1
+        self._num_cache_slots = idx
+
+    def forward(self, x, feat_cache=None, feat_idx=[0], *, cache=None, cache_bufs=None):
+        new_bufs = []
+
+        # conv1
+        if cache_bufs is not None:
+            old = cache_bufs[self.conv1._cache_idx]
+            new_bufs.append(_compute_new_cache(x, old))
+            x = self.conv1(x, old)
+        elif cache is not None:
+            buf = cache.update_conv_cache(self.conv1._cache_idx, x)
+            x = self.conv1(x, buf)
+        elif feat_cache is not None:
             idx = feat_idx[0]
             cache_x = x[:, :, -CACHE_T:, :, :].clone()
             if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                # cache last frame of last two chunk
                 cache_x = torch.cat(
                     [
                         feat_cache[idx][:, :, -1, :, :].unsqueeze(2).to(cache_x.device),
@@ -526,39 +620,68 @@ class Encoder3d(nn.Module):
 
         # downsamples
         for layer in self.downsamples:
-            if feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
+            if isinstance(layer, (ResidualBlock, Resample)):
+                if cache_bufs is not None:
+                    x, layer_new = layer(x, cache_bufs=cache_bufs)
+                    new_bufs.extend(layer_new)
+                elif cache is not None:
+                    x = layer(x, cache=cache)
+                elif feat_cache is not None:
+                    x = layer(x, feat_cache, feat_idx)
+                else:
+                    x = layer(x)
             else:
                 x = layer(x)
 
         # middle
         for layer in self.middle:
-            if isinstance(layer, ResidualBlock) and feat_cache is not None:
-                x = layer(x, feat_cache, feat_idx)
+            if isinstance(layer, ResidualBlock):
+                if cache_bufs is not None:
+                    x, layer_new = layer(x, cache_bufs=cache_bufs)
+                    new_bufs.extend(layer_new)
+                elif cache is not None:
+                    x = layer(x, cache=cache)
+                elif feat_cache is not None:
+                    x = layer(x, feat_cache, feat_idx)
+                else:
+                    x = layer(x)
             else:
                 x = layer(x)
 
         # head
         for layer in self.head:
-            if isinstance(layer, CausalConv3d) and feat_cache is not None:
-                idx = feat_idx[0]
-                cache_x = x[:, :, -CACHE_T:, :, :].clone()
-                if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
-                    # cache last frame of last two chunk
-                    cache_x = torch.cat(
-                        [
-                            feat_cache[idx][:, :, -1, :, :]
-                            .unsqueeze(2)
-                            .to(cache_x.device),
-                            cache_x,
-                        ],
-                        dim=2,
-                    )
-                x = layer(x, feat_cache[idx])
-                feat_cache[idx] = cache_x
-                feat_idx[0] += 1
+            if isinstance(layer, CausalConv3d):
+                if cache_bufs is not None:
+                    idx = layer._cache_idx
+                    old = cache_bufs[idx]
+                    new_bufs.append(_compute_new_cache(x, old))
+                    x = layer(x, old)
+                elif cache is not None:
+                    buf = cache.update_conv_cache(layer._cache_idx, x)
+                    x = layer(x, buf)
+                elif feat_cache is not None:
+                    idx = feat_idx[0]
+                    cache_x = x[:, :, -CACHE_T:, :, :].clone()
+                    if cache_x.shape[2] < 2 and feat_cache[idx] is not None:
+                        cache_x = torch.cat(
+                            [
+                                feat_cache[idx][:, :, -1, :, :]
+                                .unsqueeze(2)
+                                .to(cache_x.device),
+                                cache_x,
+                            ],
+                            dim=2,
+                        )
+                    x = layer(x, feat_cache[idx])
+                    feat_cache[idx] = cache_x
+                    feat_idx[0] += 1
+                else:
+                    x = layer(x)
             else:
                 x = layer(x)
+
+        if cache_bufs is not None:
+            return x, new_bufs
         return x
 
 
@@ -763,6 +886,7 @@ class WanVAE_(nn.Module):
         )
         self.first_batch = True
         self._decoder_cache = None
+        self._encoder_cache = None
 
     def forward(self, x):
         mu, log_var = self.encode(x)
@@ -802,37 +926,43 @@ class WanVAE_(nn.Module):
         return mu
 
     def stream_encode(self, x):
-        # cache
         t = x.shape[2]
         if self.first_batch:
-            self.clear_cache_encode()
-            self._enc_conv_idx = [0]
-            out = self.encoder(
-                x[:, :, :1, :, :],
-                feat_cache=self._enc_feat_map,
-                feat_idx=self._enc_conv_idx,
-            )
-            self._enc_conv_idx = [0]
-            out_ = self.encoder(
-                x[:, :, 1:, :, :],
-                feat_cache=self._enc_feat_map,
-                feat_idx=self._enc_conv_idx,
-            )
+            if self._encoder_cache is not None:
+                self._encoder_cache.reset()
+            else:
+                self._encoder_cache = CacheState(
+                    self.encoder._num_cache_slots, x.device, x.dtype
+                )
+
+            # First batch always uses eager cache= path. Variable frame
+            # counts (1 + t-1) would cause recompilation under torch.compile.
+            # Only steady-state (4-frame chunks) is compiled. Bypass
+            # torch.compile via _orig_mod when the encoder is compiled.
+            enc = getattr(self.encoder, "_orig_mod", self.encoder)
+            out = enc(x[:, :, :1, :, :], cache=self._encoder_cache)
+            out_ = enc(x[:, :, 1:, :, :], cache=self._encoder_cache)
             out = torch.cat([out, out_], 2)
         else:
+            cache = self._encoder_cache
             out = []
             for i in range(t // 4):
-                self._enc_conv_idx = [0]
-                out.append(
-                    self.encoder(
-                        x[:, :, i * 4 : (i + 1) * 4, :, :],
-                        feat_cache=self._enc_feat_map,
-                        feat_idx=self._enc_conv_idx,
+                if cache.is_allocated:
+                    bufs = cache.get_bufs()
+                    result, new_bufs = self.encoder(
+                        x[:, :, i * 4 : (i + 1) * 4, :, :], cache_bufs=bufs
                     )
-                )
+                    cache.set_bufs(new_bufs)
+                    out.append(result)
+                else:
+                    out.append(
+                        self.encoder(
+                            x[:, :, i * 4 : (i + 1) * 4, :, :],
+                            cache=cache,
+                        )
+                    )
             out = torch.cat(out, 2)
         mu, log_var = self.conv1(out).chunk(2, dim=1)
-        # self.clear_cache()
         return mu
 
     def decode(self, z, scale):
@@ -845,7 +975,7 @@ class WanVAE_(nn.Module):
             z = z / scale[1] + scale[0]
         iter_ = z.shape[2]
         x = self.conv2(z)
-        cache = DecoderCacheState(self.decoder._num_cache_slots, x.device, x.dtype)
+        cache = CacheState(self.decoder._num_cache_slots, x.device, x.dtype)
         for i in range(iter_):
             if i == 0:
                 out = self.decoder(x[:, :, i : i + 1, :, :], cache=cache)
@@ -869,7 +999,7 @@ class WanVAE_(nn.Module):
                 # Reuse pre-allocated buffers from a previous sequence
                 self._decoder_cache.reset()
             else:
-                self._decoder_cache = DecoderCacheState(
+                self._decoder_cache = CacheState(
                     self.decoder._num_cache_slots, x.device, x.dtype
                 )
             self.first_batch = False
@@ -926,9 +1056,12 @@ class WanVAE_(nn.Module):
         pass
 
     def clear_cache_encode(self):
+        # Legacy feat_cache for encode() and _encode_with_cache()
         self._enc_conv_num = count_conv3d(self.encoder)
         self._enc_conv_idx = [0]
         self._enc_feat_map = [None] * self._enc_conv_num
+        # CacheState for stream_encode is reset in stream_encode itself
+        # when first_batch is True, so no action needed here.
 
 
 def _video_vae(

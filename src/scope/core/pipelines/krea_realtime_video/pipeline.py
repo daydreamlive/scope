@@ -225,6 +225,11 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
                     "Compiling VAE decoder (this may take several minutes)..."
                 )
             self.components.vae.compile_decoder(config.height, config.width)
+            if stage_callback:
+                stage_callback(
+                    "Compiling VAE encoder (this may take several minutes)..."
+                )
+            self.components.vae.compile_encoder(config.height, config.width)
 
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
