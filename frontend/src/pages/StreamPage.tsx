@@ -2619,8 +2619,6 @@ export function StreamPage() {
               setShowDownloadDialog(false);
               setOpenSettingsTab(tab);
             }}
-            isCloudMode={isCloudMode}
-            onOpenLoRAsSettings={() => setOpenSettingsTab("loras")}
           />
         )}
 
