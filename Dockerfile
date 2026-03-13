@@ -24,6 +24,8 @@ RUN apt-get update && apt-get install -y \
   libxrender-dev \
   libgomp1 \
   python3-dev \
+  # Tempo Sync (Link/MIDI) on Linux
+  libasound2 \
   # Cleanup
   && rm -rf /var/lib/apt/lists/*
 
