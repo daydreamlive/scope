@@ -538,6 +538,7 @@ dependencies = [
     { name = "huggingface-hub" },
     { name = "kernels" },
     { name = "lmdb" },
+    { name = "mcp" },
     { name = "omegaconf" },
     { name = "peft" },
     { name = "pluggy" },
@@ -564,9 +565,6 @@ dependencies = [
 [package.optional-dependencies]
 kafka = [
     { name = "aiokafka" },
-]
-mcp = [
-    { name = "mcp" },
 ]
 
 [package.dev-dependencies]
@@ -598,7 +596,7 @@ requires-dist = [
     { name = "huggingface-hub", specifier = ">=0.25.0" },
     { name = "kernels", specifier = ">=0.10.4" },
     { name = "lmdb", specifier = ">=1.7.3" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.0.0" },
+    { name = "mcp", specifier = ">=1.0.0" },
     { name = "omegaconf", specifier = ">=2.3.0" },
     { name = "peft", specifier = ">=0.17.1" },
     { name = "pluggy", specifier = ">=1.5.0" },
@@ -620,7 +618,7 @@ requires-dist = [
     { name = "twilio", specifier = ">=9.8.0" },
     { name = "uvicorn", specifier = ">=0.35.0" },
 ]
-provides-extras = ["kafka", "mcp"]
+provides-extras = ["kafka"]
 
 [package.metadata.requires-dev]
 dev = [

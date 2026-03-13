@@ -2798,7 +2798,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     "--mcp",
     is_flag=True,
     help="Run as an MCP (Model Context Protocol) server over stdio instead of the HTTP server. "
-    "Connects to a running Scope instance on --port. Requires: pip install daydream-scope[mcp]",
+    "Connects to a running Scope instance on --port.",
 )
 @click.pass_context
 def main(
@@ -2819,15 +2819,16 @@ def main(
 
     # MCP mode: run the MCP stdio server instead of the HTTP server
     if mcp:
-        try:
-            from .mcp_server import run_mcp_server
-        except ImportError:
-            click.echo(
-                "MCP dependencies not installed. Install with: pip install daydream-scope[mcp]",
-                err=True,
-            )
-            sys.exit(1)
-        run_mcp_server(port=port)
+        import click.core
+
+        from .mcp_server import run_mcp_server
+
+        # Only pre-connect if --port was explicitly provided on the command line
+        source = ctx.get_parameter_source("port")
+        explicit_port = (
+            port if source == click.core.ParameterSource.COMMANDLINE else None
+        )
+        run_mcp_server(port=explicit_port)
         return
 
     # Store cloud credentials in environment for app access
