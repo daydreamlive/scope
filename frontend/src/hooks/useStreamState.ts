@@ -389,10 +389,9 @@ export function useStreamState() {
       hardwareInfo?.vram_gb !== null &&
       hardwareInfo?.vram_gb !== undefined
     ) {
-      // VACE is enabled by default, but disabled if VRAM is below the quantization threshold
-      // (because FP8 quantization will be recommended in that case)
+      const vaceFp8Ok = schema.vace_fp8_compatible === true;
       const recommendedVaceEnabled =
-        hardwareInfo.vram_gb > quantizationThreshold;
+        vaceFp8Ok || hardwareInfo.vram_gb > quantizationThreshold;
       setSettings(prev => ({
         ...prev,
         vaceEnabled: recommendedVaceEnabled,

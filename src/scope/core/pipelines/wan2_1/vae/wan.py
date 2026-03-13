@@ -204,4 +204,5 @@ class WanVAEWrapper(torch.nn.Module):
 
     def clear_cache(self):
         """Clear encoder/decoder cache for next sequence."""
+        self.model.clear_cache()
         self.model.first_batch = True

@@ -235,6 +235,8 @@ class BasePipelineConfig(BaseModel):
     min_dimension: ClassVar[int] = 1
     # Whether this pipeline contains modifications based on the original project
     modified: ClassVar[bool] = False
+    # Whether VACE and FP8 quantization can be used simultaneously
+    vace_fp8_compatible: ClassVar[bool] = False
     # Recommended quantization based on VRAM: if user's VRAM > this threshold (GB),
     # quantization=null is recommended, otherwise fp8_e4m3fn is recommended.
     # None means no specific recommendation (pipeline doesn't benefit from quantization).
@@ -380,6 +382,7 @@ class BasePipelineConfig(BaseModel):
             cls.recommended_quantization_vram_threshold
         )
         metadata["modified"] = cls.modified
+        metadata["vace_fp8_compatible"] = cls.vace_fp8_compatible
         # Convert UsageType enum values to strings for JSON serialization
         metadata["usage"] = [usage.value for usage in cls.usage] if cls.usage else []
         metadata["config_schema"] = cls.model_json_schema()

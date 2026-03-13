@@ -10,7 +10,6 @@ from typing import Any
 import torch
 
 from scope.core.pipelines.controller import parse_ctrl_input
-from scope.core.pipelines.wan2_1.vace import VACEEnabledPipeline
 
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineNotAvailableException
@@ -20,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 # Multiply the # of output frames from pipeline by this to get the max size of the output queue
 OUTPUT_QUEUE_MAX_SIZE_FACTOR = 2
+
 
 SLEEP_TIME = 0.01
 
@@ -103,8 +103,8 @@ class PipelineProcessor:
             "vace_use_input_video", True
         )
 
-        # Cache VACE support check to avoid isinstance on every chunk
-        self._pipeline_supports_vace = isinstance(pipeline, VACEEnabledPipeline)
+        # Cache VACE support check to avoid repeated lookups on every chunk.
+        self._pipeline_supports_vace = pipeline.get_config_class().supports_vace
 
         # Flag to track pending cache initialization after queue flush
         # Set when reset_cache flushes queues, cleared after successful pipeline call

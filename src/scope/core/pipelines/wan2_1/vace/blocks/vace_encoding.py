@@ -101,6 +101,12 @@ class VaceEncodingBlock(ModularPipelineBlocks):
     def inputs(self) -> list[InputParam]:
         return [
             InputParam(
+                "vace_context",
+                default=None,
+                type_hint=list[torch.Tensor] | None,
+                description="VACE context that provides visual conditioning",
+            ),
+            InputParam(
                 "vace_ref_images",
                 default=None,
                 type_hint=list[str] | None,

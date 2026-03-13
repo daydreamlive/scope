@@ -92,8 +92,7 @@ class DenoiseBlock(ModularPipelineBlocks):
             ),
             InputParam(
                 "crossattn_cache",
-                required=True,
-                type_hint=list[dict],
+                type_hint=list[dict] | None,
                 description="Initialized cross-attention cache",
             ),
             InputParam(
@@ -114,7 +113,7 @@ class DenoiseBlock(ModularPipelineBlocks):
             InputParam(
                 "vace_context",
                 default=None,
-                type_hint=torch.Tensor | None,
+                type_hint=list[torch.Tensor] | None,
                 description="VACE context that provides visual conditioning",
             ),
             InputParam(

@@ -19,7 +19,6 @@ from ..utils import Quantization, load_model_config, validate_resolution
 from ..wan2_1.components import WanDiffusionWrapper, WanTextEncoderWrapper
 from ..wan2_1.lora.mixin import LoRAEnabledPipeline
 from ..wan2_1.lora.strategies.module_targeted_lora import ModuleTargetedLoRAStrategy
-from ..wan2_1.vace import VACEEnabledPipeline
 from ..wan2_1.vae import create_vae
 from .modular_blocks import LongLiveBlocks
 from .schema import LongLiveConfig
@@ -32,7 +31,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_DENOISING_STEP_LIST = [1000, 750, 500, 250]
 
 
-class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
+class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return LongLiveConfig
@@ -41,6 +40,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         self,
         config,
         quantization: Quantization | None = None,
+        compile: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
         stage_callback=None,
@@ -69,14 +69,10 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         )
         lora_config = getattr(model_config, "adapter", {})
 
-        # Load generator with VACE support via upfront loading
-        # Strategy: Load LongLive base, wrap with VACE (if enabled), add VACE weights, then apply LoRA
-        # (VACE loaded before LoRA to ensure correct wrapper ordering)
         if stage_callback:
             stage_callback("Loading diffusion model...")
         start = time.time()
 
-        # Always create base CausalWanModel first
         generator = WanDiffusionWrapper(
             CausalWanModel,
             model_name=base_model_name,
@@ -86,11 +82,17 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
             **base_model_kwargs,
         )
 
-        # Apply VACE wrapper if vace_path is configured (upfront loading)
-        # This must happen before LoRA to get correct ordering: LoRA -> VACE -> Base
-        generator.model = self._init_vace(
-            config, generator.model, device=device, dtype=dtype
-        )
+        # Initialize VACE natively on the model (no wrapper needed)
+        vace_path = getattr(config, "vace_path", None)
+        if vace_path:
+            from ..wan2_1.vace.utils.weight_loader import load_vace_weights_only
+
+            vace_in_dim = getattr(config, "vace_in_dim", 96)
+            generator.model.init_vace(vace_in_dim=vace_in_dim)
+            generator.model.vace_patch_embedding.to(device=device, dtype=dtype)
+            generator.model.vace_blocks.to(device=device, dtype=dtype)
+            load_vace_weights_only(generator.model, vace_path)
+            logger.info("Initialized VACE natively on CausalWanModel")
 
         # Apply LongLive's built-in performance LoRA using the module-targeted strategy.
         # This mirrors the original LongLive behavior and is independent of any
@@ -198,6 +200,20 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
 
+        if compile:
+            inner_model = self.components.generator.model
+            if hasattr(inner_model, "get_base_model"):
+                inner_model = inner_model.get_base_model()
+            inner_model._compiled_inner_forward = torch.compile(
+                inner_model._compiled_inner_forward,
+                mode="max-autotune-no-cudagraphs",
+            )
+            inner_model._compiled_vace_forward = torch.compile(
+                inner_model._compiled_vace_forward,
+                mode="max-autotune-no-cudagraphs",
+            )
+            self._warmup(inner_model)
+
     def prepare(self, **kwargs) -> Requirements | None:
         """Return input requirements based on current mode."""
         return prepare_for_mode(self.__class__, self.components.config, kwargs)
@@ -249,3 +265,44 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
 
         _, self.state = self.blocks(self.components, self.state)
         return {"video": postprocess_chunk(self.state.values["output_video"])}
+
+    def _warmup(self, inner_model):
+        logger.info("Running warmup iteration...")
+        start = time.time()
+
+        warmup_prompt = [{"text": "warmup", "weight": 100}]
+        _ = self(prompts=warmup_prompt, init_cache=True)
+
+        inner_model.fill_level = inner_model.cache_tokens
+        _ = self(prompts=warmup_prompt, init_cache=False)
+
+        vace_blocks = getattr(inner_model, "vace_blocks", None)
+        if vace_blocks is not None:
+            self.components.vae.clear_cache()
+
+            h = self.state.get("height")
+            w = self.state.get("width")
+            num_frames = (
+                self.components.config.num_frame_per_block
+                * self.components.config.vae_temporal_downsample_factor
+            )
+            dummy_vace_input = torch.zeros(
+                1, 3, num_frames, h, w, device="cuda", dtype=torch.bfloat16
+            )
+            _ = self(
+                prompts=warmup_prompt,
+                init_cache=False,
+                vace_input_frames=dummy_vace_input,
+            )
+
+        # Reset state after warmup
+        inner_model.fill_level = 0
+        self.state.set("vace_context", None)
+        self.state.set("vace_input_frames", None)
+        self.state.set("vace_input_masks", None)
+        if vace_blocks is not None:
+            self.blocks.sub_blocks["vace_encoding"].clear_encoder_caches()
+        self.first_call = True
+        self.last_mode = None
+
+        logger.info(f"Warmup completed in {time.time() - start:.2f}s")
