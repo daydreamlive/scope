@@ -9,6 +9,8 @@ import torch
 from aiortc.mediastreams import VideoFrame
 
 from .kafka_publisher import publish_event
+from .modulation import ModulationEngine
+from .parameter_scheduler import ParameterScheduler
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
 
@@ -50,9 +52,25 @@ class FrameProcessor:
         connection_id: str | None = None,  # Connection ID for event correlation
         connection_info: dict
         | None = None,  # Connection metadata (gpu_type, region, etc.)
+        tempo_sync: Any | None = None,
     ):
         self.pipeline_manager = pipeline_manager
         self.cloud_manager = cloud_manager
+        self.tempo_sync = tempo_sync
+
+        # Parameter scheduler for beat-synced parameter changes
+        self.parameter_scheduler: ParameterScheduler | None = (
+            ParameterScheduler(
+                tempo_sync, self.update_parameters, notification_callback
+            )
+            if tempo_sync is not None
+            else None
+        )
+
+        # Modulation engine for continuous beat-synced parameter oscillation
+        self.modulation_engine: ModulationEngine | None = (
+            ModulationEngine() if tempo_sync is not None else None
+        )
 
         # Session ID for Kafka event tracking
         self.session_id = session_id or str(uuid.uuid4())
@@ -230,6 +248,10 @@ class FrameProcessor:
             return
 
         self.running = False
+
+        # Cancel any pending scheduled parameter changes
+        if self.parameter_scheduler is not None:
+            self.parameter_scheduler.cancel_pending()
 
         # Stop all pipeline processors
         for processor in self.pipeline_processors:
@@ -601,8 +623,28 @@ class FrameProcessor:
             logger.warning(f"Could not get pipeline dimensions: {e}")
             return 512, 512
 
+    def schedule_quantized_update(self, params: dict):
+        """Schedule params to be applied at the next beat boundary."""
+        if self.parameter_scheduler is not None:
+            self.parameter_scheduler.schedule(params)
+        else:
+            self.update_parameters(params)
+
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
+        # Always strip tempo-control keys so they never leak into pipelines,
+        # even when the corresponding helper (scheduler/engine/tempo_sync) is absent.
+
+        if "quantize_mode" in parameters:
+            mode = parameters.pop("quantize_mode")
+            if self.parameter_scheduler is not None:
+                self.parameter_scheduler.quantize_mode = mode
+
+        if "lookahead_ms" in parameters:
+            ms = parameters.pop("lookahead_ms")
+            if self.parameter_scheduler is not None:
+                self.parameter_scheduler.lookahead_ms = ms
+
         # Handle generic output sinks config
         if "output_sinks" in parameters:
             sinks_config = parameters.pop("output_sinks")
@@ -612,6 +654,29 @@ class FrameProcessor:
         if "input_source" in parameters:
             input_source_config = parameters.pop("input_source")
             self._update_input_source(input_source_config)
+
+        if "modulations" in parameters:
+            raw = parameters.pop("modulations")
+            if self.modulation_engine is not None:
+                self.modulation_engine.update(raw)
+
+        if "beat_cache_reset_rate" in parameters:
+            rate = parameters.pop("beat_cache_reset_rate")
+            for processor in self.pipeline_processors:
+                processor._beat_cache_reset_rate = rate
+                processor._last_reset_boundary = -1
+
+        # Strip client-forwarded beat state keys so they are never forwarded
+        # as regular pipeline parameters (they are injected separately by
+        # PipelineProcessor). Route to TempoSync when available.
+        if self.tempo_sync is not None:
+            parameters = self.tempo_sync.update_client_beat_state(parameters)
+        else:
+            from .tempo_sync import BEAT_STATE_KEYS
+
+            parameters = {
+                k: v for k, v in parameters.items() if k not in BEAT_STATE_KEYS
+            }
 
         # Route to specific node or broadcast to all pipeline processors
         node_id = parameters.pop("node_id", None)
@@ -973,6 +1038,8 @@ class FrameProcessor:
             user_id=self.user_id,
             connection_id=self.connection_id,
             connection_info=self.connection_info,
+            tempo_sync=self.tempo_sync,
+            modulation_engine=self.modulation_engine,
         )
 
         self._graph_source_queues = graph_run.source_queues

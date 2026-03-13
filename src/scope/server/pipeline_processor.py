@@ -2,6 +2,7 @@
 
 import logging
 import queue
+import random
 import threading
 import time
 from collections import deque
@@ -39,6 +40,8 @@ class PipelineProcessor:
         user_id: str | None = None,
         connection_id: str | None = None,
         connection_info: dict | None = None,
+        tempo_sync: Any | None = None,
+        modulation_engine: Any | None = None,
         node_id: str | None = None,
     ):
         """Initialize a pipeline processor.
@@ -51,6 +54,8 @@ class PipelineProcessor:
             user_id: User ID for event tracking
             connection_id: Connection ID from fal.ai WebSocket for event correlation
             connection_info: Connection metadata (gpu_type, region, etc.)
+            tempo_sync: TempoSync instance for beat state injection
+            modulation_engine: ModulationEngine for beat-synced param modulation
             node_id: Graph node ID (used for per-node parameter routing in graph mode)
         """
         self.pipeline = pipeline
@@ -60,6 +65,8 @@ class PipelineProcessor:
         self.user_id = user_id
         self.connection_id = connection_id
         self.connection_info = connection_info
+        self.tempo_sync = tempo_sync
+        self.modulation_engine = modulation_engine
 
         # Port-based queues wired by graph_executor.build_graph()
         self.input_queues: dict[str, queue.Queue] = {}
@@ -101,6 +108,10 @@ class PipelineProcessor:
         # Flag to track pending cache initialization after queue flush
         # Set when reset_cache flushes queues, cleared after successful pipeline call
         self._pending_cache_init = False
+
+        # Beat-synced cache reset: fire init_cache=True at rhythmic intervals
+        self._beat_cache_reset_rate: str = "none"
+        self._last_reset_boundary: int = -1
 
     def _resize_output_queue(self, port: str, target_size: int):
         """Resize output queues for a given port, transferring existing frames.
@@ -401,6 +412,43 @@ class PipelineProcessor:
                 for port, frame_list in chunks.items():
                     call_params[port] = frame_list
 
+            if self.tempo_sync is not None:
+                beat_state = self.tempo_sync.get_beat_state()
+                if beat_state is not None:
+                    call_params["bpm"] = beat_state.bpm
+                    call_params["beat_phase"] = beat_state.beat_phase
+                    call_params["bar_position"] = beat_state.bar_position
+                    call_params["beat_count"] = beat_state.beat_count
+                    call_params["is_playing"] = beat_state.is_playing
+
+                    if self.modulation_engine is not None:
+                        call_params = self.modulation_engine.apply(
+                            beat_phase=beat_state.beat_phase,
+                            bar_position=beat_state.bar_position,
+                            beat_count=beat_state.beat_count,
+                            beats_per_bar=self.tempo_sync.beats_per_bar,
+                            params=call_params,
+                        )
+
+                    # Beat-synced cache reset: check if we crossed a boundary
+                    if self._beat_cache_reset_rate != "none":
+                        boundary = self._get_beat_boundary(
+                            beat_state.beat_count,
+                            self.tempo_sync.beats_per_bar,
+                        )
+                        if (
+                            boundary != self._last_reset_boundary
+                            and self._last_reset_boundary >= 0
+                        ):
+                            call_params["init_cache"] = True
+                            call_params["base_seed"] = random.randint(0, 2**31)
+                            logger.info(
+                                "[BEAT RESET] Cache reset + seed change at boundary %d (rate=%s)",
+                                boundary,
+                                self._beat_cache_reset_rate,
+                            )
+                        self._last_reset_boundary = boundary
+
             processing_start = time.time()
             output_dict = self.pipeline(**call_params)
             processing_time = time.time() - processing_start
@@ -501,6 +549,22 @@ class PipelineProcessor:
 
         self.is_prepared = True
         self._pending_cache_init = False
+
+    def _get_beat_boundary(self, beat_count: int, beats_per_bar: int) -> int:
+        """Return an integer boundary index for the current beat position.
+
+        The boundary increments each time we cross the configured rate's period.
+        """
+        rate = self._beat_cache_reset_rate
+        if rate == "beat":
+            return beat_count
+        elif rate == "bar":
+            return beat_count // max(beats_per_bar, 1)
+        elif rate == "2_bar":
+            return beat_count // max(beats_per_bar * 2, 1)
+        elif rate == "4_bar":
+            return beat_count // max(beats_per_bar * 4, 1)
+        return -1
 
     def _track_output_batch(self, num_frames: int, processing_time: float):
         """Track batch-level production throughput for FPS calculation.

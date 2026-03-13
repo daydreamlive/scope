@@ -868,3 +868,61 @@ class ApiKeySetResponse(BaseModel):
 class ApiKeyDeleteResponse(BaseModel):
     success: bool
     message: str
+
+
+# =============================================================================
+# Tempo Sync Schemas
+# =============================================================================
+
+
+class TempoEnableRequest(BaseModel):
+    """Request to enable tempo synchronization."""
+
+    source: Literal["link", "midi_clock"] = Field(..., description="Tempo source type")
+    midi_device: str | None = Field(
+        default=None,
+        description="MIDI input device name (required when source is midi_clock)",
+    )
+    bpm: float = Field(
+        default=120.0,
+        ge=20.0,
+        le=300.0,
+        description="Initial BPM (used for Ableton Link)",
+    )
+    beats_per_bar: int = Field(
+        default=4, ge=1, le=16, description="Beats per bar (time signature numerator)"
+    )
+
+
+class TempoStatusResponse(BaseModel):
+    """Current tempo sync status."""
+
+    enabled: bool = Field(..., description="Whether tempo sync is active")
+    source: dict | None = Field(
+        default=None, description="Active source info (type, num_peers, etc.)"
+    )
+    beats_per_bar: int = Field(default=4, description="Beats per bar")
+    beat_state: dict | None = Field(
+        default=None,
+        description="Current beat state (bpm, beat_phase, bar_position, beat_count, is_playing, source)",
+    )
+
+
+class TempoSetTempoRequest(BaseModel):
+    """Request to change the session tempo."""
+
+    bpm: float = Field(
+        ...,
+        ge=20.0,
+        le=300.0,
+        description="Target BPM",
+    )
+
+
+class TempoSourcesResponse(BaseModel):
+    """Available tempo sources and their capabilities."""
+
+    sources: dict = Field(
+        ...,
+        description="Available sources keyed by type (link, midi_clock) with availability and device info",
+    )

@@ -533,6 +533,13 @@ export interface SchemaFieldUI {
   modes?: ("text" | "video")[];
   /** If true, field is a load param (disabled when streaming); if false, runtime param (editable when streaming). Omit = treated as load param. */
   is_load_param?: boolean;
+  label?: string;
+  /** If true, this field can be targeted by the beat-synced modulation engine. */
+  modulatable?: boolean;
+  /** Safe lower bound for modulation (tighter than field validation range). */
+  modulatable_min?: number;
+  /** Safe upper bound for modulation. */
+  modulatable_max?: number;
 }
 
 // Pipeline schema types - matches output of get_schema_with_metadata()
@@ -1008,4 +1015,95 @@ export const fetchDaydreamWorkflow = async (
   }
 
   return workflow;
+};
+
+// =============================================================================
+// Tempo Sync API
+// =============================================================================
+
+export interface TempoStatusResponse {
+  enabled: boolean;
+  source: { type: string; num_peers?: number } | null;
+  beats_per_bar: number;
+  beat_state: {
+    bpm: number;
+    beat_phase: number;
+    bar_position: number;
+    beat_count: number;
+    is_playing: boolean;
+    source: string;
+  } | null;
+}
+
+export interface TempoSourcesResponse {
+  sources: Record<
+    string,
+    {
+      available: boolean;
+      name: string;
+      devices?: string[];
+      install_hint?: string;
+    }
+  >;
+}
+
+export interface TempoEnableRequest {
+  source: "link" | "midi_clock";
+  midi_device?: string;
+  bpm?: number;
+  beats_per_bar?: number;
+}
+
+export const getTempoStatus = async (): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/status");
+  if (!response.ok) {
+    throw new Error(`Failed to get tempo status: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const enableTempo = async (
+  request: TempoEnableRequest
+): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/enable", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to enable tempo: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const disableTempo = async (): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/disable", {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to disable tempo: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const setTempo = async (bpm: number): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/set_tempo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bpm }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to set tempo: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const getTempoSources = async (): Promise<TempoSourcesResponse> => {
+  const response = await fetch("/api/v1/tempo/sources");
+  if (!response.ok) {
+    throw new Error(`Failed to get tempo sources: ${response.statusText}`);
+  }
+  return response.json();
 };

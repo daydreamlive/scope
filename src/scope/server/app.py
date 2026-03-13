@@ -111,6 +111,7 @@ from .schema import (
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
+from .tempo_router import router as tempo_router
 
 # Cached responses for pipeline schemas and plugin list.
 # Invalidated by _invalidate_plugin_caches() on install/uninstall.
@@ -290,6 +291,8 @@ server_start_time = time.time()
 cloud_connection_manager = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
 kafka_publisher = None
+# Global tempo sync manager instance
+tempo_sync = None
 # Global OSC server instance
 osc_server = None
 
@@ -313,6 +316,7 @@ async def lifespan(app: FastAPI):
 
     from .cloud_connection import CloudConnectionManager
     from .pipeline_manager import PipelineManager
+    from .tempo_sync import TempoSync
     from .webrtc import WebRTCManager
 
     # Startup
@@ -321,6 +325,7 @@ async def lifespan(app: FastAPI):
         pipeline_manager, \
         cloud_connection_manager, \
         kafka_publisher, \
+        tempo_sync, \
         osc_server
 
     # Check CUDA availability and warn if not available
@@ -358,6 +363,9 @@ async def lifespan(app: FastAPI):
 
     webrtc_manager = WebRTCManager()
     logger.info("WebRTC manager initialized")
+
+    tempo_sync = TempoSync()
+    logger.info("Tempo sync manager initialized")
 
     cloud_connection_manager = CloudConnectionManager()
     logger.info("Cloud connection manager initialized")
@@ -420,6 +428,11 @@ async def lifespan(app: FastAPI):
         await cloud_connection_manager.disconnect()
         logger.info("Cloud connection shutdown complete")
 
+    if tempo_sync:
+        logger.info("Shutting down tempo sync...")
+        await tempo_sync.stop()
+        logger.info("Tempo sync shutdown complete")
+
     if kafka_publisher:
         logger.info("Shutting down Kafka publisher...")
         await kafka_publisher.stop()
@@ -457,6 +470,8 @@ app = FastAPI(
 
 # MCP server endpoints (headless sessions, parameters, frame capture, etc.)
 app.include_router(mcp_router)
+# Tempo sync endpoints (enable/disable, status, sources, BPM control)
+app.include_router(tempo_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -891,7 +906,9 @@ async def handle_webrtc_offer(
                 detail="Pipeline not loaded. Please load pipeline first.",
             )
 
-        return await webrtc_manager.handle_offer(request, pipeline_manager)
+        return await webrtc_manager.handle_offer(
+            request, pipeline_manager, tempo_sync=tempo_sync
+        )
 
     except HTTPException:
         raise

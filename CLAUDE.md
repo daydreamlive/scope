@@ -81,6 +81,11 @@ This documentation can be used to understand the architecture of the project:
 - The `docs/api` directory contains server API reference
 - The `docs/architecture` contains architecture documents describing different systems used within the project
 
+### Tempo Sync (Link / MIDI)
+
+- Python extras: `uv sync --extra link` (Ableton Link) or `uv sync --extra midi` (MIDI clock).
+- On Linux, the ALSA library is required: install `libasound2` (Debian/Ubuntu), `alsa-lib` (Fedora/RHEL), or `alsa-lib` (Arch). Docker images do not include ALSA since MIDI requires local hardware access.
+
 ## Contributing Requirements
 
 - All commits must be signed off (DCO): `git commit -s`

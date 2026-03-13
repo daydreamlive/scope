@@ -52,6 +52,8 @@ def build_graph(
     user_id: str | None = None,
     connection_id: str | None = None,
     connection_info: dict | None = None,
+    tempo_sync: Any | None = None,
+    modulation_engine: Any | None = None,
 ) -> GraphRun:
     """Build executable graph: create queues and processors, wire edges.
 
@@ -103,6 +105,8 @@ def build_graph(
             user_id=user_id,
             connection_id=connection_id,
             connection_info=connection_info,
+            tempo_sync=tempo_sync,
+            modulation_engine=modulation_engine,
             node_id=node.id,
         )
         node_processors[node.id] = processor

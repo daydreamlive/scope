@@ -41,6 +41,18 @@ interface UseUnifiedWebRTCOptions {
   onStreamStop?: () => void;
   /** Callback when parameters are updated externally (REST API, MCP, OSC) */
   onParametersUpdated?: (parameters: Record<string, unknown>) => void;
+  /** Callback for tempo sync updates from the backend */
+  onTempoUpdate?: (data: {
+    bpm: number;
+    beat_phase: number;
+    bar_position: number;
+    beat_count: number;
+    is_playing: boolean;
+  }) => void;
+  /** Callback when a parameter change is scheduled for a beat boundary */
+  onChangeScheduled?: (delayMs: number) => void;
+  /** Callback when a scheduled parameter change has been applied */
+  onChangeApplied?: () => void;
 }
 
 /**
@@ -189,6 +201,16 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
                 data.parameters
               );
               options?.onParametersUpdated?.(data.parameters);
+            }
+
+            if (data.type === "tempo_update") {
+              options?.onTempoUpdate?.(data);
+            }
+            if (data.type === "change_scheduled") {
+              options?.onChangeScheduled?.(data.delay_ms ?? 0);
+            }
+            if (data.type === "change_applied") {
+              options?.onChangeApplied?.();
             }
           } catch (error) {
             console.error(
@@ -477,6 +499,20 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       images?: string[];
       first_frame_image?: string;
       last_frame_image?: string;
+      quantize_mode?: string;
+      lookahead_ms?: number;
+      modulations?: Record<
+        string,
+        {
+          enabled: boolean;
+          shape: string;
+          depth: number;
+          rate: string;
+          base_value: number;
+        }
+      >;
+      beat_cache_reset_rate?: string;
+      [key: string]: unknown;
     }) => {
       if (
         dataChannelRef.current &&

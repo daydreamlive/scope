@@ -4,6 +4,13 @@ import { InputAndControlsPanel } from "../components/InputAndControlsPanel";
 import { VideoOutput } from "../components/VideoOutput";
 import { SettingsPanel } from "../components/SettingsPanel";
 import { OutputsPanel } from "../components/OutputsPanel";
+import { TempoSyncSection } from "../components/settings/TempoSyncSection";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+} from "../components/ui/card";
 import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
@@ -16,6 +23,7 @@ import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { LogPanel } from "../components/LogPanel";
 import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
+import { useTempoSync } from "../hooks/useTempoSync";
 import { MIDIProvider } from "../contexts/MIDIContext";
 import { useVideoSource } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
@@ -177,6 +185,11 @@ export function StreamPage() {
   // Prompt state - use unified default prompts based on mode
   const initialMode =
     settings.inputMode || getPipelineDefaultMode(settings.pipelineId);
+
+  // Ref to access latest settings without re-creating sendParameterUpdate on every change
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
+
   const [promptItems, setPromptItems] = useState<PromptItem[]>([
     { text: getDefaultPromptForMode(initialMode), weight: 100 },
   ]);
@@ -382,11 +395,11 @@ export function StreamPage() {
       const workflowId = data.id;
       toast.info("Fetching workflow...");
       fetchDaydreamWorkflow(workflowId)
-        .then(workflow => {
+        .then((workflow: ScopeWorkflow) => {
           setPreloadedWorkflow(workflow);
           setShowWorkflowImport(true);
         })
-        .catch(err => {
+        .catch((err: unknown) => {
           console.error("Failed to fetch workflow from deep link:", err);
           toast.error("Failed to import workflow", {
             description: err instanceof Error ? err.message : String(err),
@@ -420,6 +433,19 @@ export function StreamPage() {
     pipelineInfo,
     loadingStage: pipelineLoadingStage,
   } = usePipeline();
+
+  // Tempo sync
+  const {
+    tempoState,
+    sources: tempoSources,
+    loading: tempoLoading,
+    error: tempoError,
+    enable: enableTempoSync,
+    disable: disableTempoSync,
+    setSessionTempo: setTempoSessionBpm,
+    fetchSources: refreshTempoSources,
+    updateFromNotification: updateTempoFromNotification,
+  } = useTempoSync();
 
   // Apply backend parameter values to frontend state (used for both local
   // sends and external updates pushed via the data channel).
@@ -455,6 +481,9 @@ export function StreamPage() {
         "reset_cache",
         "paused",
         "prompts",
+        "quantize_mode",
+        "lookahead_ms",
+        "_quantized",
       ]);
       const overrideUpdates: Record<string, unknown> = {};
       for (const [k, v] of Object.entries(params)) {
@@ -463,8 +492,9 @@ export function StreamPage() {
         }
       }
       if (Object.keys(overrideUpdates).length > 0) {
+        const current = settingsRef.current;
         settingsUpdate.schemaFieldOverrides = {
-          ...(settings.schemaFieldOverrides ?? {}),
+          ...(current.schemaFieldOverrides ?? {}),
           ...overrideUpdates,
         };
       }
@@ -495,15 +525,57 @@ export function StreamPage() {
     sessionId,
   } = useUnifiedWebRTC({
     onParametersUpdated: applyBackendParamsToSettings,
+    onTempoUpdate: updateTempoFromNotification,
   });
 
-  // Wrapper for sendParameterUpdate that also syncs frontend state
+  // Whether beat-quantized output gating is active
+  const isQuantizeActive =
+    isStreaming &&
+    tempoState.enabled &&
+    (settings.quantizeMode || "none") !== "none";
+
+  // Wrapper for sendParameterUpdate that also syncs frontend state.
+  // Uses settingsRef to avoid depending on the full `settings` object,
+  // which would cause this callback (and dependent useEffects) to
+  // re-fire on every settings change, flooding the backend with
+  // unnecessary parameter messages.
   const sendParameterUpdate = useCallback(
     (params: Record<string, unknown>) => {
+      // Auto-flag discrete params for beat-quantized gating
+      if (isQuantizeActive) {
+        const NEVER_QUANTIZE = new Set([
+          "paused",
+          "quantize_mode",
+          "lookahead_ms",
+          "_quantized",
+          "prompt_interpolation_method",
+        ]);
+        const DISCRETE_PARAM_KEYS = new Set([
+          "prompts",
+          "reset_cache",
+          "transition",
+          "denoising_step_list",
+        ]);
+        const hasDiscrete = Object.entries(params).some(([key, value]) => {
+          if (NEVER_QUANTIZE.has(key)) return false;
+          return (
+            DISCRETE_PARAM_KEYS.has(key) ||
+            typeof value === "boolean" ||
+            typeof value === "string"
+          );
+        });
+        if (hasDiscrete) {
+          params = { ...params, _quantized: true };
+        }
+      }
+
+      // Send to backend via WebRTC
       sendParameterUpdateWebRTC(params);
+
+      // Also update frontend state for known parameters
       applyBackendParamsToSettings(params);
     },
-    [sendParameterUpdateWebRTC, applyBackendParamsToSettings]
+    [sendParameterUpdateWebRTC, applyBackendParamsToSettings, isQuantizeActive]
   );
 
   // Computed loading state - true when downloading models, loading pipeline, connecting WebRTC, or waiting for cloud
@@ -1492,28 +1564,107 @@ export function StreamPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
 
-  // Subscribe to OSC commands via SSE so each update arrives individually
-  // and triggers its own render tick, giving smooth slider movement.
+  // Send quantize_mode and lookahead_ms to backend when settings change.
+  // Uses sendParameterUpdateWebRTC directly to avoid depending on the
+  // wrapper (which would re-fire this effect on unrelated changes).
   useEffect(() => {
-    const es = new EventSource("/api/v1/osc/stream");
+    if (isStreaming) {
+      sendParameterUpdateWebRTC({
+        quantize_mode: settings.quantizeMode || "none",
+        lookahead_ms: settings.lookaheadMs ?? 0,
+      });
+    }
+  }, [
+    settings.quantizeMode,
+    settings.lookaheadMs,
+    isStreaming,
+    sendParameterUpdateWebRTC,
+  ]);
 
-    es.onmessage = event => {
-      try {
-        const cmd = JSON.parse(event.data) as OscCommand;
-        oscCommandHandlerRef.current(cmd);
-      } catch (err) {
-        console.debug("[StreamPage] Failed to parse OSC SSE event:", err);
-      }
-    };
+  // Send modulation config to backend when it changes or stream starts.
+  useEffect(() => {
+    if (isStreaming && settings.modulations) {
+      sendParameterUpdateWebRTC({ modulations: settings.modulations });
+    }
+  }, [settings.modulations, isStreaming, sendParameterUpdateWebRTC]);
 
-    es.onerror = () => {
-      console.debug(
-        "[StreamPage] OSC SSE connection error; browser will retry"
-      );
-    };
+  // Send beat cache reset rate to backend when it changes or stream starts.
+  useEffect(() => {
+    if (isStreaming) {
+      sendParameterUpdateWebRTC({
+        beat_cache_reset_rate: settings.beatCacheResetRate || "none",
+      });
+    }
+  }, [settings.beatCacheResetRate, isStreaming, sendParameterUpdateWebRTC]);
 
-    return () => es.close();
-  }, []);
+  // Beat-synced prompt cycling: rotate through the queued prompt items on beat
+  // boundaries. Each prompt item is applied individually at full weight in sequence.
+  // The promptItems list in the UI stays unchanged; only the backend receives the
+  // currently-active single prompt.
+  const promptCycleBoundaryRef = useRef(-1);
+  const promptCycleIndexRef = useRef(0);
+  const promptCycleItemsRef = useRef<PromptItem[]>([]);
+  // Snapshot the prompt list when cycling is enabled so edits don't disrupt the cycle
+  useEffect(() => {
+    if (
+      (settings.promptCycleRate || "none") !== "none" &&
+      promptItems.length >= 2
+    ) {
+      promptCycleItemsRef.current = promptItems;
+      promptCycleIndexRef.current = 0;
+      promptCycleBoundaryRef.current = -1;
+    }
+  }, [settings.promptCycleRate, promptItems]);
+
+  useEffect(() => {
+    const rate = settings.promptCycleRate || "none";
+    const items = promptCycleItemsRef.current;
+    if (
+      rate === "none" ||
+      !isStreaming ||
+      !tempoState.enabled ||
+      items.length < 2
+    ) {
+      promptCycleBoundaryRef.current = -1;
+      return;
+    }
+
+    const { beatCount, beatsPerBar } = tempoState;
+    let boundary: number;
+    if (rate === "beat") boundary = beatCount;
+    else if (rate === "bar") boundary = Math.floor(beatCount / beatsPerBar);
+    else if (rate === "2_bar")
+      boundary = Math.floor(beatCount / (beatsPerBar * 2));
+    else if (rate === "4_bar")
+      boundary = Math.floor(beatCount / (beatsPerBar * 4));
+    else return;
+
+    if (
+      boundary !== promptCycleBoundaryRef.current &&
+      promptCycleBoundaryRef.current >= 0
+    ) {
+      promptCycleIndexRef.current =
+        (promptCycleIndexRef.current + 1) % items.length;
+      const active = items[promptCycleIndexRef.current];
+
+      // Send directly via WebRTC to bypass the quantize logic in
+      // sendParameterUpdate — this effect already fires on the boundary.
+      const promptParams = {
+        prompts: [{ text: active.text, weight: 100 }],
+      };
+      sendParameterUpdateWebRTC(promptParams);
+      applyBackendParamsToSettings(promptParams);
+    }
+    promptCycleBoundaryRef.current = boundary;
+  }, [
+    settings.promptCycleRate,
+    tempoState.beatCount,
+    tempoState.beatsPerBar,
+    tempoState.enabled,
+    isStreaming,
+    sendParameterUpdateWebRTC,
+    applyBackendParamsToSettings,
+  ]);
 
   // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {
@@ -2123,6 +2274,53 @@ export function StreamPage() {
                 }
               }}
             />
+            <Card className="flex-shrink-0">
+              <CardHeader className="px-4 py-3">
+                <CardTitle className="text-base font-medium">
+                  Tempo Sync
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="px-4 pb-4 pt-0">
+                <TempoSyncSection
+                  tempoState={tempoState}
+                  sources={tempoSources ?? null}
+                  loading={tempoLoading}
+                  error={tempoError}
+                  onEnable={enableTempoSync}
+                  onDisable={disableTempoSync}
+                  onSetBpm={setTempoSessionBpm}
+                  onRefreshSources={refreshTempoSources}
+                  quantizeMode={settings.quantizeMode || "none"}
+                  onQuantizeModeChange={mode =>
+                    updateSettings({
+                      quantizeMode: mode as SettingsState["quantizeMode"],
+                    })
+                  }
+                  lookaheadMs={settings.lookaheadMs ?? 0}
+                  onLookaheadMsChange={ms =>
+                    updateSettings({ lookaheadMs: ms })
+                  }
+                  modulations={settings.modulations}
+                  onModulationsChange={modulations =>
+                    updateSettings({ modulations })
+                  }
+                  configSchema={pipelines?.[settings.pipelineId]?.configSchema}
+                  beatCacheResetRate={settings.beatCacheResetRate || "none"}
+                  onBeatCacheResetRateChange={rate =>
+                    updateSettings({
+                      beatCacheResetRate:
+                        rate as SettingsState["beatCacheResetRate"],
+                    })
+                  }
+                  promptCycleRate={settings.promptCycleRate || "none"}
+                  onPromptCycleRateChange={rate =>
+                    updateSettings({
+                      promptCycleRate: rate as SettingsState["promptCycleRate"],
+                    })
+                  }
+                />
+              </CardContent>
+            </Card>
             {hasAvailableOutputs && (
               <OutputsPanel
                 className="flex-shrink-0"
