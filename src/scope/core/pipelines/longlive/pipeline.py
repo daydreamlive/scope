@@ -205,7 +205,12 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             if hasattr(inner_model, "get_base_model"):
                 inner_model = inner_model.get_base_model()
             inner_model._compiled_inner_forward = torch.compile(
-                inner_model._compiled_inner_forward, mode="max-autotune-no-cudagraphs"
+                inner_model._compiled_inner_forward,
+                mode="max-autotune-no-cudagraphs",
+            )
+            inner_model._compiled_vace_forward = torch.compile(
+                inner_model._compiled_vace_forward,
+                mode="max-autotune-no-cudagraphs",
             )
             self._warmup(inner_model)
 

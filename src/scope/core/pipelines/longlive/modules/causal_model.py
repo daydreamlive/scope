@@ -273,18 +273,43 @@ class VaceBlock(CausalWanAttentionBlock):
         """
         if self.block_id == 0:
             c = self.before_proj(c[:, : x.size(1), :]) + x
-            all_c = []
         else:
-            all_c = list(torch.unbind(c))
-            c = all_c.pop(-1)
+            prev_hints = c[:-1]
+            c = c[-1]
 
         c, _ = super().forward(
             c, e0, freqs_cos, freqs_sin, context, empty_cache, empty_cache
         )
 
         hint = self.after_proj(c)
-        all_c += [hint, c]
-        return torch.stack(all_c)
+        if self.block_id == 0:
+            return torch.stack([hint, c])
+        return torch.cat([prev_hints, hint.unsqueeze(0), c.unsqueeze(0)], dim=0)
+
+    def forward_vace_buffered(
+        self, running_ctx, e0, freqs_cos, freqs_sin, context, empty_cache
+    ):
+        """Compile-friendly VACE block: uniform path, no branching.
+
+        Block 0's before_proj + residual is handled externally in _vace_forward.
+
+        Args:
+            running_ctx: Running context tensor [B, seq, dim].
+            e0: Time embeddings [B, F, 6, C].
+            freqs_cos: RoPE cosines.
+            freqs_sin: RoPE sines.
+            context: Text embeddings.
+            empty_cache: Pre-allocated empty KV cache [B, 0, heads, head_dim].
+
+        Returns:
+            Tuple of (hint, new_running_ctx), both [B, seq, dim].
+        """
+        running_ctx, _ = super().forward(
+            running_ctx, e0, freqs_cos, freqs_sin, context, empty_cache, empty_cache
+        )
+
+        hint = self.after_proj(running_ctx)
+        return hint, running_ctx
 
 
 class CausalHead(nn.Module):
@@ -418,6 +443,7 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             dim=1,
         )
         self._compiled_inner_forward = self._inner_forward
+        self._compiled_vace_forward = self._vace_forward
 
     def init_vace(self, vace_in_dim=96):
         """Initialize VACE modules on the model. Call before loading VACE weights.
@@ -508,14 +534,61 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 kv_cache[i]["k"][:, -take:] = new_k[:, -take:]
                 kv_cache[i]["v"][:, -take:] = new_v[:, -take:]
             else:
-                kv_cache[i]["k"][:, self.fill_level : self.fill_level + take] = new_k[
-                    :, -take:
-                ]
-                kv_cache[i]["v"][:, self.fill_level : self.fill_level + take] = new_v[
-                    :, -take:
-                ]
+                remaining = self.cache_tokens - self.fill_level
+                fill_take = min(take, remaining)
+                kv_cache[i]["k"][:, self.fill_level : self.fill_level + fill_take] = (
+                    new_k[:, -fill_take:]
+                )
+                kv_cache[i]["v"][:, self.fill_level : self.fill_level + fill_take] = (
+                    new_v[:, -fill_take:]
+                )
 
         self.fill_level = min(self.fill_level + num_new, self.cache_tokens)
+
+    def _vace_forward(
+        self,
+        vace_embedded,
+        x,
+        e0,
+        freqs_cos_vace,
+        freqs_sin_vace,
+        context,
+        empty_vace_cache,
+        hints,
+    ):
+        """Run all VACE blocks and write hints into the pre-allocated buffer.
+
+        Compile-friendly: all tensors have fixed shapes at steady state.
+        Block 0's before_proj + residual is handled here (outside the uniform
+        loop) so that forward_vace_buffered has no branching.
+        """
+        seq_len = x.shape[1]
+
+        # Block 0: apply before_proj and add residual from main path
+        block0 = self.vace_blocks[0]
+        running_ctx = block0.before_proj(vace_embedded[:, :seq_len, :]) + x
+        hint, running_ctx = block0.forward_vace_buffered(
+            running_ctx,
+            e0,
+            freqs_cos_vace,
+            freqs_sin_vace,
+            context,
+            empty_vace_cache,
+        )
+        hints[0] = hint[:, :seq_len, :]
+
+        # Blocks 1..N-1: uniform path, no branching
+        for i in range(1, len(self.vace_blocks)):
+            hint, running_ctx = self.vace_blocks[i].forward_vace_buffered(
+                running_ctx,
+                e0,
+                freqs_cos_vace,
+                freqs_sin_vace,
+                context,
+                empty_vace_cache,
+            )
+            hints[i] = hint[:, :seq_len, :]
+        return hints
 
     def _inner_forward(
         self,
@@ -526,36 +599,18 @@ class CausalWanModel(ModelMixin, ConfigMixin):
         context,
         cache_ks,
         cache_vs,
-        vace_embedded=None,
-        context_scale=None,
-        freqs_cos_vace=None,
-        freqs_sin_vace=None,
+        hints,
+        context_scale,
     ):
         """Pure-tensor inner forward through all blocks. Compiled with reduce-overhead
         when cache is full. With SDPA (no graph breaks), the entire block loop
         is captured as a single CUDA graph for maximum performance.
 
-        When vace_embedded is provided, runs VACE blocks first to generate hints,
-        then injects them into the main block loop. Both VACE and main blocks
-        are inside the compiled region.
+        VACE hints are pre-computed outside the compiled region and passed in as a
+        stacked tensor. When VACE is inactive, hints is a zeros tensor and
+        context_scale is 0.0, making the hint addition a no-op while keeping a
+        single compiled trace for both paths.
         """
-        hints = None
-        if vace_embedded is not None:
-            c = vace_embedded
-            empty_cache = torch.empty(
-                c.shape[0],
-                0,
-                self.num_heads,
-                self.dim // self.num_heads,
-                dtype=c.dtype,
-                device=c.device,
-            )
-            for block in self.vace_blocks:
-                c = block.forward_vace(
-                    c, x, e0, freqs_cos_vace, freqs_sin_vace, context, empty_cache
-                )
-            hints = torch.unbind(c)[:-1]
-
         new_ks = []
         new_vs = []
         for block_index, block in enumerate(self.blocks):
@@ -568,11 +623,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
                 cache_k=cache_ks[block_index],
                 cache_v=cache_vs[block_index],
             )
-            if hints is not None and block_index % 2 == 0:
-                hint = hints[block_index // 2]
-                if hint.shape[1] > x.shape[1]:
-                    hint = hint[:, : x.shape[1], :]
-                x = x + hint * context_scale
+            if block_index % 2 == 0:
+                x = x + hints[block_index // 2, :, : x.shape[1], :] * context_scale
             new_ks.append(new_k)
             new_vs.append(new_v)
         return x, list(zip(new_ks, new_vs, strict=True))
@@ -634,19 +686,60 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context = padded_context
         context = self.text_embedding(context)
 
-        # Prepare VACE inputs outside the compiled region (Conv3d embedding + complex RoPE).
-        # The vace block loop runs inside _inner_forward for compile coverage.
-        vace_embedded = None
-        freqs_cos_vace = None
-        freqs_sin_vace = None
-        context_scale_t = None
+        # Run VACE blocks to produce hints, then pass to inner_forward.
+        # Both VACE and main blocks use the same compiled path when possible.
+        num_vace_blocks = self.num_layers // 2
         if vace_context is not None and self.vace_blocks is not None:
             vace_embedded = self._embed_vace_context(vace_context, seq_len=x.shape[1])
             freqs_cos_vace, freqs_sin_vace = precompute_freqs_i(
                 self.freqs, f, h, w, start_frame=0
             )
+
+            # Pre-allocate hints buffer and run VACE blocks with fixed shapes
+            hints = torch.zeros(
+                num_vace_blocks,
+                x.shape[0],
+                x.shape[1],
+                x.shape[2],
+                dtype=x.dtype,
+                device=x.device,
+            )
+            empty_vace_cache = torch.empty(
+                vace_embedded.shape[0],
+                0,
+                self.num_heads,
+                self.dim // self.num_heads,
+                dtype=vace_embedded.dtype,
+                device=vace_embedded.device,
+            )
+            vace_fn = (
+                self._compiled_vace_forward
+                if self.fill_level >= self.cache_tokens
+                else self._vace_forward
+            )
+            hints = vace_fn(
+                vace_embedded,
+                x,
+                e0,
+                freqs_cos_vace,
+                freqs_sin_vace,
+                context,
+                empty_vace_cache,
+                hints,
+            )
+
             scale = vace_context_scale if vace_context_scale is not None else 1.0
             context_scale_t = torch.tensor(scale, dtype=x.dtype, device=x.device)
+        else:
+            hints = torch.zeros(
+                num_vace_blocks,
+                x.shape[0],
+                x.shape[1],
+                x.shape[2],
+                dtype=x.dtype,
+                device=x.device,
+            )
+            context_scale_t = torch.tensor(0.0, dtype=x.dtype, device=x.device)
 
         if self.fill_level > 0:
             cache_ks = [
@@ -680,10 +773,8 @@ class CausalWanModel(ModelMixin, ConfigMixin):
             context,
             cache_ks,
             cache_vs,
-            vace_embedded,
+            hints,
             context_scale_t,
-            freqs_cos_vace,
-            freqs_sin_vace,
         )
 
         if update_cache:
