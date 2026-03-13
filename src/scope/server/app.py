@@ -2819,9 +2819,16 @@ def main(
 
     # MCP mode: run the MCP stdio server instead of the HTTP server
     if mcp:
+        import click.core
+
         from .mcp_server import run_mcp_server
 
-        run_mcp_server(port=port)
+        # Only pre-connect if --port was explicitly provided on the command line
+        source = ctx.get_parameter_source("port")
+        explicit_port = (
+            port if source == click.core.ParameterSource.COMMANDLINE else None
+        )
+        run_mcp_server(port=explicit_port)
         return
 
     # Store cloud credentials in environment for app access
