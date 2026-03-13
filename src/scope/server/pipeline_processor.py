@@ -481,7 +481,7 @@ class PipelineProcessor:
             extra_params = {
                 k: v for k, v in output_dict.items() if k not in self.output_queues
             }
-            logger.info(f"Extra params: {extra_params}")
+
             if extra_params and self.output_consumers:
                 seen: set[int] = set()
                 for consumers in self.output_consumers.values():
