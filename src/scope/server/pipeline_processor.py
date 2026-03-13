@@ -478,7 +478,10 @@ class PipelineProcessor:
             # pipelines. Preprocessors may return e.g. {"video": frames,
             # "vace_input_frames": ..., "vace_input_masks": ...} and the extra
             # entries need to reach the consuming pipeline as parameters.
-            extra_params = {k: v for k, v in output_dict.items() if k != "video"}
+            extra_params = {
+                k: v for k, v in output_dict.items() if k not in self.output_queues
+            }
+            logger.info(f"Extra params: {extra_params}")
             if extra_params and self.output_consumers:
                 seen: set[int] = set()
                 for consumers in self.output_consumers.values():
