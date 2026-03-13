@@ -25,7 +25,7 @@ Tempo sync requires optional dependencies depending on which tempo source you wa
 ### Ableton Link
 
 ```bash
-uv sync --group link
+uv sync --extra link
 ```
 
 This installs [aalink](https://pypi.org/project/aalink/), an async Python wrapper for Ableton Link.
@@ -33,7 +33,7 @@ This installs [aalink](https://pypi.org/project/aalink/), an async Python wrappe
 ### MIDI Clock
 
 ```bash
-uv sync --group midi
+uv sync --extra midi
 ```
 
 This installs [mido](https://pypi.org/project/mido/) and [python-rtmidi](https://pypi.org/project/python-rtmidi/).
@@ -46,12 +46,12 @@ This installs [mido](https://pypi.org/project/mido/) and [python-rtmidi](https:/
 | Fedora / RHEL | `sudo dnf install alsa-lib` |
 | Arch | `sudo pacman -S alsa-lib` |
 
-Docker images already include ALSA.
+Docker images do not include ALSA since MIDI requires local hardware access.
 
 ### Both
 
 ```bash
-uv sync --group link --group midi
+uv sync --extra link --extra midi
 ```
 
 If neither dependency group is installed, the tempo sync UI will show install hints and the feature will be unavailable.
