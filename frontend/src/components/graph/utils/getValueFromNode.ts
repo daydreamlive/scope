@@ -93,18 +93,65 @@ export function getStringFromNode(node: Node<FlowNodeData>): string | null {
 }
 
 /**
- * Extract any scalar value (number, string, boolean) from a producer node.
- * Used for displaying port values on the SubgraphNode card.
+ * Extract any scalar value (number, string, boolean, etc.) from a producer
+ * node given its source handle.  This is the canonical "read value from node"
+ * helper – all other call-sites should use this instead of inlining their own
+ * node-type switch.
  */
 export function getAnyValueFromNode(
   node: Node<FlowNodeData>,
   sourceHandleId?: string | null
 ): unknown {
-  // Try number first
-  const num = getNumberFromNode(node, sourceHandleId);
-  if (num !== null) return num;
-  // Try string
-  const str = getStringFromNode(node);
-  if (str !== null) return str;
+  const t = node.data.nodeType;
+
+  if (t === "primitive" || t === "reroute") return node.data.value ?? null;
+  if (t === "control" || t === "math") return node.data.currentValue ?? null;
+  if (t === "slider") return node.data.value ?? null;
+  if (t === "bool") {
+    const v = node.data.value;
+    return typeof v === "boolean" ? (v ? 1 : 0) : null;
+  }
+  if (t === "knobs") {
+    const knobs = node.data.knobs as { value: number }[] | undefined;
+    if (!knobs || !sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    const idx = parseInt(parsed.name.replace("knob_", ""), 10);
+    if (isNaN(idx) || idx >= knobs.length) return null;
+    return knobs[idx].value;
+  }
+  if (t === "xypad") {
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    if (parsed.name === "x") return node.data.padX ?? null;
+    if (parsed.name === "y") return node.data.padY ?? null;
+    return null;
+  }
+  if (t === "midi") {
+    const channels = node.data.midiChannels as { value: number }[] | undefined;
+    if (!channels || !sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    const idx = parseInt(parsed.name.replace("midi_", ""), 10);
+    if (isNaN(idx) || idx >= channels.length) return null;
+    return channels[idx].value;
+  }
+  if (t === "tuple") {
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    const idx = parseInt(parsed.name.replace("tuple_", ""), 10);
+    const vals = node.data.tupleValues as number[] | undefined;
+    if (!vals || isNaN(idx) || idx >= vals.length) return null;
+    return vals[idx];
+  }
+  if (t === "subgraph" || t === "subgraph_input") {
+    const pv = node.data.portValues as Record<string, unknown> | undefined;
+    if (!pv || !sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    return pv[parsed.name] ?? null;
+  }
   return null;
 }

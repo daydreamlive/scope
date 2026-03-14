@@ -9,8 +9,8 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { NODE_TOKENS } from "./tokens";
-import { useIsZoomedOut } from "../hooks/useIsZoomedOut";
-import { useNodeFlags, useNodeFlagToggle } from "../hooks/useNodeFlags";
+import { useIsZoomedOut } from "../hooks/node/useIsZoomedOut";
+import { useNodeFlags, useNodeFlagToggle } from "../hooks/node/useNodeFlags";
 
 interface NodeHeaderProps {
   title: string;

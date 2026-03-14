@@ -4,10 +4,10 @@ import {
   graphConfigToFlow,
   flowToGraphConfig,
   extractParameterPorts,
-} from "../../../lib/graphUtils";
-import type { FlowNodeData } from "../../../lib/graphUtils";
-import type { PipelineSchemaInfo } from "../../../lib/api";
-import { buildEdgeStyle } from "../constants";
+} from "../../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
+import type { PipelineSchemaInfo } from "../../../../lib/api";
+import { buildEdgeStyle } from "../../constants";
 
 const LS_GRAPH_KEY = "scope:graph:backup";
 

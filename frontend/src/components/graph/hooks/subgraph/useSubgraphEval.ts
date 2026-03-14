@@ -18,10 +18,10 @@ import type {
   SubgraphPort,
   SerializedSubgraphNode,
   SerializedSubgraphEdge,
-} from "../../../lib/graphUtils";
-import { buildHandleId, parseHandleId } from "../../../lib/graphUtils";
-import { getAnyValueFromNode } from "../utils/getValueFromNode";
-import { computeResult } from "../utils/computeResult";
+} from "../../../../lib/graphUtils";
+import { buildHandleId, parseHandleId } from "../../../../lib/graphUtils";
+import { getAnyValueFromNode } from "../../utils/getValueFromNode";
+import { computeResult } from "../../utils/computeResult";
 
 /* ── Types ────────────────────────────────────────────────────────────────── */
 

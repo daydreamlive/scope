@@ -14,33 +14,6 @@ import {
 } from "@xyflow/react";
 import type { Edge, Node, ReactFlowInstance } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import {
-  Camera,
-  Workflow,
-  Monitor,
-  SlidersHorizontal,
-  Trash2,
-  Type,
-  Hash,
-  ToggleLeft,
-  Sigma,
-  StickyNote,
-  Send,
-  Gauge,
-  CircleDot,
-  Grid2x2,
-  ListOrdered,
-  GitBranch,
-  Image,
-  Sparkles,
-  Lock,
-  LockOpen,
-  Pin,
-  PinOff,
-  Music,
-  FolderOpen,
-  PackageOpen,
-} from "lucide-react";
 
 import { SourceNode } from "./nodes/SourceNode";
 import { PipelineNode } from "./nodes/PipelineNode";
@@ -66,9 +39,9 @@ import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
 import { BreadcrumbNav } from "./BreadcrumbNav";
-import { NODE_TOKENS } from "./ui";
+import { GraphToolbar } from "./GraphToolbar";
+import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
 import type { FlowNodeData } from "../../lib/graphUtils";
-import { parseHandleId } from "../../lib/graphUtils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -80,19 +53,18 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 
-import { useGraphState } from "./hooks/useGraphState";
-import { useConnectionLogic } from "./hooks/useConnectionLogic";
-import { useNodeFactories } from "./hooks/useNodeFactories";
-import { useValueForwarding } from "./hooks/useValueForwarding";
-import { useOutputSinkSync } from "./hooks/useOutputSinkSync";
-import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
-import {
-  useGraphNavigation,
-  BOUNDARY_INPUT_ID,
-  BOUNDARY_OUTPUT_ID,
-} from "./hooks/useGraphNavigation";
-import { useParentValueBridge } from "./hooks/useParentValueBridge";
-import { useSubgraphEval } from "./hooks/useSubgraphEval";
+import { useRightClickSelect } from "./hooks/ui/useRightClickSelect";
+import { useGraphState } from "./hooks/graph/useGraphState";
+import { useConnectionLogic } from "./hooks/connection/useConnectionLogic";
+import { useNodeFactories } from "./hooks/node/useNodeFactories";
+import { useValueForwarding } from "./hooks/value/useValueForwarding";
+import { useOutputSinkSync } from "./hooks/value/useOutputSinkSync";
+import { useKeyboardShortcuts } from "./hooks/graph/useKeyboardShortcuts";
+import { useGraphNavigation } from "./hooks/subgraph/useGraphNavigation";
+import { useParentValueBridge } from "./hooks/value/useParentValueBridge";
+import { useSubgraphEval } from "./hooks/subgraph/useSubgraphEval";
+import { useSubgraphCallbackSync } from "./hooks/subgraph/useSubgraphCallbackSync";
+import { useSubgraphOperations } from "./hooks/subgraph/useSubgraphOperations";
 
 const nodeTypes = {
   source: SourceNode,
@@ -248,13 +220,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       [refreshGraph, getCurrentGraphConfig, getGraphNodePrompts]
     );
 
-    const [contextMenu, setContextMenu] = useState<{
-      x: number;
-      y: number;
-      type: "pane" | "node";
-      nodeId?: string;
-    } | null>(null);
-
     const [showAddNodeModal, setShowAddNodeModal] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [pendingNodePosition, setPendingNodePosition] = useState<{
@@ -267,110 +232,12 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       Edge
     > | null>(null);
 
-    const [selectionRect, setSelectionRect] = useState<{
-      x1: number;
-      y1: number;
-      x2: number;
-      y2: number;
-    } | null>(null);
-
-    const handleRightMouseDown = useCallback(
-      (e: React.MouseEvent) => {
-        if (e.button !== 2) return; // only right-click
-
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const startTarget = e.target as HTMLElement;
-        let isDrag = false;
-
-        setContextMenu(null);
-
-        const handleMove = (me: MouseEvent) => {
-          const dx = me.clientX - startX;
-          const dy = me.clientY - startY;
-          if (!isDrag && Math.sqrt(dx * dx + dy * dy) > 5) {
-            isDrag = true;
-          }
-          if (isDrag) {
-            setSelectionRect({
-              x1: startX,
-              y1: startY,
-              x2: me.clientX,
-              y2: me.clientY,
-            });
-          }
-        };
-
-        const handleUp = (me: MouseEvent) => {
-          window.removeEventListener("mousemove", handleMove);
-          window.removeEventListener("mouseup", handleUp);
-
-          if (isDrag) {
-            const rf = reactFlowInstanceRef.current;
-            if (rf) {
-              const start = rf.screenToFlowPosition({ x: startX, y: startY });
-              const end = rf.screenToFlowPosition({
-                x: me.clientX,
-                y: me.clientY,
-              });
-
-              const minX = Math.min(start.x, end.x);
-              const maxX = Math.max(start.x, end.x);
-              const minY = Math.min(start.y, end.y);
-              const maxY = Math.max(start.y, end.y);
-
-              setNodes(nds =>
-                nds.map(n => {
-                  const w = n.measured?.width ?? n.width ?? 200;
-                  const h = n.measured?.height ?? n.height ?? 100;
-                  const overlaps =
-                    n.position.x < maxX &&
-                    n.position.x + w > minX &&
-                    n.position.y < maxY &&
-                    n.position.y + h > minY;
-                  return n.selected === overlaps
-                    ? n
-                    : { ...n, selected: overlaps };
-                })
-              );
-            }
-          } else {
-            const nodeEl = startTarget.closest(".react-flow__node");
-            if (nodeEl) {
-              const nodeId = nodeEl.getAttribute("data-id");
-              if (nodeId) {
-                setContextMenu({
-                  x: startX,
-                  y: startY,
-                  type: "node",
-                  nodeId,
-                });
-              }
-            } else {
-              const rf = reactFlowInstanceRef.current;
-              if (rf) {
-                const position = rf.screenToFlowPosition({
-                  x: startX,
-                  y: startY,
-                });
-                setPendingNodePosition(position);
-                setContextMenu({
-                  x: startX,
-                  y: startY,
-                  type: "pane",
-                });
-              }
-            }
-          }
-
-          setSelectionRect(null);
-        };
-
-        window.addEventListener("mousemove", handleMove);
-        window.addEventListener("mouseup", handleUp);
-      },
-      [setNodes, setPendingNodePosition]
-    );
+    const { selectionRect, contextMenu, setContextMenu, handleRightMouseDown } =
+      useRightClickSelect(
+        reactFlowInstanceRef,
+        setNodes,
+        setPendingNodePosition
+      );
 
     const addSubgraphPortRef = useRef<
       | ((
@@ -396,19 +263,13 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       addSubgraphPortRef
     );
 
-    const {
-      handleNodeTypeSelect,
-      handleDeleteNodes,
-      createSubgraphFromSelection,
-      unpackSubgraph,
-    } = useNodeFactories({
+    const { handleNodeTypeSelect, handleDeleteNodes } = useNodeFactories({
       nodes,
       setNodes,
       setEdges,
       availablePipelineIds,
       portsMap,
       handlePipelineSelect,
-      selectedNodeIds,
       setSelectedNodeIds,
       spoutOutputAvailable,
       ndiOutputAvailable,
@@ -416,6 +277,14 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       pendingNodePosition,
       setPendingNodePosition,
     });
+
+    const { createSubgraphFromSelection, unpackSubgraph } =
+      useSubgraphOperations({
+        nodes,
+        setNodes,
+        setEdges,
+        setSelectedNodeIds,
+      });
 
     useValueForwarding(
       nodes,
@@ -530,166 +399,16 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       ]
     );
 
-    const enterSubgraphRef = useRef(handleEnterSubgraph);
-    enterSubgraphRef.current = handleEnterSubgraph;
-
-    const stableEnterSubgraph = useCallback(
-      (nodeId: string) => enterSubgraphRef.current(nodeId),
-      []
-    );
-    const hasSubgraphNeedingCallback = nodes.some(
-      n =>
-        n.data.nodeType === "subgraph" &&
-        n.data.onEnterSubgraph !== stableEnterSubgraph
-    );
-    useEffect(() => {
-      if (!hasSubgraphNeedingCallback) return;
-      setNodes(nds =>
-        nds.map(n => {
-          if (n.data.nodeType !== "subgraph") return n;
-          if (n.data.onEnterSubgraph === stableEnterSubgraph) return n;
-          return {
-            ...n,
-            data: { ...n.data, onEnterSubgraph: stableEnterSubgraph },
-          };
-        })
-      );
-    }, [hasSubgraphNeedingCallback, stableEnterSubgraph, setNodes]);
-
-    const renameInputRef = useRef(
-      (oldName: string, newName: string, portType: string) =>
-        renameSubgraphPort(
-          "input",
-          oldName,
-          newName,
-          portType,
-          setNodes,
-          setEdges
-        )
-    );
-    renameInputRef.current = (oldName, newName, portType) =>
-      renameSubgraphPort(
-        "input",
-        oldName,
-        newName,
-        portType,
-        setNodes,
-        setEdges
-      );
-
-    const renameOutputRef = useRef(
-      (oldName: string, newName: string, portType: string) =>
-        renameSubgraphPort(
-          "output",
-          oldName,
-          newName,
-          portType,
-          setNodes,
-          setEdges
-        )
-    );
-    renameOutputRef.current = (oldName, newName, portType) =>
-      renameSubgraphPort(
-        "output",
-        oldName,
-        newName,
-        portType,
-        setNodes,
-        setEdges
-      );
-
-    const stableRenameInput = useCallback(
-      (oldName: string, newName: string, portType: string) =>
-        renameInputRef.current(oldName, newName, portType),
-      []
-    );
-    const stableRenameOutput = useCallback(
-      (oldName: string, newName: string, portType: string) =>
-        renameOutputRef.current(oldName, newName, portType),
-      []
-    );
-
-    const hasBoundaryNeedingRename = nodes.some(
-      n =>
-        (n.id === BOUNDARY_INPUT_ID &&
-          n.data.onPortRename !== stableRenameInput) ||
-        (n.id === BOUNDARY_OUTPUT_ID &&
-          n.data.onPortRename !== stableRenameOutput)
-    );
-    useEffect(() => {
-      if (!hasBoundaryNeedingRename) return;
-      setNodes(nds =>
-        nds.map(n => {
-          if (
-            n.id === BOUNDARY_INPUT_ID &&
-            n.data.onPortRename !== stableRenameInput
-          ) {
-            return {
-              ...n,
-              data: { ...n.data, onPortRename: stableRenameInput },
-            };
-          }
-          if (
-            n.id === BOUNDARY_OUTPUT_ID &&
-            n.data.onPortRename !== stableRenameOutput
-          ) {
-            return {
-              ...n,
-              data: { ...n.data, onPortRename: stableRenameOutput },
-            };
-          }
-          return n;
-        })
-      );
-    }, [
-      hasBoundaryNeedingRename,
-      stableRenameInput,
-      stableRenameOutput,
+    useSubgraphCallbackSync({
+      nodes,
+      edges,
       setNodes,
-    ]);
-
-    useEffect(() => {
-      const currentInputHandles = new Set<string>();
-      const currentOutputHandles = new Set<string>();
-      for (const e of edges) {
-        if (e.source === BOUNDARY_INPUT_ID) {
-          const parsed = parseHandleId(e.sourceHandle);
-          if (parsed && parsed.name !== "__add__")
-            currentInputHandles.add(parsed.name);
-        }
-        if (e.target === BOUNDARY_OUTPUT_ID) {
-          const parsed = parseHandleId(e.targetHandle);
-          if (parsed && parsed.name !== "__add__")
-            currentOutputHandles.add(parsed.name);
-        }
-      }
-
-      const inputBoundary = nodes.find(n => n.id === BOUNDARY_INPUT_ID);
-      const outputBoundary = nodes.find(n => n.id === BOUNDARY_OUTPUT_ID);
-
-      if (inputBoundary) {
-        const ports = inputBoundary.data.subgraphInputs ?? [];
-        for (const port of ports) {
-          if (
-            !currentInputHandles.has(port.name) &&
-            !hasExternalConnection("input", port.name, port.portType)
-          ) {
-            removeSubgraphPort("input", port.name, setNodes);
-          }
-        }
-      }
-      if (outputBoundary) {
-        const ports = outputBoundary.data.subgraphOutputs ?? [];
-        for (const port of ports) {
-          if (
-            !currentOutputHandles.has(port.name) &&
-            !hasExternalConnection("output", port.name, port.portType)
-          ) {
-            removeSubgraphPort("output", port.name, setNodes);
-          }
-        }
-      }
-    }, [edges, nodes, removeSubgraphPort, hasExternalConnection, setNodes]);
+      setEdges,
+      handleEnterSubgraph,
+      renameSubgraphPort,
+      removeSubgraphPort,
+      hasExternalConnection,
+    });
 
     const prevHadSourceRef = useRef(false);
     const prevHadSinkRef = useRef(false);
@@ -732,120 +451,21 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       []
     );
 
-    const fileInputRef = useRef<HTMLInputElement>(null);
-
     return (
       <div className="flex h-full w-full">
         <div className="flex flex-col flex-1">
-          <div className={NODE_TOKENS.toolbar}>
-            <button
-              onClick={isStreaming ? onStopStream : onStartStream}
-              disabled={isConnecting || isLoading}
-              className={`${NODE_TOKENS.toolbarButton} ${isConnecting || isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
-              title={isStreaming ? "Stop stream" : "Start stream"}
-            >
-              {isConnecting || isLoading ? (
-                <span className="inline-flex items-center gap-1">
-                  <svg
-                    className="animate-spin h-3 w-3"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                </span>
-              ) : isStreaming ? (
-                <svg
-                  className="h-3.5 w-3.5"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <rect x="4" y="4" width="16" height="16" rx="2" />
-                </svg>
-              ) : (
-                <svg
-                  className="h-3.5 w-3.5"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <polygon points="5,3 19,12 5,21" />
-                </svg>
-              )}
-            </button>
-            {isStreaming && (
-              <button
-                onClick={onStopStream}
-                className={NODE_TOKENS.toolbarButton}
-                title="Stop and clear"
-              >
-                <svg
-                  className="h-3.5 w-3.5"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M1 4v6h6" />
-                  <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                </svg>
-              </button>
-            )}
-
-            <div className="flex-1" />
-
-            {status && (
-              <span className={NODE_TOKENS.toolbarStatus}>{status}</span>
-            )}
-
-            <button
-              onClick={handleSave}
-              className={NODE_TOKENS.toolbarButton}
-              title="Save graph (Ctrl+S)"
-            >
-              Save
-            </button>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleImport}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className={NODE_TOKENS.toolbarButton}
-            >
-              Import
-            </button>
-            <button
-              onClick={handleExport}
-              className={NODE_TOKENS.toolbarButton}
-            >
-              Export
-            </button>
-            <button
-              onClick={() => setShowClearConfirm(true)}
-              className={NODE_TOKENS.toolbarButton}
-              title="Clear graph"
-            >
-              Clear
-            </button>
-          </div>
+          <GraphToolbar
+            isStreaming={isStreaming}
+            isConnecting={isConnecting}
+            isLoading={isLoading}
+            status={status}
+            onStartStream={onStartStream}
+            onStopStream={onStopStream}
+            onSave={handleSave}
+            onImport={handleImport}
+            onExport={handleExport}
+            onClear={() => setShowClearConfirm(true)}
+          />
 
           <BreadcrumbNav
             path={breadcrumbPath}
@@ -898,318 +518,24 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                 header={contextMenu.type === "pane" ? "Create" : undefined}
                 items={
                   contextMenu.type === "pane"
-                    ? [
-                        {
-                          label: "Source",
-                          icon: <Camera />,
-                          onClick: () => handleNodeTypeSelect("source"),
-                          keywords: ["input", "camera", "video"],
-                        },
-                        {
-                          label: "Pipeline",
-                          icon: <Workflow />,
-                          onClick: () => handleNodeTypeSelect("pipeline"),
-                          keywords: ["process", "effect", "filter"],
-                        },
-                        {
-                          label: "Sink",
-                          icon: <Monitor />,
-                          onClick: () => handleNodeTypeSelect("sink"),
-                          keywords: ["output", "display", "preview"],
-                        },
-                        {
-                          label: "Output",
-                          icon: <Send />,
-                          onClick: () => handleNodeTypeSelect("output"),
-                          keywords: ["spout", "ndi", "syphon", "send"],
-                        },
-                        {
-                          label: "Controls",
-                          icon: <SlidersHorizontal />,
-                          children: [
-                            {
-                              label: "FloatControl",
-                              icon: <Gauge />,
-                              onClick: () =>
-                                handleNodeTypeSelect("control", "float"),
-                              keywords: ["float", "animated", "sine"],
-                            },
-                            {
-                              label: "IntControl",
-                              icon: <Hash />,
-                              onClick: () =>
-                                handleNodeTypeSelect("control", "int"),
-                              keywords: ["integer", "animated"],
-                            },
-                            {
-                              label: "StringControl",
-                              icon: <Type />,
-                              onClick: () =>
-                                handleNodeTypeSelect("control", "string"),
-                              keywords: ["text", "cycle", "animated"],
-                            },
-                            {
-                              label: "MIDI",
-                              icon: <Music />,
-                              onClick: () => handleNodeTypeSelect("midi"),
-                              keywords: [
-                                "midi",
-                                "controller",
-                                "cc",
-                                "knob",
-                                "fader",
-                              ],
-                            },
-                          ],
-                        },
-                        {
-                          label: "UI",
-                          icon: <CircleDot />,
-                          children: [
-                            {
-                              label: "Slider",
-                              icon: <SlidersHorizontal />,
-                              onClick: () => handleNodeTypeSelect("slider"),
-                              keywords: ["range", "value"],
-                            },
-                            {
-                              label: "Knobs",
-                              icon: <CircleDot />,
-                              onClick: () => handleNodeTypeSelect("knobs"),
-                              keywords: ["dial", "rotary"],
-                            },
-                            {
-                              label: "XY Pad",
-                              icon: <Grid2x2 />,
-                              onClick: () => handleNodeTypeSelect("xypad"),
-                              keywords: ["pad", "2d", "touch"],
-                            },
-                            {
-                              label: "Tuple",
-                              icon: <ListOrdered />,
-                              onClick: () => handleNodeTypeSelect("tuple"),
-                              keywords: ["list", "numbers", "array"],
-                            },
-                          ],
-                        },
-                        {
-                          label: "Utility",
-                          icon: <Sigma />,
-                          children: [
-                            {
-                              label: "Math",
-                              icon: <Sigma />,
-                              onClick: () => handleNodeTypeSelect("math"),
-                              keywords: ["add", "multiply", "arithmetic"],
-                            },
-                            {
-                              label: "Note",
-                              icon: <StickyNote />,
-                              onClick: () => handleNodeTypeSelect("note"),
-                              keywords: ["comment", "annotation", "text"],
-                            },
-                            {
-                              label: "Bool",
-                              icon: <ToggleLeft />,
-                              onClick: () => handleNodeTypeSelect("bool"),
-                              keywords: [
-                                "boolean",
-                                "gate",
-                                "toggle",
-                                "switch",
-                                "on",
-                                "off",
-                              ],
-                            },
-                            {
-                              label: "Reroute",
-                              icon: <GitBranch />,
-                              onClick: () => handleNodeTypeSelect("reroute"),
-                              keywords: ["passthrough", "wire", "dot"],
-                            },
-                          ],
-                        },
-                        {
-                          label: "Media",
-                          icon: <Image />,
-                          onClick: () => handleNodeTypeSelect("image"),
-                          keywords: [
-                            "media",
-                            "image",
-                            "video",
-                            "picture",
-                            "photo",
-                            "reference",
-                            "film",
-                          ],
-                        },
-                        {
-                          label: "VACE",
-                          icon: <Sparkles />,
-                          onClick: () => handleNodeTypeSelect("vace"),
-                          keywords: [
-                            "vace",
-                            "conditioning",
-                            "reference",
-                            "frame",
-                          ],
-                        },
-                        {
-                          label: "Primitive",
-                          icon: <ToggleLeft />,
-                          onClick: () => handleNodeTypeSelect("primitive"),
-                          keywords: ["value", "string", "number", "boolean"],
-                        },
-                        {
-                          label: "Subgraph",
-                          icon: <FolderOpen />,
-                          onClick: () => handleNodeTypeSelect("subgraph"),
-                          keywords: ["group", "container", "nest", "bundle"],
-                        },
-                        ...(selectedNodeIds.length > 0
-                          ? [
-                              {
-                                label: `Group ${selectedNodeIds.length} node${selectedNodeIds.length !== 1 ? "s" : ""} into Subgraph`,
-                                icon: <PackageOpen />,
-                                onClick: () => {
-                                  createSubgraphFromSelection(
-                                    nodes,
-                                    edges,
-                                    selectedNodeIds
-                                  );
-                                },
-                                keywords: [
-                                  "create",
-                                  "subgraph",
-                                  "group",
-                                  "selection",
-                                ],
-                              },
-                            ]
-                          : []),
-                      ]
-                    : (() => {
-                        const clickedId = contextMenu.nodeId;
-                        const isInSelection =
-                          !!clickedId && selectedNodeIds.includes(clickedId);
-                        const targetIds =
-                          isInSelection && selectedNodeIds.length > 1
-                            ? selectedNodeIds
-                            : clickedId
-                              ? [clickedId]
-                              : [];
-                        const count = targetIds.length;
-                        const targetNodes = nodes.filter(n =>
-                          targetIds.includes(n.id)
-                        );
-                        const allLocked = targetNodes.every(
-                          n => !!n.data.locked
-                        );
-                        const allPinned = targetNodes.every(
-                          n => !!n.data.pinned
-                        );
-                        const isSingleSubgraph =
-                          count === 1 &&
-                          targetNodes[0]?.data.nodeType === "subgraph";
-                        const canCreateSubgraph =
-                          count >= 1 &&
-                          !targetNodes.every(
-                            n => n.data.nodeType === "subgraph"
-                          );
-
-                        return [
-                          ...(isSingleSubgraph
-                            ? [
-                                {
-                                  label: "Enter Subgraph",
-                                  icon: <FolderOpen />,
-                                  onClick: () =>
-                                    handleEnterSubgraph(targetIds[0]),
-                                },
-                                {
-                                  label: "Unpack Subgraph",
-                                  icon: <PackageOpen />,
-                                  onClick: () =>
-                                    unpackSubgraph(targetIds[0], nodes, edges),
-                                },
-                              ]
-                            : []),
-                          ...(canCreateSubgraph
-                            ? [
-                                {
-                                  label: `Group into Subgraph`,
-                                  icon: <PackageOpen />,
-                                  onClick: () =>
-                                    createSubgraphFromSelection(
-                                      nodes,
-                                      edges,
-                                      targetIds
-                                    ),
-                                },
-                              ]
-                            : []),
-                          {
-                            label: allLocked
-                              ? count > 1
-                                ? `Unlock ${count} nodes`
-                                : "Unlock"
-                              : count > 1
-                                ? `Lock ${count} nodes`
-                                : "Lock",
-                            icon: allLocked ? <LockOpen /> : <Lock />,
-                            onClick: () => {
-                              const newLocked = !allLocked;
-                              setNodes(nds =>
-                                nds.map(n =>
-                                  targetIds.includes(n.id)
-                                    ? {
-                                        ...n,
-                                        data: {
-                                          ...n.data,
-                                          locked: newLocked,
-                                        },
-                                      }
-                                    : n
-                                )
-                              );
-                            },
-                          },
-                          {
-                            label: allPinned
-                              ? count > 1
-                                ? `Unpin ${count} nodes`
-                                : "Unpin"
-                              : count > 1
-                                ? `Pin ${count} nodes`
-                                : "Pin",
-                            icon: allPinned ? <PinOff /> : <Pin />,
-                            onClick: () => {
-                              const newPinned = !allPinned;
-                              setNodes(nds =>
-                                nds.map(n =>
-                                  targetIds.includes(n.id)
-                                    ? {
-                                        ...n,
-                                        draggable: !newPinned,
-                                        data: {
-                                          ...n.data,
-                                          pinned: newPinned,
-                                        },
-                                      }
-                                    : n
-                                )
-                              );
-                            },
-                          },
-                          {
-                            label:
-                              count > 1 ? `Delete ${count} nodes` : "Delete",
-                            icon: <Trash2 />,
-                            onClick: () => handleDeleteNodes(targetIds),
-                            danger: true,
-                          },
-                        ];
-                      })()
+                    ? buildPaneMenuItems({
+                        handleNodeTypeSelect,
+                        selectedNodeIds,
+                        nodes,
+                        edges,
+                        createSubgraphFromSelection,
+                      })
+                    : buildNodeMenuItems({
+                        contextNodeId: contextMenu.nodeId!,
+                        selectedNodeIds,
+                        nodes,
+                        edges,
+                        setNodes,
+                        handleDeleteNodes,
+                        handleEnterSubgraph,
+                        unpackSubgraph,
+                        createSubgraphFromSelection,
+                      })
                 }
               />
             )}

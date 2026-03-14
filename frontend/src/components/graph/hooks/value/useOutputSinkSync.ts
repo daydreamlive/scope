@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import type { Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
 
 export function useOutputSinkSync(
   nodes: Node<FlowNodeData>[],
