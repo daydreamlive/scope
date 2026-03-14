@@ -1,19 +1,19 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useNodesState, useEdgesState } from "@xyflow/react";
 import type { Edge, Node } from "@xyflow/react";
-import { buildPipelinePortsMap } from "../../../lib/graphUtils";
-import type { FlowNodeData } from "../../../lib/graphUtils";
-import type { PipelineSchemaInfo } from "../../../lib/api";
-import { getPipelineSchemas } from "../../../lib/api";
+import { buildPipelinePortsMap } from "../../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
+import type { PipelineSchemaInfo } from "../../../../lib/api";
+import { getPipelineSchemas } from "../../../../lib/api";
 import { useState } from "react";
 
-import { usePipelineParams } from "./usePipelineParams";
+import { usePipelineParams } from "../node/usePipelineParams";
 import {
   useGraphPersistence,
   enrichNodes,
   type EnrichNodesDeps,
 } from "./useGraphPersistence";
-import { useRerouteTypeSync } from "./useRerouteTypeSync";
+import { useRerouteTypeSync } from "../value/useRerouteTypeSync";
 
 type NodesSetter = React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>;
 type EdgesSetter = React.Dispatch<React.SetStateAction<Edge[]>>;

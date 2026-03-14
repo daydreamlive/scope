@@ -1,7 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { ReactFlowInstance, Edge, Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../../lib/graphUtils";
-import { generateNodeId } from "../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
+import { generateNodeId } from "../../../../lib/graphUtils";
+import { safeCloneData } from "../../utils/stripNodeData";
 
 interface ClipboardData {
   nodes: Node<FlowNodeData>[];
@@ -9,30 +10,6 @@ interface ClipboardData {
 }
 
 const PASTE_OFFSET = 30;
-
-/**
- * Deep-clone node data while stripping non-serializable values
- * (functions, MediaStream, DOM elements, etc.).  These are re-added
- * by `enrichNodes` in useGraphState after the next enrichment pass.
- */
-function safeCloneData(data: FlowNodeData): FlowNodeData {
-  const cleaned: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(data)) {
-    if (typeof value === "function") continue;
-    // Keep primitives/arrays/objects, skip browser APIs
-    if (
-      typeof value === "object" &&
-      value !== null &&
-      !Array.isArray(value) &&
-      Object.getPrototypeOf(value) !== Object.prototype
-    ) {
-      continue;
-    }
-    cleaned[key] = value;
-  }
-  // JSON round-trip to sever references
-  return JSON.parse(JSON.stringify(cleaned)) as FlowNodeData;
-}
 
 export function useKeyboardShortcuts(
   reactFlowInstanceRef: React.RefObject<ReactFlowInstance<

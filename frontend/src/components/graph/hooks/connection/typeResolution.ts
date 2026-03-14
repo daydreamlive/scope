@@ -1,7 +1,7 @@
 // Type resolution utilities for param connections
 import type { Edge, Node } from "@xyflow/react";
-import { parseHandleId } from "../../../lib/graphUtils";
-import type { FlowNodeData } from "../../../lib/graphUtils";
+import { parseHandleId } from "../../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
 
 export type ResolvedType =
   | "string"

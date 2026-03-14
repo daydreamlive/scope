@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { NODE_TOKENS } from "./tokens";
-import { useIsZoomedOut } from "../hooks/useIsZoomedOut";
-import { useNodeFlags } from "../hooks/useNodeFlags";
+import { useIsZoomedOut } from "../hooks/node/useIsZoomedOut";
+import { useNodeFlags } from "../hooks/node/useNodeFlags";
 
 interface NodeBodyProps {
   children: ReactNode;

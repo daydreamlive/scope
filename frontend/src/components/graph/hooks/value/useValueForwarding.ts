@@ -1,8 +1,8 @@
 import { useEffect, useRef } from "react";
 import type { Edge, Node } from "@xyflow/react";
-import type { FlowNodeData, SubgraphPort } from "../../../lib/graphUtils";
-import { parseHandleId } from "../../../lib/graphUtils";
-import { getAnyValueFromNode } from "../utils/getValueFromNode";
+import type { FlowNodeData, SubgraphPort } from "../../../../lib/graphUtils";
+import { parseHandleId } from "../../../../lib/graphUtils";
+import { getAnyValueFromNode } from "../../utils/getValueFromNode";
 
 function valuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;

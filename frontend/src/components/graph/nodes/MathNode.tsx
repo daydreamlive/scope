@@ -5,9 +5,9 @@ import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import { getNumberFromNode } from "../utils/getValueFromNode";
 import { computeResult } from "../utils/computeResult";
-import { useNodeData } from "../hooks/useNodeData";
-import { useNodeCollapse } from "../hooks/useNodeCollapse";
-import { useHandlePositions } from "../hooks/useHandlePositions";
+import { useNodeData } from "../hooks/node/useNodeData";
+import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
+import { useHandlePositions } from "../hooks/node/useHandlePositions";
 import {
   NodeCard,
   NodeHeader,

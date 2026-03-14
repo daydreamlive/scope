@@ -1,7 +1,7 @@
 import { useCallback, useRef, useEffect } from "react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
-import { useNodeData } from "../hooks/useNodeData";
+import { useNodeData } from "../hooks/node/useNodeData";
 import { NodeCard, NodeHeader } from "../ui";
 
 type NoteNodeType = Node<FlowNodeData, "note">;
