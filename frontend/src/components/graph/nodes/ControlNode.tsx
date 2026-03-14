@@ -2,8 +2,14 @@ import { Handle, Position, useEdges, useNodes } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
-import { buildHandleId, parseHandleId } from "../../../lib/graphUtils";
+import { buildHandleId } from "../../../lib/graphUtils";
+import {
+  getNumberFromNode,
+  getStringFromNode,
+} from "../utils/getValueFromNode";
+import { computePatternValue } from "../utils/computePatternValue";
 import { useNodeData } from "../hooks/useNodeData";
+import { useNodeCollapse } from "../hooks/useNodeCollapse";
 import { useHandlePositions } from "../hooks/useHandlePositions";
 import {
   NodeCard,
@@ -14,6 +20,7 @@ import {
   NodePillSelect,
   NodePill,
   NODE_TOKENS,
+  collapsedHandleStyle,
 } from "../ui";
 
 type ControlNodeType = Node<FlowNodeData, "control">;
@@ -53,114 +60,13 @@ const MODE_OPTIONS = [
   { value: "switch", label: "Switch" },
 ];
 
-function computePatternValue(
-  pattern: "sine" | "bounce" | "random_walk" | "linear" | "step",
-  t: number,
-  speed: number,
-  min: number,
-  max: number,
-  lastValue: number
-): number {
-  const range = max - min;
-  const phase = (t * speed) % 1;
-
-  switch (pattern) {
-    case "sine":
-      return min + range * (0.5 + 0.5 * Math.sin(phase * 2 * Math.PI));
-    case "bounce": {
-      const triangle = phase < 0.5 ? phase * 2 : 2 - phase * 2;
-      return min + range * triangle;
-    }
-    case "random_walk": {
-      const step = (Math.random() - 0.5) * 0.1 * range;
-      const newValue = lastValue + step;
-      return Math.max(min, Math.min(max, newValue));
-    }
-    case "linear":
-      return min + range * phase;
-    case "step": {
-      const steps = 10;
-      const stepIndex = Math.floor(phase * steps);
-      return min + (range * stepIndex) / (steps - 1);
-    }
-    default:
-      return min;
-  }
-}
-
-function getNumberFromNode(
-  node: Node<FlowNodeData>,
-  sourceHandleId?: string | null
-): number | null {
-  if (node.data.nodeType === "primitive" || node.data.nodeType === "reroute") {
-    const val = node.data.value;
-    if (typeof val === "number") return val;
-    return null;
-  }
-  if (node.data.nodeType === "control" || node.data.nodeType === "math") {
-    const val = node.data.currentValue;
-    if (typeof val === "number") return val;
-    return null;
-  }
-  if (node.data.nodeType === "slider") {
-    const val = node.data.value;
-    if (typeof val === "number") return val;
-    return null;
-  }
-  if (node.data.nodeType === "knobs") {
-    const knobs = node.data.knobs;
-    if (!knobs || !sourceHandleId) return null;
-    const parsed = parseHandleId(sourceHandleId);
-    if (!parsed) return null;
-    const idx = parseInt(parsed.name.replace("knob_", ""), 10);
-    if (isNaN(idx) || idx >= knobs.length) return null;
-    return knobs[idx].value;
-  }
-  if (node.data.nodeType === "xypad") {
-    if (!sourceHandleId) return null;
-    const parsed = parseHandleId(sourceHandleId);
-    if (!parsed) return null;
-    if (parsed.name === "x") return node.data.padX ?? null;
-    if (parsed.name === "y") return node.data.padY ?? null;
-    return null;
-  }
-  if (node.data.nodeType === "midi") {
-    const channels = node.data.midiChannels;
-    if (!channels || !sourceHandleId) return null;
-    const parsed = parseHandleId(sourceHandleId);
-    if (!parsed) return null;
-    const idx = parseInt(parsed.name.replace("midi_", ""), 10);
-    if (isNaN(idx) || idx >= channels.length) return null;
-    return channels[idx].value;
-  }
-  if (node.data.nodeType === "bool") {
-    const val = node.data.value;
-    if (typeof val === "boolean") return val ? 1 : 0;
-    return null;
-  }
-  return null;
-}
-
-function getStringFromNode(node: Node<FlowNodeData>): string | null {
-  if (node.data.nodeType === "primitive" || node.data.nodeType === "reroute") {
-    const val = node.data.value;
-    if (typeof val === "string") return val;
-    return null;
-  }
-  if (node.data.nodeType === "control") {
-    const val = node.data.currentValue;
-    if (typeof val === "string") return val;
-    return null;
-  }
-  return null;
-}
-
 export function ControlNode({
   id,
   data,
   selected,
 }: NodeProps<ControlNodeType>) {
   const { updateData: updateNodeData } = useNodeData(id);
+  const { collapsed, toggleCollapse } = useNodeCollapse();
   const controlType = data.controlType || "float";
   const pattern = data.controlPattern || "sine";
   const speed = data.controlSpeed ?? 1.0;
@@ -182,17 +88,14 @@ export function ControlNode({
   const animationFrameRef = useRef<number | undefined>(undefined);
 
   const color = getControlTypeColor(controlType);
-  const dotColorClass = "bg-purple-400";
   const title = getControlTitle(controlType);
 
-  // Initialize currentValue
   useEffect(() => {
     if (data.currentValue !== undefined) return;
     const initialValue = controlType === "string" ? items[0] || "" : min;
     updateNodeData({ currentValue: initialValue });
   }, [data.currentValue, updateNodeData, controlType, items, min]);
 
-  // Switch mode: read string + number inputs per slot
   const switchSlots = isSwitchMode
     ? items.map((fallbackText, i) => {
         const strHandleId = buildHandleId("param", `str_${i}`);
@@ -224,7 +127,6 @@ export function ControlNode({
 
   const lastActiveIndexRef = useRef<number>(0);
 
-  // Compute switch selection during render (produces a stable string primitive)
   let switchSelectedString: string | undefined;
   if (isSwitchMode && switchSlots.length > 0) {
     let bestIdx = lastActiveIndexRef.current;
@@ -240,7 +142,6 @@ export function ControlNode({
     switchSelectedString = switchSlots[bestIdx].text || "";
   }
 
-  // Sync selection to node data — depends on a string, not the switchSlots array
   useEffect(() => {
     if (switchSelectedString === undefined) return;
     if (switchSelectedString !== data.currentValue) {
@@ -248,7 +149,6 @@ export function ControlNode({
     }
   }, [switchSelectedString, data.currentValue, updateNodeData]);
 
-  // Animated mode
   useEffect(() => {
     if (isSwitchMode) return;
     if (!isPlaying) {
@@ -367,7 +267,6 @@ export function ControlNode({
     updateNodeData({ controlItems: newItems });
   };
 
-  // Edit individual item text (when not string-connected)
   const handleItemTextChange = (index: number, text: string) => {
     const newItems = [...items];
     newItems[index] = text;
@@ -376,20 +275,22 @@ export function ControlNode({
 
   const itemsDisplay = items.join(", ");
 
-  // Measure handle positions for switch mode
   const { setRowRef, rowPositions } = useHandlePositions([
     isSwitchMode,
     items.length,
   ]);
 
   return (
-    <NodeCard selected={selected} autoMinHeight={isSwitchMode}>
+    <NodeCard
+      selected={selected}
+      autoMinHeight={isSwitchMode && !collapsed}
+      collapsed={collapsed}
+    >
       <NodeHeader
         title={data.customTitle || title}
-        dotColor={dotColorClass}
         onTitleChange={newTitle => updateNodeData({ customTitle: newTitle })}
         rightContent={
-          !isSwitchMode ? (
+          !isSwitchMode && !collapsed ? (
             <button
               onClick={handleTogglePlay}
               className="w-5 h-5 flex items-center justify-center text-[#fafafa] hover:text-blue-400 transition-colors"
@@ -399,163 +300,167 @@ export function ControlNode({
             </button>
           ) : undefined
         }
+        collapsed={collapsed}
+        onCollapseToggle={toggleCollapse}
       />
-      <NodeBody withGap>
-        {/* Mode selector — only for string type */}
-        {controlType === "string" && (
-          <NodeParamRow label="Mode">
-            <NodePillSelect
-              value={controlMode}
-              onChange={handleModeChange}
-              options={MODE_OPTIONS}
-            />
-          </NodeParamRow>
-        )}
-
-        {/* Animated mode controls */}
-        {!isSwitchMode && (
-          <>
-            <NodeParamRow label="Pattern">
+      {!collapsed && (
+        <NodeBody withGap>
+          {/* Mode selector — only for string type */}
+          {controlType === "string" && (
+            <NodeParamRow label="Mode">
               <NodePillSelect
-                value={pattern}
-                onChange={handlePatternChange}
-                options={PATTERN_OPTIONS}
+                value={controlMode}
+                onChange={handleModeChange}
+                options={MODE_OPTIONS}
               />
             </NodeParamRow>
+          )}
 
-            {controlType === "string" ? (
-              <NodeParamRow label="Items">
-                <NodePillInput
-                  type="text"
-                  value={itemsDisplay}
-                  onChange={handleItemsChange}
+          {/* Animated mode controls */}
+          {!isSwitchMode && (
+            <>
+              <NodeParamRow label="Pattern">
+                <NodePillSelect
+                  value={pattern}
+                  onChange={handlePatternChange}
+                  options={PATTERN_OPTIONS}
                 />
               </NodeParamRow>
-            ) : (
-              <>
-                <NodeParamRow label="Min">
+
+              {controlType === "string" ? (
+                <NodeParamRow label="Items">
                   <NodePillInput
-                    type="number"
-                    value={min}
-                    onChange={handleMinChange}
+                    type="text"
+                    value={itemsDisplay}
+                    onChange={handleItemsChange}
                   />
                 </NodeParamRow>
-                <NodeParamRow label="Max">
-                  <NodePillInput
-                    type="number"
-                    value={max}
-                    onChange={handleMaxChange}
-                  />
-                </NodeParamRow>
-              </>
-            )}
-
-            <NodeParamRow label="Speed">
-              <NodePillInput
-                type="number"
-                value={speed}
-                onChange={handleSpeedChange}
-                min={0.1}
-              />
-            </NodeParamRow>
-          </>
-        )}
-
-        {/* Switch mode: per-item rows with string + number handles */}
-        {isSwitchMode && (
-          <>
-            {switchSlots.map((slot, i) => {
-              const isSelected = data.currentValue === slot.text;
-              const isActive = isSelected && slot.numVal > 0;
-              return (
-                <div
-                  key={i}
-                  ref={setRowRef(`item_${i}`)}
-                  className="flex items-center gap-1 min-h-[22px]"
-                >
-                  {/* Activity dot */}
-                  <div
-                    className="w-2 h-2 rounded-full shrink-0 transition-colors"
-                    style={{
-                      backgroundColor: isActive
-                        ? "#fbbf24"
-                        : isSelected
-                          ? "#fbbf24"
-                          : "#333",
-                      opacity: isActive ? 1 : isSelected ? 0.5 : 1,
-                      boxShadow: isActive ? "0 0 6px #fbbf24" : "none",
-                    }}
-                  />
-
-                  {/* Text: editable input if no string connection, else display connected text */}
-                  {slot.hasStringConnection ? (
-                    <span
-                      className={`text-[10px] font-medium truncate flex-1 min-w-0 ${
-                        isSelected ? "text-amber-400" : "text-[#8c8c8d]"
-                      }`}
-                      title={slot.text}
-                    >
-                      {slot.text || "—"}
-                    </span>
-                  ) : (
-                    <input
-                      className={`${NODE_TOKENS.pillInput} !w-auto flex-1 min-w-0 !text-[9px] !px-1.5 !py-0 ${
-                        isSelected ? "!text-amber-400" : ""
-                      }`}
-                      value={items[i]}
-                      onChange={e => handleItemTextChange(i, e.target.value)}
-                      onMouseDown={e => e.stopPropagation()}
-                      title={items[i]}
+              ) : (
+                <>
+                  <NodeParamRow label="Min">
+                    <NodePillInput
+                      type="number"
+                      value={min}
+                      onChange={handleMinChange}
                     />
-                  )}
+                  </NodeParamRow>
+                  <NodeParamRow label="Max">
+                    <NodePillInput
+                      type="number"
+                      value={max}
+                      onChange={handleMaxChange}
+                    />
+                  </NodeParamRow>
+                </>
+              )}
 
-                  {/* MIDI value indicator */}
-                  <span className="text-[9px] text-[#666] w-[30px] text-right shrink-0">
-                    {slot.numVal > 0 ? slot.numVal.toFixed(1) : ""}
-                  </span>
+              <NodeParamRow label="Speed">
+                <NodePillInput
+                  type="number"
+                  value={speed}
+                  onChange={handleSpeedChange}
+                  min={0.1}
+                />
+              </NodeParamRow>
+            </>
+          )}
 
-                  {/* Remove button */}
-                  {items.length > 1 && (
-                    <button
-                      className="w-4 h-4 rounded text-[#555] hover:text-red-400 text-[10px] flex items-center justify-center leading-none shrink-0"
-                      onClick={() => handleRemoveItem(i)}
-                    >
-                      ×
-                    </button>
-                  )}
-                </div>
-              );
-            })}
+          {/* Switch mode: per-item rows with string + number handles */}
+          {isSwitchMode && (
+            <>
+              {switchSlots.map((slot, i) => {
+                const isSelected = data.currentValue === slot.text;
+                const isActive = isSelected && slot.numVal > 0;
+                return (
+                  <div
+                    key={i}
+                    ref={setRowRef(`item_${i}`)}
+                    className="flex items-center gap-1 min-h-[22px]"
+                  >
+                    {/* Activity dot */}
+                    <div
+                      className="w-2 h-2 rounded-full shrink-0 transition-colors"
+                      style={{
+                        backgroundColor: isActive
+                          ? "#fbbf24"
+                          : isSelected
+                            ? "#fbbf24"
+                            : "#333",
+                        opacity: isActive ? 1 : isSelected ? 0.5 : 1,
+                        boxShadow: isActive ? "0 0 6px #fbbf24" : "none",
+                      }}
+                    />
 
-            {/* Add button */}
-            <button
-              className="w-full py-0.5 mt-0.5 rounded bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] text-[#888] hover:text-[#ccc] hover:border-[rgba(119,119,119,0.4)] text-[10px] transition-colors"
-              onClick={handleAddItem}
-            >
-              + Add Item
-            </button>
-          </>
-        )}
+                    {/* Text: editable input if no string connection, else display connected text */}
+                    {slot.hasStringConnection ? (
+                      <span
+                        className={`text-[10px] font-medium truncate flex-1 min-w-0 ${
+                          isSelected ? "text-amber-400" : "text-[#8c8c8d]"
+                        }`}
+                        title={slot.text}
+                      >
+                        {slot.text || "—"}
+                      </span>
+                    ) : (
+                      <input
+                        className={`${NODE_TOKENS.pillInput} !w-auto flex-1 min-w-0 !text-[9px] !px-1.5 !py-0 ${
+                          isSelected ? "!text-amber-400" : ""
+                        }`}
+                        value={items[i]}
+                        onChange={e => handleItemTextChange(i, e.target.value)}
+                        onMouseDown={e => e.stopPropagation()}
+                        title={items[i]}
+                      />
+                    )}
 
-        {/* Current value display */}
-        <div ref={setRowRef("value")} className={NODE_TOKENS.paramRow}>
-          <span className={NODE_TOKENS.labelText}>Value</span>
-          <NodePill className="opacity-75">
-            {(() => {
-              const displayVal = isSwitchMode
-                ? (switchSelectedString ?? String(data.currentValue ?? ""))
-                : currentValue;
-              if (typeof displayVal === "number") {
-                return controlType === "int"
-                  ? Math.round(displayVal)
-                  : displayVal.toFixed(3);
-              }
-              const s = String(displayVal);
-              return s.length > 20 ? s.slice(0, 20) + "…" : s;
-            })()}
-          </NodePill>
-        </div>
-      </NodeBody>
+                    {/* MIDI value indicator */}
+                    <span className="text-[9px] text-[#666] w-[30px] text-right shrink-0">
+                      {slot.numVal > 0 ? slot.numVal.toFixed(1) : ""}
+                    </span>
+
+                    {/* Remove button */}
+                    {items.length > 1 && (
+                      <button
+                        className="w-4 h-4 rounded text-[#555] hover:text-red-400 text-[10px] flex items-center justify-center leading-none shrink-0"
+                        onClick={() => handleRemoveItem(i)}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+
+              {/* Add button */}
+              <button
+                className="w-full py-0.5 mt-0.5 rounded bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] text-[#888] hover:text-[#ccc] hover:border-[rgba(119,119,119,0.4)] text-[10px] transition-colors"
+                onClick={handleAddItem}
+              >
+                + Add Item
+              </button>
+            </>
+          )}
+
+          {/* Current value display */}
+          <div ref={setRowRef("value")} className={NODE_TOKENS.paramRow}>
+            <span className={NODE_TOKENS.labelText}>Value</span>
+            <NodePill className="opacity-75">
+              {(() => {
+                const displayVal = isSwitchMode
+                  ? (switchSelectedString ?? String(data.currentValue ?? ""))
+                  : currentValue;
+                if (typeof displayVal === "number") {
+                  return controlType === "int"
+                    ? Math.round(displayVal)
+                    : displayVal.toFixed(3);
+                }
+                const s = String(displayVal);
+                return s.length > 20 ? s.slice(0, 20) + "…" : s;
+              })()}
+            </NodePill>
+          </div>
+        </NodeBody>
+      )}
 
       {isSwitchMode &&
         items.map((_, i) => (
@@ -564,23 +469,41 @@ export function ControlNode({
               type="target"
               position={Position.Left}
               id={buildHandleId("param", `str_${i}`)}
-              className="!w-2 !h-2 !border-0"
-              style={{
-                top: rowPositions[`item_${i}`] ?? 78 + i * 24,
-                left: -1,
-                backgroundColor: "#fbbf24",
-              }}
+              className={
+                collapsed && i > 0
+                  ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+                  : "!w-2.5 !h-2.5 !border-0"
+              }
+              style={
+                collapsed
+                  ? i === 0
+                    ? collapsedHandleStyle("left")
+                    : { ...collapsedHandleStyle("left"), opacity: 0 }
+                  : {
+                      top: (rowPositions[`item_${i}`] ?? 78 + i * 24) - 5,
+                      left: 0,
+                      backgroundColor: "#fbbf24",
+                    }
+              }
             />
             <Handle
               type="target"
               position={Position.Left}
               id={buildHandleId("param", `item_${i}`)}
-              className="!w-2 !h-2 !border-0"
-              style={{
-                top: rowPositions[`item_${i}`] ?? 78 + i * 24,
-                left: 10,
-                backgroundColor: "#38bdf8",
-              }}
+              className={
+                collapsed
+                  ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+                  : "!w-2.5 !h-2.5 !border-0"
+              }
+              style={
+                collapsed
+                  ? { ...collapsedHandleStyle("left"), opacity: 0 }
+                  : {
+                      top: (rowPositions[`item_${i}`] ?? 78 + i * 24) + 5,
+                      left: 0,
+                      backgroundColor: "#38bdf8",
+                    }
+              }
             />
           </span>
         ))}
@@ -590,12 +513,16 @@ export function ControlNode({
         type="source"
         position={Position.Right}
         id={buildHandleId("param", "value")}
-        className="!w-2 !h-2 !border-0"
-        style={{
-          top: rowPositions["value"] ?? 44,
-          right: 8,
-          backgroundColor: color,
-        }}
+        className="!w-2.5 !h-2.5 !border-0"
+        style={
+          collapsed
+            ? collapsedHandleStyle("right")
+            : {
+                top: rowPositions["value"] ?? 44,
+                right: 0,
+                backgroundColor: color,
+              }
+        }
       />
     </NodeCard>
   );

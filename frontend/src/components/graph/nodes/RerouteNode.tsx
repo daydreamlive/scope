@@ -42,11 +42,11 @@ export function RerouteNode({ data, selected }: NodeProps<RerouteNodeType>) {
         id={buildHandleId("param", "value")}
         className="!border-0"
         style={{
-          width: 8,
-          height: 8,
+          width: 10,
+          height: 10,
           borderRadius: "50%",
           backgroundColor: accent,
-          left: -4,
+          left: -5,
           top: "50%",
           transform: "translateY(-50%)",
         }}
@@ -69,11 +69,11 @@ export function RerouteNode({ data, selected }: NodeProps<RerouteNodeType>) {
         id={buildHandleId("param", "value")}
         className="!border-0"
         style={{
-          width: 8,
-          height: 8,
+          width: 10,
+          height: 10,
           borderRadius: "50%",
           backgroundColor: accent,
-          right: -4,
+          right: -5,
           top: "50%",
           transform: "translateY(-50%)",
         }}

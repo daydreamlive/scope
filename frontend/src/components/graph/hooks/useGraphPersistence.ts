@@ -9,14 +9,13 @@ import type { FlowNodeData } from "../../../lib/graphUtils";
 import type { PipelineSchemaInfo } from "../../../lib/api";
 import { buildEdgeStyle } from "../constants";
 
-// localStorage helpers
 const LS_GRAPH_KEY = "scope:graph:backup";
 
 function saveGraphToLocalStorage(graphJson: string): void {
   try {
     localStorage.setItem(LS_GRAPH_KEY, graphJson);
   } catch {
-    // Storage full or unavailable – silently ignore
+    // ignore
   }
 }
 
@@ -38,9 +37,6 @@ function clearGraphFromLocalStorage(): void {
   }
 }
 
-// Node-param attachment helpers
-
-/** Attach pipeline node parameter values into ui_state for persistence. */
 export function attachNodeParams(
   config: ReturnType<typeof flowToGraphConfig>,
   params: Record<string, Record<string, unknown>>
@@ -61,7 +57,6 @@ export function attachNodeParams(
   };
 }
 
-/** Extract pipeline node parameter values from ui_state. */
 export function extractNodeParams(
   uiState: Record<string, unknown> | null | undefined
 ): Record<string, Record<string, unknown>> {
@@ -70,8 +65,6 @@ export function extractNodeParams(
   if (!raw || typeof raw !== "object") return {};
   return raw as Record<string, Record<string, unknown>>;
 }
-
-// Enrichment helpers
 
 export interface EnrichNodesDeps {
   availablePipelineIds: string[];
@@ -221,6 +214,13 @@ interface UseGraphPersistenceArgs {
   handleEdgeDelete: (edgeId: string) => void;
   onGraphChange?: () => void;
   onGraphClear?: () => void;
+  resolveRootGraphRef: React.RefObject<
+    (
+      nodes: Node<FlowNodeData>[],
+      edges: Edge[]
+    ) => { nodes: Node<FlowNodeData>[]; edges: Edge[] }
+  >;
+  resetNavigationRef: React.RefObject<() => void>;
 }
 
 export function useGraphPersistence({
@@ -235,6 +235,8 @@ export function useGraphPersistence({
   handleEdgeDelete,
   onGraphChange,
   onGraphClear,
+  resolveRootGraphRef,
+  resetNavigationRef,
 }: UseGraphPersistenceArgs) {
   const [status, setStatus] = useState<string>("");
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
@@ -249,10 +251,9 @@ export function useGraphPersistence({
 
   const initialLoadDone = useRef(false);
 
-  // Load graph from localStorage
-
   const loadGraph = useCallback(() => {
     if (Object.keys(portsMap).length === 0) return;
+    resetNavigationRef.current?.();
 
     const backup = loadGraphFromLocalStorage();
     if (
@@ -286,30 +287,27 @@ export function useGraphPersistence({
       setStatus("No graph configured");
     }
     initialLoadDone.current = true;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [portsMap]);
 
-  // Load graph on mount
   useEffect(() => {
     loadGraph();
   }, [loadGraph]);
 
-  // Notify parent
   useEffect(() => {
     if (!initialLoadDone.current) return;
     if (nodes.length === 0 && edges.length === 0) return;
     onGraphChangeRef.current?.();
   }, [nodes, edges]);
 
-  // Auto-save graph to localStorage (debounced)
   useEffect(() => {
     if (!initialLoadDone.current) return;
     if (nodes.length === 0 && edges.length === 0) return;
 
     const timer = setTimeout(() => {
       try {
+        const root = resolveRootGraphRef.current(nodes, edges);
         const graphConfig = attachNodeParams(
-          flowToGraphConfig(nodes, edges),
+          flowToGraphConfig(root.nodes, root.edges),
           nodeParamsRef.current
         );
         const graphJson = JSON.stringify(graphConfig);
@@ -324,17 +322,17 @@ export function useGraphPersistence({
     }, 500);
 
     return () => clearTimeout(timer);
-  }, [nodes, edges, nodeParamsRef]);
+  }, [nodes, edges, nodeParamsRef, resolveRootGraphRef]);
 
-  // Manual save (immediate, no debounce)
   const handleSave = useCallback(() => {
     if (nodes.length === 0 && edges.length === 0) {
       setStatus("Nothing to save");
       return;
     }
     try {
+      const root = resolveRootGraphRef.current(nodes, edges);
       const graphConfig = attachNodeParams(
-        flowToGraphConfig(nodes, edges),
+        flowToGraphConfig(root.nodes, root.edges),
         nodeParamsRef.current
       );
       const graphJson = JSON.stringify(graphConfig);
@@ -346,40 +344,39 @@ export function useGraphPersistence({
       const message = err instanceof Error ? err.message : "Unknown error";
       setStatus(`Save failed: ${message}`);
     }
-  }, [nodes, edges, nodeParamsRef]);
+  }, [nodes, edges, nodeParamsRef, resolveRootGraphRef]);
 
-  // beforeunload: sync-save to localStorage
   useEffect(() => {
     const handler = () => {
       try {
         const currentNodes = nodesRef.current;
         const currentEdges = edgesRef.current;
         if (currentNodes.length > 0 || currentEdges.length > 0) {
+          const root = resolveRootGraphRef.current(currentNodes, currentEdges);
           const graphConfig = attachNodeParams(
-            flowToGraphConfig(currentNodes, currentEdges),
+            flowToGraphConfig(root.nodes, root.edges),
             nodeParamsRef.current
           );
           saveGraphToLocalStorage(JSON.stringify(graphConfig));
         }
       } catch {
-        // best effort
+        // ignore
       }
     };
 
     window.addEventListener("beforeunload", handler);
     return () => window.removeEventListener("beforeunload", handler);
-  }, [nodeParamsRef]);
+  }, [nodeParamsRef, resolveRootGraphRef]);
 
-  // Clear graph
   const handleClear = useCallback(() => {
+    resetNavigationRef.current?.();
     clearGraphFromLocalStorage();
     setNodes([]);
     setEdges([]);
     setStatus("Graph cleared");
     onGraphClear?.();
-  }, [setNodes, setEdges, onGraphClear]);
+  }, [setNodes, setEdges, onGraphClear, resetNavigationRef]);
 
-  // Import graph from JSON file
   const handleImport = useCallback(
     (event: React.ChangeEvent<HTMLInputElement>) => {
       const file = event.target.files?.[0];
@@ -393,6 +390,7 @@ export function useGraphPersistence({
             setStatus("Import failed: invalid graph format");
             return;
           }
+          resetNavigationRef.current?.();
           const { nodes: flowNodes, edges: flowEdges } = graphConfigToFlow(
             graphConfig,
             portsMap
@@ -419,13 +417,14 @@ export function useGraphPersistence({
       handleEdgeDelete,
       setNodeParams,
       enrichDepsRef,
+      resetNavigationRef,
     ]
   );
 
-  // Export graph as JSON file
   const handleExport = useCallback(() => {
+    const root = resolveRootGraphRef.current(nodes, edges);
     const graphConfig = attachNodeParams(
-      flowToGraphConfig(nodes, edges),
+      flowToGraphConfig(root.nodes, root.edges),
       nodeParamsRef.current
     );
     const dataStr = JSON.stringify(graphConfig, null, 2);
@@ -439,17 +438,18 @@ export function useGraphPersistence({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     setStatus("Graph exported");
-  }, [nodes, edges, nodeParamsRef]);
+  }, [nodes, edges, nodeParamsRef, resolveRootGraphRef]);
 
-  // Get current graph config
-  const getCurrentGraphConfig = useCallback(
-    () =>
-      attachNodeParams(
-        flowToGraphConfig(nodesRef.current, edgesRef.current),
-        nodeParamsRef.current
-      ),
-    [nodeParamsRef]
-  );
+  const getCurrentGraphConfig = useCallback(() => {
+    const root = resolveRootGraphRef.current(
+      nodesRef.current,
+      edgesRef.current
+    );
+    return attachNodeParams(
+      flowToGraphConfig(root.nodes, root.edges),
+      nodeParamsRef.current
+    );
+  }, [nodeParamsRef, resolveRootGraphRef]);
 
   const getGraphNodePrompts = useCallback((): Array<{
     nodeId: string;
