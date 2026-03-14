@@ -28,7 +28,8 @@ interface AddNodeModalProps {
       | "image"
       | "vace"
       | "midi"
-      | "bool",
+      | "bool"
+      | "subgraph",
     subType?: string
   ) => void;
 }
@@ -51,7 +52,8 @@ interface NodeCatalogItem {
     | "image"
     | "vace"
     | "midi"
-    | "bool";
+    | "bool"
+    | "subgraph";
   subType?: string;
   name: string;
   description: string;
@@ -59,10 +61,7 @@ interface NodeCatalogItem {
   category: string;
 }
 
-// Ordered by color so visually similar nodes are grouped together:
-// green → blue → sky-blue → purple → pink → red → orange → yellow → gray
 const NODE_CATALOG: NodeCatalogItem[] = [
-  // Green
   {
     type: "source",
     name: "Source",
@@ -70,7 +69,6 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#4ade80",
     category: "I/O",
   },
-  // Blue
   {
     type: "pipeline",
     name: "Pipeline",
@@ -78,7 +76,6 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#60a5fa",
     category: "I/O",
   },
-  // Sky-blue
   {
     type: "control",
     subType: "float",
@@ -215,6 +212,14 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     name: "Reroute",
     description: "Pass-through dot to organize long connection lines",
     color: "#9ca3af",
+    category: "Utility",
+  },
+  // Cyan – Subgraph
+  {
+    type: "subgraph",
+    name: "Subgraph",
+    description: "Container node that groups nodes into a reusable sub-graph",
+    color: "#06b6d4",
     category: "Utility",
   },
 ];

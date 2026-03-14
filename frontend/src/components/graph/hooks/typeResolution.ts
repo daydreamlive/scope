@@ -46,6 +46,9 @@ export function resolveSourceType(
     // Fallback to valueType
     return node.data.valueType;
   }
+  // Boundary / subgraph nodes: default to "number" so general type checks
+  // don't reject them; fine-grained port-level checks happen in isValidConnection.
+  if (nt === "subgraph_input" || nt === "subgraph") return "number";
   return undefined;
 }
 
