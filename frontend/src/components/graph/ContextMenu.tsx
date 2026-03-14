@@ -40,16 +40,14 @@ export function ContextMenu({
   const [search, setSearch] = useState("");
   const [activeSubmenu, setActiveSubmenu] = useState<number | null>(null);
 
-  // Adjusted position after measuring the menu against the viewport
   const [pos, setPos] = useState<{ left: number; top: number }>({
     left: x,
     top: y,
   });
-  // Whether the menu opens upward / leftward (used for submenu direction too)
   const [flipX, setFlipX] = useState(false);
   const [flipY, setFlipY] = useState(false);
 
-  // Measure the menu after first paint and clamp to viewport
+  // Measure after first paint and clamp to viewport
   useLayoutEffect(() => {
     const el = menuRef.current;
     if (!el) return;
@@ -105,7 +103,7 @@ export function ContextMenu({
     };
   }, [onClose]);
 
-  // Flatten hierarchy for search — children surface with their parent label as context
+  // Flatten hierarchy so children are searchable with their parent label as context
   const flatItems = useMemo<FlatItem[]>(() => {
     const result: FlatItem[] = [];
     for (const item of items) {
@@ -247,11 +245,7 @@ export function ContextMenu({
   );
 }
 
-/** Viewport-aware submenu that flips horizontally/vertically when needed.
- *  Uses a transparent padding wrapper to bridge the gap between the parent
- *  menu item and the visual submenu, preventing mouseleave from firing
- *  when the cursor crosses the gap.
- */
+/** Viewport-aware submenu, flips horizontally/vertically when needed. */
 function SubmenuPanel({
   items,
   flipX,
@@ -265,7 +259,6 @@ function SubmenuPanel({
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [style, setStyle] = useState<React.CSSProperties>({
-    // Initial off-screen render so we can measure
     visibility: "hidden",
     position: "absolute",
   });
@@ -288,9 +281,8 @@ function SubmenuPanel({
       visibility: "visible",
     };
 
-    // Horizontal: open to the right by default, flip left if needed.
-    // Use padding instead of margin so the transparent gap area is part of
-    // this element's hit area, keeping the parent's mouseleave from firing.
+    // Open right by default; flip left if needed.
+    // Padding (not margin) keeps the hit area bridging the gap to parent row.
     if (flipX || parent.right + rect.width + 4 > vw - VIEWPORT_PADDING) {
       css.right = "100%";
       css.left = undefined;
@@ -301,9 +293,8 @@ function SubmenuPanel({
       css.paddingLeft = "4px";
     }
 
-    // Vertical: align top of submenu with the parent row, but clamp to viewport
+    // Align top with parent row, clamp to viewport
     if (flipY || parent.top + rect.height > vh - VIEWPORT_PADDING) {
-      // Anchor from the bottom of the parent row
       css.bottom = 0;
       css.top = undefined;
     } else {

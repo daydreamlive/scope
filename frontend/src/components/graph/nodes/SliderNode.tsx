@@ -4,6 +4,7 @@ import { useCallback, useRef } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/useNodeData";
+import { useNodeCollapse } from "../hooks/useNodeCollapse";
 import {
   NodeCard,
   NodeHeader,
@@ -11,6 +12,7 @@ import {
   NodeParamRow,
   NodePillInput,
   NODE_TOKENS,
+  collapsedHandleStyle,
 } from "../ui";
 
 type SliderNodeType = Node<FlowNodeData, "slider">;
@@ -19,6 +21,7 @@ const COLOR = "#a78bfa"; // violet-400
 
 export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
   const { updateData } = useNodeData(id);
+  const { collapsed, toggleCollapse } = useNodeCollapse();
   const sliderRef = useRef<HTMLDivElement>(null);
 
   const min = data.sliderMin ?? 0;
@@ -65,77 +68,88 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
   );
 
   return (
-    <NodeCard selected={selected} autoMinHeight>
+    <NodeCard
+      selected={selected}
+      autoMinHeight={!collapsed}
+      collapsed={collapsed}
+    >
       <NodeHeader
         title={data.customTitle || "Slider"}
-        dotColor="bg-violet-400"
         onTitleChange={newTitle => updateData({ customTitle: newTitle })}
+        collapsed={collapsed}
+        onCollapseToggle={toggleCollapse}
       />
-      <NodeBody withGap>
-        {/* Slider track */}
-        <div
-          ref={sliderRef}
-          className="relative w-full h-5 rounded-full cursor-pointer select-none"
-          style={{
-            background: "#1b1a1a",
-            border: "1px solid rgba(119,119,119,0.15)",
-          }}
-          onPointerDown={handlePointerDown}
-        >
-          {/* Filled portion */}
+      {!collapsed && (
+        <NodeBody withGap>
+          {/* Slider track */}
           <div
-            className="absolute left-0 top-0 h-full rounded-full pointer-events-none"
-            style={{ width: `${pct}%`, background: COLOR, opacity: 0.35 }}
-          />
-          {/* Thumb */}
-          <div
-            className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full pointer-events-none"
+            ref={sliderRef}
+            className="relative w-full h-5 rounded-full cursor-pointer select-none"
             style={{
-              left: `calc(${pct}% - 6px)`,
-              background: COLOR,
-              boxShadow: `0 0 4px ${COLOR}`,
+              background: "#1b1a1a",
+              border: "1px solid rgba(119,119,119,0.15)",
             }}
-          />
-        </div>
+            onPointerDown={handlePointerDown}
+          >
+            {/* Filled portion */}
+            <div
+              className="absolute left-0 top-0 h-full rounded-full pointer-events-none"
+              style={{ width: `${pct}%`, background: COLOR, opacity: 0.35 }}
+            />
+            {/* Thumb */}
+            <div
+              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full pointer-events-none"
+              style={{
+                left: `calc(${pct}% - 6px)`,
+                background: COLOR,
+                boxShadow: `0 0 4px ${COLOR}`,
+              }}
+            />
+          </div>
 
-        {/* Current value display */}
-        <div className="flex justify-center">
-          <span className={NODE_TOKENS.primaryText}>
-            {clampedValue.toFixed(step < 1 ? 2 : 0)}
-          </span>
-        </div>
+          {/* Current value display */}
+          <div className="flex justify-center">
+            <span className={NODE_TOKENS.primaryText}>
+              {clampedValue.toFixed(step < 1 ? 2 : 0)}
+            </span>
+          </div>
 
-        {/* Min / Max / Step */}
-        <NodeParamRow label="Min">
-          <NodePillInput
-            type="number"
-            value={min}
-            onChange={v => updateData({ sliderMin: Number(v) })}
-          />
-        </NodeParamRow>
-        <NodeParamRow label="Max">
-          <NodePillInput
-            type="number"
-            value={max}
-            onChange={v => updateData({ sliderMax: Number(v) })}
-          />
-        </NodeParamRow>
-        <NodeParamRow label="Step">
-          <NodePillInput
-            type="number"
-            value={step}
-            onChange={v => updateData({ sliderStep: Number(v) })}
-          />
-        </NodeParamRow>
-      </NodeBody>
+          {/* Min / Max / Step */}
+          <NodeParamRow label="Min">
+            <NodePillInput
+              type="number"
+              value={min}
+              onChange={v => updateData({ sliderMin: Number(v) })}
+            />
+          </NodeParamRow>
+          <NodeParamRow label="Max">
+            <NodePillInput
+              type="number"
+              value={max}
+              onChange={v => updateData({ sliderMax: Number(v) })}
+            />
+          </NodeParamRow>
+          <NodeParamRow label="Step">
+            <NodePillInput
+              type="number"
+              value={step}
+              onChange={v => updateData({ sliderStep: Number(v) })}
+            />
+          </NodeParamRow>
+        </NodeBody>
+      )}
 
       {/* Input handle (left) */}
       <Handle
         type="target"
         position={Position.Left}
         id={buildHandleId("param", "value")}
-        className="!w-2 !h-2 !border-0"
-        style={{ top: 44, left: 8, backgroundColor: COLOR }}
+        className="!w-2.5 !h-2.5 !border-0"
+        style={
+          collapsed
+            ? collapsedHandleStyle("left")
+            : { top: 44, left: 0, backgroundColor: COLOR }
+        }
       />
 
       {/* Output handle (right) */}
@@ -143,8 +157,12 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
         type="source"
         position={Position.Right}
         id={buildHandleId("param", "value")}
-        className="!w-2 !h-2 !border-0"
-        style={{ top: 44, right: 8, backgroundColor: COLOR }}
+        className="!w-2.5 !h-2.5 !border-0"
+        style={
+          collapsed
+            ? collapsedHandleStyle("right")
+            : { top: 44, right: 0, backgroundColor: COLOR }
+        }
       />
     </NodeCard>
   );

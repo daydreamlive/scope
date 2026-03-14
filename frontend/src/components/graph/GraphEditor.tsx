@@ -38,6 +38,8 @@ import {
   Pin,
   PinOff,
   Music,
+  FolderOpen,
+  PackageOpen,
 } from "lucide-react";
 
 import { SourceNode } from "./nodes/SourceNode";
@@ -57,11 +59,16 @@ import { ImageNode } from "./nodes/ImageNode";
 import { VaceNode } from "./nodes/VaceNode";
 import { MidiNode } from "./nodes/MidiNode";
 import { BoolNode } from "./nodes/BoolNode";
+import { SubgraphNode } from "./nodes/SubgraphNode";
+import { SubgraphInputNode } from "./nodes/SubgraphInputNode";
+import { SubgraphOutputNode } from "./nodes/SubgraphOutputNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
+import { BreadcrumbNav } from "./BreadcrumbNav";
 import { NODE_TOKENS } from "./ui";
 import type { FlowNodeData } from "../../lib/graphUtils";
+import { parseHandleId } from "../../lib/graphUtils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -79,6 +86,13 @@ import { useNodeFactories } from "./hooks/useNodeFactories";
 import { useValueForwarding } from "./hooks/useValueForwarding";
 import { useOutputSinkSync } from "./hooks/useOutputSinkSync";
 import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import {
+  useGraphNavigation,
+  BOUNDARY_INPUT_ID,
+  BOUNDARY_OUTPUT_ID,
+} from "./hooks/useGraphNavigation";
+import { useParentValueBridge } from "./hooks/useParentValueBridge";
+import { useSubgraphEval } from "./hooks/useSubgraphEval";
 
 const nodeTypes = {
   source: SourceNode,
@@ -98,6 +112,9 @@ const nodeTypes = {
   vace: VaceNode,
   midi: MidiNode,
   bool: BoolNode,
+  subgraph: SubgraphNode,
+  subgraph_input: SubgraphInputNode,
+  subgraph_output: SubgraphOutputNode,
 };
 
 const edgeTypes = {
@@ -166,7 +183,13 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     },
     ref
   ) {
-    // Graph state
+    const resolveRootGraphRef = useRef<
+      (
+        nodes: Node<FlowNodeData>[],
+        edges: Edge[]
+      ) => { nodes: Node<FlowNodeData>[]; edges: Edge[] }
+    >((n, e) => ({ nodes: n, edges: e }));
+    const resetNavigationRef = useRef<() => void>(() => {});
     const {
       nodes,
       setNodes,
@@ -180,6 +203,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       selectedNodeIds,
       setSelectedNodeIds,
       handlePipelineSelect,
+      enrichDepsRef,
       handleEdgeDelete,
       resolveBackendId,
       isStreamingRef,
@@ -213,17 +237,17 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         spoutOutputAvailable,
         ndiOutputAvailable,
         syphonOutputAvailable,
-      }
+      },
+      resolveRootGraphRef,
+      resetNavigationRef
     );
 
-    // Expose imperative methods
     useImperativeHandle(
       ref,
       () => ({ refreshGraph, getCurrentGraphConfig, getGraphNodePrompts }),
       [refreshGraph, getCurrentGraphConfig, getGraphNodePrompts]
     );
 
-    // Context menu & add-node modal
     const [contextMenu, setContextMenu] = useState<{
       x: number;
       y: number;
@@ -243,7 +267,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       Edge
     > | null>(null);
 
-    // Right-click drag = box-select, click = context menu
     const [selectionRect, setSelectionRect] = useState<{
       x1: number;
       y1: number;
@@ -260,7 +283,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         const startTarget = e.target as HTMLElement;
         let isDrag = false;
 
-        // Close existing context menu
         setContextMenu(null);
 
         const handleMove = (me: MouseEvent) => {
@@ -284,7 +306,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           window.removeEventListener("mouseup", handleUp);
 
           if (isDrag) {
-            // Box selection
             const rf = reactFlowInstanceRef.current;
             if (rf) {
               const start = rf.screenToFlowPosition({ x: startX, y: startY });
@@ -314,7 +335,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               );
             }
           } else {
-            // Show context menu
             const nodeEl = startTarget.closest(".react-flow__node");
             if (nodeEl) {
               const nodeId = nodeEl.getAttribute("data-id");
@@ -352,16 +372,36 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       [setNodes, setPendingNodePosition]
     );
 
-    // Connection logic
+    const addSubgraphPortRef = useRef<
+      | ((
+          side: "input" | "output",
+          port: import("../../lib/graphUtils").SubgraphPort,
+          setNodes: (
+            updater: (nds: Node<FlowNodeData>[]) => Node<FlowNodeData>[]
+          ) => void
+        ) => string | null)
+      | null
+    >(null);
+
     const {
       isValidConnection,
       onConnect,
       onReconnect,
       findConnectedPipelineParams,
-    } = useConnectionLogic(nodes, setNodes, setEdges, handleEdgeDelete);
+    } = useConnectionLogic(
+      nodes,
+      setNodes,
+      setEdges,
+      handleEdgeDelete,
+      addSubgraphPortRef
+    );
 
-    // Node factories
-    const { handleNodeTypeSelect, handleDeleteNodes } = useNodeFactories({
+    const {
+      handleNodeTypeSelect,
+      handleDeleteNodes,
+      createSubgraphFromSelection,
+      unpackSubgraph,
+    } = useNodeFactories({
       nodes,
       setNodes,
       setEdges,
@@ -377,7 +417,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setPendingNodePosition,
     });
 
-    // Value forwarding
     useValueForwarding(
       nodes,
       edges,
@@ -388,10 +427,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setNodes
     );
 
-    // Output sink sync
     useOutputSinkSync(nodes, onOutputSinkChangeRef);
-
-    // Keyboard shortcuts
     useKeyboardShortcuts(
       reactFlowInstanceRef,
       setPendingNodePosition,
@@ -403,7 +439,258 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       handleSave
     );
 
-    // Auto-stop when source or sink node is removed while streaming
+    const {
+      depth: navDepth,
+      breadcrumbPath,
+      enterSubgraph,
+      navigateTo: navNavigateTo,
+      addSubgraphPort,
+      removeSubgraphPort,
+      renameSubgraphPort,
+      hasExternalConnection,
+      getRootGraph,
+      resetStack,
+      stackRef: navStackRef,
+    } = useGraphNavigation();
+
+    useParentValueBridge(navStackRef, navDepth, setNodes);
+    useSubgraphEval(nodes, edges, setNodes);
+    resolveRootGraphRef.current = getRootGraph;
+    resetNavigationRef.current = resetStack;
+    addSubgraphPortRef.current = addSubgraphPort;
+    const nodesRef = useRef(nodes);
+    const edgesRef = useRef(edges);
+    nodesRef.current = nodes;
+    edgesRef.current = edges;
+
+    const applyViewport = useCallback(
+      (viewport: ReturnType<typeof enterSubgraph>) => {
+        setTimeout(() => {
+          const rf = reactFlowInstanceRef.current;
+          if (!rf) return;
+          if (viewport) {
+            rf.setViewport(viewport, { duration: 300 });
+          } else {
+            rf.fitView({ padding: 0.1, duration: 300 });
+          }
+        }, 50);
+      },
+      []
+    );
+
+    const handleEnterSubgraph = useCallback(
+      (nodeId: string) => {
+        const rf = reactFlowInstanceRef.current;
+        const currentViewport = rf?.getViewport();
+        const targetViewport = enterSubgraph(
+          nodeId,
+          nodesRef.current,
+          edgesRef.current,
+          setNodes,
+          setEdges,
+          enrichDepsRef.current,
+          handleEdgeDelete,
+          currentViewport
+        );
+        applyViewport(targetViewport);
+      },
+      [
+        enterSubgraph,
+        setNodes,
+        setEdges,
+        enrichDepsRef,
+        handleEdgeDelete,
+        applyViewport,
+      ]
+    );
+
+    const handleBreadcrumbNavigate = useCallback(
+      (targetDepth: number) => {
+        const rf = reactFlowInstanceRef.current;
+        const currentViewport = rf?.getViewport();
+        const targetViewport = navNavigateTo(
+          targetDepth,
+          nodesRef.current,
+          edgesRef.current,
+          setNodes,
+          setEdges,
+          enrichDepsRef.current,
+          handleEdgeDelete,
+          currentViewport
+        );
+        applyViewport(targetViewport);
+      },
+      [
+        navNavigateTo,
+        setNodes,
+        setEdges,
+        enrichDepsRef,
+        handleEdgeDelete,
+        applyViewport,
+      ]
+    );
+
+    const enterSubgraphRef = useRef(handleEnterSubgraph);
+    enterSubgraphRef.current = handleEnterSubgraph;
+
+    const stableEnterSubgraph = useCallback(
+      (nodeId: string) => enterSubgraphRef.current(nodeId),
+      []
+    );
+    const hasSubgraphNeedingCallback = nodes.some(
+      n =>
+        n.data.nodeType === "subgraph" &&
+        n.data.onEnterSubgraph !== stableEnterSubgraph
+    );
+    useEffect(() => {
+      if (!hasSubgraphNeedingCallback) return;
+      setNodes(nds =>
+        nds.map(n => {
+          if (n.data.nodeType !== "subgraph") return n;
+          if (n.data.onEnterSubgraph === stableEnterSubgraph) return n;
+          return {
+            ...n,
+            data: { ...n.data, onEnterSubgraph: stableEnterSubgraph },
+          };
+        })
+      );
+    }, [hasSubgraphNeedingCallback, stableEnterSubgraph, setNodes]);
+
+    const renameInputRef = useRef(
+      (oldName: string, newName: string, portType: string) =>
+        renameSubgraphPort(
+          "input",
+          oldName,
+          newName,
+          portType,
+          setNodes,
+          setEdges
+        )
+    );
+    renameInputRef.current = (oldName, newName, portType) =>
+      renameSubgraphPort(
+        "input",
+        oldName,
+        newName,
+        portType,
+        setNodes,
+        setEdges
+      );
+
+    const renameOutputRef = useRef(
+      (oldName: string, newName: string, portType: string) =>
+        renameSubgraphPort(
+          "output",
+          oldName,
+          newName,
+          portType,
+          setNodes,
+          setEdges
+        )
+    );
+    renameOutputRef.current = (oldName, newName, portType) =>
+      renameSubgraphPort(
+        "output",
+        oldName,
+        newName,
+        portType,
+        setNodes,
+        setEdges
+      );
+
+    const stableRenameInput = useCallback(
+      (oldName: string, newName: string, portType: string) =>
+        renameInputRef.current(oldName, newName, portType),
+      []
+    );
+    const stableRenameOutput = useCallback(
+      (oldName: string, newName: string, portType: string) =>
+        renameOutputRef.current(oldName, newName, portType),
+      []
+    );
+
+    const hasBoundaryNeedingRename = nodes.some(
+      n =>
+        (n.id === BOUNDARY_INPUT_ID &&
+          n.data.onPortRename !== stableRenameInput) ||
+        (n.id === BOUNDARY_OUTPUT_ID &&
+          n.data.onPortRename !== stableRenameOutput)
+    );
+    useEffect(() => {
+      if (!hasBoundaryNeedingRename) return;
+      setNodes(nds =>
+        nds.map(n => {
+          if (
+            n.id === BOUNDARY_INPUT_ID &&
+            n.data.onPortRename !== stableRenameInput
+          ) {
+            return {
+              ...n,
+              data: { ...n.data, onPortRename: stableRenameInput },
+            };
+          }
+          if (
+            n.id === BOUNDARY_OUTPUT_ID &&
+            n.data.onPortRename !== stableRenameOutput
+          ) {
+            return {
+              ...n,
+              data: { ...n.data, onPortRename: stableRenameOutput },
+            };
+          }
+          return n;
+        })
+      );
+    }, [
+      hasBoundaryNeedingRename,
+      stableRenameInput,
+      stableRenameOutput,
+      setNodes,
+    ]);
+
+    useEffect(() => {
+      const currentInputHandles = new Set<string>();
+      const currentOutputHandles = new Set<string>();
+      for (const e of edges) {
+        if (e.source === BOUNDARY_INPUT_ID) {
+          const parsed = parseHandleId(e.sourceHandle);
+          if (parsed && parsed.name !== "__add__")
+            currentInputHandles.add(parsed.name);
+        }
+        if (e.target === BOUNDARY_OUTPUT_ID) {
+          const parsed = parseHandleId(e.targetHandle);
+          if (parsed && parsed.name !== "__add__")
+            currentOutputHandles.add(parsed.name);
+        }
+      }
+
+      const inputBoundary = nodes.find(n => n.id === BOUNDARY_INPUT_ID);
+      const outputBoundary = nodes.find(n => n.id === BOUNDARY_OUTPUT_ID);
+
+      if (inputBoundary) {
+        const ports = inputBoundary.data.subgraphInputs ?? [];
+        for (const port of ports) {
+          if (
+            !currentInputHandles.has(port.name) &&
+            !hasExternalConnection("input", port.name, port.portType)
+          ) {
+            removeSubgraphPort("input", port.name, setNodes);
+          }
+        }
+      }
+      if (outputBoundary) {
+        const ports = outputBoundary.data.subgraphOutputs ?? [];
+        for (const port of ports) {
+          if (
+            !currentOutputHandles.has(port.name) &&
+            !hasExternalConnection("output", port.name, port.portType)
+          ) {
+            removeSubgraphPort("output", port.name, setNodes);
+          }
+        }
+      }
+    }, [edges, nodes, removeSubgraphPort, hasExternalConnection, setNodes]);
+
     const prevHadSourceRef = useRef(false);
     const prevHadSinkRef = useRef(false);
 
@@ -423,17 +710,14 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       prevHadSinkRef.current = hasSink;
     }, [nodes, isStreaming, onStopStream]);
 
-    // Auto-fit view after graph import
     useEffect(() => {
       if (fitViewTrigger === 0) return;
-      // Delay to let React Flow measure nodes
       const timer = setTimeout(() => {
         reactFlowInstanceRef.current?.fitView({ padding: 0.1, duration: 300 });
       }, 50);
       return () => clearTimeout(timer);
     }, [fitViewTrigger]);
 
-    // Context menu suppression
     const suppressContextMenu = useCallback(
       (event: MouseEvent | React.MouseEvent<Element, MouseEvent>) => {
         event.preventDefault();
@@ -448,10 +732,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       []
     );
 
-    // File input ref
     const fileInputRef = useRef<HTMLInputElement>(null);
 
-    // Render
     return (
       <div className="flex h-full w-full">
         <div className="flex flex-col flex-1">
@@ -565,6 +847,11 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             </button>
           </div>
 
+          <BreadcrumbNav
+            path={breadcrumbPath}
+            onNavigate={handleBreadcrumbNavigate}
+          />
+
           <div className="flex-1 relative" onMouseDown={handleRightMouseDown}>
             <ReactFlow
               nodes={nodes}
@@ -582,7 +869,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               onSelectionChange={({ nodes: selected }) =>
                 setSelectedNodeIds(prev => {
                   const next = selected.map(n => n.id);
-                  // Return same ref when identical to prevent render loop
                   if (
                     next.length === prev.length &&
                     next.every((id, i) => id === prev[i])
@@ -774,6 +1060,33 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                           onClick: () => handleNodeTypeSelect("primitive"),
                           keywords: ["value", "string", "number", "boolean"],
                         },
+                        {
+                          label: "Subgraph",
+                          icon: <FolderOpen />,
+                          onClick: () => handleNodeTypeSelect("subgraph"),
+                          keywords: ["group", "container", "nest", "bundle"],
+                        },
+                        ...(selectedNodeIds.length > 0
+                          ? [
+                              {
+                                label: `Group ${selectedNodeIds.length} node${selectedNodeIds.length !== 1 ? "s" : ""} into Subgraph`,
+                                icon: <PackageOpen />,
+                                onClick: () => {
+                                  createSubgraphFromSelection(
+                                    nodes,
+                                    edges,
+                                    selectedNodeIds
+                                  );
+                                },
+                                keywords: [
+                                  "create",
+                                  "subgraph",
+                                  "group",
+                                  "selection",
+                                ],
+                              },
+                            ]
+                          : []),
                       ]
                     : (() => {
                         const clickedId = contextMenu.nodeId;
@@ -795,7 +1108,46 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                         const allPinned = targetNodes.every(
                           n => !!n.data.pinned
                         );
+                        const isSingleSubgraph =
+                          count === 1 &&
+                          targetNodes[0]?.data.nodeType === "subgraph";
+                        const canCreateSubgraph =
+                          count >= 1 &&
+                          !targetNodes.every(
+                            n => n.data.nodeType === "subgraph"
+                          );
+
                         return [
+                          ...(isSingleSubgraph
+                            ? [
+                                {
+                                  label: "Enter Subgraph",
+                                  icon: <FolderOpen />,
+                                  onClick: () =>
+                                    handleEnterSubgraph(targetIds[0]),
+                                },
+                                {
+                                  label: "Unpack Subgraph",
+                                  icon: <PackageOpen />,
+                                  onClick: () =>
+                                    unpackSubgraph(targetIds[0], nodes, edges),
+                                },
+                              ]
+                            : []),
+                          ...(canCreateSubgraph
+                            ? [
+                                {
+                                  label: `Group into Subgraph`,
+                                  icon: <PackageOpen />,
+                                  onClick: () =>
+                                    createSubgraphFromSelection(
+                                      nodes,
+                                      edges,
+                                      targetIds
+                                    ),
+                                },
+                              ]
+                            : []),
                           {
                             label: allLocked
                               ? count > 1
@@ -871,7 +1223,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               onSelectNodeType={handleNodeTypeSelect}
             />
 
-            {/* Right-click drag selection rectangle */}
             {selectionRect && (
               <div
                 style={{
@@ -889,7 +1240,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             )}
           </div>
 
-          {/* Clear confirmation dialog */}
           <AlertDialog
             open={showClearConfirm}
             onOpenChange={(open: boolean) => {
