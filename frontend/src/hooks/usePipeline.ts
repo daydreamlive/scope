@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useApi } from "./useApi";
-import type { PipelineStatusResponse, PipelineLoadParams } from "../lib/api";
+import type { PipelineStatusResponse, PipelineLoadItem } from "../lib/api";
 import { toast } from "sonner";
 
 interface UsePipelineOptions {
@@ -76,17 +76,14 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
   // Load pipeline
   const triggerLoad = useCallback(
-    async (
-      pipelineIds?: string[],
-      loadParams?: PipelineLoadParams
-    ): Promise<boolean> => {
+    async (items?: PipelineLoadItem[]): Promise<boolean> => {
       if (isLoading) {
         console.log("Pipeline already loading");
         return false;
       }
 
-      if (!pipelineIds || pipelineIds.length === 0) {
-        console.error("No pipeline IDs provided");
+      if (!items || items.length === 0) {
+        console.error("No pipeline load items provided");
         return false;
       }
 
@@ -97,8 +94,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
         // Start the load request
         await loadPipelineRequest({
-          pipeline_ids: pipelineIds,
-          load_params: loadParams,
+          pipelines: items,
         });
 
         // Set up timeout for the load operation
@@ -195,12 +191,9 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
   // Load pipeline with proper state management
   const loadPipelineAsync = useCallback(
-    async (
-      pipelineIds?: string[],
-      loadParams?: PipelineLoadParams
-    ): Promise<boolean> => {
+    async (items?: PipelineLoadItem[]): Promise<boolean> => {
       // Always trigger load - let the backend decide if reload is needed
-      return await triggerLoad(pipelineIds, loadParams);
+      return await triggerLoad(items);
     },
     [triggerLoad]
   );

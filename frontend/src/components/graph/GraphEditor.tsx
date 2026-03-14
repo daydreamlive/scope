@@ -1,0 +1,603 @@
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState,
+} from "react";
+import {
+  ReactFlow,
+  Controls,
+  Background,
+  BackgroundVariant,
+} from "@xyflow/react";
+import type { Edge, Node, ReactFlowInstance } from "@xyflow/react";
+import "@xyflow/react/dist/style.css";
+
+import { SourceNode } from "./nodes/SourceNode";
+import { PipelineNode } from "./nodes/PipelineNode";
+import { SinkNode } from "./nodes/SinkNode";
+import { PrimitiveNode } from "./nodes/PrimitiveNode";
+import { RerouteNode } from "./nodes/RerouteNode";
+import { ControlNode } from "./nodes/ControlNode";
+import { MathNode } from "./nodes/MathNode";
+import { NoteNode } from "./nodes/NoteNode";
+import { OutputNode } from "./nodes/OutputNode";
+import { SliderNode } from "./nodes/SliderNode";
+import { KnobsNode } from "./nodes/KnobsNode";
+import { XYPadNode } from "./nodes/XYPadNode";
+import { TupleNode } from "./nodes/TupleNode";
+import { ImageNode } from "./nodes/ImageNode";
+import { VaceNode } from "./nodes/VaceNode";
+import { MidiNode } from "./nodes/MidiNode";
+import { BoolNode } from "./nodes/BoolNode";
+import { SubgraphNode } from "./nodes/SubgraphNode";
+import { SubgraphInputNode } from "./nodes/SubgraphInputNode";
+import { SubgraphOutputNode } from "./nodes/SubgraphOutputNode";
+import { CustomEdge } from "./CustomEdge";
+import { ContextMenu } from "./ContextMenu";
+import { AddNodeModal } from "./AddNodeModal";
+import { BreadcrumbNav } from "./BreadcrumbNav";
+import { GraphToolbar } from "./GraphToolbar";
+import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
+import type { FlowNodeData } from "../../lib/graphUtils";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
+
+import { useRightClickSelect } from "./hooks/ui/useRightClickSelect";
+import { useGraphState } from "./hooks/graph/useGraphState";
+import { useConnectionLogic } from "./hooks/connection/useConnectionLogic";
+import { useNodeFactories } from "./hooks/node/useNodeFactories";
+import { useValueForwarding } from "./hooks/value/useValueForwarding";
+import { useOutputSinkSync } from "./hooks/value/useOutputSinkSync";
+import { useKeyboardShortcuts } from "./hooks/graph/useKeyboardShortcuts";
+import { useGraphNavigation } from "./hooks/subgraph/useGraphNavigation";
+import { useParentValueBridge } from "./hooks/value/useParentValueBridge";
+import { useSubgraphEval } from "./hooks/subgraph/useSubgraphEval";
+import { useSubgraphCallbackSync } from "./hooks/subgraph/useSubgraphCallbackSync";
+import { useSubgraphOperations } from "./hooks/subgraph/useSubgraphOperations";
+
+const nodeTypes = {
+  source: SourceNode,
+  pipeline: PipelineNode,
+  sink: SinkNode,
+  primitive: PrimitiveNode,
+  control: ControlNode,
+  math: MathNode,
+  note: NoteNode,
+  output: OutputNode,
+  slider: SliderNode,
+  knobs: KnobsNode,
+  xypad: XYPadNode,
+  tuple: TupleNode,
+  reroute: RerouteNode,
+  image: ImageNode,
+  vace: VaceNode,
+  midi: MidiNode,
+  bool: BoolNode,
+  subgraph: SubgraphNode,
+  subgraph_input: SubgraphInputNode,
+  subgraph_output: SubgraphOutputNode,
+};
+
+const edgeTypes = {
+  default: CustomEdge,
+};
+
+export interface GraphEditorHandle {
+  refreshGraph: () => void;
+  getCurrentGraphConfig: () => import("../../lib/api").GraphConfig;
+  getGraphNodePrompts: () => Array<{ nodeId: string; text: string }>;
+}
+
+interface GraphEditorProps {
+  isStreaming?: boolean;
+  isConnecting?: boolean;
+  isLoading?: boolean;
+  onNodeParameterChange?: (nodeId: string, key: string, value: unknown) => void;
+  onGraphChange?: () => void;
+  onGraphClear?: () => void;
+  localStream?: MediaStream | null;
+  remoteStream?: MediaStream | null;
+  onVideoFileUpload?: (file: File) => Promise<boolean>;
+  onStartStream?: () => void;
+  onStopStream?: () => void;
+  onSourceModeChange?: (mode: string) => void;
+  spoutAvailable?: boolean;
+  ndiAvailable?: boolean;
+  syphonAvailable?: boolean;
+  onSpoutSourceChange?: (name: string) => void;
+  onNdiSourceChange?: (identifier: string) => void;
+  onSyphonSourceChange?: (identifier: string) => void;
+  onOutputSinkChange?: (
+    sinkType: string,
+    config: { enabled: boolean; name: string }
+  ) => void;
+  spoutOutputAvailable?: boolean;
+  ndiOutputAvailable?: boolean;
+  syphonOutputAvailable?: boolean;
+}
+
+export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
+  function GraphEditor(
+    {
+      isStreaming = false,
+      isConnecting = false,
+      isLoading = false,
+      onNodeParameterChange,
+      onGraphChange,
+      onGraphClear,
+      localStream,
+      remoteStream,
+      onVideoFileUpload,
+      onStartStream,
+      onStopStream,
+      onSourceModeChange,
+      spoutAvailable = false,
+      ndiAvailable = false,
+      syphonAvailable = false,
+      onSpoutSourceChange,
+      onNdiSourceChange,
+      onSyphonSourceChange,
+      onOutputSinkChange,
+      spoutOutputAvailable = false,
+      ndiOutputAvailable = false,
+      syphonOutputAvailable = false,
+    },
+    ref
+  ) {
+    const resolveRootGraphRef = useRef<
+      (
+        nodes: Node<FlowNodeData>[],
+        edges: Edge[]
+      ) => { nodes: Node<FlowNodeData>[]; edges: Edge[] }
+    >((n, e) => ({ nodes: n, edges: e }));
+    const resetNavigationRef = useRef<() => void>(() => {});
+    const {
+      nodes,
+      setNodes,
+      onNodesChange,
+      edges,
+      setEdges,
+      onEdgesChange,
+      status,
+      availablePipelineIds,
+      portsMap,
+      selectedNodeIds,
+      setSelectedNodeIds,
+      handlePipelineSelect,
+      enrichDepsRef,
+      handleEdgeDelete,
+      resolveBackendId,
+      isStreamingRef,
+      onNodeParamChangeRef,
+      onOutputSinkChangeRef,
+      handleClear,
+      handleSave,
+      handleImport,
+      handleExport,
+      refreshGraph,
+      getCurrentGraphConfig,
+      getGraphNodePrompts,
+      fitViewTrigger,
+    } = useGraphState(
+      {
+        onNodeParameterChange,
+        onGraphChange,
+        onGraphClear,
+        onVideoFileUpload,
+        onSourceModeChange,
+        onSpoutSourceChange,
+        onNdiSourceChange,
+        onSyphonSourceChange,
+        onOutputSinkChange,
+      },
+      { localStream, remoteStream, isStreaming },
+      {
+        spoutAvailable,
+        ndiAvailable,
+        syphonAvailable,
+        spoutOutputAvailable,
+        ndiOutputAvailable,
+        syphonOutputAvailable,
+      },
+      resolveRootGraphRef,
+      resetNavigationRef
+    );
+
+    useImperativeHandle(
+      ref,
+      () => ({ refreshGraph, getCurrentGraphConfig, getGraphNodePrompts }),
+      [refreshGraph, getCurrentGraphConfig, getGraphNodePrompts]
+    );
+
+    const [showAddNodeModal, setShowAddNodeModal] = useState(false);
+    const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const [pendingNodePosition, setPendingNodePosition] = useState<{
+      x: number;
+      y: number;
+    } | null>(null);
+
+    const reactFlowInstanceRef = useRef<ReactFlowInstance<
+      Node<FlowNodeData>,
+      Edge
+    > | null>(null);
+
+    const { selectionRect, contextMenu, setContextMenu, handleRightMouseDown } =
+      useRightClickSelect(
+        reactFlowInstanceRef,
+        setNodes,
+        setPendingNodePosition
+      );
+
+    const addSubgraphPortRef = useRef<
+      | ((
+          side: "input" | "output",
+          port: import("../../lib/graphUtils").SubgraphPort,
+          setNodes: (
+            updater: (nds: Node<FlowNodeData>[]) => Node<FlowNodeData>[]
+          ) => void
+        ) => string | null)
+      | null
+    >(null);
+
+    const {
+      isValidConnection,
+      onConnect,
+      onReconnect,
+      findConnectedPipelineParams,
+    } = useConnectionLogic(
+      nodes,
+      setNodes,
+      setEdges,
+      handleEdgeDelete,
+      addSubgraphPortRef
+    );
+
+    const { handleNodeTypeSelect, handleDeleteNodes } = useNodeFactories({
+      nodes,
+      setNodes,
+      setEdges,
+      availablePipelineIds,
+      portsMap,
+      handlePipelineSelect,
+      setSelectedNodeIds,
+      spoutOutputAvailable,
+      ndiOutputAvailable,
+      syphonOutputAvailable,
+      pendingNodePosition,
+      setPendingNodePosition,
+    });
+
+    const { createSubgraphFromSelection, unpackSubgraph } =
+      useSubgraphOperations({
+        nodes,
+        setNodes,
+        setEdges,
+        setSelectedNodeIds,
+      });
+
+    useValueForwarding(
+      nodes,
+      edges,
+      findConnectedPipelineParams,
+      resolveBackendId,
+      isStreamingRef,
+      onNodeParamChangeRef,
+      setNodes
+    );
+
+    useOutputSinkSync(nodes, onOutputSinkChangeRef);
+    useKeyboardShortcuts(
+      reactFlowInstanceRef,
+      setPendingNodePosition,
+      setShowAddNodeModal,
+      nodes,
+      edges,
+      setNodes,
+      setEdges,
+      handleSave
+    );
+
+    const {
+      depth: navDepth,
+      breadcrumbPath,
+      enterSubgraph,
+      navigateTo: navNavigateTo,
+      addSubgraphPort,
+      removeSubgraphPort,
+      renameSubgraphPort,
+      hasExternalConnection,
+      getRootGraph,
+      resetStack,
+      stackRef: navStackRef,
+    } = useGraphNavigation();
+
+    useParentValueBridge(navStackRef, navDepth, setNodes);
+    useSubgraphEval(nodes, edges, setNodes);
+    resolveRootGraphRef.current = getRootGraph;
+    resetNavigationRef.current = resetStack;
+    addSubgraphPortRef.current = addSubgraphPort;
+    const nodesRef = useRef(nodes);
+    const edgesRef = useRef(edges);
+    nodesRef.current = nodes;
+    edgesRef.current = edges;
+
+    const applyViewport = useCallback(
+      (viewport: ReturnType<typeof enterSubgraph>) => {
+        setTimeout(() => {
+          const rf = reactFlowInstanceRef.current;
+          if (!rf) return;
+          if (viewport) {
+            rf.setViewport(viewport, { duration: 300 });
+          } else {
+            rf.fitView({ padding: 0.1, duration: 300 });
+          }
+        }, 50);
+      },
+      []
+    );
+
+    const handleEnterSubgraph = useCallback(
+      (nodeId: string) => {
+        const rf = reactFlowInstanceRef.current;
+        const currentViewport = rf?.getViewport();
+        const targetViewport = enterSubgraph(
+          nodeId,
+          nodesRef.current,
+          edgesRef.current,
+          setNodes,
+          setEdges,
+          enrichDepsRef.current,
+          handleEdgeDelete,
+          currentViewport
+        );
+        applyViewport(targetViewport);
+      },
+      [
+        enterSubgraph,
+        setNodes,
+        setEdges,
+        enrichDepsRef,
+        handleEdgeDelete,
+        applyViewport,
+      ]
+    );
+
+    const handleBreadcrumbNavigate = useCallback(
+      (targetDepth: number) => {
+        const rf = reactFlowInstanceRef.current;
+        const currentViewport = rf?.getViewport();
+        const targetViewport = navNavigateTo(
+          targetDepth,
+          nodesRef.current,
+          edgesRef.current,
+          setNodes,
+          setEdges,
+          enrichDepsRef.current,
+          handleEdgeDelete,
+          currentViewport
+        );
+        applyViewport(targetViewport);
+      },
+      [
+        navNavigateTo,
+        setNodes,
+        setEdges,
+        enrichDepsRef,
+        handleEdgeDelete,
+        applyViewport,
+      ]
+    );
+
+    useSubgraphCallbackSync({
+      nodes,
+      edges,
+      setNodes,
+      setEdges,
+      handleEnterSubgraph,
+      renameSubgraphPort,
+      removeSubgraphPort,
+      hasExternalConnection,
+    });
+
+    const prevHadSourceRef = useRef(false);
+    const prevHadSinkRef = useRef(false);
+
+    useEffect(() => {
+      const hasSource = nodes.some(n => n.data.nodeType === "source");
+      const hasSink = nodes.some(n => n.data.nodeType === "sink");
+
+      if (
+        isStreaming &&
+        ((prevHadSourceRef.current && !hasSource) ||
+          (prevHadSinkRef.current && !hasSink))
+      ) {
+        onStopStream?.();
+      }
+
+      prevHadSourceRef.current = hasSource;
+      prevHadSinkRef.current = hasSink;
+    }, [nodes, isStreaming, onStopStream]);
+
+    useEffect(() => {
+      if (fitViewTrigger === 0) return;
+      const timer = setTimeout(() => {
+        reactFlowInstanceRef.current?.fitView({ padding: 0.1, duration: 300 });
+      }, 50);
+      return () => clearTimeout(timer);
+    }, [fitViewTrigger]);
+
+    const suppressContextMenu = useCallback(
+      (event: MouseEvent | React.MouseEvent<Element, MouseEvent>) => {
+        event.preventDefault();
+      },
+      []
+    );
+
+    const suppressNodeContextMenu = useCallback(
+      (event: React.MouseEvent, _node: Node<FlowNodeData>) => {
+        event.preventDefault();
+      },
+      []
+    );
+
+    return (
+      <div className="flex h-full w-full">
+        <div className="flex flex-col flex-1">
+          <GraphToolbar
+            isStreaming={isStreaming}
+            isConnecting={isConnecting}
+            isLoading={isLoading}
+            status={status}
+            onStartStream={onStartStream}
+            onStopStream={onStopStream}
+            onSave={handleSave}
+            onImport={handleImport}
+            onExport={handleExport}
+            onClear={() => setShowClearConfirm(true)}
+          />
+
+          <BreadcrumbNav
+            path={breadcrumbPath}
+            onNavigate={handleBreadcrumbNavigate}
+          />
+
+          <div className="flex-1 relative" onMouseDown={handleRightMouseDown}>
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onReconnect={onReconnect}
+              reconnectRadius={25}
+              isValidConnection={isValidConnection}
+              minZoom={0.1}
+              onInit={instance => {
+                reactFlowInstanceRef.current = instance;
+              }}
+              onSelectionChange={({ nodes: selected }) =>
+                setSelectedNodeIds(prev => {
+                  const next = selected.map(n => n.id);
+                  if (
+                    next.length === prev.length &&
+                    next.every((id, i) => id === prev[i])
+                  )
+                    return prev;
+                  return next;
+                })
+              }
+              onPaneClick={() => setContextMenu(null)}
+              onPaneContextMenu={suppressContextMenu}
+              onNodeContextMenu={suppressNodeContextMenu}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              colorMode="dark"
+              fitView
+              deleteKeyCode={["Backspace", "Delete"]}
+            >
+              <Controls />
+              <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+            </ReactFlow>
+
+            {contextMenu && (
+              <ContextMenu
+                x={contextMenu.x}
+                y={contextMenu.y}
+                onClose={() => setContextMenu(null)}
+                header={contextMenu.type === "pane" ? "Create" : undefined}
+                items={
+                  contextMenu.type === "pane"
+                    ? buildPaneMenuItems({
+                        handleNodeTypeSelect,
+                        selectedNodeIds,
+                        nodes,
+                        edges,
+                        createSubgraphFromSelection,
+                      })
+                    : buildNodeMenuItems({
+                        contextNodeId: contextMenu.nodeId!,
+                        selectedNodeIds,
+                        nodes,
+                        edges,
+                        setNodes,
+                        handleDeleteNodes,
+                        handleEnterSubgraph,
+                        unpackSubgraph,
+                        createSubgraphFromSelection,
+                      })
+                }
+              />
+            )}
+
+            <AddNodeModal
+              open={showAddNodeModal}
+              onClose={() => {
+                setShowAddNodeModal(false);
+                setPendingNodePosition(null);
+              }}
+              onSelectNodeType={handleNodeTypeSelect}
+            />
+
+            {selectionRect && (
+              <div
+                style={{
+                  position: "fixed",
+                  left: Math.min(selectionRect.x1, selectionRect.x2),
+                  top: Math.min(selectionRect.y1, selectionRect.y2),
+                  width: Math.abs(selectionRect.x2 - selectionRect.x1),
+                  height: Math.abs(selectionRect.y2 - selectionRect.y1),
+                  border: "1px solid rgba(59, 130, 246, 0.5)",
+                  backgroundColor: "rgba(59, 130, 246, 0.08)",
+                  pointerEvents: "none",
+                  zIndex: 9999,
+                }}
+              />
+            )}
+          </div>
+
+          <AlertDialog
+            open={showClearConfirm}
+            onOpenChange={(open: boolean) => {
+              if (!open) setShowClearConfirm(false);
+            }}
+          >
+            <AlertDialogContent className="sm:max-w-md">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear graph?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will remove all nodes and connections from the graph.
+                  This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setShowClearConfirm(false)}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    setShowClearConfirm(false);
+                    if (isStreaming) onStopStream?.();
+                    handleClear();
+                  }}
+                >
+                  Clear
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
+      </div>
+    );
+  }
+);
