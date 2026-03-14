@@ -3,8 +3,8 @@ import type { NodeProps, Node } from "@xyflow/react";
 import { useCallback, useRef } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
-import { useNodeData } from "../hooks/useNodeData";
-import { useNodeCollapse } from "../hooks/useNodeCollapse";
+import { useNodeData } from "../hooks/node/useNodeData";
+import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import {
   NodeCard,
   NodeHeader,

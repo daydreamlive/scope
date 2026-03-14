@@ -1,9 +1,10 @@
 import { useCallback } from "react";
 import { addEdge, reconnectEdge } from "@xyflow/react";
 import type { Connection, Edge, Node } from "@xyflow/react";
-import { parseHandleId } from "../../../lib/graphUtils";
-import type { FlowNodeData, SubgraphPort } from "../../../lib/graphUtils";
-import { buildEdgeStyle, PARAM_TYPE_COLORS } from "../constants";
+import { parseHandleId } from "../../../../lib/graphUtils";
+import type { FlowNodeData, SubgraphPort } from "../../../../lib/graphUtils";
+import { buildEdgeStyle, PARAM_TYPE_COLORS } from "../../constants";
+import { validateConnection } from "../../utils/connectionValidation";
 import type { ResolvedType } from "./typeResolution";
 import {
   resolveSourceType,
@@ -11,7 +12,10 @@ import {
   resolveDownstreamType,
   collectUpstreamChain,
 } from "./typeResolution";
-import { BOUNDARY_INPUT_ID, BOUNDARY_OUTPUT_ID } from "./useGraphNavigation";
+import {
+  BOUNDARY_INPUT_ID,
+  BOUNDARY_OUTPUT_ID,
+} from "../subgraph/useGraphNavigation";
 
 export type AddSubgraphPortFn = (
   side: "input" | "output",
@@ -61,222 +65,8 @@ export function useConnectionLogic(
   );
 
   const isValidConnection = useCallback(
-    (edgeOrConnection: Edge | Connection): boolean => {
-      let connection: Connection;
-      if ("source" in edgeOrConnection && "target" in edgeOrConnection) {
-        connection = edgeOrConnection as Connection;
-      } else {
-        const edge = edgeOrConnection as Edge;
-        connection = {
-          source: edge.source,
-          target: edge.target,
-          sourceHandle: edge.sourceHandle ?? null,
-          targetHandle: edge.targetHandle ?? null,
-        };
-      }
-
-      if (
-        !connection.source ||
-        !connection.target ||
-        !connection.sourceHandle ||
-        !connection.targetHandle
-      ) {
-        return true;
-      }
-
-      const sourceParsed = parseHandleId(connection.sourceHandle);
-      const targetParsed = parseHandleId(connection.targetHandle);
-
-      if (!sourceParsed || !targetParsed) {
-        return true;
-      }
-
-      if (
-        (connection.source === BOUNDARY_INPUT_ID &&
-          sourceParsed.name === "__add__") ||
-        (connection.target === BOUNDARY_OUTPUT_ID &&
-          targetParsed.name === "__add__")
-      ) {
-        return true;
-      }
-
-      if (sourceParsed.kind === "stream" && targetParsed.kind === "stream") {
-        return true;
-      }
-
-      if (sourceParsed.kind === "param" && targetParsed.kind === "param") {
-        const sourceNode = nodes.find(n => n.id === connection.source);
-        const targetNode = nodes.find(n => n.id === connection.target);
-
-        if (!sourceNode || !targetNode) return false;
-
-        if (sourceNode.data.nodeType === "primitive") return true;
-
-        if (sourceNode.data.nodeType === "reroute") {
-          if (!sourceNode.data.valueType) return true;
-          if (targetNode.data.nodeType === "reroute") {
-            return (
-              !targetNode.data.valueType ||
-              targetNode.data.valueType === sourceNode.data.valueType
-            );
-          }
-        }
-
-        if (targetNode.data.nodeType === "reroute") {
-          if (!targetNode.data.valueType) return true;
-          const srcType = resolveSourceType(sourceNode, nodes, []);
-          if (!srcType) return true;
-          return srcType === targetNode.data.valueType;
-        }
-
-        const sourceType = resolveSourceType(sourceNode, nodes, []);
-
-        if (!sourceType) return false;
-
-        if (targetParsed.name === "__vace") {
-          return sourceType === "vace";
-        }
-        if (sourceType === "vace") return targetParsed.name === "__vace";
-
-        if (targetNode.data.nodeType === "vace") {
-          if (targetParsed.name === "video") {
-            if (sourceType !== "video_path") return false;
-            return !(
-              targetNode.data.vaceRefImage ||
-              targetNode.data.vaceFirstFrame ||
-              targetNode.data.vaceLastFrame
-            );
-          }
-          if (
-            ["ref_image", "first_frame", "last_frame"].includes(
-              targetParsed.name
-            )
-          ) {
-            if (sourceType !== "string") return false;
-            return !targetNode.data.vaceVideo;
-          }
-          return false;
-        }
-
-        if (targetParsed.name === "__prompt") {
-          return sourceType === "string";
-        }
-
-        if (targetNode.data.nodeType === "math") {
-          return (
-            sourceType === "number" &&
-            (targetParsed.name === "a" || targetParsed.name === "b")
-          );
-        }
-        if (targetNode.data.nodeType === "bool") {
-          return sourceType === "number" && targetParsed.name === "input";
-        }
-
-        if (
-          targetNode.data.nodeType === "control" &&
-          targetNode.data.controlType === "string" &&
-          targetNode.data.controlMode === "switch"
-        ) {
-          if (targetParsed.name.startsWith("item_")) {
-            return sourceType === "number";
-          }
-          if (targetParsed.name.startsWith("str_")) {
-            return sourceType === "string";
-          }
-          return false;
-        }
-
-        if (
-          targetNode.data.nodeType === "slider" ||
-          targetNode.data.nodeType === "knobs" ||
-          targetNode.data.nodeType === "xypad"
-        ) {
-          return sourceType === "number";
-        }
-        if (targetNode.data.nodeType === "tuple") {
-          if (targetParsed.name === "value") {
-            return sourceType === "list_number" || sourceType === "number";
-          }
-          if (targetParsed.name.startsWith("row_")) {
-            return sourceType === "number";
-          }
-          return false;
-        }
-
-        if (sourceNode.data.nodeType === "subgraph") {
-          const port = sourceNode.data.subgraphOutputs?.find(
-            p => p.name === sourceParsed.name
-          );
-          if (port) {
-            if (port.paramType && targetNode.data.nodeType === "pipeline") {
-              const targetParam = targetNode.data.parameterInputs?.find(
-                p => p.name === targetParsed.name
-              );
-              return targetParam ? port.paramType === targetParam.type : false;
-            }
-            return true; // allow connections to reroute / primitive etc.
-          }
-        }
-
-        if (targetNode.data.nodeType === "subgraph") {
-          const port = targetNode.data.subgraphInputs?.find(
-            p => p.name === targetParsed.name
-          );
-          if (port) {
-            const srcType = resolveSourceType(sourceNode, nodes, []);
-            if (!srcType) return true; // unknown → allow
-            if (!port.paramType) return true;
-            return srcType === port.paramType;
-          }
-        }
-
-        if (sourceNode.data.nodeType === "subgraph_input") {
-          const port = sourceNode.data.subgraphInputs?.find(
-            p => p.name === sourceParsed.name
-          );
-          if (port) {
-            if (port.paramType && targetNode.data.nodeType === "pipeline") {
-              const targetParam = targetNode.data.parameterInputs?.find(
-                p => p.name === targetParsed.name
-              );
-              return targetParam ? port.paramType === targetParam.type : false;
-            }
-            return true;
-          }
-        }
-
-        if (targetNode.data.nodeType === "subgraph_output") {
-          const port = targetNode.data.subgraphOutputs?.find(
-            p => p.name === targetParsed.name
-          );
-          if (port) {
-            const srcType = resolveSourceType(sourceNode, nodes, []);
-            if (!srcType) return true;
-            if (!port.paramType) return true;
-            return srcType === port.paramType;
-          }
-        }
-
-        const targetParam = targetNode.data.parameterInputs?.find(
-          p => p.name === targetParsed.name
-        );
-        if (!targetParam) return false;
-
-        if (targetParam.type === "list_number" && sourceType === "number") {
-          return true;
-        }
-        if (
-          targetParam.type === "list_number" &&
-          sourceType === "list_number"
-        ) {
-          return true;
-        }
-
-        return sourceType === targetParam.type;
-      }
-
-      return false;
-    },
+    (edgeOrConnection: Edge | Connection): boolean =>
+      validateConnection(edgeOrConnection, nodes),
     [nodes]
   );
 

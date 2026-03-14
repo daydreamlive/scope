@@ -4,9 +4,9 @@ import { useMemo } from "react";
 import { FolderOpen } from "lucide-react";
 import type { FlowNodeData, SubgraphPort } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
-import { useNodeData } from "../hooks/useNodeData";
-import { useNodeCollapse } from "../hooks/useNodeCollapse";
-import { useHandlePositions } from "../hooks/useHandlePositions";
+import { useNodeData } from "../hooks/node/useNodeData";
+import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
+import { useHandlePositions } from "../hooks/node/useHandlePositions";
 import { getAnyValueFromNode } from "../utils/getValueFromNode";
 import {
   NodeCard,

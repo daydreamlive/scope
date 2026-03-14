@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../../lib/graphUtils";
-import { extractParameterPorts } from "../../../lib/graphUtils";
-import type { PipelineSchemaInfo } from "../../../lib/api";
-import { getDefaultPromptForMode } from "../../../data/pipelines";
-import type { InputMode } from "../../../types";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
+import { extractParameterPorts } from "../../../../lib/graphUtils";
+import type { PipelineSchemaInfo } from "../../../../lib/api";
+import { getDefaultPromptForMode } from "../../../../data/pipelines";
+import type { InputMode } from "../../../../types";
 
 interface UsePipelineParamsArgs {
   setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>;

@@ -15,13 +15,14 @@ import type {
   SubgraphPort,
   SerializedSubgraphNode,
   SerializedSubgraphEdge,
-} from "../../../lib/graphUtils";
-import { parseHandleId, buildHandleId } from "../../../lib/graphUtils";
-import type { GraphLevel } from "./useGraphNavigation";
-import { BOUNDARY_INPUT_ID } from "./useGraphNavigation";
-import { computePatternValue } from "../utils/computePatternValue";
-import { evaluateInnerGraph } from "./useSubgraphEval";
-import type { MidiChannelDef } from "../nodes/MidiNode";
+} from "../../../../lib/graphUtils";
+import { parseHandleId, buildHandleId } from "../../../../lib/graphUtils";
+import { getAnyValueFromNode } from "../../utils/getValueFromNode";
+import type { GraphLevel } from "../subgraph/useGraphNavigation";
+import { BOUNDARY_INPUT_ID } from "../subgraph/useGraphNavigation";
+import { computePatternValue } from "../../utils/computePatternValue";
+import { evaluateInnerGraph } from "../subgraph/useSubgraphEval";
+import type { MidiChannelDef } from "../../nodes/MidiNode";
 
 /* ── Types ────────────────────────────────────────────────────────────────── */
 
@@ -264,6 +265,7 @@ export function useParentValueBridge(
     if (controlMappings.length === 0) return;
 
     let running = true;
+    let handle: number;
 
     const animate = () => {
       if (!running) return;
@@ -290,12 +292,13 @@ export function useParentValueBridge(
         writeValue(mapping.portName, final);
       }
 
-      requestAnimationFrame(animate);
+      handle = requestAnimationFrame(animate);
     };
 
-    requestAnimationFrame(animate);
+    handle = requestAnimationFrame(animate);
     return () => {
       running = false;
+      cancelAnimationFrame(handle);
     };
   }, [depth, buildMappings, writeValue]);
 
@@ -322,6 +325,7 @@ export function useParentValueBridge(
     }
 
     let running = true;
+    let handle: number;
 
     const evaluate = () => {
       if (!running) return;
@@ -363,7 +367,7 @@ export function useParentValueBridge(
             inputPortValues[port.name] = liveMidiValues.current[midiKey];
           } else {
             // Fallback to frozen static value
-            inputPortValues[port.name] = readStaticValue(
+            inputPortValues[port.name] = getAnyValueFromNode(
               srcNode,
               edge.sourceHandle
             );
@@ -390,12 +394,13 @@ export function useParentValueBridge(
         }
       }
 
-      requestAnimationFrame(evaluate);
+      handle = requestAnimationFrame(evaluate);
     };
 
-    requestAnimationFrame(evaluate);
+    handle = requestAnimationFrame(evaluate);
     return () => {
       running = false;
+      cancelAnimationFrame(handle);
     };
   }, [depth, buildMappings, writeValue, stackRef]);
 
@@ -411,7 +416,7 @@ export function useParentValueBridge(
       if (t === "control" && mapping.sourceNode.data.isPlaying) continue;
       if (t === "subgraph") continue; // handled by subgraph eval rAF
 
-      const val = readStaticValue(mapping.sourceNode, mapping.sourceHandle);
+      const val = getAnyValueFromNode(mapping.sourceNode, mapping.sourceHandle);
       if (val !== null && val !== undefined) {
         writeValue(mapping.portName, val);
       }
@@ -425,64 +430,4 @@ export function useParentValueBridge(
       if (rafHandle.current !== null) cancelAnimationFrame(rafHandle.current);
     };
   }, []);
-}
-
-/* ── Helpers ──────────────────────────────────────────────────────────────── */
-
-function readStaticValue(
-  node: Node<FlowNodeData>,
-  sourceHandle: string | null | undefined
-): unknown {
-  const t = node.data.nodeType;
-
-  if (t === "primitive" || t === "reroute") return node.data.value ?? null;
-  if (t === "control" || t === "math") return node.data.currentValue ?? null;
-  if (t === "slider") return node.data.value ?? null;
-  if (t === "bool") {
-    const v = node.data.value;
-    return typeof v === "boolean" ? (v ? 1 : 0) : null;
-  }
-  if (t === "knobs") {
-    const knobs = node.data.knobs as { value: number }[] | undefined;
-    if (!knobs || !sourceHandle) return null;
-    const parsed = parseHandleId(sourceHandle);
-    if (!parsed) return null;
-    const idx = parseInt(parsed.name.replace("knob_", ""), 10);
-    if (isNaN(idx) || idx >= knobs.length) return null;
-    return knobs[idx].value;
-  }
-  if (t === "xypad") {
-    if (!sourceHandle) return null;
-    const parsed = parseHandleId(sourceHandle);
-    if (!parsed) return null;
-    if (parsed.name === "x") return node.data.padX ?? null;
-    if (parsed.name === "y") return node.data.padY ?? null;
-    return null;
-  }
-  if (t === "midi") {
-    const channels = node.data.midiChannels as MidiChannelDef[] | undefined;
-    if (!channels || !sourceHandle) return null;
-    const parsed = parseHandleId(sourceHandle);
-    if (!parsed) return null;
-    const idx = parseInt(parsed.name.replace("midi_", ""), 10);
-    if (isNaN(idx) || idx >= channels.length) return null;
-    return channels[idx].value;
-  }
-  if (t === "tuple") {
-    if (!sourceHandle) return null;
-    const parsed = parseHandleId(sourceHandle);
-    if (!parsed) return null;
-    const idx = parseInt(parsed.name.replace("tuple_", ""), 10);
-    const vals = node.data.tupleValues as number[] | undefined;
-    if (!vals || isNaN(idx) || idx >= vals.length) return null;
-    return vals[idx];
-  }
-  if (t === "subgraph" || t === "subgraph_input") {
-    const pv = node.data.portValues as Record<string, unknown> | undefined;
-    if (!pv || !sourceHandle) return null;
-    const parsed = parseHandleId(sourceHandle);
-    if (!parsed) return null;
-    return pv[parsed.name] ?? null;
-  }
-  return null;
 }

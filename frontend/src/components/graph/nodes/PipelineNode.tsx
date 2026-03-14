@@ -3,9 +3,9 @@ import type { NodeProps, Node } from "@xyflow/react";
 import { RotateCcw, AlertTriangle, ArrowUp } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
-import { useNodeData } from "../hooks/useNodeData";
-import { useNodeCollapse } from "../hooks/useNodeCollapse";
-import { useHandlePositions } from "../hooks/useHandlePositions";
+import { useNodeData } from "../hooks/node/useNodeData";
+import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
+import { useHandlePositions } from "../hooks/node/useHandlePositions";
 import {
   NodeCard,
   NodeHeader,

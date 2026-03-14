@@ -1,7 +1,7 @@
 import { type ReactNode, useState, useRef, useEffect } from "react";
 import { NodeResizer } from "@xyflow/react";
 import { NODE_TOKENS } from "./tokens";
-import { useNodeFlags } from "../hooks/useNodeFlags";
+import { useNodeFlags } from "../hooks/node/useNodeFlags";
 
 interface NodeCardProps {
   children: ReactNode;

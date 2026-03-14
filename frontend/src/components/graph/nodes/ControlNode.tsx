@@ -8,9 +8,9 @@ import {
   getStringFromNode,
 } from "../utils/getValueFromNode";
 import { computePatternValue } from "../utils/computePatternValue";
-import { useNodeData } from "../hooks/useNodeData";
-import { useNodeCollapse } from "../hooks/useNodeCollapse";
-import { useHandlePositions } from "../hooks/useHandlePositions";
+import { useNodeData } from "../hooks/node/useNodeData";
+import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
+import { useHandlePositions } from "../hooks/node/useHandlePositions";
 import {
   NodeCard,
   NodeHeader,
