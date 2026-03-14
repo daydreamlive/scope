@@ -71,12 +71,17 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         self._inactive_cache = None
         self._reactive_cache = None
         self._caches_initialized = False
+        # Set to the error message string when a config-level error is detected on the
+        # first chunk. Subsequent chunks silently return early instead of re-raising,
+        # preventing log floods (hundreds of identical ERRORs per session).
+        self._config_validation_error: str | None = None
 
     def clear_encoder_caches(self):
         """Clear encoder caches for a new video sequence."""
         self._inactive_cache = None
         self._reactive_cache = None
         self._caches_initialized = False
+        self._config_validation_error = None
 
     @property
     def expected_components(self) -> list[ComponentSpec]:
@@ -179,6 +184,18 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         has_extension = has_first_frame or has_last_frame
 
         if not has_ref_images and not has_input_frames and not has_extension:
+            block_state.vace_context = None
+            block_state.vace_ref_images = None
+            self.set_block_state(state, block_state)
+            return components, state
+
+        # If a config-level validation error was raised on a prior chunk, skip silently.
+        # This prevents log floods (e.g. firstlastframe + num_frame_per_block=1 fires every ~50ms).
+        # The error was already logged on the first chunk; subsequent chunks just no-op.
+        if self._config_validation_error:
+            logger.debug(
+                f"VaceEncodingBlock: skipping chunk due to prior config error: {self._config_validation_error}"
+            )
             block_state.vace_context = None
             block_state.vace_ref_images = None
             self.set_block_state(state, block_state)
@@ -336,6 +353,25 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             components.config.num_frame_per_block
             * components.config.vae_temporal_downsample_factor
         )
+
+        # Validate frame count for firstlastframe mode up-front so we fail ONCE with a
+        # clear, actionable message rather than raising deep inside _build_extension_frames_and_masks
+        # on every chunk (flooding logs with hundreds of identical ERRORs per session).
+        # Setting _config_validation_error causes __call__ to short-circuit on all subsequent
+        # chunks, so only this first occurrence is logged as an ERROR.
+        if extension_mode == "firstlastframe":
+            temporal_group_size = components.config.vae_temporal_downsample_factor
+            min_frames = 2 * temporal_group_size
+            if num_frames < min_frames:
+                msg = (
+                    f"firstlastframe mode requires num_frame_per_block >= 2 "
+                    f"(need {min_frames} pixel-space frames, got {num_frames}). "
+                    f"Current num_frame_per_block={components.config.num_frame_per_block}. "
+                    f"Either increase num_frame_per_block to at least 2, or use "
+                    f"'firstframe' / 'lastframe' mode with a single reference image."
+                )
+                self._config_validation_error = msg
+                raise ValueError(msg)
 
         # Determine ref placement
         ref_at_start = extension_mode in ("firstframe", "firstlastframe")
@@ -502,11 +538,11 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         )
 
         if ref_at_start and ref_at_end:
-            # firstlastframe mode
-            if num_frames < 2 * temporal_group_size:
-                raise ValueError(
-                    f"Not enough frames for firstlastframe: need {2 * temporal_group_size}, got {num_frames}"
-                )
+            # firstlastframe mode — frame count is pre-validated in _encode_extension_mode;
+            # this assert is a safety net in case this method is called directly.
+            assert num_frames >= 2 * temporal_group_size, (
+                f"Not enough frames for firstlastframe: need {2 * temporal_group_size}, got {num_frames}"
+            )
             frames, masks = self._overlay_reference_at(
                 frames,
                 masks,
