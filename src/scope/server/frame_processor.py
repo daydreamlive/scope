@@ -104,6 +104,7 @@ class FrameProcessor:
         self._cloud_audio_queue: queue.Queue = queue.Queue(maxsize=50)
         self._frames_to_cloud = 0
         self._frames_from_cloud = 0
+        self._frames_dropped_from_cloud = 0
 
         # Output sinks keyed by type
         self.output_sinks: dict[str, dict] = {}
@@ -163,6 +164,7 @@ class FrameProcessor:
         self._frames_out = 0
         self._frames_to_cloud = 0
         self._frames_from_cloud = 0
+        self._frames_dropped_from_cloud = 0
         self._last_heartbeat_time = time.time()
         self._playback_ready_emitted = False
         self._stream_start_time = time.monotonic()
@@ -317,7 +319,9 @@ class FrameProcessor:
             logger.info(
                 f"[FRAME-PROCESSOR] Stopped (cloud mode). "
                 f"Frames: in={self._frames_in}, to_cloud={self._frames_to_cloud}, "
-                f"from_cloud={self._frames_from_cloud}, out={self._frames_out}"
+                f"from_cloud={self._frames_from_cloud}, "
+                f"dropped_from_cloud={self._frames_dropped_from_cloud}, "
+                f"out={self._frames_out}"
             )
         else:
             logger.info(
@@ -367,6 +371,9 @@ class FrameProcessor:
                 "mode": "cloud" if self._cloud_mode else "local",
                 "frames_in": self._frames_in,
                 "frames_out": self._frames_out,
+                "frames_dropped_from_cloud": (
+                    self._frames_dropped_from_cloud if self._cloud_mode else None
+                ),
             },
             connection_info=self.connection_info,
         )
@@ -556,6 +563,7 @@ class FrameProcessor:
                 self._cloud_output_queue.put_nowait(frame_np)
             except queue.Full:
                 # Drop oldest frame to make room
+                self._frames_dropped_from_cloud += 1
                 try:
                     self._cloud_output_queue.get_nowait()
                     self._cloud_output_queue.put_nowait(frame_np)
@@ -635,7 +643,9 @@ class FrameProcessor:
                 logger.info(
                     f"[FRAME-PROCESSOR] RELAY MODE | "
                     f"Frames: in={self._frames_in}, to_cloud={self._frames_to_cloud}, "
-                    f"from_cloud={self._frames_from_cloud}, out={self._frames_out} | "
+                    f"from_cloud={self._frames_from_cloud}, "
+                    f"dropped_from_cloud={self._frames_dropped_from_cloud}, "
+                    f"out={self._frames_out} | "
                     f"Rate: {fps_in:.1f} fps in, {fps_out:.1f} fps out"
                 )
             else:
@@ -660,6 +670,9 @@ class FrameProcessor:
             if self._cloud_mode:
                 heartbeat_metadata["frames_to_cloud"] = self._frames_to_cloud
                 heartbeat_metadata["frames_from_cloud"] = self._frames_from_cloud
+                heartbeat_metadata["frames_dropped_from_cloud"] = (
+                    self._frames_dropped_from_cloud
+                )
             else:
                 heartbeat_metadata["pipeline_fps"] = (
                     round(pipeline_fps, 1) if pipeline_fps else None
@@ -698,6 +711,7 @@ class FrameProcessor:
         if self._cloud_mode:
             stats["frames_to_cloud"] = self._frames_to_cloud
             stats["frames_from_cloud"] = self._frames_from_cloud
+            stats["frames_dropped_from_cloud"] = self._frames_dropped_from_cloud
 
         return stats
 
