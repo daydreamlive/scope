@@ -87,6 +87,19 @@ class CloudTrack(MediaStreamTrack):
         self._source_track = track
         logger.info("Source track set")
 
+    def _cloud_relay_active(self) -> bool:
+        """Whether the upstream cloud media transport is still live."""
+        return bool(getattr(self.cloud_manager, "webrtc_connected", False))
+
+    def _handle_relay_failure(self, reason: str) -> None:
+        """Stop local relay processing after an upstream cloud failure."""
+        logger.warning(reason)
+        self._input_running = False
+        self._started = False
+
+        if self.frame_processor and self.frame_processor.running:
+            self.frame_processor.stop(error_message=reason)
+
     async def _start(self) -> None:
         """Start the relay - called on first recv()."""
         if self._started:
@@ -137,7 +150,18 @@ class CloudTrack(MediaStreamTrack):
 
                     # Send through FrameProcessor (which relays to cloud)
                     if self.frame_processor:
-                        self.frame_processor.put(frame)
+                        frame_accepted = self.frame_processor.put(frame)
+                        if not frame_accepted:
+                            if not self.frame_processor.running:
+                                logger.info(
+                                    "Frame processor stopped, ending cloud input loop"
+                                )
+                                break
+                            if not self._cloud_relay_active():
+                                self._handle_relay_failure(
+                                    "Cloud relay disconnected while receiving input"
+                                )
+                                break
 
                 except MediaStreamError:
                     logger.info("Source track ended")
@@ -194,7 +218,8 @@ class CloudTrack(MediaStreamTrack):
         # Lazy initialization
         await self._start()
 
-        while True:
+        # Wait for a processed frame from FrameProcessor
+        while self.readyState == "live":
             if self.frame_processor:
                 frame_tensor = self.frame_processor.get()
                 if frame_tensor is not None:
@@ -207,8 +232,15 @@ class CloudTrack(MediaStreamTrack):
 
                     self._last_frame = frame
                     return frame
+                if not self.frame_processor.running:
+                    raise MediaStreamError
+            elif not self._started:
+                raise MediaStreamError
 
+            # No frame yet, wait a bit
             await asyncio.sleep(0.01)
+
+        raise MediaStreamError
 
     def update_parameters(self, params: dict) -> None:
         """Update pipeline parameters on cloud."""
@@ -231,6 +263,7 @@ class CloudTrack(MediaStreamTrack):
 
         self._input_running = False
         self._started = False  # Reset so next session starts fresh
+        super().stop()
 
         if self._input_task:
             self._input_task.cancel()
