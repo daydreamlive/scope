@@ -70,7 +70,7 @@ class SyphonOutputSink(OutputSink):
             self._sender = None
             return False
         except ImportError:
-            logger.error("syphon-python not available")
+            logger.warning("syphon-python not available (macOS only)")
             return False
         except Exception as e:
             logger.error(f"Error creating SyphonOutputSink: {e}")
