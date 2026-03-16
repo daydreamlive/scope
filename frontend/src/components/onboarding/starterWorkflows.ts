@@ -2,9 +2,10 @@
 // Starter workflow definitions with embedded .scope-workflow JSON
 // ---------------------------------------------------------------------------
 
-import kubakubThumb from "/assets/onboarding/kubakub-butterfly.webp";
-import dissolvingCatThumb from "/assets/onboarding/dissolving-cat.webp";
-import pixelArtThumb from "/assets/onboarding/pixel-art.png";
+// Images live in public/assets/onboarding/ — reference by URL, not module import
+const kubakubThumb = "/assets/onboarding/kubakub-butterfly.webp";
+const dissolvingCatThumb = "/assets/onboarding/dissolving-cat.webp";
+const pixelArtThumb = "/assets/onboarding/pixel-art.png";
 
 export interface StarterWorkflow {
   id: string;

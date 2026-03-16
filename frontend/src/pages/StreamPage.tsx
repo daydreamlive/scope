@@ -114,6 +114,7 @@ function getVaceParams(
 export function StreamPage() {
   // Onboarding state
   const {
+    state: onboardingState,
     isOverlayVisible: showOnboardingOverlay,
     isTourActive: showOnboardingTour,
     importWorkflowReady: onboardingImportReady,
@@ -131,13 +132,29 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
-    connectStage: _cloudConnectStage, // eslint-disable-line @typescript-eslint/no-unused-vars
+    refresh: refreshCloudStatus,
   } = useCloudStatus();
 
   const { loraFiles } = useLoRAsContext();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
+
+  // After cloud auth during onboarding, the CloudAuthStep fires
+  // activateCloudRelay(). Refresh the shared cloud status so the UI
+  // picks up the connecting/connected state immediately.
+  const prevOnboardingPhaseRef = useRef(onboardingState.phase);
+  useEffect(() => {
+    const prev = prevOnboardingPhaseRef.current;
+    prevOnboardingPhaseRef.current = onboardingState.phase;
+    if (
+      prev === "cloud_auth" &&
+      onboardingState.phase === "workflow" &&
+      onboardingState.inferenceMode === "cloud"
+    ) {
+      refreshCloudStatus();
+    }
+  }, [onboardingState.phase, onboardingState.inferenceMode, refreshCloudStatus]);
 
   // Log stream for the log panel
   const {

@@ -46,7 +46,6 @@ export interface OnboardingState {
 type OnboardingAction =
   | { type: "SELECT_INFERENCE_MODE"; mode: "local" | "cloud" }
   | { type: "COMPLETE_AUTH" }
-  | { type: "SKIP_AUTH" }
   | { type: "SELECT_WORKFLOW"; workflowId: string }
   | { type: "START_DOWNLOADING" }
   | { type: "DOWNLOAD_FAILED" }
@@ -79,10 +78,6 @@ function reducer(
     case "COMPLETE_AUTH":
       trackEvent("onboarding_auth_completed");
       return { ...state, phase: "workflow" };
-
-    case "SKIP_AUTH":
-      trackEvent("onboarding_auth_skipped");
-      return { ...state, inferenceMode: "local", phase: "workflow" };
 
     case "SELECT_WORKFLOW":
       return { ...state, selectedWorkflowId: action.workflowId };
@@ -166,7 +161,6 @@ interface OnboardingContextValue {
 
   selectInferenceMode: (mode: "local" | "cloud") => void;
   completeAuth: () => void;
-  skipAuth: () => void;
   selectWorkflow: (workflowId: string) => void;
   startDownloading: () => void;
   downloadFailed: () => void;
@@ -232,7 +226,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     () => dispatch({ type: "COMPLETE_AUTH" }),
     []
   );
-  const skipAuth = useCallback(() => dispatch({ type: "SKIP_AUTH" }), []);
   const selectWorkflow = useCallback(
     (workflowId: string) => dispatch({ type: "SELECT_WORKFLOW", workflowId }),
     []
@@ -278,7 +271,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         isTourActive,
         selectInferenceMode,
         completeAuth,
-        skipAuth,
         selectWorkflow,
         startDownloading,
         downloadFailed,
