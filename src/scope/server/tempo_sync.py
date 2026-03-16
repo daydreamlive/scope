@@ -5,6 +5,7 @@ Provides a unified beat clock that abstracts over multiple tempo sources
 beat state to pipeline processors for injection into pipeline kwargs.
 """
 
+import abc
 import asyncio
 import logging
 import threading
@@ -34,21 +35,25 @@ class BeatState:
     source: str
 
 
-class TempoSource:
+class TempoSource(abc.ABC):
     """Abstract base for tempo sources."""
 
     @property
-    def name(self) -> str:
-        raise NotImplementedError
+    @abc.abstractmethod
+    def name(self) -> str: ...
 
-    def get_beat_state(self) -> BeatState | None:
-        raise NotImplementedError
+    @abc.abstractmethod
+    def get_beat_state(self) -> BeatState | None: ...
 
-    async def start(self) -> None:
-        raise NotImplementedError
+    @abc.abstractmethod
+    async def start(self) -> None: ...
 
-    async def stop(self) -> None:
-        raise NotImplementedError
+    @abc.abstractmethod
+    async def stop(self) -> None: ...
+
+    def set_tempo(self, bpm: float) -> None:
+        """Set the session tempo. Override in sources that support it."""
+        raise RuntimeError(f"{self.name} does not support set_tempo")
 
 
 class TempoSync:
@@ -72,13 +77,15 @@ class TempoSync:
         self._client_state_lock = threading.Lock()
 
         self._enabled = False
+        self._enabled_lock = threading.Lock()
         self._notification_task: asyncio.Task | None = None
         self._notification_sessions: list[Any] = []
         self._notification_lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
-        return self._enabled
+        with self._enabled_lock:
+            return self._enabled
 
     @property
     def source_name(self) -> str | None:
@@ -97,8 +104,9 @@ class TempoSync:
         Returns None when disabled. Otherwise returns client-forwarded
         state if fresh, falling back to the server-side tempo source.
         """
-        if not self._enabled:
-            return None
+        with self._enabled_lock:
+            if not self._enabled:
+                return None
 
         with self._client_state_lock:
             client_state = self._client_beat_state
@@ -133,12 +141,11 @@ class TempoSync:
                 remaining[k] = v
 
         if "bpm" in beat_data and "beat_phase" in beat_data:
+            beat_phase = float(beat_data["beat_phase"])
             state = BeatState(
                 bpm=float(beat_data["bpm"]),
-                beat_phase=float(beat_data.get("beat_phase", 0.0)),
-                bar_position=float(
-                    beat_data.get("bar_position", beat_data.get("beat_phase", 0.0))
-                ),
+                beat_phase=beat_phase,
+                bar_position=float(beat_data.get("bar_position", beat_phase)),
                 beat_count=int(beat_data.get("beat_count", 0)),
                 is_playing=bool(beat_data.get("is_playing", True)),
                 timestamp=time.time(),
@@ -170,8 +177,8 @@ class TempoSync:
 
         if source is None:
             hints = {
-                "link": "Install with: uv sync --group link",
-                "midi_clock": "Install with: uv sync --group midi",
+                "link": "Install with: uv sync --extra link",
+                "midi_clock": "Install with: uv sync --extra midi",
             }
             raise RuntimeError(
                 f"Failed to create {source_type} tempo source. "
@@ -182,7 +189,8 @@ class TempoSync:
 
         with self._source_lock:
             self._source = source
-        self._enabled = True
+        with self._enabled_lock:
+            self._enabled = True
 
         logger.info(f"Tempo sync enabled: source={source_type}, bpm={bpm}")
 
@@ -191,16 +199,14 @@ class TempoSync:
     def set_tempo(self, bpm: float) -> None:
         """Set the session tempo. Only supported by some sources (e.g. Link)."""
         with self._source_lock:
-            if self._source is not None and hasattr(self._source, "set_tempo"):
-                self._source.set_tempo(bpm)
-            else:
-                raise RuntimeError(
-                    "No active tempo source or source does not support set_tempo"
-                )
+            if self._source is None:
+                raise RuntimeError("No active tempo source")
+            self._source.set_tempo(bpm)
 
     async def disable(self) -> None:
         """Disable tempo sync and stop the current source."""
-        self._enabled = False
+        with self._enabled_lock:
+            self._enabled = False
         self._stop_notifications()
 
         with self._client_state_lock:
@@ -257,7 +263,7 @@ class TempoSync:
             sources["link"] = {
                 "available": False,
                 "name": "Ableton Link",
-                "install_hint": "pip install aalink",
+                "install_hint": "uv sync --extra link",
             }
 
         try:
@@ -277,7 +283,7 @@ class TempoSync:
             sources["midi_clock"] = {
                 "available": False,
                 "name": "MIDI Clock",
-                "install_hint": "pip install mido python-rtmidi",
+                "install_hint": "uv sync --extra midi",
             }
 
         return sources
@@ -325,12 +331,23 @@ class TempoSync:
                         "beat_count": beat_state.beat_count,
                         "is_playing": beat_state.is_playing,
                     }
+                    dead: list[Any] = []
                     with self._notification_lock:
                         for sender in self._notification_sessions:
                             try:
                                 sender.call(message)
                             except Exception:
-                                pass
+                                dead.append(sender)
+                    if dead:
+                        with self._notification_lock:
+                            self._notification_sessions = [
+                                s
+                                for s in self._notification_sessions
+                                if s not in dead
+                            ]
+                        logger.debug(
+                            f"Pruned {len(dead)} dead notification sender(s)"
+                        )
                 await asyncio.sleep(1.0 / 15.0)
         except asyncio.CancelledError:
             pass
@@ -341,7 +358,7 @@ class TempoSync:
 
             return LinkTempoSource(bpm=bpm, beats_per_bar=self._beats_per_bar)
         except ImportError:
-            logger.error("aalink is not installed. Install with: pip install aalink")
+            logger.error("aalink is not installed. Install with: uv sync --extra link")
             return None
 
     def _create_midi_clock_source(
@@ -354,6 +371,6 @@ class TempoSync:
         except ImportError:
             logger.error(
                 "mido/python-rtmidi is not installed. "
-                "Install with: pip install mido python-rtmidi"
+                "Install with: uv sync --extra midi"
             )
             return None

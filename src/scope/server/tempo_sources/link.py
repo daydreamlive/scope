@@ -56,7 +56,7 @@ class LinkTempoSource(TempoSource):
     async def start(self) -> None:
         if Link is None:
             raise ImportError(
-                "aalink is not installed. Install with: uv sync --group link"
+                "aalink is not installed. Install with: uv sync --extra link"
             )
         loop = asyncio.get_running_loop()
         self._link = Link(self._initial_bpm, loop)
