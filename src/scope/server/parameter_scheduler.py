@@ -53,11 +53,11 @@ class ParameterScheduler:
     def quantize_mode(self, mode: str) -> None:
         valid = ("none", "beat", "bar", "2_bar", "4_bar")
         if mode not in valid:
-            logger.warning(f"[SCHEDULER] Invalid quantize mode '{mode}', ignoring")
+            logger.warning("[SCHEDULER] Invalid quantize mode '%s', ignoring", mode)
             return
         self.cancel_pending()
         self._quantize_mode = mode
-        logger.info(f"[SCHEDULER] Quantize mode set to '{mode}'")
+        logger.info("[SCHEDULER] Quantize mode set to '%s'", mode)
 
     @property
     def lookahead_ms(self) -> float:
@@ -67,7 +67,7 @@ class ParameterScheduler:
     def lookahead_ms(self, ms: float) -> None:
         self.cancel_pending()
         self._lookahead_ms = max(0.0, float(ms))
-        logger.info(f"[SCHEDULER] Lookahead set to {self._lookahead_ms:.0f}ms")
+        logger.info("[SCHEDULER] Lookahead set to %.0fms", self._lookahead_ms)
 
     def schedule(self, params: dict) -> None:
         """Schedule a discrete parameter change for the next beat boundary.
@@ -141,7 +141,9 @@ class ParameterScheduler:
             self._pending_timer = None
 
         if params is not None:
-            logger.info(f"[SCHEDULER] Applying scheduled change ({len(params)} params)")
+            logger.info(
+                "[SCHEDULER] Applying scheduled change (%d params)", len(params)
+            )
             self._apply_callback(params)
             self._notify({"type": "change_applied"})
 
@@ -200,4 +202,4 @@ class ParameterScheduler:
             try:
                 self._notification_callback(message)
             except Exception as e:
-                logger.error(f"[SCHEDULER] Notification error: {e}")
+                logger.error("[SCHEDULER] Notification error: %s", e)

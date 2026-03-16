@@ -663,8 +663,7 @@ class FrameProcessor:
         if "beat_cache_reset_rate" in parameters:
             rate = parameters.pop("beat_cache_reset_rate")
             for processor in self.pipeline_processors:
-                processor._beat_cache_reset_rate = rate
-                processor._last_reset_boundary = -1
+                processor.set_beat_cache_reset_rate(rate)
 
         # Strip client-forwarded beat state keys so they are never forwarded
         # as regular pipeline parameters (they are injected separately by

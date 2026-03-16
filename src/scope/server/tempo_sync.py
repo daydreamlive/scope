@@ -35,6 +35,7 @@ def get_beat_boundary(rate: str, beat_count: int, beats_per_bar: int) -> int:
         return beat_count // max(beats_per_bar * 4, 1)
     return -1
 
+
 CLIENT_BEAT_STATE_STALE_SECONDS = 2.0
 
 
@@ -208,7 +209,7 @@ class TempoSync:
         with self._enabled_lock:
             self._enabled = True
 
-        logger.info(f"Tempo sync enabled: source={source_type}, bpm={bpm}")
+        logger.info("Tempo sync enabled: source=%s, bpm=%s", source_type, bpm)
 
         self._start_notifications()
 
@@ -234,7 +235,7 @@ class TempoSync:
 
         if source is not None:
             await source.stop()
-            logger.info(f"Tempo sync disabled (was: {source.name})")
+            logger.info("Tempo sync disabled (was: %s)", source.name)
 
     async def stop(self) -> None:
         """Shutdown the tempo sync manager."""
@@ -252,7 +253,7 @@ class TempoSync:
                     source_info["num_peers"] = self._source.num_peers
 
         return {
-            "enabled": self._enabled,
+            "enabled": self.enabled,
             "source": source_info if source_info else None,
             "beats_per_bar": self._beats_per_bar,
             "beat_state": {
@@ -357,13 +358,9 @@ class TempoSync:
                     if dead:
                         with self._notification_lock:
                             self._notification_sessions = [
-                                s
-                                for s in self._notification_sessions
-                                if s not in dead
+                                s for s in self._notification_sessions if s not in dead
                             ]
-                        logger.debug(
-                            f"Pruned {len(dead)} dead notification sender(s)"
-                        )
+                        logger.debug("Pruned %d dead notification sender(s)", len(dead))
                 await asyncio.sleep(1.0 / 15.0)
         except asyncio.CancelledError:
             pass

@@ -509,7 +509,7 @@ export function StreamPage() {
         );
       }
     },
-    [updateSettings, settings]
+    [updateSettings]
   );
 
   // WebRTC for streaming (unified hook works in both local and cloud modes)
@@ -1616,27 +1616,26 @@ export function StreamPage() {
     }
   }, [settings.promptCycleRate, promptItems]);
 
+  const tempoEnabled = tempoState.enabled;
+  const tempoBeatCount = tempoState.beatCount;
+  const tempoBeatsPerBar = tempoState.beatsPerBar;
+
   useEffect(() => {
     const rate = settings.promptCycleRate || "none";
     const items = promptCycleItemsRef.current;
-    if (
-      rate === "none" ||
-      !isStreaming ||
-      !tempoState.enabled ||
-      items.length < 2
-    ) {
+    if (rate === "none" || !isStreaming || !tempoEnabled || items.length < 2) {
       promptCycleBoundaryRef.current = -1;
       return;
     }
 
-    const { beatCount, beatsPerBar } = tempoState;
     let boundary: number;
-    if (rate === "beat") boundary = beatCount;
-    else if (rate === "bar") boundary = Math.floor(beatCount / beatsPerBar);
+    if (rate === "beat") boundary = tempoBeatCount;
+    else if (rate === "bar")
+      boundary = Math.floor(tempoBeatCount / tempoBeatsPerBar);
     else if (rate === "2_bar")
-      boundary = Math.floor(beatCount / (beatsPerBar * 2));
+      boundary = Math.floor(tempoBeatCount / (tempoBeatsPerBar * 2));
     else if (rate === "4_bar")
-      boundary = Math.floor(beatCount / (beatsPerBar * 4));
+      boundary = Math.floor(tempoBeatCount / (tempoBeatsPerBar * 4));
     else return;
 
     if (
@@ -1658,9 +1657,9 @@ export function StreamPage() {
     promptCycleBoundaryRef.current = boundary;
   }, [
     settings.promptCycleRate,
-    tempoState.beatCount,
-    tempoState.beatsPerBar,
-    tempoState.enabled,
+    tempoBeatCount,
+    tempoBeatsPerBar,
+    tempoEnabled,
     isStreaming,
     sendParameterUpdateWebRTC,
     applyBackendParamsToSettings,

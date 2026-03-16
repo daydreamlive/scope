@@ -175,7 +175,9 @@ class ModulationEngine:
             try:
                 new_configs[param_name] = ModulationConfig.model_validate(cfg)
             except Exception:
-                logger.warning(f"Invalid modulation config for '{param_name}': {cfg}")
+                logger.warning(
+                    "Invalid modulation config for '%s': %s", param_name, cfg
+                )
         with self._lock:
             self._configs = new_configs
 

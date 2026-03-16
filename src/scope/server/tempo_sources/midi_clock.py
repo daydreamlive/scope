@@ -64,14 +64,14 @@ class MIDIClockTempoSource(TempoSource):
                 raise RuntimeError("No MIDI input devices found")
             self._device_name = available[0]
             self._port = mido.open_input(self._device_name)
-            logger.info(f"Auto-selected MIDI device: {self._device_name}")
+            logger.info("Auto-selected MIDI device: %s", self._device_name)
 
         self._running = True
         self._thread = threading.Thread(
             target=self._listen_loop, daemon=True, name="midi-clock-listener"
         )
         self._thread.start()
-        logger.info(f"MIDI clock started on device: {self._device_name}")
+        logger.info("MIDI clock started on device: %s", self._device_name)
 
     async def stop(self) -> None:
         self._running = False

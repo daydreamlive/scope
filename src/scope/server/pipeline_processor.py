@@ -114,6 +114,11 @@ class PipelineProcessor:
         self._beat_cache_reset_rate: str = "none"
         self._last_reset_boundary: int = -1
 
+    def set_beat_cache_reset_rate(self, rate: str) -> None:
+        """Set the beat-synced cache reset rate and reset the boundary tracker."""
+        self._beat_cache_reset_rate = rate
+        self._last_reset_boundary = -1
+
     def _resize_output_queue(self, port: str, target_size: int):
         """Resize output queues for a given port, transferring existing frames.
 
@@ -496,7 +501,7 @@ class PipelineProcessor:
             extra_params = {
                 k: v for k, v in output_dict.items() if k not in self.output_queues
             }
-            logger.info(f"Extra params: {extra_params}")
+            logger.debug("Extra params: %s", extra_params)
             if extra_params and self.output_consumers:
                 seen: set[int] = set()
                 for consumers in self.output_consumers.values():
