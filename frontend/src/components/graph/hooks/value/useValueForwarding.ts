@@ -44,11 +44,13 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "vace",
   "midi",
   "bool",
+  "trigger",
   "subgraph_input",
   "subgraph",
 ]);
 
 const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
+  "primitive",
   "slider",
   "knobs",
   "xypad",
@@ -193,7 +195,10 @@ export function useValueForwarding(
             });
           }
         }
-      } else if (node.data.nodeType === "bool") {
+      } else if (
+        node.data.nodeType === "bool" ||
+        node.data.nodeType === "trigger"
+      ) {
         valuesToForward.push({ handleName: "value", value: node.data.value });
       } else if (
         node.data.nodeType === "subgraph_input" ||
@@ -364,6 +369,11 @@ export function useValueForwarding(
         const nodeUpdates = updates.get(edge.target) ?? {};
 
         if (
+          targetNode.data.nodeType === "primitive" &&
+          targetParsed.name === "value"
+        ) {
+          nodeUpdates["value"] = sourceValue;
+        } else if (
           targetNode.data.nodeType === "slider" &&
           targetParsed.name === "value"
         ) {

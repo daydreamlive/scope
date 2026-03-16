@@ -40,7 +40,8 @@ export function evaluateInnerGraph(
   innerEdges: SerializedSubgraphEdge[],
   subgraphInputs: SubgraphPort[],
   subgraphOutputs: SubgraphPort[],
-  inputPortValues: Record<string, unknown>
+  inputPortValues: Record<string, unknown>,
+  persistentState?: Map<string, unknown>
 ): Record<string, unknown> {
   // Build a map of nodeId → node data for quick access
   const nodeMap = new Map<string, Record<string, unknown>>();
@@ -150,7 +151,8 @@ export function evaluateInnerGraph(
     }
 
     // Compute output(s) based on node type
-    const outputValues = evaluateNode(nodeType, data, inputs);
+    const evalState = persistentState ?? new Map<string, unknown>();
+    const outputValues = evaluateNode(nodeType, data, inputs, nid, evalState);
 
     // Store computed outputs
     for (const [handleName, val] of outputValues) {
@@ -196,7 +198,9 @@ export function evaluateInnerGraph(
 function evaluateNode(
   nodeType: string,
   data: Record<string, unknown>,
-  inputs: Map<string, unknown>
+  inputs: Map<string, unknown>,
+  nodeId: string,
+  state: Map<string, unknown>
 ): Map<string, unknown> {
   const out = new Map<string, unknown>();
 
@@ -225,6 +229,10 @@ function evaluateNode(
       }
       break;
     }
+    case "trigger": {
+      out.set("value", data.value ? 1 : 0);
+      break;
+    }
     case "primitive":
     case "reroute": {
       const val = data.value ?? null;
@@ -237,19 +245,75 @@ function evaluateNode(
     }
     case "slider": {
       out.set("value", (data.value as number) ?? null);
+      if (inputs.has("value") && inputs.get("value") !== undefined) {
+        out.set("value", inputs.get("value"));
+      }
       break;
     }
     case "control": {
-      out.set("value", data.currentValue ?? null);
+      const ctrlType = (data.controlType as string) ?? "float";
+      const ctrlMode = (data.controlMode as string) ?? "animated";
+
+      if (ctrlType === "string" && ctrlMode === "switch") {
+        const items = (data.controlItems as string[]) ?? [];
+        let bestIdx = -1;
+        let bestVal = 0;
+        for (let i = 0; i < items.length; i++) {
+          const trigVal = toNumber(inputs.get(`item_${i}`));
+          if (trigVal !== null && trigVal > bestVal) {
+            bestVal = trigVal;
+            bestIdx = i;
+          }
+        }
+        const stateKey = `${nodeId}:switch_value`;
+        if (bestIdx >= 0) {
+          const strVal = inputs.get(`str_${bestIdx}`);
+          const selected = strVal ?? items[bestIdx] ?? null;
+          state.set(stateKey, selected);
+          out.set("value", selected);
+        } else {
+          const latched = state.get(stateKey);
+          out.set("value", latched ?? data.currentValue ?? null);
+        }
+      } else {
+        out.set("value", data.currentValue ?? null);
+        if (inputs.has("value") && inputs.get("value") !== undefined) {
+          out.set("value", inputs.get("value"));
+        }
+      }
       break;
     }
     case "knobs": {
       const knobs = data.knobs as { value: number }[] | undefined;
       if (knobs) {
         for (let i = 0; i < knobs.length; i++) {
-          out.set(`knob_${i}`, knobs[i].value);
+          const inputKey = `knob_${i}`;
+          const inputVal = inputs.get(inputKey);
+          out.set(
+            inputKey,
+            typeof inputVal === "number" ? inputVal : knobs[i].value
+          );
         }
       }
+      break;
+    }
+    case "tuple": {
+      let vals = data.tupleValues as number[] | undefined;
+      if (inputs.has("value") && Array.isArray(inputs.get("value"))) {
+        vals = inputs.get("value") as number[];
+      }
+      if (vals) {
+        for (const [inputName, inputVal] of inputs) {
+          if (inputName.startsWith("row_") && typeof inputVal === "number") {
+            const idx = parseInt(inputName.replace("row_", ""), 10);
+            if (!isNaN(idx) && idx < vals.length) {
+              vals = [...vals];
+              vals[idx] = inputVal;
+            }
+          }
+        }
+      }
+      out.set("value", vals ?? null);
       break;
     }
     case "subgraph": {
@@ -319,6 +383,9 @@ export function useSubgraphEval(
   // Track last computed outputs per subgraph node to avoid unnecessary updates
   const lastOutputsRef = useRef<Map<string, string>>(new Map());
 
+  // Persistent state per subgraph (for latching switch selections, etc.)
+  const evalStateRef = useRef<Map<string, Map<string, unknown>>>(new Map());
+
   const rafHandle = useRef<number | null>(null);
 
   const evaluate = useCallback(() => {
@@ -361,13 +428,18 @@ export function useSubgraphEval(
         );
       }
 
-      // Evaluate the inner graph
+      // Evaluate the inner graph (with persistent state for latching)
+      if (!evalStateRef.current.has(sg.id)) {
+        evalStateRef.current.set(sg.id, new Map());
+      }
+      const sgState = evalStateRef.current.get(sg.id)!;
       const outputValues = evaluateInnerGraph(
         innerNodes,
         innerEdges,
         sgInputs,
         sgOutputs,
-        inputPortValues
+        inputPortValues,
+        sgState
       );
 
       // Merge input values into portValues too (so inputs are also readable from portValues)

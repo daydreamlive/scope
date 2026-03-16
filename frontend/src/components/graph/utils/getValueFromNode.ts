@@ -50,7 +50,7 @@ export function getNumberFromNode(
     if (isNaN(idx) || idx >= channels.length) return null;
     return channels[idx].value;
   }
-  if (t === "bool") {
+  if (t === "bool" || t === "trigger") {
     const val = node.data.value;
     if (typeof val === "boolean") return val ? 1 : 0;
     return null;
@@ -107,7 +107,7 @@ export function getAnyValueFromNode(
   if (t === "primitive" || t === "reroute") return node.data.value ?? null;
   if (t === "control" || t === "math") return node.data.currentValue ?? null;
   if (t === "slider") return node.data.value ?? null;
-  if (t === "bool") {
+  if (t === "bool" || t === "trigger") {
     const v = node.data.value;
     return typeof v === "boolean" ? (v ? 1 : 0) : null;
   }
@@ -141,6 +141,9 @@ export function getAnyValueFromNode(
     if (!sourceHandleId) return null;
     const parsed = parseHandleId(sourceHandleId);
     if (!parsed) return null;
+    if (parsed.name === "value") {
+      return node.data.tupleValues ?? null;
+    }
     const idx = parseInt(parsed.name.replace("tuple_", ""), 10);
     const vals = node.data.tupleValues as number[] | undefined;
     if (!vals || isNaN(idx) || idx >= vals.length) return null;

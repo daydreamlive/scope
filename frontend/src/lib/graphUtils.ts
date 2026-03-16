@@ -90,6 +90,7 @@ export interface FlowNodeData {
     | "vace"
     | "midi"
     | "bool"
+    | "trigger"
     | "subgraph"
     | "subgraph_input"
     | "subgraph_output";
@@ -464,9 +465,15 @@ export function graphConfigToFlow(
     return false;
   };
 
-  const sources = graph.nodes.filter(n => n.type === "source" && !isSubgraphInnerNode(n.id));
-  const pipelines = graph.nodes.filter(n => n.type === "pipeline" && !isSubgraphInnerNode(n.id));
-  const sinks = graph.nodes.filter(n => n.type === "sink" && !isSubgraphInnerNode(n.id));
+  const sources = graph.nodes.filter(
+    n => n.type === "source" && !isSubgraphInnerNode(n.id)
+  );
+  const pipelines = graph.nodes.filter(
+    n => n.type === "pipeline" && !isSubgraphInnerNode(n.id)
+  );
+  const sinks = graph.nodes.filter(
+    n => n.type === "sink" && !isSubgraphInnerNode(n.id)
+  );
 
   const nodes: Node<FlowNodeData>[] = [];
 
@@ -559,26 +566,28 @@ export function graphConfigToFlow(
   // Convert edges - add stream: prefix to handle IDs
   // Skip edges that reference flattened inner subgraph nodes
   const edges: Edge[] = graph.edges
-    .filter(e => !isSubgraphInnerNode(e.from) && !isSubgraphInnerNode(e.to_node))
+    .filter(
+      e => !isSubgraphInnerNode(e.from) && !isSubgraphInnerNode(e.to_node)
+    )
     .map((e, i) => {
-    const sourceHandle =
-      e.kind === "parameter"
-        ? buildHandleId("param", e.from_port)
-        : buildHandleId("stream", e.from_port);
-    const targetHandle =
-      e.kind === "parameter"
-        ? buildHandleId("param", e.to_port)
-        : buildHandleId("stream", e.to_port);
-    return {
-      id: `e-${i}-${e.from}-${e.to_node}`,
-      source: e.from,
-      sourceHandle,
-      target: e.to_node,
-      targetHandle,
-      label: e.from_port !== "video" ? e.from_port : undefined,
-      animated: false,
-    };
-  });
+      const sourceHandle =
+        e.kind === "parameter"
+          ? buildHandleId("param", e.from_port)
+          : buildHandleId("stream", e.from_port);
+      const targetHandle =
+        e.kind === "parameter"
+          ? buildHandleId("param", e.to_port)
+          : buildHandleId("stream", e.to_port);
+      return {
+        id: `e-${i}-${e.from}-${e.to_node}`,
+        source: e.from,
+        sourceHandle,
+        target: e.to_node,
+        targetHandle,
+        label: e.from_port !== "video" ? e.from_port : undefined,
+        animated: false,
+      };
+    });
 
   // Restore frontend-only nodes and edges from ui_state
   if (graph.ui_state) {
@@ -663,6 +672,7 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "vace",
   "midi",
   "bool",
+  "trigger",
   "subgraph",
   "subgraph_input",
   "subgraph_output",
@@ -879,43 +889,38 @@ export function flowToGraphConfig(
     }
   }
 
-  const graphNodes: GraphNode[] = backendFlatNodes
-    .map(n => {
-      // Read dimensions: node.width/height (set by NodeResizer) > measured > style
-      const w =
-        n.width ??
-        n.measured?.width ??
-        (typeof n.style?.width === "number" ? n.style.width : undefined);
-      const h =
-        n.height ??
-        n.measured?.height ??
-        (typeof n.style?.height === "number" ? n.style.height : undefined);
-      return {
-        id: n.id,
-        type:
-          n.data.nodeType === "source"
-            ? "source"
-            : n.data.nodeType === "sink"
-              ? "sink"
-              : "pipeline",
-        pipeline_id:
-          n.data.nodeType === "pipeline"
-            ? (n.data.pipelineId ?? null)
-            : undefined,
-        x: n.position.x,
-        y: n.position.y,
-        w: w && !Number.isNaN(w) ? w : undefined,
-        h: h && !Number.isNaN(h) ? h : undefined,
-        source_mode:
-          n.data.nodeType === "source"
-            ? (n.data.sourceMode ?? null)
-            : undefined,
-        source_name:
-          n.data.nodeType === "source"
-            ? (n.data.sourceName ?? null)
-            : undefined,
-      };
-    });
+  const graphNodes: GraphNode[] = backendFlatNodes.map(n => {
+    // Read dimensions: node.width/height (set by NodeResizer) > measured > style
+    const w =
+      n.width ??
+      n.measured?.width ??
+      (typeof n.style?.width === "number" ? n.style.width : undefined);
+    const h =
+      n.height ??
+      n.measured?.height ??
+      (typeof n.style?.height === "number" ? n.style.height : undefined);
+    return {
+      id: n.id,
+      type:
+        n.data.nodeType === "source"
+          ? "source"
+          : n.data.nodeType === "sink"
+            ? "sink"
+            : "pipeline",
+      pipeline_id:
+        n.data.nodeType === "pipeline"
+          ? (n.data.pipelineId ?? null)
+          : undefined,
+      x: n.position.x,
+      y: n.position.y,
+      w: w && !Number.isNaN(w) ? w : undefined,
+      h: h && !Number.isNaN(h) ? h : undefined,
+      source_mode:
+        n.data.nodeType === "source" ? (n.data.sourceMode ?? null) : undefined,
+      source_name:
+        n.data.nodeType === "source" ? (n.data.sourceName ?? null) : undefined,
+    };
+  });
 
   // Filter edges to only include those where both source and target exist in graphNodes
   const graphNodeIds = new Set(graphNodes.map(n => n.id));
