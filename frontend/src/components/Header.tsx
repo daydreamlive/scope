@@ -217,6 +217,7 @@ export function Header({
             <Plug className="h-5 w-5" />
           </Button>
           <Button
+            data-tour="settings-button"
             variant="ghost"
             size="icon"
             onClick={() => setSettingsOpen(true)}

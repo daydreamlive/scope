@@ -7,6 +7,7 @@ import { PluginsProvider } from "./contexts/PluginsContext";
 import { ServerInfoProvider } from "./contexts/ServerInfoContext";
 import { CloudProvider } from "./lib/cloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
+import { OnboardingProvider } from "./contexts/OnboardingContext";
 import {
   handleOAuthCallback,
   initElectronAuthListener,
@@ -109,7 +110,9 @@ function App() {
           <PluginsProvider>
             <ServerInfoProvider>
               <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
-                <StreamPage />
+                <OnboardingProvider>
+                  <StreamPage />
+                </OnboardingProvider>
               </CloudProvider>
             </ServerInfoProvider>
           </PluginsProvider>
