@@ -1,0 +1,233 @@
+{
+  "name": "Manual Prompt Switcher",
+  "description": "Three Trigger buttons fire a subgraph containing a StringControl in switch mode with three editable prompt Primitives — no MIDI needed",
+  "category": "Controls",
+  "color": "#f97316",
+  "thumbnail": null,
+  "nodes": [
+    {
+      "id": "trigger_a",
+      "type": "trigger",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "label": "Trigger A",
+        "nodeType": "trigger",
+        "value": false,
+        "parameterOutputs": [
+          { "name": "value", "type": "boolean", "defaultValue": false }
+        ]
+      }
+    },
+    {
+      "id": "trigger_b",
+      "type": "trigger",
+      "position": { "x": 0, "y": 100 },
+      "data": {
+        "label": "Trigger B",
+        "nodeType": "trigger",
+        "value": false,
+        "parameterOutputs": [
+          { "name": "value", "type": "boolean", "defaultValue": false }
+        ]
+      }
+    },
+    {
+      "id": "trigger_c",
+      "type": "trigger",
+      "position": { "x": 0, "y": 200 },
+      "data": {
+        "label": "Trigger C",
+        "nodeType": "trigger",
+        "value": false,
+        "parameterOutputs": [
+          { "name": "value", "type": "boolean", "defaultValue": false }
+        ]
+      }
+    },
+    {
+      "id": "subgraph",
+      "type": "subgraph",
+      "position": { "x": 300, "y": 15 },
+      "width": 240,
+      "height": 191,
+      "data": {
+        "label": "Subgraph",
+        "nodeType": "subgraph",
+        "customTitle": "Prompt Switcher",
+        "subgraphNodes": [
+          {
+            "id": "primitive",
+            "type": "primitive",
+            "position": { "x": 86, "y": 39 },
+            "width": 285,
+            "height": 133,
+            "data": {
+              "label": "Prompt A",
+              "nodeType": "primitive",
+              "valueType": "string",
+              "value": "a lion in the jungle",
+              "parameterOutputs": [
+                { "name": "value", "type": "string", "defaultValue": "" }
+              ]
+            }
+          },
+          {
+            "id": "primitive_1",
+            "type": "primitive",
+            "position": { "x": 86, "y": 183 },
+            "width": 287,
+            "height": 136,
+            "data": {
+              "label": "Prompt B",
+              "nodeType": "primitive",
+              "valueType": "string",
+              "value": "a bird in the sky",
+              "parameterOutputs": [
+                { "name": "value", "type": "string", "defaultValue": "" }
+              ]
+            }
+          },
+          {
+            "id": "primitive_2",
+            "type": "primitive",
+            "position": { "x": 86, "y": 330 },
+            "width": 284,
+            "height": 133,
+            "data": {
+              "label": "Prompt C",
+              "nodeType": "primitive",
+              "valueType": "string",
+              "value": "a dragon breathing fire",
+              "parameterOutputs": [
+                { "name": "value", "type": "string", "defaultValue": "" }
+              ]
+            }
+          },
+          {
+            "id": "control",
+            "type": "control",
+            "position": { "x": 495, "y": 81 },
+            "width": 267,
+            "height": 212,
+            "data": {
+              "label": "Prompt Switch",
+              "nodeType": "control",
+              "controlType": "string",
+              "controlPattern": "sine",
+              "controlSpeed": 1,
+              "controlMin": 0,
+              "controlMax": 1,
+              "controlItems": ["item1", "item2", "item3"],
+              "controlMode": "switch",
+              "isPlaying": false,
+              "parameterOutputs": [
+                { "name": "value", "type": "string", "defaultValue": "" }
+              ]
+            }
+          }
+        ],
+        "subgraphEdges": [
+          {
+            "id": "se1",
+            "source": "primitive",
+            "sourceHandle": "param:value",
+            "target": "control",
+            "targetHandle": "param:str_0"
+          },
+          {
+            "id": "se2",
+            "source": "primitive_1",
+            "sourceHandle": "param:value",
+            "target": "control",
+            "targetHandle": "param:str_1"
+          },
+          {
+            "id": "se3",
+            "source": "primitive_2",
+            "sourceHandle": "param:value",
+            "target": "control",
+            "targetHandle": "param:str_2"
+          }
+        ],
+        "subgraphInputs": [
+          {
+            "name": "trigger_a",
+            "portType": "param",
+            "paramType": "number",
+            "innerNodeId": "control",
+            "innerHandleId": "param:item_0"
+          },
+          {
+            "name": "trigger_b",
+            "portType": "param",
+            "paramType": "number",
+            "innerNodeId": "control",
+            "innerHandleId": "param:item_1"
+          },
+          {
+            "name": "trigger_c",
+            "portType": "param",
+            "paramType": "number",
+            "innerNodeId": "control",
+            "innerHandleId": "param:item_2"
+          }
+        ],
+        "subgraphOutputs": [
+          {
+            "name": "prompt",
+            "portType": "param",
+            "paramType": "string",
+            "innerNodeId": "control",
+            "innerHandleId": "param:value"
+          }
+        ]
+      }
+    },
+    {
+      "id": "output",
+      "type": "primitive",
+      "position": { "x": 653, "y": 51 },
+      "width": 240,
+      "height": 135,
+      "data": {
+        "label": "Prompt Output",
+        "nodeType": "primitive",
+        "valueType": "string",
+        "value": "",
+        "parameterOutputs": [
+          { "name": "value", "type": "string", "defaultValue": "" }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "trigger_a",
+      "sourceHandle": "param:value",
+      "target": "subgraph",
+      "targetHandle": "param:trigger_a"
+    },
+    {
+      "id": "e2",
+      "source": "trigger_b",
+      "sourceHandle": "param:value",
+      "target": "subgraph",
+      "targetHandle": "param:trigger_b"
+    },
+    {
+      "id": "e3",
+      "source": "trigger_c",
+      "sourceHandle": "param:value",
+      "target": "subgraph",
+      "targetHandle": "param:trigger_c"
+    },
+    {
+      "id": "e4",
+      "source": "subgraph",
+      "sourceHandle": "param:prompt",
+      "target": "output",
+      "targetHandle": "param:value"
+    }
+  ]
+}

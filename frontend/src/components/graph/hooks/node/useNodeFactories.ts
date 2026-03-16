@@ -2,6 +2,12 @@ import { useCallback, useMemo } from "react";
 import type { Node } from "@xyflow/react";
 import { generateNodeId } from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
+import {
+  deserializeNodes,
+  deserializeEdges,
+} from "../../utils/subgraphSerialization";
+import { buildEdgeStyle } from "../../constants";
+import type { Blueprint } from "../../../../data/blueprints/types";
 import { toast } from "sonner";
 
 // Node defaults
@@ -26,6 +32,7 @@ type NodeTypeKey =
   | "vace"
   | "midi"
   | "bool"
+  | "trigger"
   | "subgraph"
   | "subgraph_input"
   | "subgraph_output";
@@ -297,6 +304,19 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       ],
     },
   },
+  trigger: {
+    type: "trigger",
+    idPrefix: "trigger",
+    defaultX: 50,
+    data: {
+      label: "Trigger",
+      nodeType: "trigger",
+      value: false,
+      parameterOutputs: [
+        { name: "value", type: "boolean", defaultValue: false },
+      ],
+    },
+  },
   subgraph_input: {
     type: "subgraph_input",
     idPrefix: "sg_in",
@@ -339,6 +359,7 @@ interface UseNodeFactoriesArgs {
   syphonOutputAvailable: boolean;
   pendingNodePosition: { x: number; y: number } | null;
   setPendingNodePosition: (pos: { x: number; y: number } | null) => void;
+  handleEdgeDelete: (edgeId: string) => void;
 }
 
 export function useNodeFactories({
@@ -354,6 +375,7 @@ export function useNodeFactories({
   syphonOutputAvailable,
   pendingNodePosition,
   setPendingNodePosition,
+  handleEdgeDelete,
 }: UseNodeFactoriesArgs) {
   const existingIds = useMemo(() => new Set(nodes.map(n => n.id)), [nodes]);
 
@@ -405,6 +427,7 @@ export function useNodeFactories({
         | "vace"
         | "midi"
         | "bool"
+        | "trigger"
         | "subgraph",
       subType?: string
     ) => {
@@ -493,8 +516,73 @@ export function useNodeFactories({
     [setNodes, setEdges, setSelectedNodeIds]
   );
 
+  const insertBlueprint = useCallback(
+    (blueprint: Blueprint, insertPos?: { x: number; y: number }) => {
+      const rawNodes = deserializeNodes(blueprint.nodes);
+      const rawEdges = deserializeEdges(blueprint.edges);
+
+      if (rawNodes.length === 0) return;
+
+      const currentIds = new Set(nodes.map(n => n.id));
+      const idMap = new Map<string, string>();
+
+      for (const node of rawNodes) {
+        const prefix = (node.data.nodeType as string) || node.type || "node";
+        const newId = generateNodeId(prefix, currentIds);
+        idMap.set(node.id, newId);
+        currentIds.add(newId);
+      }
+
+      // Compute bounding box origin to offset nodes relative to insert position
+      const minX = Math.min(...rawNodes.map(n => n.position.x));
+      const minY = Math.min(...rawNodes.map(n => n.position.y));
+      const targetPos = insertPos ?? { x: 200, y: 200 };
+
+      const newNodes: Node<FlowNodeData>[] = rawNodes.map(node => ({
+        ...node,
+        id: idMap.get(node.id)!,
+        position: {
+          x: node.position.x - minX + targetPos.x,
+          y: node.position.y - minY + targetPos.y,
+        },
+        selected: true,
+      }));
+
+      // Build a lookup map of newId → newNode so we can compute edge styles
+      const newNodeMap = new Map(newNodes.map(n => [n.id, n]));
+
+      const newEdges = rawEdges.map((edge, idx) => {
+        const newSource = idMap.get(edge.source) ?? edge.source;
+        const sourceNode = newNodeMap.get(newSource);
+        const style = buildEdgeStyle(sourceNode, edge.sourceHandle);
+        return {
+          ...edge,
+          id: `blueprint_${Date.now()}_${idx}`,
+          source: newSource,
+          target: idMap.get(edge.target) ?? edge.target,
+          type: "default" as const,
+          reconnectable: "target" as const,
+          animated: false,
+          style,
+          data: { onDelete: handleEdgeDelete },
+        };
+      });
+
+      setNodes(nds => [
+        ...nds.map(n => (n.selected ? { ...n, selected: false } : n)),
+        ...newNodes,
+      ]);
+
+      if (newEdges.length > 0) {
+        setEdges(eds => [...eds, ...newEdges]);
+      }
+    },
+    [nodes, setNodes, setEdges, handleEdgeDelete]
+  );
+
   return {
     handleNodeTypeSelect,
     handleDeleteNodes,
+    insertBlueprint,
   };
 }

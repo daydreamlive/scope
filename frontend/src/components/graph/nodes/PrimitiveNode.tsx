@@ -108,6 +108,17 @@ export function PrimitiveNode({
         </NodeBody>
       )}
       <Handle
+        type="target"
+        position={Position.Left}
+        id={buildHandleId("param", "value")}
+        className="!w-2.5 !h-2.5 !border-0"
+        style={
+          collapsed
+            ? collapsedHandleStyle("left")
+            : { top: 44, left: 0, backgroundColor: color }
+        }
+      />
+      <Handle
         type="source"
         position={Position.Right}
         id={buildHandleId("param", "value")}

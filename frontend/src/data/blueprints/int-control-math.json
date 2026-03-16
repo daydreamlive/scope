@@ -1,0 +1,72 @@
+{
+  "name": "Step Sequencer",
+  "description": "An IntControl cycles through integer values; a Math node scales the step — useful for discrete parameter stepping",
+  "category": "Controls",
+  "color": "#38bdf8",
+  "thumbnail": null,
+  "nodes": [
+    {
+      "id": "intControl_1",
+      "type": "control",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "label": "Step",
+        "nodeType": "control",
+        "controlType": "int",
+        "controlPattern": "sawtooth",
+        "controlSpeed": 0.5,
+        "controlMin": 0,
+        "controlMax": 8,
+        "isPlaying": false,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    },
+    {
+      "id": "slider_stepSize",
+      "type": "slider",
+      "position": { "x": 0, "y": 140 },
+      "data": {
+        "label": "Step Size",
+        "nodeType": "slider",
+        "sliderMin": 1,
+        "sliderMax": 32,
+        "sliderStep": 1,
+        "value": 8,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 8 }
+        ]
+      }
+    },
+    {
+      "id": "math_step",
+      "type": "math",
+      "position": { "x": 280, "y": 60 },
+      "data": {
+        "label": "Scale Step",
+        "nodeType": "math",
+        "mathOp": "multiply",
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_step",
+      "source": "intControl_1",
+      "sourceHandle": "param:value",
+      "target": "math_step",
+      "targetHandle": "param:a"
+    },
+    {
+      "id": "e_size",
+      "source": "slider_stepSize",
+      "sourceHandle": "param:value",
+      "target": "math_step",
+      "targetHandle": "param:b"
+    }
+  ]
+}

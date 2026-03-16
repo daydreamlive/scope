@@ -9,7 +9,10 @@ import type { Connection, Edge, Node } from "@xyflow/react";
 import { parseHandleId } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { resolveSourceType } from "../hooks/connection/typeResolution";
-import { BOUNDARY_INPUT_ID, BOUNDARY_OUTPUT_ID } from "../hooks/subgraph/useGraphNavigation";
+import {
+  BOUNDARY_INPUT_ID,
+  BOUNDARY_OUTPUT_ID,
+} from "../hooks/subgraph/useGraphNavigation";
 
 // ---------------------------------------------------------------------------
 // Target-node rules (param → param).  Each entry maps a target nodeType (or
@@ -242,8 +245,9 @@ export function validateConnection(
     const targetNode = nodes.find(n => n.id === connection.target);
     if (!sourceNode || !targetNode) return false;
 
-    // Primitive can connect to anything
+    // Primitive can connect to anything (as source or target)
     if (sourceNode.data.nodeType === "primitive") return true;
+    if (targetNode.data.nodeType === "primitive") return true;
 
     // Reroute source
     if (sourceNode.data.nodeType === "reroute") {

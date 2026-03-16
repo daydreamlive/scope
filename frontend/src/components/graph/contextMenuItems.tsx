@@ -24,6 +24,8 @@ import {
   Music,
   FolderOpen,
   PackageOpen,
+  BookOpen,
+  Zap,
 } from "lucide-react";
 import type { Node, Edge } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
@@ -50,6 +52,7 @@ type NodeTypeSelectFn = (
     | "vace"
     | "midi"
     | "bool"
+    | "trigger"
     | "subgraph",
   subType?: string
 ) => void;
@@ -64,6 +67,7 @@ export function buildPaneMenuItems(deps: {
     edges: Edge[],
     selectedIds: string[]
   ) => void;
+  onOpenBlueprints: () => void;
 }): ContextMenuItem[] {
   const {
     handleNodeTypeSelect,
@@ -71,6 +75,7 @@ export function buildPaneMenuItems(deps: {
     nodes,
     edges,
     createSubgraphFromSelection,
+    onOpenBlueprints,
   } = deps;
 
   return [
@@ -181,6 +186,12 @@ export function buildPaneMenuItems(deps: {
           keywords: ["boolean", "gate", "toggle", "switch", "on", "off"],
         },
         {
+          label: "Trigger",
+          icon: <Zap />,
+          onClick: () => handleNodeTypeSelect("trigger"),
+          keywords: ["trigger", "pulse", "bang", "fire", "button"],
+        },
+        {
           label: "Reroute",
           icon: <GitBranch />,
           onClick: () => handleNodeTypeSelect("reroute"),
@@ -219,6 +230,12 @@ export function buildPaneMenuItems(deps: {
       icon: <FolderOpen />,
       onClick: () => handleNodeTypeSelect("subgraph"),
       keywords: ["group", "container", "nest", "bundle"],
+    },
+    {
+      label: "Insert Blueprint...",
+      icon: <BookOpen />,
+      onClick: onOpenBlueprints,
+      keywords: ["blueprint", "preset", "template", "library"],
     },
     ...(selectedNodeIds.length > 0
       ? [
