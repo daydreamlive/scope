@@ -235,10 +235,15 @@ export function DmxTab({ isActive }: DmxTabProps) {
   const getParamInfo = (key: string): FlatParam | undefined =>
     flatParams.find(p => p.key === key);
 
-  // Group params for the select dropdown
+  // Group params for the select dropdown (dedupe by key so the same param
+  // from multiple pipelines doesn't render multiple SelectItems and produce
+  // duplicated text like "zoomzoomzoom" in the trigger)
   const groupedParams = (() => {
     const groups: Record<string, FlatParam[]> = {};
+    const seenKeys = new Set<string>();
     for (const p of flatParams) {
+      if (seenKeys.has(p.key)) continue;
+      seenKeys.add(p.key);
       if (!groups[p.group]) groups[p.group] = [];
       groups[p.group].push(p);
     }
