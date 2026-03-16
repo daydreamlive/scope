@@ -89,7 +89,7 @@ class PrepareVideoLatentsBlock(ModularPipelineBlocks):
 
         # Create generator from seed for reproducible generation
         block_seed = base_seed + block_state.current_start_frame
-        rng = torch.Generator(device=components.config.device).manual_seed(block_seed)
+        rng = torch.Generator(device=components.config.device).manual_seed(int(block_seed))
 
         # Generate empty latents (noise)
         noise = torch.randn(
