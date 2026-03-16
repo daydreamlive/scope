@@ -1,0 +1,296 @@
+{
+  "name": "Denoise Controller",
+  "description": "A slider feeds a subgraph that generates 4 evenly-spaced denoising steps via chained Math nodes, output as a Tuple",
+  "category": "Utility",
+  "color": "#a78bfa",
+  "thumbnail": null,
+  "nodes": [
+    {
+      "id": "slider",
+      "type": "slider",
+      "position": { "x": 0, "y": 14 },
+      "width": 240,
+      "height": 161,
+      "data": {
+        "label": "Slider",
+        "nodeType": "slider",
+        "sliderMin": 0,
+        "sliderMax": 700,
+        "sliderStep": 0.01,
+        "value": 500,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0.5 }
+        ]
+      }
+    },
+    {
+      "id": "subgraph",
+      "type": "subgraph",
+      "position": { "x": 335, "y": 0 },
+      "width": 240,
+      "height": 141,
+      "data": {
+        "label": "Subgraph",
+        "nodeType": "subgraph",
+        "customTitle": "Slider to Tuple",
+        "subgraphNodes": [
+          {
+            "id": "slider",
+            "type": "slider",
+            "position": { "x": -100, "y": 141 },
+            "width": 240,
+            "height": 161,
+            "data": {
+              "label": "Slider",
+              "nodeType": "slider",
+              "sliderMin": 0,
+              "sliderMax": 700,
+              "sliderStep": 0.01,
+              "value": 500,
+              "parameterOutputs": [
+                { "name": "value", "type": "number", "defaultValue": 0.5 }
+              ]
+            }
+          },
+          {
+            "id": "math_toInt",
+            "type": "math",
+            "position": { "x": 249, "y": -50 },
+            "width": 240,
+            "height": 144,
+            "data": {
+              "label": "toInt",
+              "nodeType": "math",
+              "mathOp": "toInt",
+              "parameterOutputs": [
+                { "name": "value", "type": "number", "defaultValue": 0 }
+              ]
+            }
+          },
+          {
+            "id": "math_step1",
+            "type": "math",
+            "position": { "x": 249, "y": 104 },
+            "width": 240,
+            "height": 171,
+            "data": {
+              "label": "Step +1",
+              "nodeType": "math",
+              "mathOp": "add",
+              "parameterOutputs": [
+                { "name": "value", "type": "number", "defaultValue": 0 }
+              ]
+            }
+          },
+          {
+            "id": "math_step2",
+            "type": "math",
+            "position": { "x": 249, "y": 285 },
+            "width": 240,
+            "height": 167,
+            "data": {
+              "label": "Step +2",
+              "nodeType": "math",
+              "mathOp": "add",
+              "parameterOutputs": [
+                { "name": "value", "type": "number", "defaultValue": 0 }
+              ]
+            }
+          },
+          {
+            "id": "math_step3",
+            "type": "math",
+            "position": { "x": 249, "y": 463 },
+            "width": 240,
+            "height": 166,
+            "data": {
+              "label": "Step +3",
+              "nodeType": "math",
+              "mathOp": "add",
+              "parameterOutputs": [
+                { "name": "value", "type": "number", "defaultValue": 0 }
+              ]
+            }
+          },
+          {
+            "id": "increment",
+            "type": "primitive",
+            "position": { "x": -100, "y": 318 },
+            "width": 240,
+            "height": 80,
+            "data": {
+              "label": "Increment",
+              "nodeType": "primitive",
+              "valueType": "number",
+              "value": 100,
+              "parameterOutputs": [
+                { "name": "value", "type": "number", "defaultValue": 0 }
+              ]
+            }
+          },
+          {
+            "id": "tuple",
+            "type": "tuple",
+            "position": { "x": 609, "y": 141 },
+            "width": 240,
+            "height": 200,
+            "data": {
+              "label": "Denoise Steps",
+              "nodeType": "tuple",
+              "tupleValues": [800, 700, 600, 500],
+              "tupleMin": 0,
+              "tupleMax": 1000,
+              "tupleStep": 1,
+              "tupleEnforceOrder": true,
+              "tupleOrderDirection": "desc",
+              "parameterOutputs": [
+                {
+                  "name": "value",
+                  "type": "list_number",
+                  "defaultValue": [999, 800, 600]
+                }
+              ]
+            }
+          }
+        ],
+        "subgraphEdges": [
+          {
+            "id": "se1",
+            "source": "slider",
+            "sourceHandle": "param:value",
+            "target": "math_toInt",
+            "targetHandle": "param:a"
+          },
+          {
+            "id": "se2",
+            "source": "math_toInt",
+            "sourceHandle": "param:value",
+            "target": "math_step1",
+            "targetHandle": "param:a"
+          },
+          {
+            "id": "se3",
+            "source": "math_toInt",
+            "sourceHandle": "param:value",
+            "target": "tuple",
+            "targetHandle": "param:row_3"
+          },
+          {
+            "id": "se4",
+            "source": "increment",
+            "sourceHandle": "param:value",
+            "target": "math_step1",
+            "targetHandle": "param:b"
+          },
+          {
+            "id": "se5",
+            "source": "increment",
+            "sourceHandle": "param:value",
+            "target": "math_step2",
+            "targetHandle": "param:b"
+          },
+          {
+            "id": "se6",
+            "source": "increment",
+            "sourceHandle": "param:value",
+            "target": "math_step3",
+            "targetHandle": "param:b"
+          },
+          {
+            "id": "se7",
+            "source": "math_step1",
+            "sourceHandle": "param:value",
+            "target": "math_step2",
+            "targetHandle": "param:a"
+          },
+          {
+            "id": "se8",
+            "source": "math_step1",
+            "sourceHandle": "param:value",
+            "target": "tuple",
+            "targetHandle": "param:row_2"
+          },
+          {
+            "id": "se9",
+            "source": "math_step2",
+            "sourceHandle": "param:value",
+            "target": "math_step3",
+            "targetHandle": "param:a"
+          },
+          {
+            "id": "se10",
+            "source": "math_step2",
+            "sourceHandle": "param:value",
+            "target": "tuple",
+            "targetHandle": "param:row_1"
+          },
+          {
+            "id": "se11",
+            "source": "math_step3",
+            "sourceHandle": "param:value",
+            "target": "tuple",
+            "targetHandle": "param:row_0"
+          }
+        ],
+        "subgraphInputs": [
+          {
+            "name": "value",
+            "portType": "param",
+            "innerNodeId": "slider",
+            "innerHandleId": "param:value"
+          }
+        ],
+        "subgraphOutputs": [
+          {
+            "name": "value",
+            "portType": "param",
+            "paramType": "list_number",
+            "innerNodeId": "tuple",
+            "innerHandleId": "param:value"
+          }
+        ]
+      }
+    },
+    {
+      "id": "tuple_out",
+      "type": "tuple",
+      "position": { "x": 673, "y": 8 },
+      "width": 240,
+      "height": 200,
+      "data": {
+        "label": "Tuple",
+        "nodeType": "tuple",
+        "customTitle": "Denoise Steps",
+        "tupleValues": [800, 700, 600, 500],
+        "tupleMin": 0,
+        "tupleMax": 1000,
+        "tupleStep": 1,
+        "tupleEnforceOrder": true,
+        "tupleOrderDirection": "desc",
+        "parameterOutputs": [
+          {
+            "name": "value",
+            "type": "list_number",
+            "defaultValue": [999, 800, 600]
+          }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "source": "slider",
+      "sourceHandle": "param:value",
+      "target": "subgraph",
+      "targetHandle": "param:value"
+    },
+    {
+      "id": "e2",
+      "source": "subgraph",
+      "sourceHandle": "param:value",
+      "target": "tuple_out",
+      "targetHandle": "param:value"
+    }
+  ]
+}

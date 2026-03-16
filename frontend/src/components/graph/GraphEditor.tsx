@@ -32,12 +32,14 @@ import { ImageNode } from "./nodes/ImageNode";
 import { VaceNode } from "./nodes/VaceNode";
 import { MidiNode } from "./nodes/MidiNode";
 import { BoolNode } from "./nodes/BoolNode";
+import { TriggerNode } from "./nodes/TriggerNode";
 import { SubgraphNode } from "./nodes/SubgraphNode";
 import { SubgraphInputNode } from "./nodes/SubgraphInputNode";
 import { SubgraphOutputNode } from "./nodes/SubgraphOutputNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
+import { BlueprintBrowserModal } from "./BlueprintBrowserModal";
 import { BreadcrumbNav } from "./BreadcrumbNav";
 import { GraphToolbar } from "./GraphToolbar";
 import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
@@ -84,6 +86,7 @@ const nodeTypes = {
   vace: VaceNode,
   midi: MidiNode,
   bool: BoolNode,
+  trigger: TriggerNode,
   subgraph: SubgraphNode,
   subgraph_input: SubgraphInputNode,
   subgraph_output: SubgraphOutputNode,
@@ -221,6 +224,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     );
 
     const [showAddNodeModal, setShowAddNodeModal] = useState(false);
+    const [showBlueprintModal, setShowBlueprintModal] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [pendingNodePosition, setPendingNodePosition] = useState<{
       x: number;
@@ -263,20 +267,22 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       addSubgraphPortRef
     );
 
-    const { handleNodeTypeSelect, handleDeleteNodes } = useNodeFactories({
-      nodes,
-      setNodes,
-      setEdges,
-      availablePipelineIds,
-      portsMap,
-      handlePipelineSelect,
-      setSelectedNodeIds,
-      spoutOutputAvailable,
-      ndiOutputAvailable,
-      syphonOutputAvailable,
-      pendingNodePosition,
-      setPendingNodePosition,
-    });
+    const { handleNodeTypeSelect, handleDeleteNodes, insertBlueprint } =
+      useNodeFactories({
+        nodes,
+        setNodes,
+        setEdges,
+        availablePipelineIds,
+        portsMap,
+        handlePipelineSelect,
+        setSelectedNodeIds,
+        spoutOutputAvailable,
+        ndiOutputAvailable,
+        syphonOutputAvailable,
+        pendingNodePosition,
+        setPendingNodePosition,
+        handleEdgeDelete,
+      });
 
     const { createSubgraphFromSelection, unpackSubgraph } =
       useSubgraphOperations({
@@ -524,6 +530,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                         nodes,
                         edges,
                         createSubgraphFromSelection,
+                        onOpenBlueprints: () => setShowBlueprintModal(true),
                       })
                     : buildNodeMenuItems({
                         contextNodeId: contextMenu.nodeId!,
@@ -547,6 +554,15 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                 setPendingNodePosition(null);
               }}
               onSelectNodeType={handleNodeTypeSelect}
+            />
+
+            <BlueprintBrowserModal
+              open={showBlueprintModal}
+              onClose={() => setShowBlueprintModal(false)}
+              onInsert={blueprint => {
+                insertBlueprint(blueprint, pendingNodePosition ?? undefined);
+                setPendingNodePosition(null);
+              }}
             />
 
             {selectionRect && (

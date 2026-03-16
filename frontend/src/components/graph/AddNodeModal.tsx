@@ -29,6 +29,7 @@ interface AddNodeModalProps {
       | "vace"
       | "midi"
       | "bool"
+      | "trigger"
       | "subgraph",
     subType?: string
   ) => void;
@@ -53,6 +54,7 @@ interface NodeCatalogItem {
     | "vace"
     | "midi"
     | "bool"
+    | "trigger"
     | "subgraph";
   subType?: string;
   name: string;
@@ -205,6 +207,13 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     description:
       "Convert number to boolean — gate (momentary) or toggle (latching)",
     color: "#34d399",
+    category: "Utility",
+  },
+  {
+    type: "trigger",
+    name: "Trigger",
+    description: "Momentary pulse button — fires a boolean bang on click",
+    color: "#f97316",
     category: "Utility",
   },
   {

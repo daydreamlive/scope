@@ -47,9 +47,7 @@ export function serializeNodes(
   });
 }
 
-export function serializeEdges(
-  edges: Edge[]
-): SerializedSubgraphEdge[] {
+export function serializeEdges(edges: Edge[]): SerializedSubgraphEdge[] {
   return edges.map(e => ({
     id: e.id,
     source: e.source,
@@ -88,9 +86,7 @@ export function deserializeNodes(
   });
 }
 
-export function deserializeEdges(
-  serialized: SerializedSubgraphEdge[]
-): Edge[] {
+export function deserializeEdges(serialized: SerializedSubgraphEdge[]): Edge[] {
   return serialized.map(e => ({
     id: e.id,
     source: e.source,

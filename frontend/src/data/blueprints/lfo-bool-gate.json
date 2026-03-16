@@ -1,0 +1,51 @@
+{
+  "name": "LFO Gate",
+  "description": "A sine FloatControl feeds a Bool gate node — pulses a boolean signal in rhythm with the LFO",
+  "category": "Controls",
+  "color": "#34d399",
+  "thumbnail": null,
+  "nodes": [
+    {
+      "id": "floatControl_lfo",
+      "type": "control",
+      "position": { "x": 0, "y": 0 },
+      "data": {
+        "label": "LFO",
+        "nodeType": "control",
+        "controlType": "float",
+        "controlPattern": "sine",
+        "controlSpeed": 1.0,
+        "controlMin": 0,
+        "controlMax": 1.0,
+        "isPlaying": false,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    },
+    {
+      "id": "bool_gate",
+      "type": "bool",
+      "position": { "x": 260, "y": 0 },
+      "data": {
+        "label": "Gate",
+        "nodeType": "bool",
+        "boolMode": "gate",
+        "boolThreshold": 0.5,
+        "value": false,
+        "parameterOutputs": [
+          { "name": "value", "type": "boolean", "defaultValue": false }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_lfo",
+      "source": "floatControl_lfo",
+      "sourceHandle": "param:value",
+      "target": "bool_gate",
+      "targetHandle": "param:value"
+    }
+  ]
+}

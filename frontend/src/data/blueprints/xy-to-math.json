@@ -1,0 +1,70 @@
+{
+  "name": "XY Pad Split",
+  "description": "An XY Pad wired to two separate Math nodes — one for X, one for Y — ready for independent parameter control",
+  "category": "UI",
+  "color": "#38bdf8",
+  "thumbnail": null,
+  "nodes": [
+    {
+      "id": "xypad_1",
+      "type": "xypad",
+      "position": { "x": 0, "y": 60 },
+      "data": {
+        "label": "XY Pad",
+        "nodeType": "xypad",
+        "padMinX": 0,
+        "padMaxX": 1,
+        "padMinY": 0,
+        "padMaxY": 1,
+        "padX": 0.5,
+        "padY": 0.5,
+        "parameterOutputs": [
+          { "name": "x", "type": "number", "defaultValue": 0.5 },
+          { "name": "y", "type": "number", "defaultValue": 0.5 }
+        ]
+      }
+    },
+    {
+      "id": "math_x",
+      "type": "math",
+      "position": { "x": 280, "y": 0 },
+      "data": {
+        "label": "Scale X",
+        "nodeType": "math",
+        "mathOp": "multiply",
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    },
+    {
+      "id": "math_y",
+      "type": "math",
+      "position": { "x": 280, "y": 140 },
+      "data": {
+        "label": "Scale Y",
+        "nodeType": "math",
+        "mathOp": "multiply",
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_x",
+      "source": "xypad_1",
+      "sourceHandle": "param:x",
+      "target": "math_x",
+      "targetHandle": "param:a"
+    },
+    {
+      "id": "e_y",
+      "source": "xypad_1",
+      "sourceHandle": "param:y",
+      "target": "math_y",
+      "targetHandle": "param:a"
+    }
+  ]
+}
