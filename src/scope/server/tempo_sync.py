@@ -19,6 +19,22 @@ BEAT_STATE_KEYS = frozenset(
     {"bpm", "beat_phase", "bar_position", "beat_count", "is_playing"}
 )
 
+
+def get_beat_boundary(rate: str, beat_count: int, beats_per_bar: int) -> int:
+    """Return an integer boundary index for the current beat position.
+
+    The boundary increments each time we cross the configured rate's period.
+    """
+    if rate == "beat":
+        return beat_count
+    elif rate == "bar":
+        return beat_count // max(beats_per_bar, 1)
+    elif rate == "2_bar":
+        return beat_count // max(beats_per_bar * 2, 1)
+    elif rate == "4_bar":
+        return beat_count // max(beats_per_bar * 4, 1)
+    return -1
+
 CLIENT_BEAT_STATE_STALE_SECONDS = 2.0
 
 

@@ -14,6 +14,7 @@ from scope.core.pipelines.controller import parse_ctrl_input
 
 from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineNotAvailableException
+from .tempo_sync import get_beat_boundary
 
 logger = logging.getLogger(__name__)
 
@@ -413,41 +414,7 @@ class PipelineProcessor:
                     call_params[port] = frame_list
 
             if self.tempo_sync is not None:
-                beat_state = self.tempo_sync.get_beat_state()
-                if beat_state is not None:
-                    call_params["bpm"] = beat_state.bpm
-                    call_params["beat_phase"] = beat_state.beat_phase
-                    call_params["bar_position"] = beat_state.bar_position
-                    call_params["beat_count"] = beat_state.beat_count
-                    call_params["is_playing"] = beat_state.is_playing
-
-                    if self.modulation_engine is not None:
-                        call_params = self.modulation_engine.apply(
-                            beat_phase=beat_state.beat_phase,
-                            bar_position=beat_state.bar_position,
-                            beat_count=beat_state.beat_count,
-                            beats_per_bar=self.tempo_sync.beats_per_bar,
-                            params=call_params,
-                        )
-
-                    # Beat-synced cache reset: check if we crossed a boundary
-                    if self._beat_cache_reset_rate != "none":
-                        boundary = self._get_beat_boundary(
-                            beat_state.beat_count,
-                            self.tempo_sync.beats_per_bar,
-                        )
-                        if (
-                            boundary != self._last_reset_boundary
-                            and self._last_reset_boundary >= 0
-                        ):
-                            call_params["init_cache"] = True
-                            call_params["base_seed"] = random.randint(0, 2**31)
-                            logger.info(
-                                "[BEAT RESET] Cache reset + seed change at boundary %d (rate=%s)",
-                                boundary,
-                                self._beat_cache_reset_rate,
-                            )
-                        self._last_reset_boundary = boundary
+                call_params = self._apply_tempo_sync(call_params)
 
             processing_start = time.time()
             output_dict = self.pipeline(**call_params)
@@ -550,21 +517,44 @@ class PipelineProcessor:
         self.is_prepared = True
         self._pending_cache_init = False
 
-    def _get_beat_boundary(self, beat_count: int, beats_per_bar: int) -> int:
-        """Return an integer boundary index for the current beat position.
+    def _apply_tempo_sync(self, call_params: dict) -> dict:
+        """Inject beat state, apply modulation, and handle beat-synced cache resets."""
+        beat_state = self.tempo_sync.get_beat_state()
+        if beat_state is None:
+            return call_params
 
-        The boundary increments each time we cross the configured rate's period.
-        """
-        rate = self._beat_cache_reset_rate
-        if rate == "beat":
-            return beat_count
-        elif rate == "bar":
-            return beat_count // max(beats_per_bar, 1)
-        elif rate == "2_bar":
-            return beat_count // max(beats_per_bar * 2, 1)
-        elif rate == "4_bar":
-            return beat_count // max(beats_per_bar * 4, 1)
-        return -1
+        call_params["bpm"] = beat_state.bpm
+        call_params["beat_phase"] = beat_state.beat_phase
+        call_params["bar_position"] = beat_state.bar_position
+        call_params["beat_count"] = beat_state.beat_count
+        call_params["is_playing"] = beat_state.is_playing
+
+        if self.modulation_engine is not None:
+            call_params = self.modulation_engine.apply(
+                beat_phase=beat_state.beat_phase,
+                bar_position=beat_state.bar_position,
+                beat_count=beat_state.beat_count,
+                beats_per_bar=self.tempo_sync.beats_per_bar,
+                params=call_params,
+            )
+
+        if self._beat_cache_reset_rate != "none":
+            boundary = get_beat_boundary(
+                self._beat_cache_reset_rate,
+                beat_state.beat_count,
+                self.tempo_sync.beats_per_bar,
+            )
+            if boundary != self._last_reset_boundary and self._last_reset_boundary >= 0:
+                call_params["init_cache"] = True
+                call_params["base_seed"] = random.randint(0, 2**31)
+                logger.info(
+                    "[BEAT RESET] Cache reset + seed change at boundary %d (rate=%s)",
+                    boundary,
+                    self._beat_cache_reset_rate,
+                )
+            self._last_reset_boundary = boundary
+
+        return call_params
 
     def _track_output_batch(self, num_frames: int, processing_time: float):
         """Track batch-level production throughput for FPS calculation.
