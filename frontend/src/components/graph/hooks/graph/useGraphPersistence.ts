@@ -4,6 +4,7 @@ import {
   graphConfigToFlow,
   flowToGraphConfig,
   extractParameterPorts,
+  parseHandleId,
 } from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 import type { PipelineSchemaInfo } from "../../../../lib/api";
@@ -189,9 +190,13 @@ export function colorEdges(
   return flowEdges.map(edge => {
     const sourceNode = enrichedNodes.find(n => n.id === edge.source);
     const style = buildEdgeStyle(sourceNode, edge.sourceHandle);
+    const parsed = parseHandleId(edge.sourceHandle);
+    const isTimelineTrigger =
+      sourceNode?.data.nodeType === "timeline" &&
+      parsed?.name?.startsWith("trigger_");
     return {
       ...edge,
-      type: "default",
+      type: isTimelineTrigger ? "timeline_trigger" : "default",
       reconnectable: "target" as const,
       style,
       animated: false,

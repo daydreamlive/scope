@@ -35,7 +35,11 @@ import { BoolNode } from "./nodes/BoolNode";
 import { SubgraphNode } from "./nodes/SubgraphNode";
 import { SubgraphInputNode } from "./nodes/SubgraphInputNode";
 import { SubgraphOutputNode } from "./nodes/SubgraphOutputNode";
+import { TimelineNode } from "./nodes/TimelineNode";
+import { TriggerActionNode } from "./nodes/TriggerActionNode";
+import { CurveNode } from "./nodes/CurveNode";
 import { CustomEdge } from "./CustomEdge";
+import { TimelineEdge } from "./TimelineEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
 import { BreadcrumbNav } from "./BreadcrumbNav";
@@ -87,10 +91,14 @@ const nodeTypes = {
   subgraph: SubgraphNode,
   subgraph_input: SubgraphInputNode,
   subgraph_output: SubgraphOutputNode,
+  timeline: TimelineNode,
+  trigger_action: TriggerActionNode,
+  curve: CurveNode,
 };
 
 const edgeTypes = {
   default: CustomEdge,
+  timeline_trigger: TimelineEdge,
 };
 
 export interface GraphEditorHandle {

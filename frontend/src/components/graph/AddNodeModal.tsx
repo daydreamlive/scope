@@ -29,7 +29,10 @@ interface AddNodeModalProps {
       | "vace"
       | "midi"
       | "bool"
-      | "subgraph",
+      | "subgraph"
+      | "timeline"
+      | "trigger_action"
+      | "curve",
     subType?: string
   ) => void;
 }
@@ -53,7 +56,10 @@ interface NodeCatalogItem {
     | "vace"
     | "midi"
     | "bool"
-    | "subgraph";
+    | "subgraph"
+    | "timeline"
+    | "trigger_action"
+    | "curve";
   subType?: string;
   name: string;
   description: string;
@@ -213,6 +219,33 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     description: "Pass-through dot to organize long connection lines",
     color: "#9ca3af",
     category: "Utility",
+  },
+  // Amber – Timeline
+  {
+    type: "timeline",
+    name: "Timeline",
+    description:
+      "Sequencer with time-based triggers that fire at specific positions",
+    color: "#f59e0b",
+    category: "Controls",
+  },
+  // Amber – TriggerAction
+  {
+    type: "trigger_action",
+    name: "TriggerAction",
+    description:
+      "Performs an action when triggered: set value, animate, toggle, or cycle",
+    color: "#f59e0b",
+    category: "Controls",
+  },
+  // Amber – Curve
+  {
+    type: "curve",
+    name: "Curve",
+    description:
+      "Drawable automation curve that shapes TriggerAction animations",
+    color: "#f59e0b",
+    category: "Controls",
   },
   // Cyan – Subgraph
   {

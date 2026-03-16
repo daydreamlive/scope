@@ -21,6 +21,7 @@ type TargetRule = (ctx: {
   sourceType: string;
   targetParsedName: string;
   targetNode: Node<FlowNodeData>;
+  sourceNode: Node<FlowNodeData>;
 }) => boolean | undefined; // undefined = "this rule doesn't apply, fall through"
 
 /**
@@ -94,6 +95,20 @@ const TARGET_RULES: TargetRule[] = [
     )
       return sourceType === "number";
     return undefined;
+  },
+  // timeline node – play input accepts number only
+  ({ sourceType, targetParsedName, targetNode }) => {
+    if (targetNode.data.nodeType !== "timeline") return undefined;
+    if (targetParsedName === "play") return sourceType === "number";
+    return false;
+  },
+  // trigger_action node – trigger input accepts number, curve input accepts number (from curve node)
+  ({ sourceType, targetParsedName, targetNode, sourceNode }) => {
+    if (targetNode.data.nodeType !== "trigger_action") return undefined;
+    if (targetParsedName === "trigger") return sourceType === "number";
+    if (targetParsedName === "curve")
+      return sourceNode.data.nodeType === "curve";
+    return false;
   },
   // tuple
   ({ sourceType, targetParsedName, targetNode }) => {
@@ -273,6 +288,7 @@ export function validateConnection(
         sourceType,
         targetParsedName: targetParsed.name,
         targetNode,
+        sourceNode,
       });
       if (result !== undefined) return result;
     }

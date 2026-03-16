@@ -46,6 +46,9 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "bool",
   "subgraph_input",
   "subgraph",
+  "timeline",
+  "trigger_action",
+  "curve",
 ]);
 
 const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
@@ -195,6 +198,24 @@ export function useValueForwarding(
         }
       } else if (node.data.nodeType === "bool") {
         valuesToForward.push({ handleName: "value", value: node.data.value });
+      } else if (node.data.nodeType === "timeline") {
+        // Forward trigger pulse values (0 or 1) for each trigger
+        const triggerValues = (node.data.triggerValues ?? {}) as Record<string, number>;
+        const triggers = node.data.timelineTriggers ?? [];
+        for (const trigger of triggers) {
+          valuesToForward.push({
+            handleName: `trigger_${trigger.id}`,
+            value: triggerValues[trigger.id] ?? 0,
+          });
+        }
+      } else if (node.data.nodeType === "trigger_action") {
+        valuesToForward.push({
+          handleName: "value",
+          value: node.data.currentValue,
+        });
+      } else if (node.data.nodeType === "curve") {
+        // Curve node: the output value is just 0 (curve data is read directly from node data by TriggerAction)
+        valuesToForward.push({ handleName: "value", value: 0 });
       } else if (
         node.data.nodeType === "subgraph_input" ||
         node.data.nodeType === "subgraph"
@@ -206,7 +227,10 @@ export function useValueForwarding(
       }
 
       const isAnimated =
-        node.data.nodeType === "control" || node.data.nodeType === "math";
+        node.data.nodeType === "control" ||
+        node.data.nodeType === "math" ||
+        node.data.nodeType === "timeline" ||
+        node.data.nodeType === "trigger_action";
       if (isAnimated) {
         const now = Date.now();
         const lastTime = lastForwardTimeRef.current[node.id] || 0;

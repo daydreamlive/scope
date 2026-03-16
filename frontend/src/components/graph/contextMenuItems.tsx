@@ -24,6 +24,8 @@ import {
   Music,
   FolderOpen,
   PackageOpen,
+  Timer,
+  Zap,
 } from "lucide-react";
 import type { Node, Edge } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
@@ -50,7 +52,10 @@ type NodeTypeSelectFn = (
     | "vace"
     | "midi"
     | "bool"
-    | "subgraph",
+    | "subgraph"
+    | "timeline"
+    | "trigger_action"
+    | "curve",
   subType?: string
 ) => void;
 
@@ -125,6 +130,24 @@ export function buildPaneMenuItems(deps: {
           icon: <Music />,
           onClick: () => handleNodeTypeSelect("midi"),
           keywords: ["midi", "controller", "cc", "knob", "fader"],
+        },
+        {
+          label: "Timeline",
+          icon: <Timer />,
+          onClick: () => handleNodeTypeSelect("timeline"),
+          keywords: ["timeline", "sequencer", "trigger", "time", "cue"],
+        },
+        {
+          label: "TriggerAction",
+          icon: <Zap />,
+          onClick: () => handleNodeTypeSelect("trigger_action"),
+          keywords: ["trigger", "action", "set", "animate", "toggle", "cycle"],
+        },
+        {
+          label: "Curve",
+          icon: <Zap />,
+          onClick: () => handleNodeTypeSelect("curve"),
+          keywords: ["curve", "automation", "shape", "envelope", "draw"],
         },
       ],
     },

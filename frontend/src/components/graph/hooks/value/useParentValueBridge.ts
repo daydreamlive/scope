@@ -302,6 +302,146 @@ export function useParentValueBridge(
     };
   }, [depth, buildMappings, writeValue]);
 
+  // ── Timeline animation bridge ────────────────────────────────────────────
+  // When the parent has a playing timeline that feeds into the current
+  // subgraph, we need to keep its playback alive and fire triggers.
+  useEffect(() => {
+    if (depth === 0) return;
+    const mappings = buildMappings();
+    const timelineMappings = mappings.filter(
+      m =>
+        m.sourceNode.data.nodeType === "timeline" &&
+        m.sourceNode.data.isPlaying === true
+    );
+    if (timelineMappings.length === 0) return;
+
+    // Group by source timeline node
+    const byTimeline = new Map<string, SourceMapping[]>();
+    for (const m of timelineMappings) {
+      const arr = byTimeline.get(m.sourceNode.id) ?? [];
+      arr.push(m);
+      byTimeline.set(m.sourceNode.id, arr);
+    }
+
+    // Per-timeline state
+    const timelineState = new Map<
+      string,
+      {
+        startTime: number;
+        offset: number;
+        duration: number;
+        loop: boolean;
+        triggers: Array<{ id: string; time: number }>;
+        firedSet: Set<string>;
+      }
+    >();
+
+    for (const [nodeId, _portMappings] of byTimeline) {
+      const srcNode = mappings.find(m => m.sourceNode.id === nodeId)
+        ?.sourceNode;
+      if (!srcNode) continue;
+      const d = srcNode.data;
+      const duration = (d.timelineDuration as number) ?? 10;
+      const loop = (d.timelineLoop as boolean) ?? false;
+      const triggers = (d.timelineTriggers ?? []) as Array<{
+        id: string;
+        time: number;
+      }>;
+
+      // Reconstruct position from wall-clock timestamps if available
+      const wallStart = d._timelineWallStart as number | undefined;
+      const wallOffset = (d._timelineWallOffset as number) ?? 0;
+      let reconstructedOffset: number;
+
+      if (wallStart) {
+        const wallElapsed = (Date.now() - wallStart) / 1000;
+        reconstructedOffset = wallOffset + wallElapsed;
+        if (loop && duration > 0) {
+          reconstructedOffset = reconstructedOffset % duration;
+        } else if (reconstructedOffset > duration) {
+          reconstructedOffset = duration;
+        }
+      } else {
+        reconstructedOffset = (d.timelineCurrentTime as number) ?? 0;
+      }
+
+      const firedSet = new Set<string>();
+      // Mark triggers already past the current position
+      for (const t of triggers) {
+        if (t.time <= reconstructedOffset) firedSet.add(t.id);
+      }
+      timelineState.set(nodeId, {
+        startTime: performance.now(),
+        offset: reconstructedOffset,
+        duration,
+        loop,
+        triggers,
+        firedSet,
+      });
+    }
+
+    let running = true;
+    let handle: number;
+
+    const animate = () => {
+      if (!running) return;
+
+      for (const [nodeId, state] of timelineState) {
+        const elapsed =
+          (performance.now() - state.startTime) / 1000;
+        let newTime = state.offset + elapsed;
+
+        if (newTime >= state.duration) {
+          if (state.loop) {
+            newTime = newTime % state.duration;
+            state.startTime = performance.now();
+            state.offset = 0;
+            state.firedSet.clear();
+          } else {
+            newTime = state.duration;
+            // Timeline finished — write 0s for all triggers
+            const portMaps = byTimeline.get(nodeId) ?? [];
+            for (const pm of portMaps) {
+              writeValue(pm.portName, 0);
+            }
+            continue;
+          }
+        }
+
+        // Check triggers
+        for (const trigger of state.triggers) {
+          if (
+            trigger.time <= newTime &&
+            !state.firedSet.has(trigger.id)
+          ) {
+            state.firedSet.add(trigger.id);
+
+            // Find port mapping for this trigger
+            const portMaps = byTimeline.get(nodeId) ?? [];
+            for (const pm of portMaps) {
+              const parsed = parseHandleId(pm.sourceHandle);
+              if (parsed && parsed.name === `trigger_${trigger.id}`) {
+                writeValue(pm.portName, 1);
+                // Reset after brief pulse
+                setTimeout(() => {
+                  writeValue(pm.portName, 0);
+                }, 50);
+              }
+            }
+          }
+        }
+      }
+
+      handle = requestAnimationFrame(animate);
+    };
+
+    handle = requestAnimationFrame(animate);
+    return () => {
+      running = false;
+      cancelAnimationFrame(handle);
+    };
+  }, [depth, buildMappings, writeValue]);
+
   // ── Subgraph source evaluation (rAF loop) ──────────────────────────────
   useEffect(() => {
     if (depth === 0) return;
@@ -414,6 +554,7 @@ export function useParentValueBridge(
       // Skip types handled by live bridges above
       if (t === "midi") continue;
       if (t === "control" && mapping.sourceNode.data.isPlaying) continue;
+      if (t === "timeline" && mapping.sourceNode.data.isPlaying) continue;
       if (t === "subgraph") continue; // handled by subgraph eval rAF
 
       const val = getAnyValueFromNode(mapping.sourceNode, mapping.sourceHandle);

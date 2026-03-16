@@ -55,6 +55,21 @@ export function getNumberFromNode(
     if (typeof val === "boolean") return val ? 1 : 0;
     return null;
   }
+  if (t === "timeline") {
+    // Trigger outputs: read from triggerValues map
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    // Handle name is "trigger_{triggerId}"
+    const triggerId = parsed.name.replace("trigger_", "");
+    const triggerValues = node.data.triggerValues as Record<string, number> | undefined;
+    return triggerValues?.[triggerId] ?? 0;
+  }
+  if (t === "trigger_action") {
+    const val = node.data.currentValue;
+    return typeof val === "number" ? val : null;
+  }
+  if (t === "curve") return 0; // curve shape data is read directly; output value is placeholder
   // Boundary input / subgraph — read from portValues
   if (t === "subgraph_input" || t === "subgraph") {
     const pv = node.data.portValues as Record<string, unknown> | undefined;
@@ -80,6 +95,11 @@ export function getStringFromNode(node: Node<FlowNodeData>): string | null {
     const val = node.data.currentValue;
     return typeof val === "string" ? val : null;
   }
+  if (t === "trigger_action") {
+    const val = node.data.currentValue;
+    return typeof val === "string" ? val : null;
+  }
+  if (t === "curve") return null; // curve never outputs strings
   if (t === "subgraph_input" || t === "subgraph") {
     const pv = node.data.portValues as Record<string, unknown> | undefined;
     if (!pv) return null;
@@ -146,6 +166,18 @@ export function getAnyValueFromNode(
     if (!vals || isNaN(idx) || idx >= vals.length) return null;
     return vals[idx];
   }
+  if (t === "timeline") {
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    const triggerId = parsed.name.replace("trigger_", "");
+    const triggerValues = node.data.triggerValues as Record<string, number> | undefined;
+    return triggerValues?.[triggerId] ?? 0;
+  }
+  if (t === "trigger_action") {
+    return node.data.currentValue ?? null;
+  }
+  if (t === "curve") return 0;
   if (t === "subgraph" || t === "subgraph_input") {
     const pv = node.data.portValues as Record<string, unknown> | undefined;
     if (!pv || !sourceHandleId) return null;

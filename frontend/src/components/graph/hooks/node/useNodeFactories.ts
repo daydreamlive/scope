@@ -28,7 +28,10 @@ type NodeTypeKey =
   | "bool"
   | "subgraph"
   | "subgraph_input"
-  | "subgraph_output";
+  | "subgraph_output"
+  | "timeline"
+  | "trigger_action"
+  | "curve";
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -322,6 +325,57 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       subgraphOutputs: [],
     },
   },
+  timeline: {
+    type: "timeline",
+    idPrefix: "timeline",
+    defaultX: 50,
+    style: { width: 500, height: 140 },
+    data: {
+      label: "Timeline",
+      nodeType: "timeline",
+      timelineDuration: 10,
+      timelineTriggers: [],
+      timelineLoop: false,
+      isPlaying: false,
+      timelineCurrentTime: 0,
+      triggerValues: {},
+    },
+  },
+  trigger_action: {
+    type: "trigger_action",
+    idPrefix: "trigger_action",
+    defaultX: 50,
+    data: {
+      label: "TriggerAction",
+      nodeType: "trigger_action",
+      triggerActionType: "set_number",
+      triggerSetValue: 0,
+      triggerAnimateFrom: 0,
+      triggerAnimateTo: 1,
+      triggerAnimateDuration: 1,
+      triggerAnimateCurve: "linear",
+      triggerToggleState: false,
+      triggerCycleItems: ["item1", "item2", "item3"],
+      triggerCycleIndex: 0,
+      currentValue: 0,
+      parameterOutputs: [{ name: "value", type: "number", defaultValue: 0 }],
+    },
+  },
+  curve: {
+    type: "curve",
+    idPrefix: "curve",
+    defaultX: 50,
+    data: {
+      label: "Curve",
+      nodeType: "curve",
+      curvePoints: [
+        { x: 0, y: 0 },
+        { x: 1, y: 1 },
+      ],
+      curveMin: 0,
+      curveMax: 1,
+    },
+  },
 };
 
 interface UseNodeFactoriesArgs {
@@ -405,7 +459,10 @@ export function useNodeFactories({
         | "vace"
         | "midi"
         | "bool"
-        | "subgraph",
+        | "subgraph"
+        | "timeline"
+        | "trigger_action"
+        | "curve",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;

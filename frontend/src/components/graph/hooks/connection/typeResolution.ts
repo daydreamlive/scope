@@ -36,6 +36,15 @@ export function resolveSourceType(
   if (nt === "vace") return "vace";
   if (nt === "midi") return "number";
   if (nt === "bool") return "boolean";
+  if (nt === "timeline") return "number"; // trigger outputs are number pulses (0/1)
+  if (nt === "curve") return "number"; // curve node output (shape data is read directly via node data)
+  if (nt === "trigger_action") {
+    // Output type depends on action type
+    const at = node.data.triggerActionType;
+    if (at === "set_string" || at === "cycle_strings") return "string";
+    if (at === "set_bool" || at === "toggle_bool") return "boolean";
+    return "number"; // set_number, animate_number, default
+  }
   if (nt === "reroute") {
     // Walk upstream
     for (const e of edges) {
@@ -87,6 +96,15 @@ export function resolveTargetType(
     if (targetParamName === "video") {
       return "video_path";
     }
+    return undefined;
+  }
+  if (nt === "timeline") {
+    if (targetParamName === "play") return "number";
+    return undefined;
+  }
+  if (nt === "trigger_action") {
+    if (targetParamName === "trigger") return "number";
+    if (targetParamName === "curve") return "number";
     return undefined;
   }
   if (nt === "reroute") return undefined; // accepts any

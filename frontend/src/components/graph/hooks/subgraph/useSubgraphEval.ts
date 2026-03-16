@@ -29,6 +29,65 @@ type SetNodes = (
   updater: (nds: Node<FlowNodeData>[]) => Node<FlowNodeData>[]
 ) => void;
 
+/** Per-trigger_action node state that persists across rAF evaluation ticks. */
+interface TriggerActionEvalState {
+  lastTriggerInput: number;
+  currentValue: unknown;
+  // animate_number fields
+  animStartTime?: number;
+  animFrom?: number;
+  animTo?: number;
+  animDuration?: number;
+  animCurve?: string;
+  // toggle_bool / cycle_strings state
+  toggleState?: boolean;
+  cycleIndex?: number;
+}
+
+/** Keyed by inner node id. */
+export type EvalStateStore = Map<string, TriggerActionEvalState>;
+
+/* ── Easing functions ────────────────────────────────────────────────────── */
+
+function easeLinear(t: number): number {
+  return t;
+}
+function easeIn(t: number): number {
+  return t * t;
+}
+function easeOut(t: number): number {
+  return t * (2 - t);
+}
+function easeInOut(t: number): number {
+  return t < 0.5 ? 2 * t * t : -1 + (4 - 2 * t) * t;
+}
+
+const EASING_FNS: Record<string, (t: number) => number> = {
+  linear: easeLinear,
+  ease_in: easeIn,
+  ease_out: easeOut,
+  ease_in_out: easeInOut,
+};
+
+/** Interpolate y from sorted breakpoints (both axes normalized 0-1). */
+function interpolateCurvePoints(
+  points: Array<{ x: number; y: number }>,
+  t: number
+): number {
+  if (points.length === 0) return t;
+  if (points.length === 1) return points[0].y;
+  if (t <= points[0].x) return points[0].y;
+  if (t >= points[points.length - 1].x) return points[points.length - 1].y;
+  for (let i = 0; i < points.length - 1; i++) {
+    if (t >= points[i].x && t <= points[i + 1].x) {
+      const segLen = points[i + 1].x - points[i].x;
+      const localT = segLen > 0 ? (t - points[i].x) / segLen : 0;
+      return points[i].y + localT * (points[i + 1].y - points[i].y);
+    }
+  }
+  return points[points.length - 1].y;
+}
+
 /* ── Pure evaluator ───────────────────────────────────────────────────────── */
 
 /**
@@ -40,7 +99,8 @@ export function evaluateInnerGraph(
   innerEdges: SerializedSubgraphEdge[],
   subgraphInputs: SubgraphPort[],
   subgraphOutputs: SubgraphPort[],
-  inputPortValues: Record<string, unknown>
+  inputPortValues: Record<string, unknown>,
+  stateStore?: EvalStateStore
 ): Record<string, unknown> {
   // Build a map of nodeId → node data for quick access
   const nodeMap = new Map<string, Record<string, unknown>>();
@@ -150,7 +210,10 @@ export function evaluateInnerGraph(
     }
 
     // Compute output(s) based on node type
-    const outputValues = evaluateNode(nodeType, data, inputs);
+    const outputValues = evaluateNode(
+      nodeType, nid, data, inputs, stateStore,
+      nodeMap, incomingEdges.get(nid)
+    );
 
     // Store computed outputs
     for (const [handleName, val] of outputValues) {
@@ -192,11 +255,19 @@ export function evaluateInnerGraph(
 
 /**
  * Evaluate a single node, returning a map of output handle name → value.
+ * An optional `stateStore` provides persistent per-node state across ticks
+ * (used for trigger_action rising-edge detection, value latching, and animation).
  */
 function evaluateNode(
   nodeType: string,
+  nodeId: string,
   data: Record<string, unknown>,
-  inputs: Map<string, unknown>
+  inputs: Map<string, unknown>,
+  stateStore?: EvalStateStore,
+  /** Optional: map of all inner node data (keyed by node id) for cross-node lookups */
+  nodeMap?: Map<string, Record<string, unknown>>,
+  /** Optional: incoming edges for this node, for looking up source nodes */
+  incomingEdgesForNode?: SerializedSubgraphEdge[]
 ): Map<string, unknown> {
   const out = new Map<string, unknown>();
 
@@ -250,6 +321,133 @@ function evaluateNode(
           out.set(`knob_${i}`, knobs[i].value);
         }
       }
+      break;
+    }
+    case "timeline": {
+      // Output each trigger's current value from triggerValues
+      const triggerValues = (data.triggerValues ?? {}) as Record<
+        string,
+        number
+      >;
+      const triggers = (data.timelineTriggers ?? []) as Array<{
+        id: string;
+        time: number;
+      }>;
+      for (const trigger of triggers) {
+        out.set(`trigger_${trigger.id}`, triggerValues[trigger.id] ?? 0);
+      }
+      break;
+    }
+    case "curve": {
+      // Curve node: shape data is read directly by trigger_action; output is placeholder
+      out.set("value", 0);
+      break;
+    }
+    case "trigger_action": {
+      const actionType = (data.triggerActionType as string) ?? "set_number";
+      const triggerInput = toNumber(inputs.get("trigger")) ?? 0;
+
+      // Get or create persistent state for this node
+      let state = stateStore?.get(nodeId);
+      if (!state) {
+        state = {
+          lastTriggerInput: 0,
+          currentValue: data.currentValue ?? 0,
+          toggleState: (data.triggerToggleState as boolean) ?? false,
+          cycleIndex: (data.triggerCycleIndex as number) ?? 0,
+        };
+        stateStore?.set(nodeId, state);
+      }
+
+      // Detect rising edge: previous <= 0 and current > 0
+      const risingEdge = state.lastTriggerInput <= 0 && triggerInput > 0;
+      state.lastTriggerInput = triggerInput;
+
+      if (risingEdge) {
+        switch (actionType) {
+          case "set_number":
+            state.currentValue = Number(data.triggerSetValue) || 0;
+            break;
+          case "set_string":
+            state.currentValue = String(data.triggerSetValue ?? "");
+            break;
+          case "set_bool":
+            state.currentValue = data.triggerSetValue ? 1 : 0;
+            break;
+          case "animate_number": {
+            // Start animation: record start time and params
+            state.animStartTime = Date.now();
+            state.animFrom = (data.triggerAnimateFrom as number) ?? 0;
+            state.animTo = (data.triggerAnimateTo as number) ?? 1;
+            state.animDuration = (data.triggerAnimateDuration as number) ?? 1;
+            state.animCurve = (data.triggerAnimateCurve as string) ?? "linear";
+            state.currentValue = state.animFrom;
+            break;
+          }
+          case "toggle_bool": {
+            state.toggleState = !state.toggleState;
+            state.currentValue = state.toggleState ? 1 : 0;
+            break;
+          }
+          case "cycle_strings": {
+            const items = (data.triggerCycleItems as string[]) ?? [];
+            if (items.length > 0) {
+              state.cycleIndex = ((state.cycleIndex ?? 0) + 1) % items.length;
+              state.currentValue = items[state.cycleIndex] ?? "";
+            }
+            break;
+          }
+        }
+      }
+
+      // For animate_number, interpolate if animation is in progress
+      if (
+        actionType === "animate_number" &&
+        state.animStartTime !== undefined &&
+        state.animDuration !== undefined &&
+        state.animFrom !== undefined &&
+        state.animTo !== undefined
+      ) {
+        const elapsed = (Date.now() - state.animStartTime) / 1000;
+        const progress = Math.min(elapsed / state.animDuration, 1);
+
+        // Check for connected curve node to use custom curve shape + value trajectory
+        let curvePoints: Array<{ x: number; y: number }> | undefined;
+        let curveMin = 0;
+        let curveMax = 1;
+        if (nodeMap && incomingEdgesForNode) {
+          const curveHandleId = buildHandleId("param", "curve");
+          for (const e of incomingEdgesForNode) {
+            if (e.targetHandle === curveHandleId && e.source) {
+              const srcData = nodeMap.get(e.source);
+              if (srcData && srcData.__nodeType === "curve") {
+                curvePoints = srcData.curvePoints as Array<{ x: number; y: number }> | undefined;
+                curveMin = (srcData.curveMin as number) ?? 0;
+                curveMax = (srcData.curveMax as number) ?? 1;
+              }
+              break;
+            }
+          }
+        }
+
+        if (curvePoints && curvePoints.length >= 2) {
+          // Curve defines full value trajectory: y (0-1) maps to [curveMin, curveMax]
+          const curveY = interpolateCurvePoints(curvePoints, progress);
+          state.currentValue = curveMin + (curveMax - curveMin) * curveY;
+        } else {
+          // Preset easing between From and To
+          const easeFn = EASING_FNS[state.animCurve ?? "linear"] ?? easeLinear;
+          const eased = easeFn(progress);
+          state.currentValue =
+            state.animFrom + (state.animTo - state.animFrom) * eased;
+        }
+        // Clear animation state once complete
+        if (progress >= 1) {
+          state.animStartTime = undefined;
+        }
+      }
+
+      out.set("value", state.currentValue ?? 0);
       break;
     }
     case "subgraph": {
@@ -319,6 +517,9 @@ export function useSubgraphEval(
   // Track last computed outputs per subgraph node to avoid unnecessary updates
   const lastOutputsRef = useRef<Map<string, string>>(new Map());
 
+  // Persistent state stores for stateful inner nodes (keyed by subgraph node id)
+  const stateStoresRef = useRef<Map<string, EvalStateStore>>(new Map());
+
   const rafHandle = useRef<number | null>(null);
 
   const evaluate = useCallback(() => {
@@ -361,13 +562,20 @@ export function useSubgraphEval(
         );
       }
 
+      // Get or create state store for this subgraph
+      if (!stateStoresRef.current.has(sg.id)) {
+        stateStoresRef.current.set(sg.id, new Map());
+      }
+      const store = stateStoresRef.current.get(sg.id)!;
+
       // Evaluate the inner graph
       const outputValues = evaluateInnerGraph(
         innerNodes,
         innerEdges,
         sgInputs,
         sgOutputs,
-        inputPortValues
+        inputPortValues,
+        store
       );
 
       // Merge input values into portValues too (so inputs are also readable from portValues)

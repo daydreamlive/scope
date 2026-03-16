@@ -92,7 +92,10 @@ export interface FlowNodeData {
     | "bool"
     | "subgraph"
     | "subgraph_input"
-    | "subgraph_output";
+    | "subgraph_output"
+    | "timeline"
+    | "trigger_action"
+    | "curve";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -278,6 +281,56 @@ export interface FlowNodeData {
   onPortRename?: (oldName: string, newName: string, portType: string) => void;
   /** Live port values for boundary / subgraph nodes (transient, not serialized). */
   portValues?: Record<string, unknown>;
+
+  /* ── Timeline node fields ── */
+  /** For timeline nodes: total duration in seconds */
+  timelineDuration?: number;
+  /** For timeline nodes: user-placed trigger markers */
+  timelineTriggers?: Array<{ id: string; time: number; label?: string }>;
+  /** For timeline nodes: current playhead position (transient, not serialized) */
+  timelineCurrentTime?: number;
+  /** For timeline nodes: whether to loop at the end */
+  timelineLoop?: boolean;
+  /** For timeline nodes: current trigger output values (trigger_id → 0 or 1) */
+  triggerValues?: Record<string, number>;
+  /** For timeline nodes: wall-clock timestamp (Date.now()) when play started (transient) */
+  _timelineWallStart?: number;
+  /** For timeline nodes: playhead offset when play started (transient) */
+  _timelineWallOffset?: number;
+
+  /* ── TriggerAction node fields ── */
+  /** For trigger_action nodes: the action type */
+  triggerActionType?:
+    | "set_string"
+    | "set_number"
+    | "set_bool"
+    | "animate_number"
+    | "toggle_bool"
+    | "cycle_strings";
+  /** For trigger_action nodes: static value for set_* actions */
+  triggerSetValue?: unknown;
+  /** For trigger_action nodes: animate_number start value */
+  triggerAnimateFrom?: number;
+  /** For trigger_action nodes: animate_number end value */
+  triggerAnimateTo?: number;
+  /** For trigger_action nodes: animate_number duration in seconds */
+  triggerAnimateDuration?: number;
+  /** For trigger_action nodes: easing curve for animate_number */
+  triggerAnimateCurve?: "linear" | "ease_in" | "ease_out" | "ease_in_out";
+  /** For trigger_action nodes: current toggle state */
+  triggerToggleState?: boolean;
+  /** For trigger_action nodes: strings list for cycle_strings */
+  triggerCycleItems?: string[];
+  /** For trigger_action nodes: current index in cycle */
+  triggerCycleIndex?: number;
+
+  /* ── Curve node fields ── */
+  /** For curve nodes: breakpoints defining the shape, normalized 0-1 on both axes, sorted by x */
+  curvePoints?: Array<{ x: number; y: number }>;
+  /** For curve nodes: output range minimum (default 0) */
+  curveMin?: number;
+  /** For curve nodes: output range maximum (default 1) */
+  curveMax?: number;
 
   /* ── Node lock / pin / collapse ── */
   /** When true, parameter inputs on this node are disabled (read-only). */
@@ -666,6 +719,9 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "subgraph",
   "subgraph_input",
   "subgraph_output",
+  "timeline",
+  "trigger_action",
+  "curve",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
@@ -684,6 +740,10 @@ const NON_SERIALIZABLE_KEYS = new Set<string>([
   "onEnterSubgraph",
   "onPortRename",
   "portValues",
+  "timelineCurrentTime",
+  "triggerValues",
+  "_timelineWallStart",
+  "_timelineWallOffset",
 ]);
 
 /**

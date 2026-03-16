@@ -375,10 +375,17 @@ export function useConnectionLogic(
           style = buildEdgeStyle(sourceNode, conn.sourceHandle);
         }
 
+        // Use special edge type for timeline trigger handles
+        const srcNode = nodes.find(n => n.id === conn.source);
+        const parsedSrcHandle = parseHandleId(conn.sourceHandle);
+        const isTimelineTrigger =
+          srcNode?.data.nodeType === "timeline" &&
+          parsedSrcHandle?.name?.startsWith("trigger_");
+
         let updated = addEdge(
           {
             ...conn,
-            type: "default",
+            type: isTimelineTrigger ? "timeline_trigger" : "default",
             reconnectable: "target" as const,
             style,
             animated: false,
@@ -428,9 +435,13 @@ export function useConnectionLogic(
           ) {
             const sourceNode = nodes.find(n => n.id === e.source);
             const style = buildEdgeStyle(sourceNode, e.sourceHandle);
+            const parsed = parseHandleId(e.sourceHandle);
+            const isTlTrigger =
+              sourceNode?.data.nodeType === "timeline" &&
+              parsed?.name?.startsWith("trigger_");
             return {
               ...e,
-              type: "default",
+              type: isTlTrigger ? "timeline_trigger" : "default",
               reconnectable: "target" as const,
               style,
               animated: false,
