@@ -114,10 +114,9 @@ Video pipelines have processing latency — a parameter change applied at the ex
 
 **How to calibrate:**
 
-1. Load the **metronome** pipeline.
-2. Set a simulated latency with the `latency_ms` parameter.
-3. Enable quantization and toggle a color layer.
-4. Adjust the lookahead slider until the visual change lands exactly on the beat.
+1. Load any pipeline with a visible beat-synced effect (e.g. enable modulation on `noise_scale`).
+2. Enable quantization and adjust a parameter.
+3. Adjust the lookahead slider until the visual change lands exactly on the beat.
 
 ---
 
@@ -171,24 +170,6 @@ Some pipelines use cached state between frames. Beat cache reset regenerates the
 ## Prompt Cycling
 
 When you have multiple prompts in the timeline, prompt cycling automatically advances through them on beat boundaries. Set the cycle rate in the Tempo Sync section to control how often prompts advance.
-
----
-
-## Demo Pipelines
-
-Two pipelines are included specifically for testing and visualizing tempo sync:
-
-### Metronome
-
-A visual metronome for calibrating the lookahead setting:
-
-- Displays beat pulses, beat/bar numbers, and current BPM.
-- Has three color layers (A/B/C) that mix additively — toggle them with quantization enabled to test timing.
-- Includes a `latency_ms` parameter to simulate pipeline processing delay.
-
-### ModScope
-
-An oscilloscope that visualizes modulation output in real time. Use it to verify that your modulation settings produce the expected waveforms.
 
 ---
 
