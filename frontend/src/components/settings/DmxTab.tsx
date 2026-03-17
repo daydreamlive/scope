@@ -139,6 +139,7 @@ export function DmxTab({ isActive }: DmxTabProps) {
     try {
       const updated = await updateDmxSettings({ log_all_messages: checked });
       setStatus(prev => (prev ? { ...prev, ...updated } : prev));
+      setDirty(true);
     } catch (err) {
       toast.error("Failed to update DMX logging");
       console.error(err);
@@ -155,8 +156,12 @@ export function DmxTab({ isActive }: DmxTabProps) {
     try {
       const updated = await applyDmxPort(port);
       setStatus(prev => (prev ? { ...prev, ...updated } : prev));
-      setDirty(false);
-      toast.success(`DMX now listening on port ${updated.port ?? port}`);
+      if (updated.listening) {
+        setDirty(false);
+        toast.success(`DMX now listening on port ${updated.port ?? port}`);
+      } else {
+        toast.error("Failed to start listening on the requested port");
+      }
     } catch (err) {
       toast.error("Failed to apply port");
       console.error(err);
