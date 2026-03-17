@@ -17,7 +17,7 @@ import {
 
 type MidiNodeType = Node<FlowNodeData, "midi">;
 
-const COLOR = "#06b6d4"; // cyan-500
+const COLOR = "#38bdf8"; // sky-400 (number)
 
 /** Height of a single channel row (used for handle positioning). */
 const ROW_HEIGHT = 32;

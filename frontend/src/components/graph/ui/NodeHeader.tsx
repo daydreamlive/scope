@@ -22,6 +22,8 @@ interface NodeHeaderProps {
   collapsed?: boolean;
   /** Callback to toggle collapse/expand. When omitted the chevron is not rendered. */
   onCollapseToggle?: () => void;
+  /** Fires on double-click of the header bar (excluding the title text). */
+  onHeaderDoubleClick?: () => void;
 }
 
 export function NodeHeader({
@@ -31,6 +33,7 @@ export function NodeHeader({
   rightContent,
   collapsed = false,
   onCollapseToggle,
+  onHeaderDoubleClick,
 }: NodeHeaderProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
@@ -67,11 +70,15 @@ export function NodeHeader({
     [commit]
   );
 
-  const handleDoubleClick = useCallback(() => {
-    if (onTitleChange) {
-      setEditing(true);
-    }
-  }, [onTitleChange]);
+  const handleDoubleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (onTitleChange) {
+        e.stopPropagation();
+        setEditing(true);
+      }
+    },
+    [onTitleChange]
+  );
 
   const zoomedOut = useIsZoomedOut();
   const { locked, pinned, selected } = useNodeFlags();
@@ -84,6 +91,14 @@ export function NodeHeader({
     <div
       className={`${NODE_TOKENS.header} ${collapsed ? "!rounded-full !border-b-0 !pr-4" : ""} ${rightContent ? "justify-between" : ""} ${className}`}
       style={{ pointerEvents: "auto" }}
+      onDoubleClick={
+        onHeaderDoubleClick
+          ? e => {
+              e.stopPropagation();
+              onHeaderDoubleClick();
+            }
+          : undefined
+      }
     >
       <div className="flex items-center gap-2 min-w-0 flex-1">
         {onCollapseToggle ? (

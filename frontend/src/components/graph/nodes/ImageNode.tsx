@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import { createPortal } from "react-dom";
 import { Handle, Position, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { ImageIcon, Film, X } from "lucide-react";
+import { ImageIcon, X, Repeat, ArrowLeftRight } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
@@ -13,8 +13,8 @@ import { NodeCard, NodeHeader, NODE_TOKENS, collapsedHandleStyle } from "../ui";
 
 type ImageNodeType = Node<FlowNodeData, "image">;
 
-const IMAGE_COLOR = "#f472b6"; // pink-400
-const VIDEO_COLOR = "#38bdf8"; // sky-400
+const IMAGE_COLOR = "#fbbf24"; // amber-400 (string)
+const VIDEO_COLOR = "#eeeeee"; // white (video_path, matches stream:video)
 
 export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
   const { updateData } = useNodeData(id);
@@ -25,6 +25,7 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
   const imagePath = (data.imagePath as string) || "";
   const mediaType = data.mediaType || "image";
   const isVideo = mediaType === "video";
+  const videoLoopMode = data.videoLoopMode || "loop";
 
   /** Remove outgoing edges from this node whose sourceHandle no longer matches. */
   const cleanupStaleEdges = useCallback(
@@ -94,10 +95,14 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
                 onClick={() => setIsMediaPickerOpen(true)}
               >
                 {isVideo ? (
-                  <div className="w-full h-full flex flex-col items-center justify-center bg-[#1a1a1a]">
-                    <Film className="h-8 w-8 text-blue-400 mb-1" />
-                    <span className="text-[9px] text-[#999]">Video</span>
-                  </div>
+                  <video
+                    src={getAssetUrl(imagePath)}
+                    className="w-full h-full object-contain bg-[#1a1a1a]"
+                    autoPlay
+                    loop
+                    muted
+                    playsInline
+                  />
                 ) : (
                   <img
                     src={getAssetUrl(imagePath)}
@@ -139,6 +144,37 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
               >
                 {imagePath.split(/[/\\]/).pop() || imagePath}
               </span>
+            </div>
+          )}
+
+          {/* Loop mode selector for video */}
+          {isVideo && imagePath && (
+            <div className="flex items-center justify-center gap-1 px-2 pb-1.5 shrink-0">
+              {(
+                [
+                  { value: "none", icon: null, label: "No loop" },
+                  { value: "loop", icon: Repeat, label: "Loop" },
+                  {
+                    value: "ping-pong",
+                    icon: ArrowLeftRight,
+                    label: "Ping-pong",
+                  },
+                ] as const
+              ).map(({ value, icon: Icon, label }) => (
+                <button
+                  key={value}
+                  title={label}
+                  onClick={() => updateData({ videoLoopMode: value })}
+                  className={`flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[9px] transition-colors ${
+                    videoLoopMode === value
+                      ? "bg-blue-500/30 text-blue-300"
+                      : "bg-[#2a2a2a] text-[#888] hover:text-[#aaa]"
+                  }`}
+                >
+                  {Icon && <Icon className="h-2.5 w-2.5" />}
+                  {!Icon && <span>—</span>}
+                </button>
+              ))}
             </div>
           )}
         </>

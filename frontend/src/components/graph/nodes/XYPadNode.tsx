@@ -15,8 +15,8 @@ import {
 
 type XYPadNodeType = Node<FlowNodeData, "xypad">;
 
-const COLOR_X = "#38bdf8"; // sky-400
-const COLOR_Y = "#4ade80"; // green-400
+const COLOR_X = "#38bdf8"; // sky-400 (number)
+const COLOR_Y = "#38bdf8"; // sky-400 (number)
 const DOT_COLOR = "#fafafa";
 const PAD_SIZE = 160;
 const HEADER_HEIGHT = 28;

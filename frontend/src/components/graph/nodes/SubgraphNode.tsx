@@ -95,7 +95,7 @@ export function SubgraphNode({
       selected={selected}
       autoMinHeight={!collapsed}
       collapsed={collapsed}
-      className="!h-auto min-h-full"
+      className="!h-auto min-h-full !bg-[#1e2a3a] !border-[rgba(96,165,250,0.3)]"
     >
       {/* ── Input Handles ── */}
       {inputs.map((port, i) => {
@@ -153,6 +153,7 @@ export function SubgraphNode({
         onTitleChange={newTitle => updateData({ customTitle: newTitle })}
         collapsed={collapsed}
         onCollapseToggle={toggleCollapse}
+        onHeaderDoubleClick={() => onEnterSubgraph?.(id)}
       />
 
       {!collapsed && (
@@ -221,7 +222,7 @@ export function SubgraphNode({
       {/* ── Footer: absolutely pinned to bottom of card ── */}
       {!collapsed && (
         <div
-          className="absolute bottom-0 left-0 right-0 bg-[#181717] border-t border-[rgba(119,119,119,0.15)] flex items-center justify-center gap-1.5 px-2 py-1 h-[28px] rounded-b-xl cursor-pointer hover:bg-[#222] transition-colors"
+          className="absolute bottom-0 left-0 right-0 bg-[#172030] border-t border-[rgba(96,165,250,0.15)] flex items-center justify-center gap-1.5 px-2 py-1 h-[28px] rounded-b-xl cursor-pointer hover:bg-[#1e2a3a] transition-colors"
           onClick={e => {
             e.stopPropagation();
             onEnterSubgraph?.(id);
