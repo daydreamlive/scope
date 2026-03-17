@@ -52,7 +52,6 @@ import type {
 import type {
   PromptItem,
   PromptTransition,
-  PluginInfo,
   GraphConfig,
   PipelineLoadItem,
 } from "../lib/api";
@@ -61,9 +60,6 @@ import {
   fetchDaydreamWorkflow,
   getDmxStatus,
 } from "../lib/api";
-import { useLoRAsContext } from "../contexts/LoRAsContext";
-import { usePluginsContext } from "../contexts/PluginsContext";
-import { useServerInfoContext } from "../contexts/ServerInfoContext";
 import type { ScopeWorkflow } from "../lib/workflowApi";
 import { linearGraphFromSettings, stripUIFields } from "../lib/graphUtils";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
@@ -120,7 +116,7 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
-    connectStage: cloudConnectStage,
+    connectStage: _cloudConnectStage,
   } = useCloudStatus();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
@@ -354,7 +350,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
-    loadingStage: pipelineLoadingStage,
+    loadingStage: _pipelineLoadingStage,
   } = usePipeline();
 
   // Tempo sync
