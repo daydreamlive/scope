@@ -1568,6 +1568,29 @@ export function StreamPage() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedTimelinePrompt]);
 
+  // Subscribe to OSC commands via SSE so each update arrives individually
+  // and triggers its own render tick, giving smooth slider movement.
+  useEffect(() => {
+    const es = new EventSource("/api/v1/osc/stream");
+
+    es.onmessage = event => {
+      try {
+        const cmd = JSON.parse(event.data) as OscCommand;
+        oscCommandHandlerRef.current(cmd);
+      } catch (err) {
+        console.debug("[StreamPage] Failed to parse OSC SSE event:", err);
+      }
+    };
+
+    es.onerror = () => {
+      console.debug(
+        "[StreamPage] OSC SSE connection error, will auto-reconnect"
+      );
+    };
+
+    return () => es.close();
+  }, []);
+
   // Send quantize_mode and lookahead_ms to backend when settings change.
   // Uses sendParameterUpdateWebRTC directly to avoid depending on the
   // wrapper (which would re-fire this effect on unrelated changes).

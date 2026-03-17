@@ -328,7 +328,8 @@ async def lifespan(app: FastAPI):
         cloud_connection_manager, \
         kafka_publisher, \
         tempo_sync, \
-        osc_server
+        osc_server, \
+        dmx_server
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
