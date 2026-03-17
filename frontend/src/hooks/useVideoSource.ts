@@ -189,11 +189,6 @@ export function useVideoSource(props?: UseVideoSourceProps) {
 
   const switchMode = useCallback(
     async (newMode: VideoSourceMode) => {
-      // Don't switch modes if not enabled
-      if (!props?.enabled) {
-        return;
-      }
-
       setMode(newMode);
       setError(null);
 
