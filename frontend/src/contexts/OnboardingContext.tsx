@@ -24,16 +24,10 @@ export type OnboardingPhase =
   | "cloud_auth" // step 2: sign in (only if cloud chosen)
   | "workflow" // step 3: starter workflow picker
   | "downloading" // step 3b: workflow downloading
-  | "tour" // step 4: popover walkthrough
   | "completed"; // persist and transition to idle
-
-export type TourStep = 0 | 1 | 2 | 3 | 4 | 5;
-
-const TOTAL_TOUR_STEPS = 6;
 
 export interface OnboardingState {
   phase: OnboardingPhase;
-  tourStep: TourStep;
   inferenceMode: "local" | "cloud" | null;
   selectedWorkflowId: string | null;
   downloadFailures: number;
@@ -52,8 +46,6 @@ type OnboardingAction =
   | { type: "WORKFLOW_READY" }
   | { type: "START_FROM_SCRATCH" }
   | { type: "IMPORT_WORKFLOW_READY" }
-  | { type: "ADVANCE_TOUR" }
-  | { type: "SKIP_TOUR" }
   | { type: "COMPLETE" }
   | { type: "BACKEND_SAYS_COMPLETED" };
 
@@ -99,39 +91,21 @@ function reducer(
       trackEvent("onboarding_workflow_downloaded", {
         workflowId: state.selectedWorkflowId,
       });
+      trackEvent("onboarding_completed");
       markOnboardingCompleted();
-      return { ...state, phase: "tour", tourStep: 0 };
+      return { ...state, phase: "idle" };
 
     case "START_FROM_SCRATCH":
       trackEvent("onboarding_started_from_scratch");
+      trackEvent("onboarding_completed");
       markOnboardingCompleted();
-      return {
-        ...state,
-        phase: "tour",
-        tourStep: 0,
-        selectedWorkflowId: null,
-      };
+      return { ...state, phase: "idle", selectedWorkflowId: null };
 
     case "IMPORT_WORKFLOW_READY":
       trackEvent("onboarding_imported_workflow");
-      markOnboardingCompleted();
-      return { ...state, phase: "tour", tourStep: 0 };
-
-    case "ADVANCE_TOUR": {
-      const nextStep = (state.tourStep + 1) as TourStep;
-      if (nextStep >= TOTAL_TOUR_STEPS) {
-        trackEvent("onboarding_tour_completed");
-        trackEvent("onboarding_completed");
-        return { ...state, phase: "idle", tourStep: 0 };
-      }
-      trackEvent("onboarding_tour_step_viewed", { step: nextStep });
-      return { ...state, tourStep: nextStep };
-    }
-
-    case "SKIP_TOUR":
-      trackEvent("onboarding_tour_dismissed", { at_step: state.tourStep });
       trackEvent("onboarding_completed");
-      return { ...state, phase: "idle", tourStep: 0 };
+      markOnboardingCompleted();
+      return { ...state, phase: "idle" };
 
     case "COMPLETE":
       trackEvent("onboarding_completed");
@@ -156,9 +130,6 @@ interface OnboardingContextValue {
   isOnboarding: boolean;
   /** True only during the full-screen overlay phases */
   isOverlayVisible: boolean;
-  /** True only during the popover tour */
-  isTourActive: boolean;
-
   selectInferenceMode: (mode: "local" | "cloud") => void;
   completeAuth: () => void;
   selectWorkflow: (workflowId: string) => void;
@@ -167,8 +138,6 @@ interface OnboardingContextValue {
   workflowReady: () => void;
   startFromScratch: () => void;
   importWorkflowReady: () => void;
-  advanceTour: () => void;
-  skipTour: () => void;
 }
 
 const OnboardingContext = createContext<OnboardingContextValue | null>(null);
@@ -179,7 +148,6 @@ const OnboardingContext = createContext<OnboardingContextValue | null>(null);
 
 const initialState: OnboardingState = {
   phase: isOnboardingCompletedSync() ? "idle" : "inference",
-  tourStep: 0,
   inferenceMode: null,
   selectedWorkflowId: null,
   downloadFailures: 0,
@@ -209,13 +177,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  // Fire tour step 0 viewed when entering tour
-  useEffect(() => {
-    if (state.phase === "tour" && state.tourStep === 0) {
-      trackEvent("onboarding_tour_step_viewed", { step: 0 });
-    }
-  }, [state.phase, state.tourStep]);
 
   const selectInferenceMode = useCallback(
     (mode: "local" | "cloud") =>
@@ -250,8 +211,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     () => dispatch({ type: "IMPORT_WORKFLOW_READY" }),
     []
   );
-  const advanceTour = useCallback(() => dispatch({ type: "ADVANCE_TOUR" }), []);
-  const skipTour = useCallback(() => dispatch({ type: "SKIP_TOUR" }), []);
 
   const isOnboarding = state.phase !== "idle";
   const isOverlayVisible = [
@@ -260,7 +219,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     "workflow",
     "downloading",
   ].includes(state.phase);
-  const isTourActive = state.phase === "tour";
 
   return (
     <OnboardingContext.Provider
@@ -268,7 +226,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         state,
         isOnboarding,
         isOverlayVisible,
-        isTourActive,
         selectInferenceMode,
         completeAuth,
         selectWorkflow,
@@ -277,8 +234,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         workflowReady,
         startFromScratch,
         importWorkflowReady,
-        advanceTour,
-        skipTour,
       }}
     >
       {children}

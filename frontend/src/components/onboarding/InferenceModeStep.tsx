@@ -27,7 +27,7 @@ const MODES: {
     icon: Monitor,
     title: "Run Locally",
     description: "Free forever. Requires a compatible GPU.",
-    detail: "NVIDIA RTX 3060 or above for audio, 4090 or above for video.",
+    detail: "Most workflows require at least 24GB of VRAM.",
   },
 ];
 

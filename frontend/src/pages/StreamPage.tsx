@@ -68,7 +68,6 @@ import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 import { useOnboarding } from "../contexts/OnboardingContext";
 import { OnboardingOverlay } from "../components/onboarding/OnboardingOverlay";
-import { WorkspaceTour } from "../components/onboarding/WorkspaceTour";
 
 interface OscCommand {
   key: string;
@@ -116,12 +115,7 @@ export function StreamPage() {
   const {
     state: onboardingState,
     isOverlayVisible: showOnboardingOverlay,
-    isTourActive: showOnboardingTour,
-    importWorkflowReady: onboardingImportReady,
-    workflowReady: onboardingWorkflowReady,
   } = useOnboarding();
-  // Track whether a starter workflow triggered the import dialog
-  const onboardingStarterRef = useRef(false);
 
   // Get API functions that work in both local and cloud modes
   const api = useApi();
@@ -3103,13 +3097,6 @@ export function StreamPage() {
           onClose={() => {
             setShowWorkflowImport(false);
             setPreloadedWorkflow(null);
-            // If onboarding triggered the import, advance to tour
-            if (onboardingStarterRef.current) {
-              onboardingStarterRef.current = false;
-              onboardingWorkflowReady();
-            } else if (showOnboardingOverlay) {
-              onboardingImportReady();
-            }
           }}
           onLoad={handleWorkflowLoad}
           onLoadToGraph={graphMode ? handleWorkflowLoadToGraph : undefined}
@@ -3120,8 +3107,6 @@ export function StreamPage() {
         {showOnboardingOverlay && (
           <OnboardingOverlay
             onSelectWorkflow={starter => {
-              // Feed the embedded workflow JSON into the import dialog
-              onboardingStarterRef.current = true;
               setPreloadedWorkflow(starter.workflow as ScopeWorkflow);
               setShowWorkflowImport(true);
             }}
@@ -3130,8 +3115,6 @@ export function StreamPage() {
           />
         )}
 
-        {/* Onboarding popover tour (non-blocking, shown after overlay completes) */}
-        {showOnboardingTour && <WorkspaceTour />}
       </div>
     </MIDIProvider>
   );
