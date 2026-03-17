@@ -12,7 +12,13 @@ import {
   Background,
   BackgroundVariant,
 } from "@xyflow/react";
-import type { Edge, Node, ReactFlowInstance } from "@xyflow/react";
+import type {
+  Edge,
+  Node,
+  NodeChange,
+  EdgeChange,
+  ReactFlowInstance,
+} from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
 import { SourceNode } from "./nodes/SourceNode";
@@ -36,6 +42,7 @@ import { TriggerNode } from "./nodes/TriggerNode";
 import { SubgraphNode } from "./nodes/SubgraphNode";
 import { SubgraphInputNode } from "./nodes/SubgraphInputNode";
 import { SubgraphOutputNode } from "./nodes/SubgraphOutputNode";
+import { RecordNode } from "./nodes/RecordNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -90,6 +97,7 @@ const nodeTypes = {
   subgraph: SubgraphNode,
   subgraph_input: SubgraphInputNode,
   subgraph_output: SubgraphOutputNode,
+  record: RecordNode,
 };
 
 const edgeTypes = {
@@ -128,6 +136,9 @@ interface GraphEditorProps {
   spoutOutputAvailable?: boolean;
   ndiOutputAvailable?: boolean;
   syphonOutputAvailable?: boolean;
+  onStartRecording?: () => void;
+  onStopRecording?: () => void;
+  onDownloadRecording?: () => void;
 }
 
 export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
@@ -155,6 +166,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       spoutOutputAvailable = false,
       ndiOutputAvailable = false,
       syphonOutputAvailable = false,
+      onStartRecording,
+      onStopRecording,
+      onDownloadRecording,
     },
     ref
   ) {
@@ -203,6 +217,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onNdiSourceChange,
         onSyphonSourceChange,
         onOutputSinkChange,
+        onStartRecording,
+        onStopRecording,
+        onDownloadRecording,
       },
       { localStream, remoteStream, isStreaming },
       {
@@ -256,8 +273,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
 
     const {
       isValidConnection,
-      onConnect,
-      onReconnect,
+      onConnect: rawOnConnect,
+      onReconnect: rawOnReconnect,
       findConnectedPipelineParams,
     } = useConnectionLogic(
       nodes,
@@ -265,6 +282,46 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setEdges,
       handleEdgeDelete,
       addSubgraphPortRef
+    );
+
+    const filteredOnNodesChange = useCallback(
+      (changes: NodeChange<Node<FlowNodeData>>[]) => {
+        if (isStreaming) {
+          changes = changes.filter(
+            c => c.type !== "remove" && c.type !== "add"
+          );
+        }
+        onNodesChange(changes);
+      },
+      [isStreaming, onNodesChange]
+    );
+
+    const filteredOnEdgesChange = useCallback(
+      (changes: EdgeChange<Edge>[]) => {
+        if (isStreaming) {
+          changes = changes.filter(
+            c => c.type !== "remove" && c.type !== "add"
+          );
+        }
+        onEdgesChange(changes);
+      },
+      [isStreaming, onEdgesChange]
+    );
+
+    const onConnect = useCallback(
+      (...args: Parameters<typeof rawOnConnect>) => {
+        if (isStreaming) return;
+        rawOnConnect(...args);
+      },
+      [isStreaming, rawOnConnect]
+    );
+
+    const onReconnect = useCallback(
+      (...args: Parameters<typeof rawOnReconnect>) => {
+        if (isStreaming) return;
+        rawOnReconnect(...args);
+      },
+      [isStreaming, rawOnReconnect]
     );
 
     const { handleNodeTypeSelect, handleDeleteNodes, insertBlueprint } =
@@ -478,15 +535,19 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             onNavigate={handleBreadcrumbNavigate}
           />
 
-          <div className="flex-1 relative" onMouseDown={handleRightMouseDown}>
+          <div
+            className={`flex-1 relative${isStreaming ? " streaming" : ""}`}
+            onMouseDown={handleRightMouseDown}
+          >
             <ReactFlow
               nodes={nodes}
               edges={edges}
-              onNodesChange={onNodesChange}
-              onEdgesChange={onEdgesChange}
+              onNodesChange={filteredOnNodesChange}
+              onEdgesChange={filteredOnEdgesChange}
               onConnect={onConnect}
               onReconnect={onReconnect}
               reconnectRadius={25}
+              nodesConnectable={!isStreaming}
               isValidConnection={isValidConnection}
               minZoom={0.1}
               onInit={instance => {
@@ -510,13 +571,13 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               edgeTypes={edgeTypes}
               colorMode="dark"
               fitView
-              deleteKeyCode={["Backspace", "Delete"]}
+              deleteKeyCode={isStreaming ? [] : ["Backspace", "Delete"]}
             >
               <Controls />
               <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
             </ReactFlow>
 
-            {contextMenu && (
+            {contextMenu && !isStreaming && (
               <ContextMenu
                 x={contextMenu.x}
                 y={contextMenu.y}
@@ -548,7 +609,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             )}
 
             <AddNodeModal
-              open={showAddNodeModal}
+              open={showAddNodeModal && !isStreaming}
               onClose={() => {
                 setShowAddNodeModal(false);
                 setPendingNodePosition(null);
@@ -557,7 +618,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             />
 
             <BlueprintBrowserModal
-              open={showBlueprintModal}
+              open={showBlueprintModal && !isStreaming}
               onClose={() => setShowBlueprintModal(false)}
               onInsert={blueprint => {
                 insertBlueprint(blueprint, pendingNodePosition ?? undefined);

@@ -2191,6 +2191,26 @@ export function StreamPage() {
     }
   };
 
+  const handleStartRecording = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await api.startRecording(sessionId);
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      toast.error("Failed to start recording");
+    }
+  }, [sessionId, api]);
+
+  const handleStopRecording = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await api.stopRecording(sessionId);
+    } catch (error) {
+      console.error("Error stopping recording:", error);
+      toast.error("Failed to stop recording");
+    }
+  }, [sessionId, api]);
+
   // Handle workflow import: load settings, timeline, and prompt state
   const handleWorkflowLoad = useCallback(
     (
@@ -2383,6 +2403,9 @@ export function StreamPage() {
             spoutOutputAvailable={spoutAvailable}
             ndiOutputAvailable={ndiOutputAvailable}
             syphonOutputAvailable={syphonOutputAvailable}
+            onStartRecording={handleStartRecording}
+            onStopRecording={handleStopRecording}
+            onDownloadRecording={handleSaveGeneration}
           />
         </div>
 

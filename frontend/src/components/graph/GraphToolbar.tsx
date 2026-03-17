@@ -69,7 +69,7 @@ export function GraphToolbar({
         <button
           onClick={onStopStream}
           className={NODE_TOKENS.toolbarButton}
-          title="Stop and clear"
+          title="Stop stream"
         >
           <RotateCcw className="h-3.5 w-3.5" />
         </button>
@@ -91,7 +91,10 @@ export function GraphToolbar({
         ref={fileInputRef}
         type="file"
         accept=".json"
-        onChange={onImport}
+        onChange={e => {
+          if (isStreaming) onStopStream?.();
+          onImport(e);
+        }}
         className="hidden"
       />
       <button

@@ -78,6 +78,7 @@ export function PipelineNode({
   const supportsCacheManagement = data.supportsCacheManagement ?? false;
   const pipelineAvailable = data.pipelineAvailable ?? true;
   const supportsVace = data.supportsVace ?? false;
+  const isStreaming = data.isStreaming ?? false;
 
   const pipelineName = data.pipelineId || "Pipeline";
 
@@ -152,6 +153,7 @@ export function PipelineNode({
               }}
               options={selectOptions}
               placeholder="Select pipeline..."
+              disabled={isStreaming}
             />
           </NodeParamRow>
 
@@ -209,6 +211,8 @@ export function PipelineNode({
             const isConnected = isParamConnected(param.name);
             const currentValue =
               parameterValues[param.name] ?? param.defaultValue;
+            const isLoadParam = param.isLoadParam !== false;
+            const disabled = isStreaming && isLoadParam;
 
             return (
               <div
@@ -243,6 +247,7 @@ export function PipelineNode({
                           value: String(opt),
                           label: String(opt),
                         }))}
+                        disabled={disabled}
                       />
                     ) : (
                       <NodePillInput
@@ -251,6 +256,7 @@ export function PipelineNode({
                         onChange={val =>
                           onParameterChange?.(id, param.name, val)
                         }
+                        disabled={disabled}
                       />
                     )
                   ) : param.type === "number" ? (
@@ -262,6 +268,7 @@ export function PipelineNode({
                       }
                       min={param.min}
                       max={param.max}
+                      disabled={disabled}
                     />
                   ) : (
                     <NodePillToggle
@@ -269,6 +276,7 @@ export function PipelineNode({
                         currentValue ?? param.defaultValue ?? false
                       )}
                       onChange={val => onParameterChange?.(id, param.name, val)}
+                      disabled={disabled}
                     />
                   )}
                 </NodeParamRow>
@@ -285,6 +293,8 @@ export function PipelineNode({
               : Array.isArray(param.defaultValue)
                 ? param.defaultValue
                 : [];
+            const isLoadParam = param.isLoadParam !== false;
+            const disabled = isStreaming && isLoadParam;
 
             return (
               <div
@@ -319,6 +329,7 @@ export function PipelineNode({
                           }}
                           min={0}
                           max={1000}
+                          disabled={disabled}
                         />
                       </NodeParamRow>
                     ))}

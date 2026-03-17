@@ -34,3 +34,9 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* Hide edge delete dots while streaming */
+.streaming .edge-delete-dot {
+  display: none;
+  pointer-events: none;
+}
