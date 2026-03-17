@@ -84,6 +84,7 @@ export class ScopePythonProcessService implements PythonProcessService {
 
     const child = spawn(uvCommand, [
       'run',
+      '--extra', 'link',
       'daydream-scope',
       '--host',
       SERVER_CONFIG.host,
