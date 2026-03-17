@@ -43,7 +43,11 @@ import type {
   SettingsState,
 } from "../types";
 import type { PromptItem, PromptTransition, PluginInfo } from "../lib/api";
-import { getInputSourceResolution, fetchDaydreamWorkflow } from "../lib/api";
+import {
+  getInputSourceResolution,
+  fetchDaydreamWorkflow,
+  getDmxStatus,
+} from "../lib/api";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { usePluginsContext } from "../contexts/PluginsContext";
 import { useServerInfoContext } from "../contexts/ServerInfoContext";
@@ -1500,8 +1504,18 @@ export function StreamPage() {
     return () => es.close();
   }, []);
 
-  // Subscribe to DMX commands via SSE (same shape as OSC commands)
+  // Subscribe to DMX commands via SSE only when DMX is enabled
+  const [dmxEnabled, setDmxEnabled] = useState(false);
+
   useEffect(() => {
+    getDmxStatus()
+      .then(s => setDmxEnabled(s.enabled))
+      .catch(() => setDmxEnabled(false));
+  }, []);
+
+  useEffect(() => {
+    if (!dmxEnabled) return;
+
     const es = new EventSource("/api/v1/dmx/stream");
 
     es.onmessage = event => {
@@ -1520,7 +1534,7 @@ export function StreamPage() {
     };
 
     return () => es.close();
-  }, []);
+  }, [dmxEnabled]);
 
   // Update temporal interpolation defaults and clear prompts when pipeline changes
   useEffect(() => {

@@ -376,7 +376,9 @@ async def lifespan(app: FastAPI):
     dmx_server.set_managers(pipeline_manager, webrtc_manager)
     dmx_server.log_all_messages = dmx_cfg.get("log_all_messages", False)
     dmx_server.set_mappings(mappings_to_dict(dmx_cfg.get("mappings", [])))
-    await dmx_server.start()
+    dmx_server.enabled = dmx_cfg.get("enabled", False)
+    if dmx_server.enabled:
+        await dmx_server.start()
 
     # Syphon server discovery (macOS only): create the ObjC singleton and do
     # an initial NSRunLoop pump so servers are available when the UI first loads.
@@ -827,26 +829,43 @@ async def dmx_status():
 
 
 class DmxSettingsRequest(BaseModel):
+    enabled: bool | None = None
     log_all_messages: bool | None = None
     preferred_port: int | None = None
 
 
 @app.put("/api/v1/dmx/settings")
 async def update_dmx_settings(request: DmxSettingsRequest):
-    """Update DMX server runtime settings (logging, preferred port)."""
+    """Update DMX server runtime settings (enabled, logging, preferred port)."""
     srv = get_dmx_server()
     if srv is None:
-        raise HTTPException(status_code=503, detail="DMX server not running")
+        raise HTTPException(status_code=503, detail="DMX server not initialized")
+
+    from .dmx_config import load_config, save_config
+
+    need_persist = False
+    cfg = load_config()
+
+    if request.enabled is not None:
+        cfg["enabled"] = request.enabled
+        srv.enabled = request.enabled
+        need_persist = True
+        if request.enabled and not srv.listening:
+            await srv.start()
+        elif not request.enabled and srv.listening:
+            await srv.stop()
+
     if request.log_all_messages is not None:
         srv.log_all_messages = request.log_all_messages
-        # Persist logging preference immediately without persisting other fields.
-        from .dmx_config import load_config, save_config
-
-        cfg = load_config()
         cfg["log_all_messages"] = request.log_all_messages
-        save_config(cfg)
+        need_persist = True
+
     if request.preferred_port is not None:
         srv.preferred_port = request.preferred_port
+
+    if need_persist:
+        save_config(cfg)
+
     return srv.status()
 
 
@@ -870,7 +889,8 @@ async def dmx_restart(request: DmxRestartRequest):
         save_config(cfg)
 
     await srv.stop()
-    await srv.start()
+    if srv.enabled:
+        await srv.start()
     return srv.status()
 
 
@@ -893,6 +913,7 @@ async def dmx_get_config():
 
 
 class DmxConfigRequest(BaseModel):
+    enabled: bool | None = None
     preferred_port: int | None = None
     log_all_messages: bool | None = None
     mappings: list[dict] | None = None
@@ -916,6 +937,8 @@ async def dmx_put_config(request: DmxConfigRequest):
         )
 
     cfg = load_config()
+    if request.enabled is not None:
+        cfg["enabled"] = request.enabled
     if request.preferred_port is not None:
         cfg["preferred_port"] = request.preferred_port
     if request.log_all_messages is not None:
@@ -933,6 +956,12 @@ async def dmx_put_config(request: DmxConfigRequest):
     if srv is not None:
         srv.log_all_messages = cfg.get("log_all_messages", False)
         srv.set_mappings(mappings_to_dict(cfg.get("mappings", [])))
+        if request.enabled is not None:
+            srv.enabled = cfg["enabled"]
+            if srv.enabled and not srv.listening:
+                await srv.start()
+            elif not srv.enabled and srv.listening:
+                await srv.stop()
 
     return cfg
 

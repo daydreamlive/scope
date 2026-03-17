@@ -995,6 +995,7 @@ export interface DmxMapping {
 }
 
 export interface DmxConfigResponse {
+  enabled: boolean;
   preferred_port: number;
   log_all_messages: boolean;
   mappings: DmxMapping[];
@@ -1024,6 +1025,7 @@ export const getDmxStatus = async (): Promise<DmxStatusResponse> => {
 };
 
 export const updateDmxSettings = async (settings: {
+  enabled?: boolean;
   log_all_messages?: boolean;
   preferred_port?: number;
 }): Promise<DmxStatusResponse> => {

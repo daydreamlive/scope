@@ -1,4 +1,4 @@
-"""Always-on Art-Net DMX UDP server for mapping DMX channels to pipeline params.
+"""Art-Net DMX UDP server for mapping DMX channels to pipeline params.
 
 The server tries to bind on the standard Art-Net port (6454) and falls back to
 6455, 6456, 6457 if that port is unavailable.  It runs for the full application
@@ -46,7 +46,7 @@ class _ArtNetProtocol(asyncio.DatagramProtocol):
 
 
 class DMXServer:
-    """Manages the always-on Art-Net DMX UDP listener with channel mapping."""
+    """Manages the Art-Net DMX UDP listener with channel mapping."""
 
     def __init__(self, host: str, preferred_port: int = ARTNET_DEFAULT_PORT):
         self._host = host
@@ -54,6 +54,7 @@ class DMXServer:
         self._bound_port: int | None = None
         self._transport: asyncio.DatagramTransport | None = None
         self._listening = False
+        self._enabled = False
         self._log_all_messages = False
 
         self._pipeline_manager: PipelineManager | None = None
@@ -99,6 +100,14 @@ class DMXServer:
     @property
     def host(self) -> str:
         return self._host
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
+
+    @enabled.setter
+    def enabled(self, value: bool) -> None:
+        self._enabled = value
 
     @property
     def listening(self) -> bool:
@@ -326,7 +335,7 @@ class DMXServer:
 
     def status(self) -> dict:
         return {
-            "enabled": True,
+            "enabled": self._enabled,
             "listening": self._listening,
             "port": self._bound_port,
             "preferred_port": self._preferred_port,

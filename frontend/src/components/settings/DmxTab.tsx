@@ -135,6 +135,16 @@ export function DmxTab({ isActive }: DmxTabProps) {
     }
   };
 
+  const handleToggleEnabled = async (checked: boolean) => {
+    try {
+      const updated = await updateDmxSettings({ enabled: checked });
+      setStatus(prev => (prev ? { ...prev, ...updated } : prev));
+    } catch (err) {
+      toast.error("Failed to toggle DMX");
+      console.error(err);
+    }
+  };
+
   const handleToggleLogging = async (checked: boolean) => {
     try {
       const updated = await updateDmxSettings({ log_all_messages: checked });
@@ -193,6 +203,7 @@ export function DmxTab({ isActive }: DmxTabProps) {
 
   const handleExport = () => {
     const exportData: DmxConfigResponse = {
+      enabled: status?.enabled ?? false,
       preferred_port: parseInt(localPort, 10) || 6454,
       log_all_messages: status?.log_all_messages ?? false,
       mappings: localMappings,
@@ -258,6 +269,25 @@ export function DmxTab({ isActive }: DmxTabProps) {
   return (
     <div className="space-y-4">
       <div className="rounded-lg bg-muted/50 p-4 space-y-4">
+        {/* Enable / Disable */}
+        <div className="flex items-center gap-4">
+          <span className="text-sm font-medium text-foreground w-32">
+            DMX Input
+          </span>
+          <div className="flex-1 flex items-center justify-end gap-2">
+            <span className="text-xs text-muted-foreground">
+              {status?.enabled ? "Enabled" : "Disabled"}
+            </span>
+            <Switch
+              aria-label="Enable DMX input"
+              checked={status?.enabled ?? false}
+              onCheckedChange={handleToggleEnabled}
+              disabled={isLoading}
+              className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
+            />
+          </div>
+        </div>
+
         {/* Status */}
         <div className="flex items-center gap-4">
           <span className="text-sm font-medium text-foreground w-32">
@@ -266,6 +296,8 @@ export function DmxTab({ isActive }: DmxTabProps) {
           <div className="flex-1 flex items-center justify-end">
             {isLoading ? (
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+            ) : !status?.enabled ? (
+              <span className="text-sm text-muted-foreground">Disabled</span>
             ) : status?.listening ? (
               <span className="text-sm text-green-500">
                 Listening on UDP port {status.port}
@@ -299,7 +331,7 @@ export function DmxTab({ isActive }: DmxTabProps) {
               variant="outline"
               size="sm"
               onClick={handleApplyPort}
-              disabled={isApplyingPort || isLoading}
+              disabled={isApplyingPort || isLoading || !status?.enabled}
               className="h-8"
             >
               {isApplyingPort ? (
@@ -324,7 +356,7 @@ export function DmxTab({ isActive }: DmxTabProps) {
               aria-label="Log all DMX messages"
               checked={status?.log_all_messages ?? false}
               onCheckedChange={handleToggleLogging}
-              disabled={isLoading || !status?.listening}
+              disabled={isLoading || !status?.enabled}
               className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
             />
           </div>

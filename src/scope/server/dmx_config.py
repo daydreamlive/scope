@@ -25,6 +25,7 @@ def _config_path() -> Path:
 
 def _default_config() -> dict[str, Any]:
     return {
+        "enabled": False,
         "preferred_port": 6454,
         "log_all_messages": False,
         "mappings": [],
@@ -56,6 +57,8 @@ def load_config() -> dict[str, Any]:
     try:
         raw = json.loads(path.read_text(encoding="utf-8"))
         cfg = _default_config()
+        if isinstance(raw.get("enabled"), bool):
+            cfg["enabled"] = raw["enabled"]
         if isinstance(raw.get("preferred_port"), int):
             cfg["preferred_port"] = raw["preferred_port"]
         if isinstance(raw.get("log_all_messages"), bool):
