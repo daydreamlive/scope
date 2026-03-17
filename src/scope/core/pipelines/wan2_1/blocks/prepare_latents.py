@@ -90,7 +90,7 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
             base_seed = 42
 
         # Create generator from seed for reproducible generation
-        block_seed = base_seed + block_state.current_start_frame
+        block_seed = int(base_seed + block_state.current_start_frame)
         rng = torch.Generator(device=generator_param.device).manual_seed(block_seed)
 
         # Determine number of latent frames to generate
