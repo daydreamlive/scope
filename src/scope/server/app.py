@@ -907,13 +907,25 @@ async def dmx_put_config(request: DmxConfigRequest):
         save_config,
     )
 
+    if request.preferred_port is not None and not (
+        1 <= request.preferred_port <= 65535
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=f"preferred_port must be between 1 and 65535, got {request.preferred_port}",
+        )
+
     cfg = load_config()
     if request.preferred_port is not None:
         cfg["preferred_port"] = request.preferred_port
     if request.log_all_messages is not None:
         cfg["log_all_messages"] = request.log_all_messages
     if request.mappings is not None:
-        cfg["mappings"] = request.mappings
+        normalized = mappings_to_dict(request.mappings)
+        # Store only the validated/cleaned mappings list
+        cfg["mappings"] = [
+            {"universe": u, "channel": c, "key": k} for (u, c), k in normalized.items()
+        ]
     save_config(cfg)
 
     # Hot-reload into the running server

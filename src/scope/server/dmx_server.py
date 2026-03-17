@@ -263,11 +263,11 @@ class DMXServer:
             for ch, raw in enumerate(dmx_data):
                 if raw == 0:
                     continue
-                if (universe, ch) not in self._mappings:
+                if (universe, ch + 1) not in self._mappings:
                     logger.info(
                         "DMX UNMAPPED  uni=%d ch=%d raw=%d (no mapping)",
                         universe,
-                        ch,
+                        ch + 1,
                         raw,
                     )
 
