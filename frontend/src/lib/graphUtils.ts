@@ -1176,7 +1176,7 @@ export function tryExtractLinearSettings(
  */
 export function stripUIFields(graph: GraphConfig): GraphConfig {
   return {
-    nodes: graph.nodes.map(({ x, y, w, h, ...rest }) => rest),
+    nodes: graph.nodes.map(({ x: _x, y: _y, w: _w, h: _h, ...rest }) => rest),
     edges: graph.edges,
   };
 }
