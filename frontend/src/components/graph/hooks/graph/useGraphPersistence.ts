@@ -99,6 +99,10 @@ export interface EnrichNodesDeps {
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
   handleEdgeDelete: (edgeId: string) => void;
+  isStreaming: boolean;
+  onStartRecordingRef: React.RefObject<(() => void) | undefined>;
+  onStopRecordingRef: React.RefObject<(() => void) | undefined>;
+  onDownloadRecordingRef: React.RefObject<(() => void) | undefined>;
 }
 
 export function enrichNodes(
@@ -137,6 +141,7 @@ export function enrichNodes(
           onPromptChange: deps.handlePromptChange,
           onPromptSubmit: deps.handlePromptSubmit,
           pipelineAvailable,
+          isStreaming: deps.isStreaming,
           ...(ports
             ? {
                 streamInputs: ports.inputs,
@@ -152,19 +157,36 @@ export function enrichNodes(
         data: {
           ...n.data,
           localStream: deps.localStream,
-          onVideoFileUpload: deps.onVideoFileUploadRef.current,
-          onSourceModeChange: deps.onSourceModeChangeRef.current,
+          onVideoFileUpload: (file: File) =>
+            deps.onVideoFileUploadRef.current?.(file) ?? Promise.resolve(false),
+          onSourceModeChange: (mode: string) =>
+            deps.onSourceModeChangeRef.current?.(mode),
           spoutAvailable: deps.spoutAvailable,
           ndiAvailable: deps.ndiAvailable,
           syphonAvailable: deps.syphonAvailable,
-          onSpoutSourceChange: deps.onSpoutSourceChangeRef.current,
-          onNdiSourceChange: deps.onNdiSourceChangeRef.current,
-          onSyphonSourceChange: deps.onSyphonSourceChangeRef.current,
+          onSpoutSourceChange: (name: string) =>
+            deps.onSpoutSourceChangeRef.current?.(name),
+          onNdiSourceChange: (identifier: string) =>
+            deps.onNdiSourceChangeRef.current?.(identifier),
+          onSyphonSourceChange: (identifier: string) =>
+            deps.onSyphonSourceChangeRef.current?.(identifier),
         },
       };
     }
     if (n.data.nodeType === "sink") {
       return { ...n, data: { ...n.data, remoteStream: deps.remoteStream } };
+    }
+    if (n.data.nodeType === "record") {
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          isStreaming: deps.isStreaming,
+          onStartRecording: deps.onStartRecordingRef.current,
+          onStopRecording: deps.onStopRecordingRef.current,
+          onDownloadRecording: deps.onDownloadRecordingRef.current,
+        },
+      };
     }
     if (n.data.nodeType === "output") {
       return {
@@ -280,6 +302,14 @@ export function useGraphPersistence({
         setNodes(enriched);
         setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
         setStatus("Restored from local storage");
+
+        const sourceNode = flowNodes.find(n => n.data.nodeType === "source");
+        const restoredMode = sourceNode?.data.sourceMode as string | undefined;
+        if (restoredMode && restoredMode !== "video") {
+          setTimeout(() => {
+            enrichDepsRef.current.onSourceModeChangeRef.current?.(restoredMode);
+          }, 0);
+        }
       } catch {
         setStatus("No graph configured");
       }
@@ -402,6 +432,18 @@ export function useGraphPersistence({
           setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
           setStatus(`Imported from ${file.name}`);
           setFitViewTrigger(c => c + 1);
+
+          const sourceNode = flowNodes.find(n => n.data.nodeType === "source");
+          const importedMode = sourceNode?.data.sourceMode as
+            | string
+            | undefined;
+          if (importedMode) {
+            setTimeout(() => {
+              enrichDepsRef.current.onSourceModeChangeRef.current?.(
+                importedMode
+              );
+            }, 0);
+          }
         } catch {
           setStatus("Import failed: invalid JSON");
         }

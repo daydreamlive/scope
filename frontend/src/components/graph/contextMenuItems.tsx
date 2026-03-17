@@ -26,6 +26,7 @@ import {
   PackageOpen,
   BookOpen,
   Zap,
+  Circle,
 } from "lucide-react";
 import type { Node, Edge } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
@@ -53,7 +54,8 @@ type NodeTypeSelectFn = (
     | "midi"
     | "bool"
     | "trigger"
-    | "subgraph",
+    | "subgraph"
+    | "record",
   subType?: string
 ) => void;
 
@@ -102,6 +104,12 @@ export function buildPaneMenuItems(deps: {
       icon: <Send />,
       onClick: () => handleNodeTypeSelect("output"),
       keywords: ["spout", "ndi", "syphon", "send"],
+    },
+    {
+      label: "Record",
+      icon: <Circle />,
+      onClick: () => handleNodeTypeSelect("record"),
+      keywords: ["record", "recording", "mp4", "save", "capture"],
     },
     {
       label: "Controls",

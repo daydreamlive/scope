@@ -35,7 +35,8 @@ type NodeTypeKey =
   | "trigger"
   | "subgraph"
   | "subgraph_input"
-  | "subgraph_output";
+  | "subgraph_output"
+  | "record";
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -342,6 +343,13 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       subgraphOutputs: [],
     },
   },
+  record: {
+    type: "record",
+    idPrefix: "record",
+    defaultX: 900,
+    style: { width: 180, height: 100 },
+    data: { label: "Record", nodeType: "record" },
+  },
 };
 
 interface UseNodeFactoriesArgs {
@@ -428,7 +436,8 @@ export function useNodeFactories({
         | "midi"
         | "bool"
         | "trigger"
-        | "subgraph",
+        | "subgraph"
+        | "record",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;
@@ -446,6 +455,14 @@ export function useNodeFactories({
         const hasSink = nodes.some(n => n.data.nodeType === "sink");
         if (hasSink) {
           toast.warning("Only one Sink node is allowed");
+          setPendingNodePosition(null);
+          return;
+        }
+      }
+      if (type === "record") {
+        const hasRecord = nodes.some(n => n.data.nodeType === "record");
+        if (hasRecord) {
+          toast.warning("Only one Record node is allowed");
           setPendingNodePosition(null);
           return;
         }

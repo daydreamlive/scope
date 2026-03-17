@@ -30,7 +30,8 @@ interface AddNodeModalProps {
       | "midi"
       | "bool"
       | "trigger"
-      | "subgraph",
+      | "subgraph"
+      | "record",
     subType?: string
   ) => void;
 }
@@ -55,7 +56,8 @@ interface NodeCatalogItem {
     | "midi"
     | "bool"
     | "trigger"
-    | "subgraph";
+    | "subgraph"
+    | "record";
   subType?: string;
   name: string;
   description: string;
@@ -158,6 +160,14 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     name: "Sink",
     description: "Output node for the workflow",
     color: "#fb923c",
+    category: "I/O",
+  },
+  // Red
+  {
+    type: "record",
+    name: "Record",
+    description: "Record the output stream to MP4",
+    color: "#ef4444",
     category: "I/O",
   },
   {

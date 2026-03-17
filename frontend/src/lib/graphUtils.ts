@@ -26,6 +26,7 @@ export interface ParameterPortDef {
   min?: number;
   max?: number;
   enum?: unknown[];
+  isLoadParam?: boolean;
 }
 
 export interface PortInfo {
@@ -93,7 +94,8 @@ export interface FlowNodeData {
     | "trigger"
     | "subgraph"
     | "subgraph_input"
-    | "subgraph_output";
+    | "subgraph_output"
+    | "record";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -189,6 +191,16 @@ export interface FlowNodeData {
   onPromptChange?: (nodeId: string, text: string) => void;
   /** For pipeline nodes: whether the selected pipeline is installed locally */
   pipelineAvailable?: boolean;
+  /** Whether the stream is currently active (used to disable load params) */
+  isStreaming?: boolean;
+
+  /* ── Record node fields ── */
+  /** For record nodes: callback to start recording */
+  onStartRecording?: () => void;
+  /** For record nodes: callback to stop recording */
+  onStopRecording?: () => void;
+  /** For record nodes: callback to download the current recording */
+  onDownloadRecording?: () => void;
 
   /* ── Slider node fields ── */
   /** For slider nodes: minimum value */
@@ -377,6 +389,7 @@ export function extractParameterPorts(
         type: "list_number",
         defaultValue: schemaProp.default,
         label,
+        isLoadParam: ui?.is_load_param,
       });
       continue;
     }
@@ -395,21 +408,53 @@ export function extractParameterPorts(
           type: "list_number",
           defaultValue: schemaProp.default,
           label,
+          isLoadParam: ui?.is_load_param,
         });
         continue;
       }
     }
 
-    const fieldType = inferPrimitiveFieldType(schemaProp);
-    if (!fieldType) continue;
+    // Resolve $ref-based enums from $defs (e.g. Python Enum classes via Pydantic).
+    // Also handles anyOf: [{ $ref: "..." }, { type: "null" }] (nullable enum).
+    const resolveEnumFromRef = (): unknown[] | undefined => {
+      const defs = schema.config_schema?.$defs;
+      if (!defs) return undefined;
 
-    // Map PrimitiveFieldType to PortType
+      const resolveRef = (ref: string): unknown[] | undefined => {
+        const refName = ref.split("/").pop();
+        if (!refName) return undefined;
+        const def = defs[refName];
+        return def?.enum && Array.isArray(def.enum) ? def.enum : undefined;
+      };
+
+      if (schemaProp.$ref) return resolveRef(schemaProp.$ref);
+
+      if (anyOf?.length) {
+        for (const variant of anyOf) {
+          const ref = (variant as Record<string, unknown>).$ref as
+            | string
+            | undefined;
+          if (ref) return resolveRef(ref);
+        }
+      }
+      return undefined;
+    };
+
+    const fieldType = inferPrimitiveFieldType(schemaProp);
+    const refEnumValues = resolveEnumFromRef();
+    // If inferPrimitiveFieldType missed a $ref inside anyOf, treat it as enum
+    const effectiveFieldType = !fieldType && refEnumValues ? "enum" : fieldType;
+    if (!effectiveFieldType) continue;
+
     let paramType: "string" | "number" | "boolean" | null = null;
-    if (fieldType === "text" || fieldType === "enum") {
+    if (effectiveFieldType === "text" || effectiveFieldType === "enum") {
       paramType = "string";
-    } else if (fieldType === "number" || fieldType === "slider") {
+    } else if (
+      effectiveFieldType === "number" ||
+      effectiveFieldType === "slider"
+    ) {
       paramType = "number";
-    } else if (fieldType === "toggle") {
+    } else if (effectiveFieldType === "toggle") {
       paramType = "boolean";
     }
 
@@ -417,6 +462,9 @@ export function extractParameterPorts(
 
     const ui = schemaProp.ui;
     const label = ui?.label || key;
+    const enumValues = Array.isArray(schemaProp.enum)
+      ? schemaProp.enum
+      : refEnumValues;
 
     params.push({
       name: key,
@@ -427,7 +475,8 @@ export function extractParameterPorts(
         typeof schemaProp.minimum === "number" ? schemaProp.minimum : undefined,
       max:
         typeof schemaProp.maximum === "number" ? schemaProp.maximum : undefined,
-      enum: Array.isArray(schemaProp.enum) ? schemaProp.enum : undefined,
+      enum: enumValues,
+      isLoadParam: ui?.is_load_param,
     });
   }
 
@@ -685,6 +734,7 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "subgraph",
   "subgraph_input",
   "subgraph_output",
+  "record",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
@@ -703,6 +753,9 @@ const NON_SERIALIZABLE_KEYS = new Set<string>([
   "onEnterSubgraph",
   "onPortRename",
   "portValues",
+  "onStartRecording",
+  "onStopRecording",
+  "onDownloadRecording",
 ]);
 
 /**

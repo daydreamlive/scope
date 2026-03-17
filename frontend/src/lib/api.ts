@@ -946,6 +946,32 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   URL.revokeObjectURL(url);
 };
 
+export const startRecording = async (
+  sessionId: string
+): Promise<{ status: string }> => {
+  const response = await fetch(`/api/v1/recordings/${sessionId}/start`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Start recording failed: ${response.status}: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const stopRecording = async (
+  sessionId: string
+): Promise<{ status: string }> => {
+  const response = await fetch(`/api/v1/recordings/${sessionId}/stop`, {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Stop recording failed: ${response.status}: ${errorText}`);
+  }
+  return response.json();
+};
+
 // ---------------------------------------------------------------------------
 // Workflow
 // ---------------------------------------------------------------------------

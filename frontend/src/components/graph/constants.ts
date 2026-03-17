@@ -9,6 +9,7 @@ export const HANDLE_COLORS: Record<string, string> = {
   vace_input_masks: "#f472b6",
   source: "#4ade80",
   sink: "#fb923c",
+  record: "#ef4444",
 };
 
 export const PARAM_TYPE_COLORS: Record<string, string> = {

@@ -87,6 +87,7 @@ from .models_config import (
 )
 from .pipeline_manager import PipelineManager
 from .recording import (
+    RecordingManager,
     cleanup_recording_files,
     cleanup_temp_file,
 )
@@ -1240,6 +1241,73 @@ async def download_recording(
         raise
     except Exception as e:
         logger.error(f"Error downloading recording: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/recordings/{session_id}/start")
+async def start_recording(
+    session_id: str,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Start recording for the specified session.
+
+    Creates a RecordingManager if one does not already exist.
+    """
+    try:
+        session = webrtc_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404, detail=f"Session {session_id} not found"
+            )
+
+        if not session.recording_manager:
+            if not session.video_track:
+                raise HTTPException(
+                    status_code=400, detail="Session has no video track"
+                )
+            rm = RecordingManager(video_track=session.video_track)
+            if session.relay:
+                rm.set_relay(session.relay)
+            session.recording_manager = rm
+
+        if session.recording_manager.is_recording_started:
+            return {"status": "already_recording"}
+
+        await session.recording_manager.start_recording()
+        return {"status": "started"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting recording for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/recordings/{session_id}/stop")
+async def stop_recording(
+    session_id: str,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Stop recording for the specified session without downloading."""
+    try:
+        session = webrtc_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404, detail=f"Session {session_id} not found"
+            )
+        if not session.recording_manager:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Recording not available for session {session_id}",
+            )
+        if not session.recording_manager.is_recording_started:
+            return {"status": "not_recording"}
+
+        await session.recording_manager.stop_recording()
+        return {"status": "stopped"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error stopping recording for session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
