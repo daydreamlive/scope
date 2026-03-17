@@ -24,3 +24,5 @@ notes/
 .cursor/
 .specstory/
 *.local*
+
+*.tsbuildinfo

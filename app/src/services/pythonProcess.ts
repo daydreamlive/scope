@@ -95,6 +95,9 @@ export class ScopePythonProcessService implements PythonProcessService {
       cwd: projectRoot,
       stdio: ['pipe', 'pipe', 'pipe'],
       shell: false,
+      // On Unix, create a new process group so we can kill the entire tree
+      // (uv + Python server + any children) with a single signal
+      detached: process.platform !== 'win32',
       env: {
         ...process.env,
         PATH: pathEnv,
@@ -193,29 +196,32 @@ export class ScopePythonProcessService implements PythonProcessService {
 
   stopServer(): void {
     this.intentionalStop = true;  // Mark as intentional to prevent respawn on exit code 42
-    if (this.serverProcess) {
-      logger.info('Stopping server...');
-      const pid = this.serverProcess.pid;
 
-      if (process.platform === 'win32' && pid) {
-        // On Windows, kill the entire process tree using taskkill
-        // This ensures child processes (like the Python server spawned by uv) are also terminated
-        try {
-          execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
-          logger.info(`Killed process tree for PID ${pid}`);
-        } catch (err) {
-          logger.warn(`Failed to kill process tree: ${err}`);
-          // Fallback to regular kill
-          this.serverProcess.kill('SIGINT');
-        }
-      } else {
-        // On Unix-like systems, SIGINT should propagate to child processes
-        this.serverProcess.kill('SIGINT');
+    if (!this.serverProcess?.pid) return;
+
+    logger.info('Stopping server...');
+    const pid = this.serverProcess.pid;
+    this.serverProcess = null;
+
+    if (process.platform === 'win32') {
+      // On Windows, kill the entire process tree using taskkill
+      try {
+        execSync(`taskkill /PID ${pid} /T /F`, { stdio: 'ignore' });
+        logger.info(`Killed process tree for PID ${pid}`);
+      } catch (err) {
+        logger.warn(`Failed to kill process tree: ${err}`);
       }
-
-      this.serverProcess = null;
+    } else {
+      // On Unix, kill the entire process group (negative PID) since we spawned with detached: true
+      try {
+        process.kill(-pid, 'SIGKILL');
+        logger.info(`Killed process group ${pid}`);
+      } catch (err) {
+        logger.warn(`Failed to kill process group: ${err}`);
+      }
     }
   }
+
 
   isServerRunning(): boolean {
     return this.serverProcess !== null && !this.serverProcess.killed;
