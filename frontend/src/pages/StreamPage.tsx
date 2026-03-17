@@ -108,7 +108,7 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
-    connectStage: _cloudConnectStage,
+    connectStage: _cloudConnectStage, // eslint-disable-line @typescript-eslint/no-unused-vars
   } = useCloudStatus();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
@@ -335,7 +335,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
-    loadingStage: _pipelineLoadingStage,
+    loadingStage: _pipelineLoadingStage, // eslint-disable-line @typescript-eslint/no-unused-vars
   } = usePipeline();
 
   // Apply backend parameter values to frontend state (used for both local
