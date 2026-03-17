@@ -40,7 +40,7 @@ class _ArtNetProtocol(asyncio.DatagramProtocol):
 
     def datagram_received(self, data: bytes, addr: tuple) -> None:
         if self._server.log_all_messages:
-            logger.info("DMX UDP packet received: %d bytes from %s", len(data), addr)
+            logger.debug("DMX UDP packet received: %d bytes from %s", len(data), addr)
         self._server._handle_packet(data)
 
     def error_received(self, exc: Exception) -> None:
