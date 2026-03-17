@@ -38,7 +38,7 @@ def _validate_mapping(m: dict) -> dict | None:
         universe = int(m.get("universe", 0))
         channel = int(m.get("channel", 0))
         key = str(m.get("key", ""))
-        if not key or channel < 0 or channel > 511 or universe < 0:
+        if not key or channel < 1 or channel > 512 or universe < 0:
             return None
         return {
             "universe": universe,

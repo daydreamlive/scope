@@ -24,7 +24,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
@@ -884,7 +884,7 @@ async def dmx_status():
 class DmxSettingsRequest(BaseModel):
     enabled: bool | None = None
     log_all_messages: bool | None = None
-    preferred_port: int | None = None
+    preferred_port: int | None = Field(None, ge=1024, le=65535)
 
 
 @app.put("/api/v1/dmx/settings")
@@ -923,7 +923,7 @@ async def update_dmx_settings(request: DmxSettingsRequest):
 
 
 class DmxRestartRequest(BaseModel):
-    preferred_port: int | None = None
+    preferred_port: int | None = Field(None, ge=1024, le=65535)
 
 
 @app.post("/api/v1/dmx/restart")
@@ -967,7 +967,7 @@ async def dmx_get_config():
 
 class DmxConfigRequest(BaseModel):
     enabled: bool | None = None
-    preferred_port: int | None = None
+    preferred_port: int | None = Field(None, ge=1024, le=65535)
     log_all_messages: bool | None = None
     mappings: list[dict] | None = None
 
@@ -980,14 +980,6 @@ async def dmx_put_config(request: DmxConfigRequest):
         mappings_to_dict,
         save_config,
     )
-
-    if request.preferred_port is not None and not (
-        1 <= request.preferred_port <= 65535
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail=f"preferred_port must be between 1 and 65535, got {request.preferred_port}",
-        )
 
     cfg = load_config()
     if request.enabled is not None:

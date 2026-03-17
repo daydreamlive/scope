@@ -149,7 +149,6 @@ export function DmxTab({ isActive }: DmxTabProps) {
     try {
       const updated = await updateDmxSettings({ log_all_messages: checked });
       setStatus(prev => (prev ? { ...prev, ...updated } : prev));
-      setDirty(true);
     } catch (err) {
       toast.error("Failed to update DMX logging");
       console.error(err);
@@ -181,7 +180,7 @@ export function DmxTab({ isActive }: DmxTabProps) {
   };
 
   const addMapping = () => {
-    setLocalMappings(prev => [...prev, { universe: 0, channel: 0, key: "" }]);
+    setLocalMappings(prev => [...prev, { universe: 0, channel: 1, key: "" }]);
     setDirty(true);
   };
 
@@ -430,12 +429,12 @@ export function DmxTab({ isActive }: DmxTabProps) {
                       updateMapping(
                         index,
                         "channel",
-                        parseInt(e.target.value, 10) || 0
+                        parseInt(e.target.value, 10) || 1
                       )
                     }
                     className="h-7 text-xs px-1.5"
-                    min={0}
-                    max={511}
+                    min={1}
+                    max={512}
                   />
                   <div className="flex flex-col gap-0.5">
                     <Select
