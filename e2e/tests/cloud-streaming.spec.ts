@@ -19,10 +19,14 @@ test.describe("Cloud Streaming", () => {
     // Increase timeout for this test
     test.setTimeout(180000); // 3 minutes
 
-    // Navigate to the app (running at localhost:8000)
+    // Skip onboarding by pre-setting localStorage before navigation
     await page.goto("/");
+    await page.evaluate(() =>
+      localStorage.setItem("scope_onboarding_completed", "true")
+    );
+    await page.reload();
     await expect(
-      page.locator("h1", { hasText: "Daydream Scope" })
+      page.getByRole("heading", { name: "Daydream Scope", exact: true })
     ).toBeVisible({ timeout: 15000 });
 
     // Take screenshot after initial load — app loads directly into the streaming interface
