@@ -118,7 +118,7 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
-    connectStage: cloudConnectStage,
+    connectStage: _cloudConnectStage,
   } = useCloudStatus();
 
   const { loraFiles } = useLoRAsContext();
@@ -354,7 +354,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
-    loadingStage: pipelineLoadingStage,
+    loadingStage: _pipelineLoadingStage,
   } = usePipeline();
 
   // Tempo sync
