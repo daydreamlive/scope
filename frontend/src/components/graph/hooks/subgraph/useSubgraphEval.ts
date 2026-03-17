@@ -41,7 +41,8 @@ export function evaluateInnerGraph(
   subgraphInputs: SubgraphPort[],
   subgraphOutputs: SubgraphPort[],
   inputPortValues: Record<string, unknown>,
-  persistentState?: Map<string, unknown>
+  persistentState?: Map<string, unknown>,
+  allComputed?: Map<string, unknown>
 ): Record<string, unknown> {
   // Build a map of nodeId → node data for quick access
   const nodeMap = new Map<string, Record<string, unknown>>();
@@ -176,6 +177,12 @@ export function evaluateInnerGraph(
     }
   }
 
+  if (allComputed) {
+    for (const [k, v] of computed) {
+      allComputed.set(k, v);
+    }
+  }
+
   // Collect output boundary values
   const result: Record<string, unknown> = {};
   for (const port of subgraphOutputs) {
@@ -244,10 +251,16 @@ function evaluateNode(
       break;
     }
     case "slider": {
-      out.set("value", (data.value as number) ?? null);
+      let sliderVal: number | null = (data.value as number) ?? null;
       if (inputs.has("value") && inputs.get("value") !== undefined) {
-        out.set("value", inputs.get("value"));
+        sliderVal = inputs.get("value") as number;
       }
+      if (typeof sliderVal === "number") {
+        const sMin = (data.sliderMin as number) ?? 0;
+        const sMax = (data.sliderMax as number) ?? 1;
+        sliderVal = Math.min(Math.max(sliderVal, sMin), sMax);
+      }
+      out.set("value", sliderVal);
       break;
     }
     case "control": {
@@ -302,13 +315,15 @@ function evaluateNode(
       if (inputs.has("value") && Array.isArray(inputs.get("value"))) {
         vals = inputs.get("value") as number[];
       }
+      const tMin = (data.tupleMin as number) ?? 0;
+      const tMax = (data.tupleMax as number) ?? 1000;
       if (vals) {
         for (const [inputName, inputVal] of inputs) {
           if (inputName.startsWith("row_") && typeof inputVal === "number") {
             const idx = parseInt(inputName.replace("row_", ""), 10);
             if (!isNaN(idx) && idx < vals.length) {
               vals = [...vals];
-              vals[idx] = inputVal;
+              vals[idx] = Math.min(Math.max(inputVal, tMin), tMax);
             }
           }
         }

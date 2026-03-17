@@ -459,6 +459,9 @@ export function useValueForwarding(
           };
           prevParams[targetParsed.name] = sourceValue;
           nodeUpdates["parameterValues"] = prevParams;
+          if (targetParsed.name === "__prompt") {
+            nodeUpdates["promptText"] = String(sourceValue);
+          }
         }
 
         if (Object.keys(nodeUpdates).length > 0) {

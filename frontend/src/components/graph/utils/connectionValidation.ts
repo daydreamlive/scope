@@ -136,14 +136,21 @@ function checkSubgraphTarget(
   sourceNode: Node<FlowNodeData>,
   targetNode: Node<FlowNodeData>,
   targetParsedName: string,
-  nodes: Node<FlowNodeData>[]
+  nodes: Node<FlowNodeData>[],
+  sourceHandleId?: string | null
 ): boolean | undefined {
   if (targetNode.data.nodeType !== "subgraph") return undefined;
   const port = targetNode.data.subgraphInputs?.find(
     p => p.name === targetParsedName
   );
   if (!port) return undefined;
-  const srcType = resolveSourceType(sourceNode, nodes, []);
+  const srcType = resolveSourceType(
+    sourceNode,
+    nodes,
+    [],
+    new Set(),
+    sourceHandleId
+  );
   if (!srcType) return true;
   if (!port.paramType) return true;
   return srcType === port.paramType;
@@ -173,14 +180,21 @@ function checkSubgraphOutputTarget(
   sourceNode: Node<FlowNodeData>,
   targetNode: Node<FlowNodeData>,
   targetParsedName: string,
-  nodes: Node<FlowNodeData>[]
+  nodes: Node<FlowNodeData>[],
+  sourceHandleId?: string | null
 ): boolean | undefined {
   if (targetNode.data.nodeType !== "subgraph_output") return undefined;
   const port = targetNode.data.subgraphOutputs?.find(
     p => p.name === targetParsedName
   );
   if (!port) return undefined;
-  const srcType = resolveSourceType(sourceNode, nodes, []);
+  const srcType = resolveSourceType(
+    sourceNode,
+    nodes,
+    [],
+    new Set(),
+    sourceHandleId
+  );
   if (!srcType) return true;
   if (!port.paramType) return true;
   return srcType === port.paramType;
@@ -263,12 +277,24 @@ export function validateConnection(
     // Reroute target
     if (targetNode.data.nodeType === "reroute") {
       if (!targetNode.data.valueType) return true;
-      const srcType = resolveSourceType(sourceNode, nodes, []);
+      const srcType = resolveSourceType(
+        sourceNode,
+        nodes,
+        [],
+        new Set(),
+        connection.sourceHandle
+      );
       if (!srcType) return true;
       return srcType === targetNode.data.valueType;
     }
 
-    const sourceType = resolveSourceType(sourceNode, nodes, []);
+    const sourceType = resolveSourceType(
+      sourceNode,
+      nodes,
+      [],
+      new Set(),
+      connection.sourceHandle
+    );
     if (!sourceType) return false;
 
     // Run table-driven target rules
@@ -294,7 +320,8 @@ export function validateConnection(
       sourceNode,
       targetNode,
       targetParsed.name,
-      nodes
+      nodes,
+      connection.sourceHandle
     );
     if (sgTgt !== undefined) return sgTgt;
 
@@ -310,7 +337,8 @@ export function validateConnection(
       sourceNode,
       targetNode,
       targetParsed.name,
-      nodes
+      nodes,
+      connection.sourceHandle
     );
     if (sgOutTgt !== undefined) return sgOutTgt;
 

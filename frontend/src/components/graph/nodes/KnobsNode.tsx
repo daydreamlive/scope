@@ -1,6 +1,6 @@
-import { Handle, Position } from "@xyflow/react";
+import { Handle, Position, useUpdateNodeInternals } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
@@ -211,8 +211,24 @@ function SingleKnobRow({
 export function KnobsNode({ id, data, selected }: NodeProps<KnobsNodeType>) {
   const { updateData } = useNodeData(id);
   const { collapsed, toggleCollapse } = useNodeCollapse();
+  const updateNodeInternals = useUpdateNodeInternals();
   const knobs: KnobDef[] =
     data.knobs && data.knobs.length > 0 ? data.knobs : [defaultKnob(0)];
+  const prevKnobCount = useRef(knobs.length);
+
+  useEffect(() => {
+    if (knobs.length !== prevKnobCount.current) {
+      prevKnobCount.current = knobs.length;
+      updateData({
+        parameterOutputs: knobs.map((_, i) => ({
+          name: `knob_${i}`,
+          type: "number" as const,
+          defaultValue: 0,
+        })),
+      });
+      updateNodeInternals(id);
+    }
+  }, [knobs.length, id, updateData, updateNodeInternals]);
 
   const updateKnobs = useCallback(
     (newKnobs: KnobDef[]) => {

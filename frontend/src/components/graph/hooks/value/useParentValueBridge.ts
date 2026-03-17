@@ -134,40 +134,25 @@ export function useParentValueBridge(
   useEffect(() => {
     if (depth === 0) return;
     const mappings = buildMappings();
-
-    // Collect ALL MIDI nodes referenced in the parent stack (direct or
-    // upstream of a subgraph source) so we can set up listeners for them.
     const stack = stackRef.current;
-    const top = stack[stack.length - 1];
-    const parentNodes = top?.nodes ?? [];
-    const parentEdges = top?.edges ?? [];
 
-    // Direct MIDI → boundary mappings
+    // Direct MIDI → boundary mappings at the immediate parent
     const directMidiMappings = mappings.filter(
       m => m.sourceNode.data.nodeType === "midi"
     );
 
-    // Also find all MIDI nodes that feed into subgraph source nodes
-    const sgMappings = mappings.filter(
-      m => m.sourceNode.data.nodeType === "subgraph"
-    );
-    const indirectMidiNodeIds = new Set<string>();
-    for (const sgMapping of sgMappings) {
-      for (const edge of parentEdges) {
-        if (edge.target !== sgMapping.sourceNode.id) continue;
-        const srcNode = parentNodes.find(n => n.id === edge.source);
-        if (srcNode?.data.nodeType === "midi") {
-          indirectMidiNodeIds.add(srcNode.id);
+    // Walk ALL stack levels to find every MIDI node (needed at depth >= 2
+    // where MIDI nodes may be several levels up).
+    const midiNodeMap = new Map<string, Node<FlowNodeData>>();
+    for (const level of stack) {
+      for (const n of level.nodes) {
+        if (n.data.nodeType === "midi" && !midiNodeMap.has(n.id)) {
+          midiNodeMap.set(n.id, n);
         }
       }
     }
 
-    // Merge: all unique MIDI nodes that need listeners
-    const allMidiNodeIds = new Set<string>();
-    for (const m of directMidiMappings) allMidiNodeIds.add(m.sourceNode.id);
-    for (const id of indirectMidiNodeIds) allMidiNodeIds.add(id);
-
-    if (allMidiNodeIds.size === 0) return;
+    if (midiNodeMap.size === 0) return;
 
     let midiAccess: MIDIAccess | null = null;
     let cleanups: (() => void)[] = [];
@@ -180,9 +165,7 @@ export function useParentValueBridge(
         return;
       }
 
-      for (const midiNodeId of allMidiNodeIds) {
-        const midiNode = parentNodes.find(n => n.id === midiNodeId);
-        if (!midiNode) continue;
+      for (const [midiNodeId, midiNode] of midiNodeMap) {
         const deviceId = midiNode.data.midiDeviceId as string | undefined;
         if (!deviceId) continue;
         const channels = (midiNode.data.midiChannels ?? []) as MidiChannelDef[];
@@ -225,9 +208,7 @@ export function useParentValueBridge(
               }
             }
             if (matched) {
-              // Store in shared live store
               liveMidiValues.current[`${midiNodeId}:midi_${chIdx}`] = val;
-              // Also directly write for direct MIDI → boundary mappings
               for (const dm of directMidiMappings) {
                 if (dm.sourceNode.id !== midiNodeId) continue;
                 const parsed = parseHandleId(dm.sourceHandle);
@@ -302,9 +283,9 @@ export function useParentValueBridge(
     };
   }, [depth, buildMappings, writeValue]);
 
-  // ── Subgraph source evaluation (rAF loop) ──────────────────────────────
+  // ── Subgraph source evaluation (rAF loop) — depth 1 only ───────────────
   useEffect(() => {
-    if (depth === 0) return;
+    if (depth !== 1) return;
     const mappings = buildMappings();
     const sgMappings = mappings.filter(
       m => m.sourceNode.data.nodeType === "subgraph"
@@ -342,8 +323,6 @@ export function useParentValueBridge(
           []) as SerializedSubgraphEdge[];
         if (innerNodes.length === 0) continue;
 
-        // Build input values for the source subgraph by reading from its
-        // upstream parent nodes, using live MIDI values where available.
         const inputPortValues: Record<string, unknown> = {};
         for (const port of sgInputs) {
           if (port.portType !== "param") continue;
@@ -358,7 +337,6 @@ export function useParentValueBridge(
           const srcParsed = parseHandleId(edge.sourceHandle);
           if (!srcParsed) continue;
 
-          // Check live MIDI store first
           const midiKey = `${srcNode.id}:${srcParsed.name}`;
           if (
             srcNode.data.nodeType === "midi" &&
@@ -366,7 +344,6 @@ export function useParentValueBridge(
           ) {
             inputPortValues[port.name] = liveMidiValues.current[midiKey];
           } else {
-            // Fallback to frozen static value
             inputPortValues[port.name] = getAnyValueFromNode(
               srcNode,
               edge.sourceHandle
@@ -374,7 +351,6 @@ export function useParentValueBridge(
           }
         }
 
-        // Evaluate the inner graph
         const outputValues = evaluateInnerGraph(
           innerNodes,
           innerEdges,
@@ -383,7 +359,6 @@ export function useParentValueBridge(
           inputPortValues
         );
 
-        // Write the relevant output port values to the boundary
         for (const pm of portMappings) {
           const parsed = parseHandleId(pm.sourceHandle);
           if (!parsed) continue;
@@ -404,17 +379,16 @@ export function useParentValueBridge(
     };
   }, [depth, buildMappings, writeValue, stackRef]);
 
-  // ── Static snapshot for all other producer types ─────────────────────────
+  // ── Static snapshot for all other producer types — depth 1 only ─────────
   useEffect(() => {
-    if (depth === 0) return;
+    if (depth !== 1) return;
     const mappings = buildMappings();
 
     for (const mapping of mappings) {
       const t = mapping.sourceNode.data.nodeType;
-      // Skip types handled by live bridges above
       if (t === "midi") continue;
       if (t === "control" && mapping.sourceNode.data.isPlaying) continue;
-      if (t === "subgraph") continue; // handled by subgraph eval rAF
+      if (t === "subgraph") continue;
 
       const val = getAnyValueFromNode(mapping.sourceNode, mapping.sourceHandle);
       if (val !== null && val !== undefined) {
@@ -423,6 +397,118 @@ export function useParentValueBridge(
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [depth]);
+
+  // ── Recursive evaluation for depth >= 2 ────────────────────────────────
+  // When navigating into a sub-sub-graph (depth 2+), the intermediate
+  // canvas levels are unmounted.  We re-evaluate the full subgraph chain
+  // from level 0 down to the current depth using `evaluateInnerGraph` so
+  // that live MIDI values propagate through all intermediate nodes.
+  useEffect(() => {
+    if (depth < 2) return;
+
+    const stack = stackRef.current;
+    const mappings = buildMappings();
+
+    // Ports driven by animated controls are handled by the control bridge
+    const animatedControlPorts = new Set<string>();
+    for (const m of mappings) {
+      if (
+        m.sourceNode.data.nodeType === "control" &&
+        m.sourceNode.data.isPlaying
+      ) {
+        animatedControlPorts.add(m.portName);
+      }
+    }
+
+    let running = true;
+    let handle: number;
+
+    const evaluate = () => {
+      if (!running) return;
+
+      let prevAllComputed: Map<string, unknown> | null = null;
+
+      for (let lvl = 0; lvl < depth; lvl++) {
+        const level = stack[lvl];
+        const sgNodeId = level.subgraphNodeId;
+        const levelNodes = level.nodes;
+        const levelEdges = level.edges;
+
+        const sgNode = levelNodes.find(n => n.id === sgNodeId);
+        if (!sgNode) break;
+
+        const sgInputs: SubgraphPort[] = sgNode.data.subgraphInputs ?? [];
+
+        // Resolve boundary inputs for this subgraph
+        const boundaryInputs: Record<string, unknown> = {};
+        for (const port of sgInputs) {
+          if (port.portType !== "param") continue;
+          const handleId = buildHandleId("param", port.name);
+          const edge = levelEdges.find(
+            e => e.target === sgNodeId && e.targetHandle === handleId
+          );
+          if (!edge) continue;
+          const srcNode = levelNodes.find(n => n.id === edge.source);
+          if (!srcNode) continue;
+
+          const parsed = parseHandleId(edge.sourceHandle);
+          const handleName = parsed?.name ?? "value";
+
+          if (srcNode.data.nodeType === "midi") {
+            const midiKey = `${srcNode.id}:${handleName}`;
+            boundaryInputs[port.name] =
+              liveMidiValues.current[midiKey] ??
+              getAnyValueFromNode(srcNode, edge.sourceHandle);
+          } else if (prevAllComputed) {
+            const computedKey = `${srcNode.id}:output:${handleName}`;
+            boundaryInputs[port.name] = prevAllComputed.has(computedKey)
+              ? prevAllComputed.get(computedKey)
+              : getAnyValueFromNode(srcNode, edge.sourceHandle);
+          } else {
+            boundaryInputs[port.name] = getAnyValueFromNode(
+              srcNode,
+              edge.sourceHandle
+            );
+          }
+        }
+
+        if (lvl < depth - 1) {
+          const innerNodes = (sgNode.data.subgraphNodes ??
+            []) as SerializedSubgraphNode[];
+          const innerEdges = (sgNode.data.subgraphEdges ??
+            []) as SerializedSubgraphEdge[];
+          const sgOutputs: SubgraphPort[] = sgNode.data.subgraphOutputs ?? [];
+
+          const allComputed = new Map<string, unknown>();
+          evaluateInnerGraph(
+            innerNodes,
+            innerEdges,
+            sgInputs,
+            sgOutputs,
+            boundaryInputs,
+            undefined,
+            allComputed
+          );
+          prevAllComputed = allComputed;
+        } else {
+          for (const [portName, val] of Object.entries(boundaryInputs)) {
+            if (animatedControlPorts.has(portName)) continue;
+            if (val !== undefined && val !== null) {
+              writeValue(portName, val);
+            }
+          }
+        }
+      }
+
+      handle = requestAnimationFrame(evaluate);
+    };
+
+    handle = requestAnimationFrame(evaluate);
+    return () => {
+      running = false;
+      cancelAnimationFrame(handle);
+    };
+  }, [depth, buildMappings, writeValue, stackRef]);
 
   // Cleanup rAF on unmount
   useEffect(() => {

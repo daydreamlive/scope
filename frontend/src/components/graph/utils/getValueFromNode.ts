@@ -68,9 +68,12 @@ export function getNumberFromNode(
 }
 
 /**
- * Extract a string value from a producer node.
+ * Extract a string value from a producer node given the source handle.
  */
-export function getStringFromNode(node: Node<FlowNodeData>): string | null {
+export function getStringFromNode(
+  node: Node<FlowNodeData>,
+  sourceHandleId?: string | null
+): string | null {
   const t = node.data.nodeType;
   if (t === "primitive" || t === "reroute") {
     const val = node.data.value;
@@ -83,7 +86,13 @@ export function getStringFromNode(node: Node<FlowNodeData>): string | null {
   if (t === "subgraph_input" || t === "subgraph") {
     const pv = node.data.portValues as Record<string, unknown> | undefined;
     if (!pv) return null;
-    // For string extraction we need a handle; fall back to first string value
+    if (sourceHandleId) {
+      const parsed = parseHandleId(sourceHandleId);
+      if (parsed) {
+        const val = pv[parsed.name];
+        return typeof val === "string" ? val : null;
+      }
+    }
     for (const v of Object.values(pv)) {
       if (typeof v === "string") return v;
     }

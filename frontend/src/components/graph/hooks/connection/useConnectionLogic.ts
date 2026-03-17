@@ -148,7 +148,13 @@ export function useConnectionLogic(
         if (isConcreteSource) {
           const srcType = changed.has(sourceNode.id)
             ? (changed.get(sourceNode.id) as ResolvedType)
-            : resolveSourceType(sourceNode, nodes, edgesWithNew);
+            : resolveSourceType(
+                sourceNode,
+                nodes,
+                edgesWithNew,
+                new Set(),
+                connection.sourceHandle
+              );
           if (
             srcType &&
             srcType !== "list_number" &&
@@ -299,7 +305,13 @@ export function useConnectionLogic(
               paramType = targetParam.type as SubgraphPort["paramType"];
             }
           } else {
-            const srcType = resolveSourceType(otherNode, nodes, []);
+            const srcType = resolveSourceType(
+              otherNode,
+              nodes,
+              [],
+              new Set(),
+              otherHandle
+            );
             if (srcType) {
               paramType = srcType as SubgraphPort["paramType"];
             }
