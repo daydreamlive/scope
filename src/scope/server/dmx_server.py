@@ -39,6 +39,8 @@ class _ArtNetProtocol(asyncio.DatagramProtocol):
         pass
 
     def datagram_received(self, data: bytes, addr: tuple) -> None:
+        if self._server.log_all_messages:
+            logger.info("DMX UDP packet received: %d bytes from %s", len(data), addr)
         self._server._handle_packet(data)
 
     def error_received(self, exc: Exception) -> None:
@@ -76,6 +78,8 @@ class DMXServer:
 
         # One-time hint when packets arrive but no mappings configured
         self._logged_no_mappings = False
+        # One-time log to confirm packets are arriving
+        self._logged_first_packet = False
 
         # Cached known-path inventory for DMX key validation/range mapping.
         # The cache is refreshed lazily when marked dirty by mapping/pipeline changes.
@@ -165,6 +169,14 @@ class DMXServer:
     # -- Packet handling ------------------------------------------------------
 
     def _handle_packet(self, data: bytes) -> None:
+        if not self._logged_first_packet:
+            self._logged_first_packet = True
+            logger.info(
+                "DMX Art-Net: first UDP packet received (%d bytes, header=%r)",
+                len(data),
+                data[:8],
+            )
+
         if len(data) < 18:
             return
         if data[:8] != ARTNET_HEADER:
