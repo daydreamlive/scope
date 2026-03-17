@@ -1,4 +1,4 @@
-import { Handle, Position } from "@xyflow/react";
+import { Handle, Position, useUpdateNodeInternals } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
@@ -171,10 +171,12 @@ function MidiChannelRow({
 export function MidiNode({ id, data, selected }: NodeProps<MidiNodeType>) {
   const { updateData } = useNodeData(id);
   const { collapsed, toggleCollapse } = useNodeCollapse();
+  const updateNodeInternals = useUpdateNodeInternals();
   const channels: MidiChannelDef[] =
     data.midiChannels && data.midiChannels.length > 0
       ? data.midiChannels
       : [defaultChannel(0)];
+  const prevChannelCount = useRef(channels.length);
 
   const [devices, setDevices] = useState<MIDIInput[]>([]);
   const [learningIndex, setLearningIndex] = useState<number | null>(null);
@@ -317,8 +319,21 @@ export function MidiNode({ id, data, selected }: NodeProps<MidiNodeType>) {
         input.removeEventListener("midimessage", handler as EventListener);
       }
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data.midiDeviceId, devices, updateData]);
+
+  useEffect(() => {
+    if (channels.length !== prevChannelCount.current) {
+      prevChannelCount.current = channels.length;
+      updateData({
+        parameterOutputs: channels.map((_, i) => ({
+          name: `midi_${i}`,
+          type: "number" as const,
+          defaultValue: 0,
+        })),
+      });
+      updateNodeInternals(id);
+    }
+  }, [channels.length, id, updateData, updateNodeInternals]);
 
   const updateChannels = useCallback(
     (newChannels: MidiChannelDef[]) => {

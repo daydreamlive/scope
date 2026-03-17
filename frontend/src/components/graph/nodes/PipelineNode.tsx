@@ -113,7 +113,10 @@ export function PipelineNode({
   );
 
   const listParams = parameterInputs.filter(p => p.type === "list_number");
-  const primitiveParams = parameterInputs.filter(p => p.type !== "list_number");
+  const primitiveParams = parameterInputs.filter(
+    p => p.type !== "list_number" && p.name !== "reset_cache"
+  );
+  const isResetCacheConnected = isParamConnected("reset_cache");
 
   // Measure handle positions when content changes
   const { setRowRef, rowPositions } = useHandlePositions([
@@ -182,17 +185,23 @@ export function PipelineNode({
 
           {/* Reset Cache button for pipelines that support cache management */}
           {supportsCacheManagement && (
-            <NodeParamRow label="Reset Cache">
-              <button
-                type="button"
-                onClick={() => onParameterChange?.(id, "reset_cache", true)}
-                className={`${NODE_TOKENS.pill} flex items-center justify-center gap-1 w-[110px] cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
-                title="Clear longlive cache to regenerate fresh frames"
-              >
-                <RotateCcw className="h-3 w-3 text-[#fafafa]" />
-                <span className={NODE_TOKENS.primaryText}>Reset</span>
-              </button>
-            </NodeParamRow>
+            <div ref={setRowRef("param:reset_cache")}>
+              <NodeParamRow label="Reset Cache">
+                {isResetCacheConnected ? (
+                  <NodePill className="opacity-50">connected</NodePill>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onParameterChange?.(id, "reset_cache", true)}
+                    className={`${NODE_TOKENS.pill} flex items-center justify-center gap-1 w-[110px] cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
+                    title="Clear longlive cache to regenerate fresh frames"
+                  >
+                    <RotateCcw className="h-3 w-3 text-[#fafafa]" />
+                    <span className={NODE_TOKENS.primaryText}>Reset</span>
+                  </button>
+                )}
+              </NodeParamRow>
+            </div>
           )}
 
           {/* Primitive parameters (string, number, boolean) */}
@@ -481,6 +490,29 @@ export function PipelineNode({
                   top: rowPositions["vace"] ?? 0,
                   left: 0,
                   backgroundColor: "#a78bfa",
+                }
+          }
+        />
+      )}
+
+      {/* Reset cache input handle */}
+      {supportsCacheManagement && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          id={buildHandleId("param", "reset_cache")}
+          className={
+            collapsed
+              ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+              : "!w-2.5 !h-2.5 !border-0"
+          }
+          style={
+            collapsed
+              ? { ...collapsedHandleStyle("left"), opacity: 0 }
+              : {
+                  top: rowPositions["param:reset_cache"] ?? 0,
+                  left: 0,
+                  backgroundColor: PARAM_TYPE_COLORS.boolean,
                 }
           }
         />

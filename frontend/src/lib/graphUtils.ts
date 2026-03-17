@@ -431,6 +431,15 @@ export function extractParameterPorts(
     });
   }
 
+  if (schema?.supports_cache_management) {
+    params.push({
+      name: "reset_cache",
+      type: "boolean",
+      defaultValue: false,
+      label: "Reset Cache",
+    });
+  }
+
   return params;
 }
 

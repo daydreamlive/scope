@@ -106,7 +106,7 @@ export function ControlNode({
           ? allNodes.find(n => n.id === strEdge.source)
           : null;
         const connectedString = strSourceNode
-          ? getStringFromNode(strSourceNode)
+          ? getStringFromNode(strSourceNode, strEdge?.sourceHandle)
           : null;
         const text = connectedString !== null ? connectedString : fallbackText;
         const hasStringConnection = connectedString !== null;

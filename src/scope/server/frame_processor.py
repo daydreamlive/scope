@@ -618,7 +618,7 @@ class FrameProcessor:
         if node_id:
             if node_id in self._processors_by_node_id:
                 self._processors_by_node_id[node_id].update_parameters(parameters)
-            else:
+            elif self._processors_by_node_id:
                 logger.warning(
                     f"Unknown node_id '{node_id}', ignoring parameter update"
                 )

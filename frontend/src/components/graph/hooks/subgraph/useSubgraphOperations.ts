@@ -11,6 +11,7 @@ import type {
   SerializedSubgraphNode,
   SerializedSubgraphEdge,
 } from "../../../../lib/graphUtils";
+import { resolveSourceType } from "../connection/typeResolution";
 import { toast } from "sonner";
 import { stripNonSerializable } from "../../utils/stripNodeData";
 
@@ -116,14 +117,21 @@ export function useSubgraphOperations({
         outputPortNameCounts.set(baseName, count + 1);
         const portName = count > 0 ? `${baseName}_${count}` : baseName;
 
-        // Determine paramType from the source node's parameter outputs
         let paramType: SubgraphPort["paramType"];
         if (parsed.kind === "param") {
           const sourceNode = currentNodes.find(n => n.id === edge.source);
-          const pOutput = sourceNode?.data.parameterOutputs?.find(
-            p => p.name === parsed.name
-          );
-          paramType = pOutput?.type ?? "number";
+          if (sourceNode) {
+            const resolved = resolveSourceType(
+              sourceNode,
+              currentNodes,
+              currentEdges,
+              new Set(),
+              edge.sourceHandle
+            );
+            paramType = (resolved ?? "number") as SubgraphPort["paramType"];
+          } else {
+            paramType = "number";
+          }
         }
 
         subgraphOutputs.push({

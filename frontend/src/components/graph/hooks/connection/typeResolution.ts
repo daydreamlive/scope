@@ -17,7 +17,8 @@ export function resolveSourceType(
   node: Node<FlowNodeData>,
   nodes: Node<FlowNodeData>[],
   edges: Edge[],
-  visited = new Set<string>()
+  visited = new Set<string>(),
+  sourceHandleId?: string | null
 ): ResolvedType {
   if (visited.has(node.id)) return undefined;
   visited.add(node.id);
@@ -41,14 +42,32 @@ export function resolveSourceType(
     for (const e of edges) {
       if (e.target !== node.id) continue;
       const upstream = nodes.find(n => n.id === e.source);
-      if (upstream) return resolveSourceType(upstream, nodes, edges, visited);
+      if (upstream)
+        return resolveSourceType(
+          upstream,
+          nodes,
+          edges,
+          visited,
+          e.sourceHandle
+        );
     }
     // Fallback to valueType
     return node.data.valueType;
   }
-  // Boundary / subgraph nodes: default to "number" so general type checks
-  // don't reject them; fine-grained port-level checks happen in isValidConnection.
-  if (nt === "subgraph_input" || nt === "subgraph") return "number";
+  if (nt === "subgraph" || nt === "subgraph_input") {
+    if (sourceHandleId) {
+      const parsed = parseHandleId(sourceHandleId);
+      if (parsed) {
+        const ports =
+          nt === "subgraph"
+            ? node.data.subgraphOutputs
+            : node.data.subgraphInputs;
+        const port = ports?.find(p => p.name === parsed.name);
+        if (port?.paramType) return port.paramType as ResolvedType;
+      }
+    }
+    return "number";
+  }
   return undefined;
 }
 
