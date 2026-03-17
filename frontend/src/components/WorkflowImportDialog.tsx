@@ -614,7 +614,7 @@ export function WorkflowImportDialog({
       {/* Confirmation alert dialog (replaces window.confirm) */}
       <AlertDialog
         open={confirmState !== null}
-        onOpenChange={open => {
+        onOpenChange={(open: boolean) => {
           if (!open) handleConfirmCancel();
         }}
       >
