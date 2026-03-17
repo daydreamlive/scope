@@ -11,6 +11,7 @@ import {
   Controls,
   Background,
   BackgroundVariant,
+  SelectionMode,
 } from "@xyflow/react";
 import type {
   Edge,
@@ -18,6 +19,8 @@ import type {
   NodeChange,
   EdgeChange,
   ReactFlowInstance,
+  FinalConnectionState,
+  HandleType,
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 
@@ -514,6 +517,139 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       []
     );
 
+    // Double-click on empty canvas opens pane context menu
+    const handleWrapperDoubleClick = useCallback(
+      (event: React.MouseEvent) => {
+        if (isStreaming) return;
+        const target = event.target as HTMLElement;
+        if (target.closest(".react-flow__node")) return;
+        const rf = reactFlowInstanceRef.current;
+        if (!rf) return;
+        const position = rf.screenToFlowPosition({
+          x: event.clientX,
+          y: event.clientY,
+        });
+        setPendingNodePosition(position);
+        setContextMenu({
+          x: event.clientX,
+          y: event.clientY,
+          type: "pane",
+        });
+      },
+      [isStreaming, setContextMenu]
+    );
+
+    // Track connection drag for noodle-drop context menu
+    const connectStartRef = useRef<{
+      nodeId: string;
+      handleId: string | null;
+      handleType: string | null;
+    } | null>(null);
+
+    const handleConnectStart = useCallback(
+      (
+        _event: MouseEvent | TouchEvent,
+        params: {
+          nodeId: string | null;
+          handleId: string | null;
+          handleType: string | null;
+        }
+      ) => {
+        connectStartRef.current = params.nodeId
+          ? {
+              nodeId: params.nodeId,
+              handleId: params.handleId ?? null,
+              handleType: params.handleType ?? null,
+            }
+          : null;
+      },
+      []
+    );
+
+    const handleConnectEnd = useCallback(
+      (
+        event: MouseEvent | TouchEvent,
+        connectionState: FinalConnectionState
+      ) => {
+        if (isStreaming || isReconnectingRef.current) {
+          connectStartRef.current = null;
+          return;
+        }
+        if (
+          connectStartRef.current &&
+          !connectionState.isValid &&
+          !connectionState.toNode
+        ) {
+          const rf = reactFlowInstanceRef.current;
+          if (rf) {
+            const clientX =
+              "clientX" in event
+                ? event.clientX
+                : event.changedTouches[0].clientX;
+            const clientY =
+              "clientY" in event
+                ? event.clientY
+                : event.changedTouches[0].clientY;
+            const position = rf.screenToFlowPosition({
+              x: clientX,
+              y: clientY,
+            });
+            setPendingNodePosition(position);
+            setContextMenu({
+              x: clientX,
+              y: clientY,
+              type: "pane",
+            });
+          }
+        }
+        connectStartRef.current = null;
+      },
+      [isStreaming, setContextMenu]
+    );
+
+    // Track reconnect state so dropping on canvas deletes the edge
+    const isReconnectingRef = useRef(false);
+    const reconnectingEdgeRef = useRef<string | null>(null);
+    const reconnectSucceededRef = useRef(false);
+
+    const handleReconnectStart = useCallback(
+      (_event: React.MouseEvent, edge: Edge, _handleType: HandleType) => {
+        isReconnectingRef.current = true;
+        reconnectingEdgeRef.current = edge.id;
+        reconnectSucceededRef.current = false;
+      },
+      []
+    );
+
+    const wrappedOnReconnect = useCallback(
+      (...args: Parameters<typeof onReconnect>) => {
+        reconnectSucceededRef.current = true;
+        onReconnect(...args);
+      },
+      [onReconnect]
+    );
+
+    const handleReconnectEnd = useCallback(
+      (
+        _event: MouseEvent | TouchEvent,
+        _edge: Edge,
+        _handleType: HandleType,
+        _connectionState: FinalConnectionState
+      ) => {
+        if (
+          reconnectingEdgeRef.current &&
+          !reconnectSucceededRef.current &&
+          !isStreaming
+        ) {
+          handleEdgeDelete(reconnectingEdgeRef.current);
+        }
+        reconnectingEdgeRef.current = null;
+        reconnectSucceededRef.current = false;
+        isReconnectingRef.current = false;
+      },
+      [isStreaming, handleEdgeDelete]
+    );
+
     return (
       <div className="flex h-full w-full">
         <div className="flex flex-col flex-1">
@@ -538,6 +674,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           <div
             className={`flex-1 relative${isStreaming ? " streaming" : ""}`}
             onMouseDown={handleRightMouseDown}
+            onDoubleClick={handleWrapperDoubleClick}
+            onContextMenu={e => e.preventDefault()}
           >
             <ReactFlow
               nodes={nodes}
@@ -545,11 +683,19 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               onNodesChange={filteredOnNodesChange}
               onEdgesChange={filteredOnEdgesChange}
               onConnect={onConnect}
-              onReconnect={onReconnect}
+              onReconnect={wrappedOnReconnect}
+              onReconnectStart={handleReconnectStart}
+              onReconnectEnd={handleReconnectEnd}
+              onConnectStart={handleConnectStart}
+              onConnectEnd={handleConnectEnd}
               reconnectRadius={25}
               nodesConnectable={!isStreaming}
               isValidConnection={isValidConnection}
               minZoom={0.1}
+              zoomOnDoubleClick={false}
+              panActivationKeyCode="Space"
+              multiSelectionKeyCode={["Meta", "Control"]}
+              selectionMode={SelectionMode.Partial}
               onInit={instance => {
                 reactFlowInstanceRef.current = instance;
               }}

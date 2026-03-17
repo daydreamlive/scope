@@ -241,6 +241,8 @@ export interface FlowNodeData {
   imagePath?: string;
   /** For image/media nodes: detected media type based on file extension */
   mediaType?: "image" | "video";
+  /** For video media nodes: playback loop mode */
+  videoLoopMode?: "none" | "loop" | "ping-pong";
 
   /* ── MIDI node fields ── */
   /** For MIDI nodes: array of channel definitions */

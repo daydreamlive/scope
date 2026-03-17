@@ -44,17 +44,8 @@ const TARGET_RULES: TargetRule[] = [
   // vace node targets
   ({ sourceType, targetParsedName, targetNode }) => {
     if (targetNode.data.nodeType !== "vace") return undefined;
-    if (targetParsedName === "video") {
-      if (sourceType !== "video_path") return false;
-      return !(
-        targetNode.data.vaceRefImage ||
-        targetNode.data.vaceFirstFrame ||
-        targetNode.data.vaceLastFrame
-      );
-    }
     if (["ref_image", "first_frame", "last_frame"].includes(targetParsedName)) {
-      if (sourceType !== "string") return false;
-      return !targetNode.data.vaceVideo;
+      return sourceType === "string";
     }
     return false;
   },

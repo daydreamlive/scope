@@ -17,7 +17,7 @@ import {
 
 type SliderNodeType = Node<FlowNodeData, "slider">;
 
-const COLOR = "#a78bfa"; // violet-400
+const COLOR = "#38bdf8"; // sky-400 (number)
 
 export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
   const { updateData } = useNodeData(id);

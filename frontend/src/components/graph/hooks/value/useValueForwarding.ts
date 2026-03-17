@@ -264,44 +264,30 @@ export function useValueForwarding(
             ctxScale
           );
 
-          const vaceVideo = (node.data.vaceVideo as string) || "";
-          if (vaceVideo) {
+          onNodeParamChangeRef.current(
+            backendId,
+            "vace_use_input_video",
+            false
+          );
+          const refImg = (node.data.vaceRefImage as string) || "";
+          if (refImg)
+            onNodeParamChangeRef.current(backendId, "vace_ref_images", [
+              refImg,
+            ]);
+          const firstFrame = (node.data.vaceFirstFrame as string) || "";
+          if (firstFrame)
             onNodeParamChangeRef.current(
               backendId,
-              "vace_use_input_video",
-              true
+              "first_frame_image",
+              firstFrame
             );
+          const lastFrame = (node.data.vaceLastFrame as string) || "";
+          if (lastFrame)
             onNodeParamChangeRef.current(
               backendId,
-              "vace_video_path",
-              vaceVideo
+              "last_frame_image",
+              lastFrame
             );
-          } else {
-            onNodeParamChangeRef.current(
-              backendId,
-              "vace_use_input_video",
-              false
-            );
-            const refImg = (node.data.vaceRefImage as string) || "";
-            if (refImg)
-              onNodeParamChangeRef.current(backendId, "vace_ref_images", [
-                refImg,
-              ]);
-            const firstFrame = (node.data.vaceFirstFrame as string) || "";
-            if (firstFrame)
-              onNodeParamChangeRef.current(
-                backendId,
-                "first_frame_image",
-                firstFrame
-              );
-            const lastFrame = (node.data.vaceLastFrame as string) || "";
-            if (lastFrame)
-              onNodeParamChangeRef.current(
-                backendId,
-                "last_frame_image",
-                lastFrame
-              );
-          }
           continue;
         }
 
@@ -443,8 +429,6 @@ export function useValueForwarding(
             nodeUpdates["vaceFirstFrame"] = String(sourceValue);
           } else if (targetParsed.name === "last_frame") {
             nodeUpdates["vaceLastFrame"] = String(sourceValue);
-          } else if (targetParsed.name === "video") {
-            nodeUpdates["vaceVideo"] = String(sourceValue);
           }
         } else if (targetNode.data.nodeType === "reroute") {
           nodeUpdates["value"] = sourceValue;
@@ -473,7 +457,6 @@ export function useValueForwarding(
         ref_image: "vaceRefImage",
         first_frame: "vaceFirstFrame",
         last_frame: "vaceLastFrame",
-        video: "vaceVideo",
       };
       for (const node of currentNodes) {
         if (node.data.nodeType !== "vace") continue;

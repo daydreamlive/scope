@@ -26,7 +26,7 @@ type PipelineNodeType = Node<FlowNodeData, "pipeline">;
 const PORT_COLORS_HEX: Record<string, string> = {
   video: "#ffffff",
   video2: "#ffffff",
-  vace_input_frames: "#a78bfa",
+  vace_input_frames: "#ffffff",
   vace_input_masks: "#f472b6",
 };
 
@@ -119,9 +119,21 @@ export function PipelineNode({
   );
   const isResetCacheConnected = isParamConnected("reset_cache");
 
+  const VACE_STREAM_PORTS = ["vace_input_frames", "vace_input_masks"];
+  const normalStreamInputs = streamInputs.filter(
+    p => !VACE_STREAM_PORTS.includes(p)
+  );
+  // When supportsVace is true, always show these ports (they are always in the
+  // schema for VACE pipelines). Fall back to what streamInputs provides if
+  // supportsVace hasn't been resolved yet.
+  const vaceStreamInputs = supportsVace
+    ? VACE_STREAM_PORTS
+    : streamInputs.filter(p => VACE_STREAM_PORTS.includes(p));
+
   // Measure handle positions when content changes
   const { setRowRef, rowPositions } = useHandlePositions([
-    streamInputs,
+    normalStreamInputs,
+    vaceStreamInputs,
     streamOutputs,
     primitiveParams.length,
     listParams.length,
@@ -167,8 +179,8 @@ export function PipelineNode({
             </div>
           )}
 
-          {/* Stream inputs */}
-          {streamInputs.map(port => (
+          {/* Stream inputs (normal, e.g. video) */}
+          {normalStreamInputs.map(port => (
             <div key={`in-${port}`} ref={setRowRef(`in:${port}`)}>
               <NodeParamRow label="Input">
                 <NodePill>{port}</NodePill>
@@ -350,6 +362,19 @@ export function PipelineNode({
             </div>
           )}
 
+          {/* VACE stream inputs (vace_input_frames, vace_input_masks) */}
+          {vaceStreamInputs.map(port => (
+            <div key={`in-${port}`} ref={setRowRef(`in:${port}`)}>
+              <NodeParamRow
+                label={
+                  port === "vace_input_frames" ? "VACE Frames" : "VACE Masks"
+                }
+              >
+                <NodePill>{port}</NodePill>
+              </NodeParamRow>
+            </div>
+          ))}
+
           {/* Prompt textarea */}
           {supportsPrompts && (
             <div ref={setRowRef("prompt")}>
@@ -386,8 +411,8 @@ export function PipelineNode({
         </NodeBody>
       )}
 
-      {/* Stream input handles */}
-      {streamInputs.map((port, idx) => (
+      {/* Stream input handles (normal) */}
+      {normalStreamInputs.map((port, idx) => (
         <Handle
           key={`target-${port}`}
           type="target"
@@ -403,6 +428,30 @@ export function PipelineNode({
               ? idx === 0
                 ? collapsedHandleStyle("left")
                 : { ...collapsedHandleStyle("left"), opacity: 0 }
+              : {
+                  top: rowPositions[`in:${port}`] ?? 0,
+                  left: 0,
+                  backgroundColor: getPortColorHex(port),
+                }
+          }
+        />
+      ))}
+
+      {/* VACE stream input handles (vace_input_frames, vace_input_masks) */}
+      {vaceStreamInputs.map(port => (
+        <Handle
+          key={`target-${port}`}
+          type="target"
+          position={Position.Left}
+          id={buildHandleId("stream", port)}
+          className={
+            collapsed
+              ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+              : "!w-2.5 !h-2.5 !border-0"
+          }
+          style={
+            collapsed
+              ? { ...collapsedHandleStyle("left"), opacity: 0 }
               : {
                   top: rowPositions[`in:${port}`] ?? 0,
                   left: 0,

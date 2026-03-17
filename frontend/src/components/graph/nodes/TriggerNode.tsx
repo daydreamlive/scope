@@ -9,7 +9,7 @@ import { NodeCard, NodeHeader, NodeBody, collapsedHandleStyle } from "../ui";
 
 type TriggerNodeType = Node<FlowNodeData, "trigger">;
 
-const COLOR = "#f97316"; // orange-500
+const COLOR = "#34d399"; // emerald-400 (boolean)
 
 export function TriggerNode({
   id,

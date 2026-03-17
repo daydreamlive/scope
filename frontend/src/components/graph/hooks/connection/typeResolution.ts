@@ -103,9 +103,6 @@ export function resolveTargetType(
     ) {
       return "string";
     }
-    if (targetParamName === "video") {
-      return "video_path";
-    }
     return undefined;
   }
   if (nt === "reroute") return undefined; // accepts any
