@@ -139,13 +139,19 @@ class MIDIClockTempoSource(TempoSource):
         self._last_tick_time = None
         self._ema_interval = None
         self._is_playing = True
+        with self._state_lock:
+            self._cached_state = None
         logger.info("MIDI Start received")
 
     def _on_stop(self) -> None:
         self._is_playing = False
+        with self._state_lock:
+            self._cached_state = None
         logger.info("MIDI Stop received")
 
     def _on_continue(self) -> None:
         self._is_playing = True
         self._last_tick_time = None
+        with self._state_lock:
+            self._cached_state = None
         logger.info("MIDI Continue received")

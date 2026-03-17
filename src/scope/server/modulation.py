@@ -140,7 +140,7 @@ def modulate_step_list(
     # Enforce strictly descending: walk backwards, push each value up if needed
     for i in range(len(result) - 2, -1, -1):
         if result[i] <= result[i + 1]:
-            result[i] = result[i + 1] + 1
+            result[i] = min(hi, result[i + 1] + 1)
 
     return result
 
