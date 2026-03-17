@@ -118,7 +118,7 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
-    connectStage: _cloudConnectStage,
+    connectStage: _cloudConnectStage, // eslint-disable-line @typescript-eslint/no-unused-vars
   } = useCloudStatus();
 
   const { loraFiles } = useLoRAsContext();
@@ -354,7 +354,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
-    loadingStage: _pipelineLoadingStage,
+    loadingStage: _pipelineLoadingStage, // eslint-disable-line @typescript-eslint/no-unused-vars
   } = usePipeline();
 
   // Tempo sync
