@@ -982,6 +982,116 @@ export const updateOscSettings = async (
 };
 
 // ---------------------------------------------------------------------------
+// DMX settings
+// ---------------------------------------------------------------------------
+
+export interface DmxStatusResponse {
+  enabled: boolean;
+  listening: boolean;
+  port: number | null;
+  preferred_port: number;
+  host: string | null;
+  log_all_messages: boolean;
+  mapping_count: number;
+}
+
+export interface DmxMapping {
+  universe: number;
+  channel: number;
+  key: string;
+}
+
+export interface DmxConfigResponse {
+  enabled: boolean;
+  preferred_port: number;
+  log_all_messages: boolean;
+  mappings: DmxMapping[];
+}
+
+export interface DmxPathEntry {
+  key: string;
+  type: string;
+  description: string;
+  min?: number;
+  max?: number;
+  pipeline_id?: string;
+}
+
+export interface DmxPathsResponse {
+  active: Record<string, DmxPathEntry[]>;
+  available: Record<string, DmxPathEntry[]>;
+  active_pipeline_ids: string[];
+}
+
+export const getDmxStatus = async (): Promise<DmxStatusResponse> => {
+  const response = await fetch("/api/v1/dmx/status");
+  if (!response.ok) {
+    throw new Error("Failed to fetch DMX status");
+  }
+  return response.json();
+};
+
+export const updateDmxSettings = async (settings: {
+  enabled?: boolean;
+  log_all_messages?: boolean;
+  preferred_port?: number;
+}): Promise<DmxStatusResponse> => {
+  const response = await fetch("/api/v1/dmx/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to update DMX settings");
+  }
+  return response.json();
+};
+
+export const applyDmxPort = async (
+  preferredPort: number
+): Promise<DmxStatusResponse> => {
+  const response = await fetch("/api/v1/dmx/restart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ preferred_port: preferredPort }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to apply DMX port");
+  }
+  return response.json();
+};
+
+export const getDmxPaths = async (): Promise<DmxPathsResponse> => {
+  const response = await fetch("/api/v1/dmx/paths");
+  if (!response.ok) {
+    throw new Error("Failed to fetch DMX paths");
+  }
+  return response.json();
+};
+
+export const getDmxConfig = async (): Promise<DmxConfigResponse> => {
+  const response = await fetch("/api/v1/dmx/config");
+  if (!response.ok) {
+    throw new Error("Failed to fetch DMX config");
+  }
+  return response.json();
+};
+
+export const saveDmxConfig = async (
+  config: Partial<DmxConfigResponse>
+): Promise<DmxConfigResponse> => {
+  const response = await fetch("/api/v1/dmx/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to save DMX config");
+  }
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
 // Daydream API – workflow import from community hub
 // ---------------------------------------------------------------------------
 
