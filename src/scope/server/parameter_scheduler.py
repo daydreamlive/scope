@@ -56,7 +56,8 @@ class ParameterScheduler:
             logger.warning("[SCHEDULER] Invalid quantize mode '%s', ignoring", mode)
             return
         self.cancel_pending()
-        self._quantize_mode = mode
+        with self._lock:
+            self._quantize_mode = mode
         logger.info("[SCHEDULER] Quantize mode set to '%s'", mode)
 
     @property
@@ -66,7 +67,8 @@ class ParameterScheduler:
     @lookahead_ms.setter
     def lookahead_ms(self, ms: float) -> None:
         self.cancel_pending()
-        self._lookahead_ms = max(0.0, float(ms))
+        with self._lock:
+            self._lookahead_ms = max(0.0, float(ms))
         logger.info("[SCHEDULER] Lookahead set to %.0fms", self._lookahead_ms)
 
     def schedule(self, params: dict) -> None:
@@ -78,48 +80,44 @@ class ParameterScheduler:
         If a timer is already pending, new params are merged into the
         existing schedule without recomputing the target boundary.
         """
-        if self._quantize_mode == "none":
-            self._apply_callback(params)
-            return
-
         beat_state = self._tempo_sync.get_beat_state()
-        if beat_state is None:
-            self._apply_callback(params)
-            return
 
         apply_immediately = False
         scheduled_delay = 0.0
 
         with self._lock:
+            if self._quantize_mode == "none" or beat_state is None:
+                apply_immediately = True
             # If a timer is already pending, merge params without
             # recomputing the target boundary
-            if self._pending_timer is not None:
+            elif self._pending_timer is not None:
                 if self._pending_params is not None:
                     self._pending_params.update(params)
                 else:
                     self._pending_params = dict(params)
                 logger.info("[SCHEDULER] Params merged into existing scheduled change")
                 return
-
-            delay = self._compute_apply_delay(beat_state)
-
-            if delay <= 0:
-                apply_immediately = True
             else:
-                self._pending_params = dict(params)
-                self._pending_timer = threading.Timer(delay, self._apply_pending)
-                self._pending_timer.daemon = True
-                self._pending_timer.start()
-                scheduled_delay = delay
+                delay = self._compute_apply_delay(beat_state)
+
+                if delay <= 0:
+                    apply_immediately = True
+                else:
+                    self._pending_params = dict(params)
+                    self._pending_timer = threading.Timer(delay, self._apply_pending)
+                    self._pending_timer.daemon = True
+                    self._pending_timer.start()
+                    scheduled_delay = delay
+                    quantize_mode = self._quantize_mode
+                    lookahead_ms = self._lookahead_ms
 
         if apply_immediately:
             self._apply_callback(params)
-            self._notify({"type": "change_applied"})
             return
 
         logger.info(
             f"[SCHEDULER] Change scheduled in {scheduled_delay * 1000:.0f}ms "
-            f"(mode={self._quantize_mode}, lookahead={self._lookahead_ms:.0f}ms)"
+            f"(mode={quantize_mode}, lookahead={lookahead_ms:.0f}ms)"
         )
         self._notify(
             {"type": "change_scheduled", "delay_ms": int(scheduled_delay * 1000)}

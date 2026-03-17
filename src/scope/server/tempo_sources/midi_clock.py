@@ -9,7 +9,10 @@ import logging
 import threading
 import time
 
-import mido
+try:
+    import mido
+except ImportError:
+    mido = None
 
 from ..tempo_sync import BeatState, TempoSource
 
@@ -56,6 +59,10 @@ class MIDIClockTempoSource(TempoSource):
             return self._cached_state
 
     async def start(self) -> None:
+        if mido is None:
+            raise ImportError(
+                "mido is not installed. Install with: uv sync --extra midi"
+            )
         if self._device_name:
             self._port = mido.open_input(self._device_name)
         else:
