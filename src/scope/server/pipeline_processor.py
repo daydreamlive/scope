@@ -550,7 +550,7 @@ class PipelineProcessor:
             )
             if boundary != self._last_reset_boundary and self._last_reset_boundary >= 0:
                 call_params["init_cache"] = True
-                call_params["base_seed"] = random.randint(0, 2**31)
+                call_params["base_seed"] = random.randint(0, 2**31 - 1)
                 logger.info(
                     "[BEAT RESET] Cache reset + seed change at boundary %d (rate=%s)",
                     boundary,

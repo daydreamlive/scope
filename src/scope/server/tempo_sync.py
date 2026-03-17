@@ -87,26 +87,25 @@ class TempoSync:
 
     def __init__(self, beats_per_bar: int = 4):
         self._source: TempoSource | None = None
-        self._source_lock = threading.Lock()
+        self._state_lock = threading.Lock()  # guards _source and _enabled together
         self._beats_per_bar = beats_per_bar
 
         self._client_beat_state: BeatState | None = None
         self._client_state_lock = threading.Lock()
 
         self._enabled = False
-        self._enabled_lock = threading.Lock()
         self._notification_task: asyncio.Task | None = None
         self._notification_sessions: list[Any] = []
         self._notification_lock = threading.Lock()
 
     @property
     def enabled(self) -> bool:
-        with self._enabled_lock:
+        with self._state_lock:
             return self._enabled
 
     @property
     def source_name(self) -> str | None:
-        with self._source_lock:
+        with self._state_lock:
             if self._source is not None:
                 return self._source.name
         return None
@@ -121,9 +120,10 @@ class TempoSync:
         Returns None when disabled. Otherwise returns client-forwarded
         state if fresh, falling back to the server-side tempo source.
         """
-        with self._enabled_lock:
+        with self._state_lock:
             if not self._enabled:
                 return None
+            source = self._source
 
         with self._client_state_lock:
             client_state = self._client_beat_state
@@ -133,9 +133,8 @@ class TempoSync:
             if age < CLIENT_BEAT_STATE_STALE_SECONDS:
                 return client_state
 
-        with self._source_lock:
-            if self._source is not None:
-                return self._source.get_beat_state()
+        if source is not None:
+            return source.get_beat_state()
 
         return None
 
@@ -204,9 +203,8 @@ class TempoSync:
 
         await source.start()
 
-        with self._source_lock:
+        with self._state_lock:
             self._source = source
-        with self._enabled_lock:
             self._enabled = True
 
         logger.info("Tempo sync enabled: source=%s, bpm=%s", source_type, bpm)
@@ -215,23 +213,21 @@ class TempoSync:
 
     def set_tempo(self, bpm: float) -> None:
         """Set the session tempo. Only supported by some sources (e.g. Link)."""
-        with self._source_lock:
+        with self._state_lock:
             if self._source is None:
                 raise RuntimeError("No active tempo source")
             self._source.set_tempo(bpm)
 
     async def disable(self) -> None:
         """Disable tempo sync and stop the current source."""
-        with self._enabled_lock:
+        with self._state_lock:
             self._enabled = False
+            source = self._source
+            self._source = None
         self._stop_notifications()
 
         with self._client_state_lock:
             self._client_beat_state = None
-
-        with self._source_lock:
-            source = self._source
-            self._source = None
 
         if source is not None:
             await source.stop()
@@ -246,7 +242,7 @@ class TempoSync:
         beat_state = self.get_beat_state()
         source_info = {}
 
-        with self._source_lock:
+        with self._state_lock:
             if self._source is not None:
                 source_info["type"] = self._source.name
                 if hasattr(self._source, "num_peers"):

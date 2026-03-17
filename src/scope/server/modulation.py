@@ -137,10 +137,19 @@ def modulate_step_list(
 
     result = [max(lo, min(hi, s + offset)) for s in steps]
 
-    # Enforce strictly descending: walk backwards, push each value up if needed
+    # Enforce strictly descending: walk backwards, push each value up if needed.
+    # Then walk forwards to fix any ceiling collisions at hi.
     for i in range(len(result) - 2, -1, -1):
         if result[i] <= result[i + 1]:
             result[i] = min(hi, result[i + 1] + 1)
+    for i in range(1, len(result)):
+        if result[i] >= result[i - 1]:
+            result[i] = max(lo, result[i - 1] - 1)
+
+    # If the range [lo, hi] is too narrow to fit len(steps) distinct values,
+    # return the original (clamped) list rather than a broken schedule.
+    if len(result) >= 2 and result[0] <= result[-1]:
+        return [max(lo, min(hi, s)) for s in steps]
 
     return result
 
