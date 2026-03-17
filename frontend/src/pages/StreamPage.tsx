@@ -2228,9 +2228,9 @@ export function StreamPage() {
         {/* Main Content Area */}
         <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
           {/* Left Panel - Input & Controls */}
-          <div className="w-1/5 flex flex-col gap-3 min-h-0">
+          <div className="w-1/5 flex flex-col gap-3 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
             <InputAndControlsPanel
-              className="flex-1 min-h-0"
+              className=""
               pipelines={pipelines}
               localStream={localStream}
               isInitializing={isInitializing}
@@ -2332,7 +2332,7 @@ export function StreamPage() {
                 }
               }}
             />
-            <Card className="flex-shrink-0">
+            <Card>
               <CardHeader className="px-4 py-3">
                 <CardTitle className="text-base font-medium">
                   Tempo Sync
@@ -2381,7 +2381,7 @@ export function StreamPage() {
             </Card>
             {hasAvailableOutputs && (
               <OutputsPanel
-                className="flex-shrink-0"
+                className=""
                 outputSinks={settings.outputSinks}
                 onOutputSinkChange={handleOutputSinkChange}
                 spoutAvailable={spoutAvailable}
