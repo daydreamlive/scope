@@ -72,10 +72,17 @@ class Session:
         self.user_id = user_id
         self.connection_id = connection_id
         self.connection_info = connection_info
+        self.notification_sender = None
+        self.tempo_sync = None
 
     async def close(self):
         """Close this session and cleanup resources."""
         try:
+            if self.tempo_sync is not None and self.notification_sender is not None:
+                self.tempo_sync.unregister_notification_session(
+                    self.notification_sender
+                )
+
             # Stop video track first to properly cleanup FrameProcessor
             if self.video_track is not None:
                 await self.video_track.stop()
@@ -129,7 +136,8 @@ class NotificationSender:
                 def send_sync():
                     try:
                         self.data_channel.send(message_str)
-                        logger.info(f"Sent notification to frontend: {message}")
+                        if message.get("type") != "tempo_update":
+                            logger.info(f"Sent notification to frontend: {message}")
                     except Exception as e:
                         logger.error(f"Failed to send notification: {e}")
 
@@ -194,7 +202,10 @@ class WebRTCManager:
         self.is_first_track = True
 
     async def handle_offer(
-        self, request: WebRTCOfferRequest, pipeline_manager: PipelineManager
+        self,
+        request: WebRTCOfferRequest,
+        pipeline_manager: PipelineManager,
+        tempo_sync=None,
     ) -> dict[str, Any]:
         """
         Handle an incoming WebRTC offer and return an answer.
@@ -202,6 +213,7 @@ class WebRTCManager:
         Args:
             offer_data: Dictionary containing SDP offer
             pipeline_manager: The pipeline manager instance
+            tempo_sync: Optional TempoSync instance for beat state injection
 
         Returns:
             Dictionary containing SDP answer
@@ -237,8 +249,14 @@ class WebRTCManager:
                 user_id=request.user_id,
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
+                tempo_sync=tempo_sync,
             )
             session.video_track = video_track
+
+            session.notification_sender = notification_sender
+            session.tempo_sync = tempo_sync
+            if tempo_sync is not None:
+                tempo_sync.register_notification_session(notification_sender)
 
             # Create a MediaRelay to allow multiple consumers (WebRTC and recording)
             relay = MediaRelay()
@@ -349,9 +367,20 @@ class WebRTCManager:
                         data = json.loads(message)
                         logger.debug(f"Received parameter update: {data}")
 
-                        # Check for paused parameter and call pause() method on video track
+                        # Always handle paused immediately (before quantized
+                        # scheduling) so pause/unpause is never delayed.
                         if "paused" in data and session.video_track:
                             session.video_track.pause(data["paused"])
+
+                        # Check for quantized update flag
+                        if data.pop("_quantized", False):
+                            if session.video_track and hasattr(
+                                session.video_track, "frame_processor"
+                            ):
+                                session.video_track.frame_processor.schedule_quantized_update(
+                                    data
+                                )
+                            return
 
                         # Send parameters to the frame processor
                         if session.video_track and hasattr(
