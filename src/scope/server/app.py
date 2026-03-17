@@ -67,13 +67,18 @@ from .kafka_publisher import (
     set_kafka_publisher,
 )
 from .logs_config import (
+    LOG_FORMAT,
+    FalConnectionFilter,
     cleanup_old_logs,
     ensure_logs_dir,
     get_current_log_file,
+    get_fal_connection_id,
     get_logs_dir,
     get_most_recent_log_file,
+    set_fal_connection_id,
 )
 from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
+from .mcp_router import router as mcp_router
 from .models_config import (
     ensure_models_dir,
     get_assets_dir,
@@ -108,9 +113,16 @@ from .schema import (
 )
 
 # Cached responses for pipeline schemas and plugin list.
-# Server restarts after plugin install/uninstall, so these are naturally reset.
+# Invalidated by _invalidate_plugin_caches() on install/uninstall.
 _pipeline_schemas_cache: PipelineSchemasResponse | None = None
 _plugins_list_cache: object | None = None
+
+
+def _invalidate_plugin_caches():
+    """Reset plugin and pipeline schema caches after install/uninstall."""
+    global _pipeline_schemas_cache, _plugins_list_cache
+    _pipeline_schemas_cache = None
+    _plugins_list_cache = None
 
 
 class STUNErrorFilter(logging.Filter):
@@ -123,52 +135,59 @@ class STUNErrorFilter(logging.Filter):
         return True
 
 
-# Ensure logs directory exists and clean up old logs
-logs_dir = ensure_logs_dir()
-cleanup_old_logs(max_age_days=1)  # Delete logs older than 1 day
-log_file = get_current_log_file()
+def _configure_logging():
+    """Set up file and console logging for the main server process.
 
-# Configure logging - set root to WARNING to keep non-app libraries quiet by default
-logging.basicConfig(
-    level=logging.WARNING, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+    Called from run_server() rather than at module import time so that the MCP
+    subprocess (which also imports this module) doesn't create a competing log
+    file that shadows the real server logs.
+    """
+    # Ensure logs directory exists and clean up old logs
+    ensure_logs_dir()
+    cleanup_old_logs(max_age_days=1)
+    log_file = get_current_log_file()
 
-# Console handler handles INFO
-root_logger = logging.getLogger()
-for handler in root_logger.handlers:
-    if isinstance(handler, logging.StreamHandler) and not isinstance(
-        handler, RotatingFileHandler
-    ):
-        handler.setLevel(logging.INFO)
+    # Set root to WARNING to keep non-app libraries quiet by default
+    logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT)
 
-# Add rotating file handler
-file_handler = RotatingFileHandler(
-    log_file,
-    maxBytes=5 * 1024 * 1024,  # 5 MB per file
-    backupCount=5,  # Keep 5 backup files
-)
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(
-    logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-)
-root_logger.addHandler(file_handler)
+    # Install filter on every handler so %(fal_conn)s is always populated
+    _fal_filter = FalConnectionFilter()
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        handler.addFilter(_fal_filter)
+        if isinstance(handler, logging.StreamHandler) and not isinstance(
+            handler, RotatingFileHandler
+        ):
+            handler.setLevel(logging.INFO)
 
-# Add the filter to suppress STUN/TURN errors
-stun_filter = STUNErrorFilter()
-logging.getLogger("asyncio").addFilter(stun_filter)
+    # Add rotating file handler
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=5 * 1024 * 1024,  # 5 MB per file
+        backupCount=5,  # Keep 5 backup files
+    )
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    file_handler.addFilter(_fal_filter)
+    root_logger.addHandler(file_handler)
 
-# Set INFO level for your app modules
-logging.getLogger("scope.server").setLevel(logging.INFO)
-logging.getLogger("scope.core").setLevel(logging.INFO)
+    # Add the filter to suppress STUN/TURN errors
+    stun_filter = STUNErrorFilter()
+    logging.getLogger("asyncio").addFilter(stun_filter)
 
-# Set INFO level for uvicorn
-logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+    # Set INFO level for app modules
+    logging.getLogger("scope.server").setLevel(logging.INFO)
+    logging.getLogger("scope.core").setLevel(logging.INFO)
 
-# Enable verbose logging for other libraries when needed
-if os.getenv("VERBOSE_LOGGING"):
-    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
-    logging.getLogger("fastapi").setLevel(logging.INFO)
+    # Set INFO level for uvicorn
+    logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+
+    # Enable verbose logging for other libraries when needed
+    if os.getenv("VERBOSE_LOGGING"):
+        logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+        logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
+
 
 # Set INFO for the cloud log re-emitter so cloud lines reach console and file
 logging.getLogger("scope.cloud").setLevel(logging.INFO)
@@ -281,7 +300,7 @@ async def prewarm_pipeline(pipeline_id: str):
     """Background task to pre-warm the pipeline without blocking startup."""
     try:
         await asyncio.wait_for(
-            pipeline_manager.load_pipelines([pipeline_id]),
+            pipeline_manager.load_pipelines([(pipeline_id, pipeline_id, None)]),
             timeout=300,  # 5 minute timeout for pipeline loading
         )
     except Exception as e:
@@ -465,6 +484,9 @@ app = FastAPI(
     version=version("daydream-scope"),
 )
 
+# MCP server endpoints (headless sessions, parameters, frame capture, etc.)
+app.include_router(mcp_router)
+
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
@@ -489,6 +511,33 @@ async def health_check(
         version=version("daydream-scope"),
         git_commit=get_git_commit_hash(),
     )
+
+
+@app.put("/api/v1/internal/fal-connection-id")
+async def put_fal_connection_id(request: Request):
+    """Set the fal connection ID that is injected into every log line.
+
+    Called by the fal_app proxy when a new WebSocket connection is established.
+    This is an internal endpoint not intended for external consumers.
+    """
+    body = await request.json()
+    connection_id = body.get("connection_id")
+    set_fal_connection_id(connection_id)
+    logger.info("Fal connection ID set")
+    return {"status": "ok", "connection_id": connection_id}
+
+
+@app.delete("/api/v1/internal/fal-connection-id")
+async def delete_fal_connection_id():
+    """Clear the fal connection ID from log lines.
+
+    Called by the fal_app proxy when a WebSocket connection is closed.
+    """
+    prev = get_fal_connection_id()
+    set_fal_connection_id(None)
+    if prev:
+        logger.info("Fal connection ID cleared")
+    return {"status": "ok"}
 
 
 @app.post("/api/v1/restart")
@@ -609,16 +658,21 @@ async def load_pipeline(
     cloud-hosted scope backend.
     """
     try:
-        # Get pipeline IDs to load
-        pipeline_ids = request.pipeline_ids
-        if not pipeline_ids:
+        # Normalize to list of (node_id, pipeline_id, load_params) tuples
+        if request.pipelines:
+            pipelines = [
+                (p.node_id, p.pipeline_id, p.load_params) for p in request.pipelines
+            ]
+        elif request.pipeline_ids:
+            # Legacy format: use pipeline_id as node_id
+            pipelines = [
+                (pid, pid, request.load_params) for pid in request.pipeline_ids
+            ]
+        else:
             raise HTTPException(
                 status_code=400,
-                detail="pipeline_ids must be provided and cannot be empty",
+                detail="Either 'pipelines' or 'pipeline_ids' must be provided",
             )
-
-        # load_params is already a dict (or None)
-        load_params_dict = request.load_params
 
         # Pipeline active/available DMX path grouping can change after load/unload.
         # Mark the DMX known-path cache stale so it is rebuilt once on next packet.
@@ -629,8 +683,7 @@ async def load_pipeline(
         # Local mode: start loading in background without blocking
         asyncio.create_task(
             pipeline_manager.load_pipelines(
-                pipeline_ids,
-                load_params_dict,
+                pipelines,
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
                 user_id=request.user_id,
@@ -1768,13 +1821,15 @@ async def upload_asset(
         # Read file content from request body
         content = await request.body()
 
-        # Validate file size (50MB limit)
-        max_size = 50 * 1024 * 1024  # 50MB
-        if len(content) > max_size:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
-            )
+        # Apply upload size validation only for cloud uploads.
+        # Local mode keeps files on the same machine, so no explicit cap is enforced.
+        if cloud_manager.is_connected:
+            max_size = 50 * 1024 * 1024  # 50MB
+            if len(content) > max_size:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
+                )
 
         # If cloud mode is active, upload to cloud AND save locally for thumbnails
         if cloud_manager.is_connected:
@@ -2526,6 +2581,7 @@ async def install_plugin(
             srv.invalidate_known_paths_cache()
 
         logger.info(f"Plugin installed: {plugin_name}")
+        _invalidate_plugin_caches()
         return PluginInstallResponse(
             success=result["success"],
             message=result["message"],
@@ -2606,6 +2662,7 @@ async def uninstall_plugin(
             srv.invalidate_known_paths_cache()
 
         logger.info(f"Plugin uninstalled: {name}")
+        _invalidate_plugin_caches()
         return PluginUninstallResponse(
             success=result["success"],
             message=result["message"],
@@ -2666,6 +2723,8 @@ async def reload_plugin(
             force=reload_request.force,
             pipeline_manager=pipeline_manager,
         )
+
+        _invalidate_plugin_caches()
 
         srv = get_dmx_server()
         if srv is not None:
@@ -2898,6 +2957,7 @@ def open_browser_when_ready(host: str, port: int, server):
 
 def run_server(reload: bool, host: str, port: int, no_browser: bool):
     """Run the Daydream Scope server."""
+    _configure_logging()
 
     from scope.core.pipelines.registry import (
         PipelineRegistry,  # noqa: F401 - imported for side effects (registry initialization)
@@ -2979,6 +3039,12 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     envvar="SCOPE_CLOUD_API_KEY",
     help="Cloud API key for cloud mode",
 )
+@click.option(
+    "--mcp",
+    is_flag=True,
+    help="Run as an MCP (Model Context Protocol) server over stdio instead of the HTTP server. "
+    "Connects to a running Scope instance on --port.",
+)
 @click.pass_context
 def main(
     ctx,
@@ -2989,11 +3055,26 @@ def main(
     no_browser: bool,
     cloud_app_id: str | None,
     cloud_api_key: str | None,
+    mcp: bool,
 ):
     # Handle version flag
     if version:
         print_version_info()
         sys.exit(0)
+
+    # MCP mode: run the MCP stdio server instead of the HTTP server
+    if mcp:
+        import click.core
+
+        from .mcp_server import run_mcp_server
+
+        # Only pre-connect if --port was explicitly provided on the command line
+        source = ctx.get_parameter_source("port")
+        explicit_port = (
+            port if source == click.core.ParameterSource.COMMANDLINE else None
+        )
+        run_mcp_server(port=explicit_port)
+        return
 
     # Store cloud credentials in environment for app access
     if cloud_app_id:

@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "scope": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["run", "daydream-scope", "--mcp"]
+    }
+  }
+}

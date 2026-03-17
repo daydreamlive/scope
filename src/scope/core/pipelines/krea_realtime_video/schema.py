@@ -42,6 +42,9 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         ),
     ]
 
+    inputs = ["video", "vace_input_frames", "vace_input_masks"]
+    outputs = ["video"]
+
     supports_cache_management = True
     supports_kv_cache_bias = True
     supports_quantization = True

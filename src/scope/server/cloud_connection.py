@@ -30,6 +30,7 @@ import numpy as np
 from av import VideoFrame
 
 from .kafka_publisher import publish_event
+from .logs_config import set_fal_connection_id
 
 if TYPE_CHECKING:
     from .cloud_webrtc_client import CloudWebRTCClient
@@ -173,6 +174,7 @@ class CloudConnectionManager:
                     raise RuntimeError(f"Expected 'ready' message, got: {data}")
                 # Extract connection_id for log correlation
                 self._connection_id = data.get("connection_id")
+                set_fal_connection_id(self._connection_id)
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 # Get the underlying exception for better diagnostics
                 ws_exception = self.ws.exception() if self.ws else None
@@ -572,6 +574,7 @@ class CloudConnectionManager:
         self._stop_event.set()
         self._connected = False
         self._connection_id = None
+        set_fal_connection_id(None)
 
         # Stop WebRTC client first
         await self.stop_webrtc()
