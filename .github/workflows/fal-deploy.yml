@@ -8,9 +8,9 @@ on:
         required: true
         type: choice
         options:
-          - staging
+          - main
           - prod
-        default: 'staging'
+        default: 'main'
   workflow_run:
     workflows: ["Build and Push Docker Image"]
     types:
@@ -36,7 +36,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install fal
         run: pip install fal
@@ -45,16 +45,12 @@ jobs:
         env:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
-          # Use the SHA from the triggering workflow for workflow_run events
-          SHA="${{ github.event.workflow_run.head_sha || github.sha }}"
-          SHORT_SHA=$(echo "$SHA" | cut -c1-7)
-          
-          # Use input environment for manual dispatch, default to staging for workflow_run
+          # Use input environment for manual dispatch, default to main for workflow_run
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             ENV="${{ github.event.inputs.environment }}"
           else
-            ENV="staging"
+            ENV="main"
           fi
-          
-          echo "Deploying to $ENV with tag $SHORT_SHA"
-          SCOPE_DEPLOY_TAG=$SHORT_SHA fal deploy --env $ENV --auth public src/scope/cloud/fal_app.py
+
+          echo "Deploying to $ENV"
+          fal deploy --env $ENV --auth public src/scope/cloud/fal_app.py

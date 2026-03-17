@@ -313,13 +313,13 @@ export function InputAndControlsPanel({
   };
 
   return (
-    <Card className={`h-full flex flex-col ${className}`}>
-      <CardHeader className="flex-shrink-0">
+    <Card className={className}>
+      <CardHeader>
         <CardTitle className="text-base font-medium">
           Input & Controls
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
+      <CardContent className="space-y-4">
         {/* Input Mode selector - only show for multi-mode pipelines */}
         {isMultiMode && (
           <div>
@@ -928,6 +928,7 @@ export function InputAndControlsPanel({
                       label={ui.label}
                       fieldType={primitiveType}
                       enumValues={enumValues}
+                      midiMappable={isRuntimeParam}
                     />
                   );
                 })}

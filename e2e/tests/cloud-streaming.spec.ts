@@ -21,7 +21,9 @@ test.describe("Cloud Streaming", () => {
 
     // Navigate to the app (running at localhost:8000)
     await page.goto("/");
-    await page.waitForLoadState("networkidle");
+    await expect(
+      page.locator("h1", { hasText: "Daydream Scope" })
+    ).toBeVisible({ timeout: 15000 });
 
     // Take screenshot after initial load — app loads directly into the streaming interface
     await page.screenshot({ path: "test-results/01-initial-load.png" });
@@ -55,7 +57,7 @@ async function enableCloudMode(page: Page) {
   console.log("Enabling cloud mode...");
 
   // Open settings dialog via the cloud icon in the header
-  const cloudIcon = page.getByRole("button", { name: /cloud/i });
+  const cloudIcon = page.locator('button[title*="cloud" i], button[title*="remote inference" i]');
   await expect(cloudIcon).toBeVisible({ timeout: 10000 });
   await cloudIcon.click();
 

@@ -16,120 +16,39 @@ on:
     tags:
       - 'v*'
 
+# Permissions for the reusable workflow jobs
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+  issues: write
+
 jobs:
-  build-and-push:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    outputs:
-      short_sha: ${{ steps.meta.outputs.short_sha }}
-      pr_number: ${{ steps.meta.outputs.pr_number }}
+  # Cloud image - faster, used for PR deploys
+  build-cloud:
+    uses: ./.github/workflows/docker-build-image.yml
+    with:
+      variant: cloud
+      suffix: '-cloud'
+      dockerfile: Dockerfile.cloud
+      description: Daydream Scope (Cloud)
+    secrets: inherit
 
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+  # Standard image - slower, not needed for PR deploys
+  build-standard:
+    uses: ./.github/workflows/docker-build-image.yml
+    with:
+      variant: standard
+      suffix: ''
+      dockerfile: Dockerfile
+      description: Daydream Scope
+    secrets: inherit
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Clean up before build
-        run: |
-          # Clean up unused packages to avoid disk space issues
-          sudo rm -rf /usr/local/.ghcup
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/lib/android/sdk/ndk
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
-
-          # Show disk usage before build
-          echo "Disk usage before build:"
-          df -h
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          username: daydreamlive
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
-
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set build metadata
-        id: meta
-        run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            echo "short_sha=$(echo '${{ github.event.pull_request.head.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
-            echo "pr_number=${{ github.event.pull_request.number }}" >> $GITHUB_OUTPUT
-          else
-            echo "short_sha=$(echo '${{ github.sha }}' | cut -c1-7)" >> $GITHUB_OUTPUT
-            echo "pr_number=" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Set image tag
-        id: tag
-        run: |
-          DOCKERHUB="daydreamlive/scope"
-          GHCR="ghcr.io/daydreamlive/scope"
-
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # Manual dispatch: use provided version + latest
-            VERSION="${{ github.event.inputs.version }}"
-            TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
-            TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            # Git tag: extract version (e.g., v0.1.0 -> 0.1.0) + latest
-            VERSION_TAG="${{ github.ref_name }}"
-            VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
-            TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
-            TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
-          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            # Main branch
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            TAGS="$DOCKERHUB:main,$DOCKERHUB:$SHORT_SHA"
-            TAGS="$TAGS,$GHCR:main,$GHCR:$SHORT_SHA"
-          elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
-            # Runpod serverless branch
-            TAGS="$DOCKERHUB:runpod-serverless"
-            TAGS="$TAGS,$GHCR:runpod-serverless"
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            # Pull request: use sanitized branch name + short SHA
-            BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
-            SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-            TAGS="$DOCKERHUB:$BRANCH_TAG,$DOCKERHUB:$SHORT_SHA"
-            TAGS="$TAGS,$GHCR:$BRANCH_TAG,$GHCR:$SHORT_SHA"
-          fi
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
-
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.tag.outputs.tags }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/daydreamlive/scope
-            org.opencontainers.image.description=Daydream Scope
-            org.opencontainers.image.licenses=MIT
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
+  # PR deploy - only waits for cloud build
   deploy-pr:
-    needs: build-and-push
+    needs: build-cloud
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
 
     outputs:
       fal_app_id: ${{ steps.deploy.outputs.fal_app_id }}
@@ -144,7 +63,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install fal
         run: pip install fal
@@ -154,24 +73,21 @@ jobs:
         env:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
-          PR_NUMBER="${{ needs.build-and-push.outputs.pr_number }}"
-          SHORT_SHA="${{ needs.build-and-push.outputs.short_sha }}"
+          set -euo pipefail
+
+          PR_NUMBER="${{ needs.build-cloud.outputs.pr_number }}"
 
           APP_NAME="scope-pr-${PR_NUMBER}"
 
-          echo "Deploying PR #${PR_NUMBER} to fal as ${APP_NAME} with tag ${SHORT_SHA}"
+          echo "Deploying PR #${PR_NUMBER} to fal as ${APP_NAME}"
 
-          SCOPE_DEPLOY_TAG=$SHORT_SHA fal deploy \
+          fal deploy \
             --app-name "$APP_NAME" \
+            --env preview \
             --auth public \
             src/scope/cloud/fal_app.py 2>&1 | tee deploy_output.txt
 
-          FAL_APP_ID=$(grep -oP 'Deployed to: \K[^\s]+' deploy_output.txt || echo "")
-
-          if [ -z "$FAL_APP_ID" ]; then
-            FAL_APP_ID="daydream/${APP_NAME}"
-          fi
-
+          FAL_APP_ID="daydream/${APP_NAME}--preview"
           FAL_WS_URL="wss://fal.run/${FAL_APP_ID}/ws"
 
           echo "fal_app_id=${FAL_APP_ID}" >> $GITHUB_OUTPUT
@@ -187,7 +103,7 @@ jobs:
             const prNumber = ${{ github.event.pull_request.number }};
             const falAppId = '${{ steps.deploy.outputs.fal_app_id }}';
             const falWsUrl = '${{ steps.deploy.outputs.fal_ws_url }}';
-            const shortSha = '${{ needs.build-and-push.outputs.short_sha }}';
+            const shortSha = '${{ needs.build-cloud.outputs.short_sha }}';
 
             const body = `## 🚀 fal.ai Preview Deployment
 
@@ -198,9 +114,9 @@ jobs:
             | **Commit** | \`${shortSha}\` |
 
             ### Testing
-            Connect to this preview deployment by setting the fal endpoint in your client:
+            Connect to this preview deployment by running this on your branch:
             \`\`\`
-            FAL_WS_URL=${falWsUrl}
+            uv run build && SCOPE_CLOUD_APP_ID="${falAppId}/ws" uv run daydream-scope
             \`\`\`
 
             🧪 E2E tests will run automatically against this deployment.
@@ -237,10 +153,6 @@ jobs:
     needs: deploy-pr
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: write
 
     steps:
       - name: Checkout code
@@ -251,7 +163,7 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.12'
 
       - name: Install uv
         run: pip install uv
@@ -273,7 +185,9 @@ jobs:
 
       - name: Build Scope app
         env:
-          VITE_DAYDREAM_API_KEY: ${{ secrets.DAYDREAM_API_KEY }}
+          VITE_DAYDREAM_API_KEY: ${{ secrets.E2ES_DAYDREAM_API_KEY }}
+          VITE_DAYDREAM_AUTH_URL: https://app.daydream.live/sign-in/local
+          VITE_DAYDREAM_API_BASE: https://api.daydream.live
         run: |
           echo "Building Scope with API key auth..."
           uv run build
@@ -283,7 +197,7 @@ jobs:
           SCOPE_CLOUD_APP_ID: ${{ needs.deploy-pr.outputs.fal_app_id }}
         run: |
           echo "Starting Scope with cloud app ID: $SCOPE_CLOUD_APP_ID"
-          uv run daydream-scope &
+          uv run daydream-scope > scope-app.log 2>&1 &
 
           echo "Waiting for localhost:8000 to be ready..."
           MAX_ATTEMPTS=60
@@ -312,7 +226,7 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: playwright-report-pr-${{ needs.build-and-push.outputs.pr_number }}
+          name: playwright-report
           path: e2e/playwright-report/
           retention-days: 30
 
@@ -320,8 +234,16 @@ jobs:
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-artifacts-pr-${{ needs.build-and-push.outputs.pr_number }}
+          name: test-artifacts
           path: e2e/test-results/
+          retention-days: 30
+
+      - name: Upload app logs
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: scope-app-logs
+          path: scope-app.log
           retention-days: 30
 
       - name: Comment test results on PR

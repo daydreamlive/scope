@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import io
+import json
 import logging
 import os
 import subprocess
@@ -23,7 +24,7 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
@@ -39,10 +40,16 @@ from scope.core.lora.manifest import (
     load_manifest,
     save_manifest,
 )
+from scope.core.workflows.resolve import (
+    WorkflowRequest,
+    WorkflowResolutionPlan,
+    resolve_workflow,
+)
 
 from .cloud_proxy import (
     cloud_proxy,
     get_hardware_info_from_cloud,
+    proxy_with_body,
     recording_download_cloud_path,
     upload_asset_to_cloud,
 )
@@ -60,13 +67,18 @@ from .kafka_publisher import (
     set_kafka_publisher,
 )
 from .logs_config import (
+    LOG_FORMAT,
+    FalConnectionFilter,
     cleanup_old_logs,
     ensure_logs_dir,
     get_current_log_file,
+    get_fal_connection_id,
     get_logs_dir,
     get_most_recent_log_file,
+    set_fal_connection_id,
 )
 from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
+from .mcp_router import router as mcp_router
 from .models_config import (
     ensure_models_dir,
     get_assets_dir,
@@ -99,6 +111,19 @@ from .schema import (
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
+from .tempo_router import router as tempo_router
+
+# Cached responses for pipeline schemas and plugin list.
+# Invalidated by _invalidate_plugin_caches() on install/uninstall.
+_pipeline_schemas_cache: PipelineSchemasResponse | None = None
+_plugins_list_cache: object | None = None
+
+
+def _invalidate_plugin_caches():
+    """Reset plugin and pipeline schema caches after install/uninstall."""
+    global _pipeline_schemas_cache, _plugins_list_cache
+    _pipeline_schemas_cache = None
+    _plugins_list_cache = None
 
 
 class STUNErrorFilter(logging.Filter):
@@ -111,52 +136,70 @@ class STUNErrorFilter(logging.Filter):
         return True
 
 
-# Ensure logs directory exists and clean up old logs
-logs_dir = ensure_logs_dir()
-cleanup_old_logs(max_age_days=1)  # Delete logs older than 1 day
-log_file = get_current_log_file()
+def _configure_logging():
+    """Set up file and console logging for the main server process.
 
-# Configure logging - set root to WARNING to keep non-app libraries quiet by default
-logging.basicConfig(
-    level=logging.WARNING, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+    Called from run_server() rather than at module import time so that the MCP
+    subprocess (which also imports this module) doesn't create a competing log
+    file that shadows the real server logs.
+    """
+    # Ensure logs directory exists and clean up old logs
+    ensure_logs_dir()
+    cleanup_old_logs(max_age_days=1)
+    log_file = get_current_log_file()
 
-# Console handler handles INFO
-root_logger = logging.getLogger()
-for handler in root_logger.handlers:
-    if isinstance(handler, logging.StreamHandler) and not isinstance(
-        handler, RotatingFileHandler
-    ):
-        handler.setLevel(logging.INFO)
+    # Set root to WARNING to keep non-app libraries quiet by default
+    logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT)
 
-# Add rotating file handler
-file_handler = RotatingFileHandler(
-    log_file,
-    maxBytes=5 * 1024 * 1024,  # 5 MB per file
-    backupCount=5,  # Keep 5 backup files
-)
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(
-    logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-)
-root_logger.addHandler(file_handler)
+    # Install filter on every handler so %(fal_conn)s is always populated
+    _fal_filter = FalConnectionFilter()
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        handler.addFilter(_fal_filter)
+        if isinstance(handler, logging.StreamHandler) and not isinstance(
+            handler, RotatingFileHandler
+        ):
+            handler.setLevel(logging.INFO)
 
-# Add the filter to suppress STUN/TURN errors
-stun_filter = STUNErrorFilter()
-logging.getLogger("asyncio").addFilter(stun_filter)
+    # Add rotating file handler
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=5 * 1024 * 1024,  # 5 MB per file
+        backupCount=5,  # Keep 5 backup files
+    )
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    file_handler.addFilter(_fal_filter)
+    root_logger.addHandler(file_handler)
 
-# Set INFO level for your app modules
-logging.getLogger("scope.server").setLevel(logging.INFO)
-logging.getLogger("scope.core").setLevel(logging.INFO)
+    # Add the filter to suppress STUN/TURN errors
+    stun_filter = STUNErrorFilter()
+    logging.getLogger("asyncio").addFilter(stun_filter)
 
-# Set INFO level for uvicorn
-logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+    # Set INFO level for app modules
+    logging.getLogger("scope.server").setLevel(logging.INFO)
+    logging.getLogger("scope.core").setLevel(logging.INFO)
 
-# Enable verbose logging for other libraries when needed
-if os.getenv("VERBOSE_LOGGING"):
-    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
-    logging.getLogger("fastapi").setLevel(logging.INFO)
+    # Set INFO level for uvicorn
+    logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+
+    # Enable verbose logging for other libraries when needed
+    if os.getenv("VERBOSE_LOGGING"):
+        logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+        logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
+
+
+# Set INFO for the cloud log re-emitter so cloud lines reach console and file
+logging.getLogger("scope.cloud").setLevel(logging.INFO)
+
+# Allow suppressing noisy loggers via env var (comma-separated logger names)
+# e.g. SCOPE_LOG_QUIET_LOGGERS=scope.server.frame_processor,scope.core.pipelines.longlive
+_quiet_loggers = os.getenv("SCOPE_LOG_QUIET_LOGGERS", "")
+for _logger_name in _quiet_loggers.split(","):
+    _logger_name = _logger_name.strip()
+    if _logger_name:
+        logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
 # Select pipeline depending on the "PIPELINE" environment variable
 PIPELINE = os.getenv("PIPELINE", None)
@@ -248,13 +291,19 @@ server_start_time = time.time()
 cloud_connection_manager = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
 kafka_publisher = None
+# Global tempo sync manager instance
+tempo_sync = None
+# Global OSC server instance
+osc_server = None
+# Global DMX server instance
+dmx_server = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
     """Background task to pre-warm the pipeline without blocking startup."""
     try:
         await asyncio.wait_for(
-            pipeline_manager.load_pipelines([pipeline_id]),
+            pipeline_manager.load_pipelines([(pipeline_id, pipeline_id, None)]),
             timeout=300,  # 5 minute timeout for pipeline loading
         )
     except Exception as e:
@@ -269,10 +318,18 @@ async def lifespan(app: FastAPI):
 
     from .cloud_connection import CloudConnectionManager
     from .pipeline_manager import PipelineManager
+    from .tempo_sync import TempoSync
     from .webrtc import WebRTCManager
 
     # Startup
-    global webrtc_manager, pipeline_manager, cloud_connection_manager, kafka_publisher
+    global \
+        webrtc_manager, \
+        pipeline_manager, \
+        cloud_connection_manager, \
+        kafka_publisher, \
+        tempo_sync, \
+        osc_server, \
+        dmx_server
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -310,6 +367,9 @@ async def lifespan(app: FastAPI):
     webrtc_manager = WebRTCManager()
     logger.info("WebRTC manager initialized")
 
+    tempo_sync = TempoSync()
+    logger.info("Tempo sync manager initialized")
+
     cloud_connection_manager = CloudConnectionManager()
     logger.info("Cloud connection manager initialized")
 
@@ -322,6 +382,30 @@ async def lifespan(app: FastAPI):
         else:
             kafka_publisher = None
             logger.warning("Kafka publisher failed to start")
+
+    # Start OSC UDP server on the same port as the HTTP API
+    from .osc_server import OSCServer
+
+    osc_host = os.getenv("SCOPE_HOST", "0.0.0.0")
+    osc_port = int(os.getenv("SCOPE_PORT", "8000"))
+    osc_server = OSCServer(osc_host, osc_port)
+    osc_server.set_managers(pipeline_manager, webrtc_manager)
+    await osc_server.start()
+
+    # Start DMX Art-Net server (loads config from disk for port + mappings)
+    from .dmx_config import load_config as load_dmx_config
+    from .dmx_config import mappings_to_dict
+    from .dmx_server import DMXServer
+
+    dmx_cfg = load_dmx_config()
+    dmx_host = os.getenv("SCOPE_HOST", "0.0.0.0")
+    dmx_server = DMXServer(dmx_host, dmx_cfg.get("preferred_port", 6454))
+    dmx_server.set_managers(pipeline_manager, webrtc_manager)
+    dmx_server.log_all_messages = dmx_cfg.get("log_all_messages", False)
+    dmx_server.set_mappings(mappings_to_dict(dmx_cfg.get("mappings", [])))
+    dmx_server.enabled = dmx_cfg.get("enabled", False)
+    if dmx_server.enabled:
+        await dmx_server.start()
 
     # Syphon server discovery (macOS only): create the ObjC singleton and do
     # an initial NSRunLoop pump so servers are available when the UI first loads.
@@ -342,6 +426,16 @@ async def lifespan(app: FastAPI):
     yield
 
     # Shutdown
+    if dmx_server:
+        logger.info("Shutting down DMX server...")
+        await dmx_server.stop()
+        logger.info("DMX server shutdown complete")
+
+    if osc_server:
+        logger.info("Shutting down OSC server...")
+        await osc_server.stop()
+        logger.info("OSC server shutdown complete")
+
     if webrtc_manager:
         logger.info("Shutting down WebRTC manager...")
         await webrtc_manager.stop()
@@ -356,6 +450,11 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down cloud connection...")
         await cloud_connection_manager.disconnect()
         logger.info("Cloud connection shutdown complete")
+
+    if tempo_sync:
+        logger.info("Shutting down tempo sync...")
+        await tempo_sync.stop()
+        logger.info("Tempo sync shutdown complete")
 
     if kafka_publisher:
         logger.info("Shutting down Kafka publisher...")
@@ -379,12 +478,29 @@ def get_cloud_connection_manager() -> "CloudConnectionManager":
     return cloud_connection_manager
 
 
+def get_osc_server():
+    """Dependency to get OSC server instance."""
+
+    return osc_server
+
+
+def get_dmx_server():
+    """Dependency to get DMX server instance."""
+
+    return dmx_server
+
+
 app = FastAPI(
     lifespan=lifespan,
     title="Scope",
     description="A tool for running and customizing real-time, interactive generative AI pipelines and models",
     version=version("daydream-scope"),
 )
+
+# MCP server endpoints (headless sessions, parameters, frame capture, etc.)
+app.include_router(mcp_router)
+# Tempo sync endpoints (enable/disable, status, sources, BPM control)
+app.include_router(tempo_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -397,7 +513,11 @@ app.add_middleware(
 
 
 @app.get("/health", response_model=HealthResponse)
-async def health_check():
+@cloud_proxy()
+async def health_check(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Health check endpoint."""
     return HealthResponse(
         status="healthy",
@@ -408,8 +528,39 @@ async def health_check():
     )
 
 
+@app.put("/api/v1/internal/fal-connection-id")
+async def put_fal_connection_id(request: Request):
+    """Set the fal connection ID that is injected into every log line.
+
+    Called by the fal_app proxy when a new WebSocket connection is established.
+    This is an internal endpoint not intended for external consumers.
+    """
+    body = await request.json()
+    connection_id = body.get("connection_id")
+    set_fal_connection_id(connection_id)
+    logger.info("Fal connection ID set")
+    return {"status": "ok", "connection_id": connection_id}
+
+
+@app.delete("/api/v1/internal/fal-connection-id")
+async def delete_fal_connection_id():
+    """Clear the fal connection ID from log lines.
+
+    Called by the fal_app proxy when a WebSocket connection is closed.
+    """
+    prev = get_fal_connection_id()
+    set_fal_connection_id(None)
+    if prev:
+        logger.info("Fal connection ID cleared")
+    return {"status": "ok"}
+
+
 @app.post("/api/v1/restart")
-async def restart_server():
+@cloud_proxy(timeout=30.0)
+async def restart_server(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
     """Restart the server process.
 
     This endpoint is called after plugin install/uninstall to ensure
@@ -522,22 +673,32 @@ async def load_pipeline(
     cloud-hosted scope backend.
     """
     try:
-        # Get pipeline IDs to load
-        pipeline_ids = request.pipeline_ids
-        if not pipeline_ids:
+        # Normalize to list of (node_id, pipeline_id, load_params) tuples
+        if request.pipelines:
+            pipelines = [
+                (p.node_id, p.pipeline_id, p.load_params) for p in request.pipelines
+            ]
+        elif request.pipeline_ids:
+            # Legacy format: use pipeline_id as node_id
+            pipelines = [
+                (pid, pid, request.load_params) for pid in request.pipeline_ids
+            ]
+        else:
             raise HTTPException(
                 status_code=400,
-                detail="pipeline_ids must be provided and cannot be empty",
+                detail="Either 'pipelines' or 'pipeline_ids' must be provided",
             )
 
-        # load_params is already a dict (or None)
-        load_params_dict = request.load_params
+        # Pipeline active/available DMX path grouping can change after load/unload.
+        # Mark the DMX known-path cache stale so it is rebuilt once on next packet.
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
 
         # Local mode: start loading in background without blocking
         asyncio.create_task(
             pipeline_manager.load_pipelines(
-                pipeline_ids,
-                load_params_dict,
+                pipelines,
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
                 user_id=request.user_id,
@@ -594,6 +755,10 @@ async def get_pipeline_schemas(
     In cloud mode (when connected to cloud), this proxies the request to the
     cloud-hosted scope backend to get the available pipelines there.
     """
+    global _pipeline_schemas_cache
+    if _pipeline_schemas_cache is not None:
+        return _pipeline_schemas_cache
+
     from scope.core.pipelines.registry import PipelineRegistry
     from scope.core.plugins import get_plugin_manager
 
@@ -611,7 +776,287 @@ async def get_pipeline_schemas(
             )
             pipelines[pipeline_id] = schema_data
 
-    return PipelineSchemasResponse(pipelines=pipelines)
+    response = PipelineSchemasResponse(pipelines=pipelines)
+    _pipeline_schemas_cache = response
+    return response
+
+
+# ---------------------------------------------------------------------------
+# OSC endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/osc/status")
+async def osc_status():
+    """Return current OSC server status (port, listening state, logging mode)."""
+
+    srv = get_osc_server()
+    if srv is None:
+        return {
+            "enabled": False,
+            "listening": False,
+            "port": None,
+            "host": None,
+            "log_all_messages": False,
+        }
+    return srv.status()
+
+
+class OscSettingsRequest(BaseModel):
+    log_all_messages: bool
+
+
+@app.put("/api/v1/osc/settings")
+async def update_osc_settings(request: OscSettingsRequest):
+    """Update OSC server runtime settings (e.g. logging verbosity)."""
+
+    srv = get_osc_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="OSC server not running")
+    srv.log_all_messages = request.log_all_messages
+    return srv.status()
+
+
+@app.get("/api/v1/osc/paths")
+async def osc_paths(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Return all OSC paths split into active / available sections."""
+    from .osc_docs import get_osc_paths
+
+    return get_osc_paths(pm)
+
+
+@app.get("/api/v1/osc/stream")
+async def osc_sse_stream():
+    """Server-Sent Events stream that pushes OSC commands to the frontend in real time."""
+    srv = get_osc_server()
+    if srv is None:
+        return Response(content="OSC server not running", status_code=503)
+
+    q = srv.subscribe()
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except TimeoutError:
+                    # Keepalive comment — prevents proxy/browser timeout.
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            srv.unsubscribe(q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/v1/osc/docs")
+async def osc_docs_page(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Serve a self-contained HTML reference page for OSC control."""
+    from .osc_docs import render_osc_docs_html
+
+    srv = get_osc_server()
+    port = srv.port if srv else 8000
+    html_content = render_osc_docs_html(pm, port)
+    return Response(content=html_content, media_type="text/html")
+
+
+# ---------------------------------------------------------------------------
+# DMX endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/dmx/status")
+async def dmx_status():
+    """Return current DMX Art-Net server status."""
+    srv = get_dmx_server()
+    if srv is None:
+        return {
+            "enabled": False,
+            "listening": False,
+            "port": None,
+            "preferred_port": 6454,
+            "host": None,
+            "log_all_messages": False,
+            "mapping_count": 0,
+        }
+    return srv.status()
+
+
+class DmxSettingsRequest(BaseModel):
+    enabled: bool | None = None
+    log_all_messages: bool | None = None
+    preferred_port: int | None = Field(None, ge=1024, le=65535)
+
+
+@app.put("/api/v1/dmx/settings")
+async def update_dmx_settings(request: DmxSettingsRequest):
+    """Update DMX server runtime settings (enabled, logging, preferred port)."""
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not initialized")
+
+    from .dmx_config import load_config, save_config
+
+    need_persist = False
+    cfg = load_config()
+
+    if request.enabled is not None:
+        cfg["enabled"] = request.enabled
+        srv.enabled = request.enabled
+        need_persist = True
+        if request.enabled and not srv.listening:
+            await srv.start()
+        elif not request.enabled and srv.listening:
+            await srv.stop()
+
+    if request.log_all_messages is not None:
+        srv.log_all_messages = request.log_all_messages
+        cfg["log_all_messages"] = request.log_all_messages
+        need_persist = True
+
+    if request.preferred_port is not None:
+        srv.preferred_port = request.preferred_port
+
+    if need_persist:
+        save_config(cfg)
+
+    return srv.status()
+
+
+class DmxRestartRequest(BaseModel):
+    preferred_port: int | None = Field(None, ge=1024, le=65535)
+
+
+@app.post("/api/v1/dmx/restart")
+async def dmx_restart(request: DmxRestartRequest):
+    """Restart the DMX server to apply a new port. Persists preferred_port to config."""
+    from .dmx_config import load_config, save_config
+
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    if request.preferred_port is not None:
+        srv.preferred_port = request.preferred_port
+        cfg = load_config()
+        cfg["preferred_port"] = request.preferred_port
+        save_config(cfg)
+
+    await srv.stop()
+    if srv.enabled:
+        await srv.start()
+    return srv.status()
+
+
+@app.get("/api/v1/dmx/paths")
+async def dmx_paths(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Return numeric DMX-mappable paths split into active / available."""
+    from .dmx_paths import get_dmx_paths
+
+    return get_dmx_paths(pm)
+
+
+@app.get("/api/v1/dmx/config")
+async def dmx_get_config():
+    """Return the current persisted DMX mapping configuration."""
+    from .dmx_config import load_config
+
+    return load_config()
+
+
+class DmxConfigRequest(BaseModel):
+    enabled: bool | None = None
+    preferred_port: int | None = Field(None, ge=1024, le=65535)
+    log_all_messages: bool | None = None
+    mappings: list[dict] | None = None
+
+
+@app.put("/api/v1/dmx/config")
+async def dmx_put_config(request: DmxConfigRequest):
+    """Save / import a full DMX mapping configuration."""
+    from .dmx_config import (
+        load_config,
+        mappings_to_dict,
+        save_config,
+    )
+
+    cfg = load_config()
+    if request.enabled is not None:
+        cfg["enabled"] = request.enabled
+    if request.preferred_port is not None:
+        cfg["preferred_port"] = request.preferred_port
+    if request.log_all_messages is not None:
+        cfg["log_all_messages"] = request.log_all_messages
+    if request.mappings is not None:
+        normalized = mappings_to_dict(request.mappings)
+        # Store only the validated/cleaned mappings list
+        cfg["mappings"] = [
+            {"universe": u, "channel": c, "key": k} for (u, c), k in normalized.items()
+        ]
+    save_config(cfg)
+
+    # Hot-reload into the running server
+    srv = get_dmx_server()
+    if srv is not None:
+        srv.log_all_messages = cfg.get("log_all_messages", False)
+        srv.set_mappings(mappings_to_dict(cfg.get("mappings", [])))
+        if request.enabled is not None:
+            srv.enabled = cfg["enabled"]
+            if srv.enabled and not srv.listening:
+                await srv.start()
+            elif not srv.enabled and srv.listening:
+                await srv.stop()
+
+    return cfg
+
+
+@app.get("/api/v1/dmx/stream")
+async def dmx_sse_stream():
+    """Server-Sent Events stream pushing DMX commands to the frontend."""
+    srv = get_dmx_server()
+    if srv is None:
+        return Response(content="DMX server not running", status_code=503)
+
+    q = srv.subscribe()
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            srv.unsubscribe(q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
@@ -670,9 +1115,7 @@ async def handle_webrtc_offer(
     try:
         # If connected to cloud, use cloud mode (video flows through backend)
         if cloud_manager.is_connected:
-            logger.info(
-                "[CLOUD] Using relay mode - video will flow through backend to cloud"
-            )
+            logger.info("Using relay mode - video will flow through backend to cloud")
             return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
 
         # Local mode: ensure pipeline is loaded before proceeding
@@ -683,7 +1126,9 @@ async def handle_webrtc_offer(
                 detail="Pipeline not loaded. Please load pipeline first.",
             )
 
-        return await webrtc_manager.handle_offer(request, pipeline_manager)
+        return await webrtc_manager.handle_offer(
+            request, pipeline_manager, tempo_sync=tempo_sync
+        )
 
     except HTTPException:
         raise
@@ -734,6 +1179,26 @@ async def add_ice_candidate(
         raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error adding ICE candidate to session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.delete(
+    "/api/v1/webrtc/offer/{session_id}", status_code=204, response_class=Response
+)
+async def close_webrtc_session(
+    session_id: str,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Close and remove a WebRTC session.
+
+    Used by the cloud proxy (fal_app) to tear down the WebRTC peer connection
+    when the signaling WebSocket closes (e.g. MAX_DURATION_EXCEEDED).
+    """
+    try:
+        await webrtc_manager.remove_session(session_id)
+        return Response(status_code=204)
+    except Exception as e:
+        logger.error(f"Error closing WebRTC session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -911,29 +1376,10 @@ async def install_lora_file(
 
     # If connected to cloud, proxy with the (potentially modified) URL
     if cloud_manager.is_connected:
-        logger.info("Proxying LoRA install to cloud")
         body = {"url": url, "filename": request.filename}
-        try:
-            response = await cloud_manager.api_request(
-                method="POST",
-                path="/api/v1/loras",
-                body=body,
-                timeout=300.0,
-            )
-        except Exception as e:
-            logger.error(f"Cloud proxy request failed: {e}")
-            raise HTTPException(
-                status_code=502,
-                detail=f"Cloud request failed: {e}",
-            ) from e
-
-        status = response.get("status", 200)
-        if status >= 400:
-            raise HTTPException(
-                status_code=status,
-                detail=response.get("error", "Cloud request failed"),
-            )
-        return response.get("data", {})
+        return await proxy_with_body(
+            cloud_manager, "POST", "/api/v1/loras", body, timeout=300.0
+        )
 
     # Local installation
     import re
@@ -964,26 +1410,41 @@ async def install_lora_file(
         if not filename:
             filename = unquote(parsed.path.split("/")[-1])
 
-        # For CivitAI URLs, resolve filename via API if path doesn't have one
-        if is_civitai and (not filename or "." not in filename):
+        # For CivitAI URLs, extract version ID and resolve filename via API
+        version_id = None
+        civitai_token = None
+        if is_civitai:
             # Extract version ID: check query param first, then path
             query_params = parse_qs(parsed.query)
-            version_id = None
             if "modelVersionId" in query_params:
                 version_id = query_params["modelVersionId"][0]
             else:
                 # Fall back to last path segment (e.g. /api/download/models/<version_id>)
                 path_parts = parsed.path.rstrip("/").split("/")
-                version_id = path_parts[-1] if path_parts else None
-            if version_id and version_id.isdigit():
+                candidate = path_parts[-1] if path_parts else None
+                if candidate and candidate.isdigit():
+                    version_id = candidate
+            civitai_token = query_params.get("token", [None])[0]
+            logger.info(
+                f"CivitAI resolve: version_id={version_id}, "
+                f"token_from_url={'yes' if civitai_token else 'no'}, "
+                f"filename={filename}"
+            )
+
+        if is_civitai and (not filename or "." not in filename):
+            if version_id:
                 try:
                     from .lora_downloader import resolve_civitai_metadata
 
-                    dl_url, civitai_filename = resolve_civitai_metadata(version_id)
+                    dl_url, civitai_filename = resolve_civitai_metadata(
+                        version_id, token=civitai_token
+                    )
                     if civitai_filename:
                         filename = civitai_filename
                     if dl_url:
                         url = dl_url
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e)) from e
                 except Exception as e:
                     logger.warning(f"Failed to resolve CivitAI metadata: {e}")
 
@@ -1071,7 +1532,24 @@ async def install_lora_file(
             )
         )
 
-        provenance = LoRAProvenance(source=source, url=clean_url)
+        # Parse structured fields from URLs so downstream downloads can use
+        # authenticated paths (hf_hub_url for HF, version API for CivitAI).
+        extra: dict = {}
+        if source == "huggingface":
+            hf_parts = [p for p in _parsed.path.split("/") if p]
+            if len(hf_parts) >= 5 and hf_parts[2] in ("resolve", "blob"):
+                extra["repo_id"] = f"{hf_parts[0]}/{hf_parts[1]}"
+                extra["hf_filename"] = "/".join(hf_parts[4:])
+        elif source == "civitai":
+            civ_query = parse_qs(_parsed.query)
+            if "modelVersionId" in civ_query:
+                extra["version_id"] = civ_query["modelVersionId"][0]
+            else:
+                civ_parts = _parsed.path.rstrip("/").split("/")
+                if civ_parts and civ_parts[-1].isdigit():
+                    extra["version_id"] = civ_parts[-1]
+
+        provenance = LoRAProvenance(source=source, url=clean_url, **extra)
         entry = add_manifest_entry(
             lora_dir, relative_key, provenance, sha256, size_bytes
         )
@@ -1166,13 +1644,31 @@ async def delete_lora_file(
 @app.post("/api/v1/lora/download")
 async def download_lora_endpoint(
     request: LoRADownloadRequest,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ) -> LoRADownloadResult:
-    """Download a LoRA from HuggingFace, CivitAI, or a direct URL."""
+    """Download a LoRA from HuggingFace, CivitAI, or a direct URL.
+
+    When cloud mode is active, the CivitAI token is resolved locally and
+    forwarded so the cloud worker can authenticate without its own token.
+    """
     from .lora_downloader import download_lora
+    from .models_config import get_civitai_token
+
+    civitai_token = None
+    if request.source == "civitai":
+        civitai_token = get_civitai_token() or request.civitai_token
+
+    if cloud_manager.is_connected:
+        body = request.model_dump(exclude_none=True)
+        if civitai_token:
+            body["civitai_token"] = civitai_token
+        return await proxy_with_body(
+            cloud_manager, "POST", "/api/v1/lora/download", body, timeout=300.0
+        )
 
     lora_dir = get_lora_dir()
     try:
-        return await download_lora(request, lora_dir)
+        return await download_lora(request, lora_dir, civitai_token=civitai_token)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except Exception as e:
@@ -1197,6 +1693,39 @@ async def tag_lora_provenance(
     size_bytes = file_path.stat().st_size
 
     return add_manifest_entry(lora_dir, filename, provenance, sha256, size_bytes)
+
+
+# ---------------------------------------------------------------------------
+# Workflow resolve
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/workflow/resolve", response_model=WorkflowResolutionPlan)
+@cloud_proxy()
+async def resolve_workflow_endpoint(
+    workflow: WorkflowRequest,
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """Resolve workflow dependencies and return a resolution plan.
+
+    This is side-effect-free: no installs, no downloads.  The request
+    body uses ``extra="ignore"`` so the frontend can send the full
+    workflow JSON; the backend only reads the fields it needs.
+    """
+    from scope.core.plugins import get_plugin_manager
+
+    try:
+        plugin_manager = get_plugin_manager()
+        lora_dir = get_lora_dir()
+
+        return resolve_workflow(workflow, plugin_manager, lora_dir)
+    except Exception as e:
+        logger.error("Error resolving workflow: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error while resolving workflow dependencies",
+        ) from e
 
 
 @app.get("/api/v1/assets", response_model=AssetsResponse)
@@ -1301,13 +1830,15 @@ async def upload_asset(
         # Read file content from request body
         content = await request.body()
 
-        # Validate file size (50MB limit)
-        max_size = 50 * 1024 * 1024  # 50MB
-        if len(content) > max_size:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
-            )
+        # Apply upload size validation only for cloud uploads.
+        # Local mode keeps files on the same machine, so no explicit cap is enforced.
+        if cloud_manager.is_connected:
+            max_size = 50 * 1024 * 1024  # 50MB
+            if len(content) > max_size:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
+                )
 
         # If cloud mode is active, upload to cloud AND save locally for thumbnails
         if cloud_manager.is_connected:
@@ -1317,6 +1848,9 @@ async def upload_asset(
                 filename,
                 content_type,
                 asset_type,
+                fal_cdn_token=request.headers.get("X-Fal-CDN-Token"),
+                fal_cdn_token_type=request.headers.get("X-Fal-CDN-Token-Type"),
+                fal_cdn_base_url=request.headers.get("X-Fal-CDN-Base-URL"),
             )
 
         # Local mode: save to local assets directory
@@ -1900,6 +2434,39 @@ async def get_current_logs():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/v1/logs/tail")
+async def tail_logs(
+    lines: int = Query(default=200, ge=1, le=1000),
+    since_offset: int = Query(default=0, ge=0),
+):
+    """Get recent log lines, optionally only new content since a byte offset.
+
+    Returns JSON with "lines" (list of strings) and "offset" (byte offset for next poll).
+    """
+    log_file_path = get_most_recent_log_file()
+    if log_file_path is None or not log_file_path.exists():
+        return {"lines": [], "offset": 0}
+
+    file_size = log_file_path.stat().st_size
+
+    if since_offset > 0 and since_offset >= file_size:
+        return {"lines": [], "offset": file_size}
+
+    if since_offset > 0 and since_offset < file_size:
+        # Read only new content since last offset
+        with open(log_file_path, encoding="utf-8", errors="replace") as f:
+            f.seek(since_offset)
+            new_content = f.read()
+            new_lines = [ln for ln in new_content.splitlines() if ln.strip()]
+            return {"lines": new_lines[-lines:], "offset": file_size}
+
+    # No offset or offset beyond file: return last N lines
+    with open(log_file_path, encoding="utf-8", errors="replace") as f:
+        all_lines = f.readlines()
+        tail = [ln.rstrip() for ln in all_lines[-lines:] if ln.strip()]
+        return {"lines": tail, "offset": file_size}
+
+
 # Plugin Management API Endpoints
 
 
@@ -1931,11 +2498,23 @@ def _convert_plugin_dict_to_info(plugin_dict: dict) -> "PluginInfo":
 
 
 @app.get("/api/v1/plugins")
-async def list_plugins():
-    """List all installed plugins with metadata."""
+@cloud_proxy()
+async def list_plugins(
+    http_request: Request,
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+):
+    """List all installed plugins with metadata.
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import get_plugin_manager
 
     from .schema import FailedPluginInfoSchema, PluginListResponse
+
+    global _plugins_list_cache
+    if _plugins_list_cache is not None:
+        return _plugins_list_cache
 
     try:
         plugin_manager = get_plugin_manager()
@@ -1953,20 +2532,28 @@ async def list_plugins():
             for f in plugin_manager.get_failed_plugins()
         ]
 
-        return PluginListResponse(
+        response = PluginListResponse(
             plugins=plugins, total=len(plugins), failed_plugins=failed
         )
+        _plugins_list_cache = response
+        return response
     except Exception as e:
         logger.error(f"Error listing plugins: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/api/v1/plugins")
+@cloud_proxy(timeout=60.0)
 async def install_plugin(
-    request: Request,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Install a plugin from PyPI, git URL, or local path."""
+    """Install a plugin from PyPI, git URL, or local path.
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import (
         PluginDependencyError,
         PluginInstallError,
@@ -1977,7 +2564,7 @@ async def install_plugin(
     from .schema import PluginInstallRequest, PluginInstallResponse
 
     # Parse request body
-    body = await request.json()
+    body = await http_request.json()
     install_request = PluginInstallRequest(**body)
 
     logger.info(f"Installing plugin: {install_request.package}")
@@ -1998,7 +2585,12 @@ async def install_plugin(
             plugin_info = _convert_plugin_dict_to_info(result["plugin"])
             plugin_name = plugin_info.name
 
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
+
         logger.info(f"Plugin installed: {plugin_name}")
+        _invalidate_plugin_caches()
         return PluginInstallResponse(
             success=result["success"],
             message=result["message"],
@@ -2045,11 +2637,18 @@ async def install_plugin(
 
 
 @app.delete("/api/v1/plugins/{name}")
+@cloud_proxy(timeout=60.0)
 async def uninstall_plugin(
     name: str,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Uninstall a plugin, cleaning up loaded pipelines."""
+    """Uninstall a plugin, cleaning up loaded pipelines.
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import (
         PluginInstallError,
         PluginNotFoundError,
@@ -2067,7 +2666,12 @@ async def uninstall_plugin(
             pipeline_manager=pipeline_manager,
         )
 
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
+
         logger.info(f"Plugin uninstalled: {name}")
+        _invalidate_plugin_caches()
         return PluginUninstallResponse(
             success=result["success"],
             message=result["message"],
@@ -2095,12 +2699,18 @@ async def uninstall_plugin(
 
 
 @app.post("/api/v1/plugins/{name}/reload")
+@cloud_proxy(timeout=60.0)
 async def reload_plugin(
     name: str,
-    request: Request,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
-    """Reload an editable plugin for development (without server restart)."""
+    """Reload an editable plugin for development (without server restart).
+
+    In cloud mode (when connected to cloud), this proxies the request to the
+    cloud-hosted scope backend.
+    """
     from scope.core.plugins import (
         PluginInUseError,
         PluginNotEditableError,
@@ -2111,7 +2721,7 @@ async def reload_plugin(
     from .schema import PluginReloadRequest, PluginReloadResponse
 
     # Parse request body
-    body = await request.json()
+    body = await http_request.json()
     reload_request = PluginReloadRequest(**body)
 
     try:
@@ -2122,6 +2732,12 @@ async def reload_plugin(
             force=reload_request.force,
             pipeline_manager=pipeline_manager,
         )
+
+        _invalidate_plugin_caches()
+
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
 
         return PluginReloadResponse(
             success=result["success"],
@@ -2350,10 +2966,15 @@ def open_browser_when_ready(host: str, port: int, server):
 
 def run_server(reload: bool, host: str, port: int, no_browser: bool):
     """Run the Daydream Scope server."""
+    _configure_logging()
 
     from scope.core.pipelines.registry import (
         PipelineRegistry,  # noqa: F401 - imported for side effects (registry initialization)
     )
+
+    # Propagate host/port so lifespan can read them (e.g. for OSC UDP bind)
+    os.environ["SCOPE_HOST"] = host
+    os.environ["SCOPE_PORT"] = str(port)
 
     # Configure static file serving
     configure_static_files()
@@ -2427,6 +3048,12 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     envvar="SCOPE_CLOUD_API_KEY",
     help="Cloud API key for cloud mode",
 )
+@click.option(
+    "--mcp",
+    is_flag=True,
+    help="Run as an MCP (Model Context Protocol) server over stdio instead of the HTTP server. "
+    "Connects to a running Scope instance on --port.",
+)
 @click.pass_context
 def main(
     ctx,
@@ -2437,11 +3064,26 @@ def main(
     no_browser: bool,
     cloud_app_id: str | None,
     cloud_api_key: str | None,
+    mcp: bool,
 ):
     # Handle version flag
     if version:
         print_version_info()
         sys.exit(0)
+
+    # MCP mode: run the MCP stdio server instead of the HTTP server
+    if mcp:
+        import click.core
+
+        from .mcp_server import run_mcp_server
+
+        # Only pre-connect if --port was explicitly provided on the command line
+        source = ctx.get_parameter_source("port")
+        explicit_port = (
+            port if source == click.core.ParameterSource.COMMANDLINE else None
+        )
+        run_mcp_server(port=explicit_port)
+        return
 
     # Store cloud credentials in environment for app access
     if cloud_app_id:

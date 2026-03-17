@@ -12,8 +12,10 @@ Based on:
 import asyncio
 import json
 import os
+import queue
 import shutil
 import subprocess as _subprocess
+import threading
 import time
 import uuid
 from typing import Any
@@ -21,6 +23,13 @@ from typing import Any
 import fal
 from fal.container import ContainerImage
 from fastapi import WebSocket
+
+SCOPE_PORT = 8000
+SCOPE_LOCAL_URL = f"http://localhost:{SCOPE_PORT}"
+
+
+def get_daydream_api_base() -> str:
+    return os.getenv("DAYDREAM_API_BASE", "https://api.daydream.live")
 
 
 async def validate_user_access(user_id: str) -> tuple[bool, str]:
@@ -35,7 +44,7 @@ async def validate_user_access(user_id: str) -> tuple[bool, str]:
     if not user_id:
         return False, "No user ID provided"
 
-    url = f"{os.getenv('DAYDREAM_API_BASE', 'https://api.daydream.live')}/v1/users/{user_id}"
+    url = f"{get_daydream_api_base()}/v1/users/{user_id}"
     print(f"Validating user access for {user_id} via {url}")
 
     def fetch_user():
@@ -163,7 +172,103 @@ class KafkaPublisher:
 kafka_publisher: KafkaPublisher | None = None
 
 
-ASSETS_DIR_PATH = "~/.daydream-scope/assets"
+ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
+
+# Gates the "ready" WebSocket message until the previous session's cleanup completes.
+# Initialized lazily to ensure an event loop is available.
+_cleanup_event: asyncio.Event | None = None
+
+
+def _get_cleanup_event() -> asyncio.Event:
+    global _cleanup_event
+    if _cleanup_event is None:
+        _cleanup_event = asyncio.Event()
+        _cleanup_event.set()
+    return _cleanup_event
+
+
+class LogBroadcaster:
+    """Thread-safe broadcaster that fans out subprocess log lines to async subscribers.
+
+    Uses stdlib queue.Queue (thread-safe) instead of asyncio.Queue, since publish()
+    is called from a background thread. The async forwarder polls via get_nowait().
+    """
+
+    def __init__(self, max_queue_size: int = 200):
+        self._queue_class = queue
+        self._subscribers: dict[str, queue.Queue] = {}
+        self._lock = threading.Lock()
+        self._max_queue_size = max_queue_size
+
+    def publish(self, line: str) -> None:
+        """Called from the subprocess reader thread to broadcast a log line."""
+        with self._lock:
+            for q in self._subscribers.values():
+                try:
+                    q.put_nowait(line)
+                except self._queue_class.Full:
+                    # Subscriber is slow — drop the line to avoid backpressure
+                    pass
+
+    def subscribe(self, connection_id: str) -> queue.Queue[str]:
+        """Subscribe to log lines. Returns a thread-safe Queue for the caller to drain."""
+        q: queue.Queue[str] = queue.Queue(maxsize=self._max_queue_size)
+        with self._lock:
+            self._subscribers[connection_id] = q
+        return q
+
+    def unsubscribe(self, connection_id: str) -> None:
+        """Remove a subscriber."""
+        with self._lock:
+            self._subscribers.pop(connection_id, None)
+
+
+# Global log broadcaster — populated once subprocess starts
+log_broadcaster = LogBroadcaster()
+
+# Loggers whose INFO/DEBUG lines are skipped from WebSocket streaming.
+# ERROR/WARNING from these loggers are still forwarded.
+_CLOUD_LOG_SKIP_LOGGERS_DEFAULT = {
+    "scope.server.kafka_publisher",
+}
+
+_cloud_log_skip_loggers: set[str] = set()
+
+
+def _init_cloud_log_skip_loggers() -> set[str]:
+    skip = set(_CLOUD_LOG_SKIP_LOGGERS_DEFAULT)
+    extra = os.environ.get("CLOUD_LOG_SKIP_LOGGERS", "")
+    for name in extra.split(","):
+        name = name.strip()
+        if name:
+            skip.add(name)
+    return skip
+
+
+def _should_forward_log(line: str) -> bool:
+    """Decide whether a subprocess log line should be forwarded over WebSocket.
+
+    Always forwards ERROR/WARNING. Skips INFO/DEBUG from loggers in the skip list.
+    Lines that don't match the standard log format are forwarded as-is (safety net).
+    """
+    global _cloud_log_skip_loggers
+    if not _cloud_log_skip_loggers:
+        _cloud_log_skip_loggers = _init_cloud_log_skip_loggers()
+
+    # Always forward errors and warnings
+    if " - ERROR - " in line or " - WARNING - " in line:
+        return True
+
+    # Parse logger name: "YYYY-MM-DD HH:MM:SS,mmm - logger.name - LEVEL - msg"
+    parts = line.split(" - ", 3)
+    if len(parts) >= 3:
+        logger_name = parts[1].strip()
+        if logger_name in _cloud_log_skip_loggers:
+            return False
+
+    return True
+
+
 # Connection timeout settings
 MAX_CONNECTION_DURATION_SECONDS = (
     3600  # Close connection after 60 minutes regardless of activity
@@ -198,6 +303,45 @@ def cleanup_session_data():
         print(f"Warning: Session cleanup failed: {e}")
 
 
+async def cleanup_installed_plugins():
+    """Uninstall all plugins installed during the session via the Scope API."""
+    import httpx
+
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"{SCOPE_LOCAL_URL}/api/v1/plugins", timeout=10.0
+            )
+            if response.status_code != 200:
+                print(
+                    f"Warning: Failed to list plugins for cleanup: {response.status_code}"
+                )
+                return
+
+            plugins = response.json().get("plugins", [])
+            if not plugins:
+                return
+
+            for plugin in plugins:
+                name = plugin.get("name")
+                if not name:
+                    continue
+                try:
+                    resp = await client.delete(
+                        f"{SCOPE_LOCAL_URL}/api/v1/plugins/{name}", timeout=60.0
+                    )
+                    if resp.status_code == 200:
+                        print(f"Cleanup: uninstalled plugin '{name}'")
+                    else:
+                        print(
+                            f"Warning: Failed to uninstall plugin '{name}': {resp.status_code}"
+                        )
+                except Exception as e:
+                    print(f"Warning: Failed to uninstall plugin '{name}': {e}")
+    except Exception as e:
+        print(f"Warning: Plugin cleanup failed: {e}")
+
+
 # To deploy:
 # 1. Ensure the docker image for your current git SHA has been built
 #    (check https://github.com/daydreamlive/scope/actions for the docker-build workflow)
@@ -224,7 +368,9 @@ def _get_git_sha() -> str:
             text=True,
             check=True,
         )
-        return result.stdout.strip()[:7]
+        tag = result.stdout.strip()[:7] + "-cloud"
+        print(f"Deploying with tag: {tag}")
+        return tag
     except Exception as e:
         print(f"Warning: Could not get git SHA: {e}")
         return "unknown"
@@ -281,7 +427,6 @@ class ScopeApp(fal.App, keep_alive=300):
         """
         import os
         import subprocess
-        import threading
         import time
 
         print(f"Starting Scope container setup... (version: {GIT_SHA})")
@@ -296,52 +441,85 @@ class ScopeApp(fal.App, keep_alive=300):
             print(f"GPU check failed: {e}")
             raise
 
-        # Environment for scope
-        scope_env = os.environ.copy()
-        # Add any scope-specific environment variables here
-        # scope_env["PIPELINE"] = "some-default-pipeline"
-        # Use fal's /data directory for persistent storage
+        # Environment for scope - whitelist only necessary variables (security)
+        ENV_WHITELIST = [
+            # Required for process execution
+            "PATH",
+            "HOME",
+            "USER",
+            "LANG",
+            "LC_ALL",
+            # CUDA/GPU
+            "CUDA_VISIBLE_DEVICES",
+            "NVIDIA_VISIBLE_DEVICES",
+            "NVIDIA_DRIVER_CAPABILITIES",
+            "LD_LIBRARY_PATH",
+            # Daydream API
+            "DAYDREAM_API_BASE",
+            # Kafka
+            "KAFKA_BOOTSTRAP_SERVERS",
+            "KAFKA_TOPIC",
+            "KAFKA_SASL_USERNAME",
+            "KAFKA_SASL_PASSWORD",
+            # HuggingFace (for model downloads)
+            "HF_TOKEN",
+            "HF_HOME",
+            "HUGGINGFACE_HUB_CACHE",
+        ]
+        scope_env = {k: os.environ[k] for k in ENV_WHITELIST if k in os.environ}
+
+        # Add scope-specific environment variables
         scope_env["DAYDREAM_SCOPE_MODELS_DIR"] = "/data/models"
-        scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = "/data/logs"
         # not shared between users
+        scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = ASSETS_DIR_PATH + "/logs"
         scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
         scope_env["DAYDREAM_SCOPE_LORA_DIR"] = ASSETS_DIR_PATH + "/lora"
+        scope_env["UV_CACHE_DIR"] = "/tmp/uv-cache"
 
-        # Install kafka extra dependencies
-        print("Installing daydream-scope[kafka]...")
-        try:
-            subprocess.run(
-                ["uv", "pip", "install", "daydream-scope[kafka]"],
-                check=True,
-                env=scope_env,
-            )
-            print("✅ daydream-scope[kafka] installed")
-        except Exception as e:
-            print(f"Failed to install daydream-scope[kafka]: {e}")
+        # Ensure VERBOSE_LOGGING is not set so noisy third-party loggers
+        # (aiortc, uvicorn.access) stay at WARNING level
+        scope_env.pop("VERBOSE_LOGGING", None)
 
-        # Start the scope server in a background thread
+        # Force unbuffered stdout in subprocess so log lines arrive immediately
+        # (Python uses block buffering when stdout is a pipe, not a tty)
+        scope_env["PYTHONUNBUFFERED"] = "1"
+
+        # Start the scope server in a background thread with captured output
         def start_server():
             print("Starting Scope server...")
             try:
-                result = subprocess.run(
+                process = subprocess.Popen(
                     [
                         "uv",
                         "run",
+                        "--extra",
+                        "kafka",
                         "daydream-scope",
                         "--no-browser",
                         "--host",
                         "0.0.0.0",
                         "--port",
-                        "8000",
+                        str(SCOPE_PORT),
                     ],
                     env=scope_env,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    bufsize=1,  # Line-buffered
                 )
-                # Log when process exits (regardless of exit code)
-                if result.returncode == 0:
+                # Read stdout line by line and broadcast to WebSocket subscribers
+                for line in process.stdout:
+                    line = line.rstrip("\n")
+                    if line:
+                        print(line)  # Echo to fal container logs
+                        log_broadcaster.publish(line)
+
+                process.wait()
+                if process.returncode == 0:
                     print("Scope server process exited normally (exit code 0)")
                 else:
                     print(
-                        f"❌ Scope server process exited with code {result.returncode}"
+                        f"❌ Scope server process exited with code {process.returncode}"
                     )
             except Exception as e:
                 print(f"❌ Failed to start Scope server: {e}")
@@ -359,9 +537,9 @@ class ScopeApp(fal.App, keep_alive=300):
             try:
                 import requests
 
-                response = requests.get("http://localhost:8000/health", timeout=2)
+                response = requests.get(f"{SCOPE_LOCAL_URL}/health", timeout=2)
                 if response.status_code == 200:
-                    print("✅ Scope server is running on port 8000")
+                    print(f"✅ Scope server is running on port {SCOPE_PORT}")
                     break
             except Exception:
                 pass
@@ -393,8 +571,6 @@ class ScopeApp(fal.App, keep_alive=300):
         import httpx
         from starlette.websockets import WebSocketDisconnect, WebSocketState
 
-        SCOPE_BASE_URL = "http://localhost:8000"
-
         # Initialize Kafka publisher if not already done
         global kafka_publisher
         if kafka_publisher is None:
@@ -416,6 +592,22 @@ class ScopeApp(fal.App, keep_alive=300):
 
         print(f"[{log_prefix()}] ✅ WebSocket connection accepted")
 
+        # Tell the Scope subprocess to tag every log line with this connection ID
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.put(
+                    f"{SCOPE_LOCAL_URL}/api/v1/internal/fal-connection-id",
+                    json={"connection_id": connection_id},
+                    timeout=5.0,
+                )
+        except Exception as e:
+            print(
+                f"[{log_prefix()}] Warning: failed to set connection ID in subprocess: {e}"
+            )
+
+        # Wait for any in-progress cleanup from the previous session before signaling ready
+        await _get_cleanup_event().wait()
+
         # Send ready message with connection_id
         await ws.send_json({"type": "ready", "connection_id": connection_id})
 
@@ -436,6 +628,37 @@ class ScopeApp(fal.App, keep_alive=300):
                 await ws.send_json(payload)
             except (RuntimeError, WebSocketDisconnect):
                 pass
+
+        async def forward_logs_to_client():
+            """Forward subprocess log lines to WebSocket client in batches.
+
+            Uses stdlib queue.Queue (thread-safe) polled via asyncio.sleep,
+            since the publisher runs in a background thread.
+            """
+            LOG_BATCH_LIMIT = 50
+            POLL_INTERVAL = 0.5  # seconds
+            q = log_broadcaster.subscribe(connection_id)
+            try:
+                while True:
+                    batch = []
+                    # Drain all available lines (non-blocking)
+                    while len(batch) < LOG_BATCH_LIMIT:
+                        try:
+                            line = q.get_nowait()
+                            if _should_forward_log(line):
+                                batch.append(line)
+                        except queue.Empty:
+                            break
+
+                    if batch:
+                        await safe_send_json({"type": "logs", "lines": batch})
+                    else:
+                        # No lines available — yield to event loop before next poll
+                        await asyncio.sleep(POLL_INTERVAL)
+            except asyncio.CancelledError:
+                pass
+            finally:
+                log_broadcaster.unsubscribe(connection_id)
 
         async def check_max_duration_exceeded() -> bool:
             """Check if connection has exceeded max duration. Returns True if should close."""
@@ -459,7 +682,7 @@ class ScopeApp(fal.App, keep_alive=300):
             request_id = payload.get("request_id")
             async with httpx.AsyncClient() as client:
                 response = await client.get(
-                    f"{SCOPE_BASE_URL}/api/v1/webrtc/ice-servers"
+                    f"{SCOPE_LOCAL_URL}/api/v1/webrtc/ice-servers"
                 )
                 return {
                     "type": "ice_servers",
@@ -493,7 +716,7 @@ class ScopeApp(fal.App, keep_alive=300):
             try:
                 async with httpx.AsyncClient() as client:
                     response = await client.post(
-                        f"{SCOPE_BASE_URL}/api/v1/webrtc/offer",
+                        f"{SCOPE_LOCAL_URL}/api/v1/webrtc/offer",
                         json={
                             "sdp": payload.get("sdp"),
                             "type": payload.get("sdp_type", "offer"),
@@ -554,7 +777,7 @@ class ScopeApp(fal.App, keep_alive=300):
 
             async with httpx.AsyncClient() as client:
                 response = await client.patch(
-                    f"{SCOPE_BASE_URL}/api/v1/webrtc/offer/{target_session}",
+                    f"{SCOPE_LOCAL_URL}/api/v1/webrtc/offer/{target_session}",
                     json={
                         "candidates": [
                             {
@@ -604,19 +827,85 @@ class ScopeApp(fal.App, keep_alive=300):
             body = payload.get("body")
             request_id = payload.get("request_id")
 
-            # Block plugin installation in cloud mode (security: prevent arbitrary code execution)
-            if method == "POST" and path == "/api/v1/plugins":
-                return {
-                    "type": "api_response",
-                    "request_id": request_id,
-                    "status": 403,
-                    "error": "Plugin installation is not available in cloud mode",
-                }
+            from urllib.parse import unquote, urlparse
+
+            normalized_path = unquote(urlparse(path).path).rstrip("/")
+
+            if method == "POST" and normalized_path == "/api/v1/plugins":
+                requested_package = (
+                    body.get("package", "") if isinstance(body, dict) else ""
+                )
+
+                # Check if the requested plugin is allowed via the Daydream API
+                async def is_plugin_allowed(package: str) -> bool | None:
+                    import re
+
+                    def normalize_plugin_url(url: str) -> str:
+                        normalized = url.lower().strip()
+                        normalized = re.sub(r"^git\+https?://", "", normalized)
+                        normalized = re.sub(r"^https?://", "", normalized)
+                        if normalized.endswith(".git"):
+                            normalized = normalized[:-4]
+                        return normalized.rstrip("/")
+
+                    normalized_package = normalize_plugin_url(package)
+                    base_url = f"{get_daydream_api_base()}/v1/plugins"
+                    limit = 100
+                    offset = 0
+
+                    try:
+                        async with httpx.AsyncClient() as client:
+                            while True:
+                                resp = await client.get(
+                                    base_url,
+                                    params={
+                                        "remoteOnly": "true",
+                                        "limit": limit,
+                                        "offset": offset,
+                                    },
+                                    timeout=10.0,
+                                )
+                                resp.raise_for_status()
+                                data = resp.json()
+                                for plugin in data.get("plugins", []):
+                                    plugin_url = plugin.get("repositoryUrl", "")
+                                    if (
+                                        plugin_url
+                                        and normalized_package
+                                        == normalize_plugin_url(plugin_url)
+                                    ):
+                                        return True
+                                if not data.get("hasMore", False):
+                                    break
+                                offset += limit
+                    except Exception as e:
+                        print(
+                            f"[{log_prefix()}] Failed to fetch allowed plugins from {base_url}: {e}"
+                        )
+                        return None
+
+                    return False
+
+                allowed = await is_plugin_allowed(requested_package)
+                if allowed is None:
+                    return {
+                        "type": "api_response",
+                        "request_id": request_id,
+                        "status": 503,
+                        "error": "Unable to verify plugin allowlist — the Daydream API is currently unavailable. Please try again later.",
+                    }
+                if not allowed:
+                    return {
+                        "type": "api_response",
+                        "request_id": request_id,
+                        "status": 403,
+                        "error": f"Plugin '{requested_package}' is not in the allowed list for cloud mode",
+                    }
 
             # Inject connection_id into pipeline load requests for event correlation
             if (
                 method == "POST"
-                and path == "/api/v1/pipeline/load"
+                and normalized_path == "/api/v1/pipeline/load"
                 and isinstance(body, dict)
             ):
                 body["connection_id"] = connection_id
@@ -625,45 +914,88 @@ class ScopeApp(fal.App, keep_alive=300):
 
             async with httpx.AsyncClient() as client:
                 try:
-                    # Check if this is a base64-encoded file upload
-                    is_binary_upload = (
+                    # Check if this is a file upload (base64 or CDN URL)
+                    is_base64_upload = (
                         body and isinstance(body, dict) and "_base64_content" in body
+                    )
+                    is_cdn_upload = (
+                        body and isinstance(body, dict) and "_cdn_url" in body
                     )
 
                     if method == "GET":
                         # Use longer timeout for potential binary downloads (recordings)
-                        timeout = 120.0 if "/recordings/" in path else 30.0
+                        timeout = 120.0 if "/recordings/" in normalized_path else 30.0
                         response = await client.get(
-                            f"{SCOPE_BASE_URL}{path}", timeout=timeout
+                            f"{SCOPE_LOCAL_URL}{path}", timeout=timeout
                         )
                     elif method == "POST":
-                        if is_binary_upload:
-                            # Decode base64 and send as binary
+                        if is_cdn_upload:
+                            # Download from CDN URL and forward as binary
+                            # This handles large files that were uploaded directly to fal CDN
+                            cdn_url = body["_cdn_url"]
+                            content_type = body.get(
+                                "_content_type", "application/octet-stream"
+                            )
+                            print(f"[{log_prefix()}] Downloading from CDN: {cdn_url}")
+                            try:
+                                cdn_response = await client.get(
+                                    cdn_url, timeout=120.0, follow_redirects=True
+                                )
+                                if cdn_response.status_code != 200:
+                                    return {
+                                        "type": "api_response",
+                                        "request_id": request_id,
+                                        "status": 502,
+                                        "error": f"CDN download failed: {cdn_response.status_code}",
+                                    }
+                                binary_content = cdn_response.content
+                                print(
+                                    f"[{log_prefix()}] Downloaded {len(binary_content)} bytes from CDN"
+                                )
+                            except Exception as e:
+                                print(f"[{log_prefix()}] CDN download error: {e}")
+                                return {
+                                    "type": "api_response",
+                                    "request_id": request_id,
+                                    "status": 502,
+                                    "error": f"CDN download error: {e}",
+                                }
+
+                            response = await client.post(
+                                f"{SCOPE_LOCAL_URL}{path}",
+                                content=binary_content,
+                                headers={"Content-Type": content_type},
+                                timeout=60.0,
+                            )
+                        elif is_base64_upload:
+                            # Decode base64 and send as binary (for small files)
                             binary_content = base64.b64decode(body["_base64_content"])
                             content_type = body.get(
                                 "_content_type", "application/octet-stream"
                             )
                             response = await client.post(
-                                f"{SCOPE_BASE_URL}{path}",
+                                f"{SCOPE_LOCAL_URL}{path}",
                                 content=binary_content,
                                 headers={"Content-Type": content_type},
                                 timeout=60.0,  # Longer timeout for uploads
                             )
                         else:
                             # Use longer timeout for LoRA installs
-                            post_timeout = 300.0 if path == "/api/v1/loras" else 30.0
+                            post_timeout = (
+                                300.0 if normalized_path == "/api/v1/loras" else 30.0
+                            )
                             response = await client.post(
-                                f"{SCOPE_BASE_URL}{path}",
+                                f"{SCOPE_LOCAL_URL}{path}",
                                 json=body,
                                 timeout=post_timeout,
                             )
                     elif method == "PATCH":
                         response = await client.patch(
-                            f"{SCOPE_BASE_URL}{path}", json=body, timeout=30.0
+                            f"{SCOPE_LOCAL_URL}{path}", json=body, timeout=30.0
                         )
                     elif method == "DELETE":
                         response = await client.delete(
-                            f"{SCOPE_BASE_URL}{path}", timeout=30.0
+                            f"{SCOPE_LOCAL_URL}{path}", timeout=30.0
                         )
                     else:
                         return {
@@ -788,6 +1120,9 @@ class ScopeApp(fal.App, keep_alive=300):
                     "error": f"Unknown message type: {msg_type}",
                 }
 
+        # Log forwarder task — started after user_id is validated
+        log_forwarder_task: asyncio.Task | None = None
+
         # Main message loop
         try:
             while True:
@@ -819,6 +1154,14 @@ class ScopeApp(fal.App, keep_alive=300):
                 response = await handle_message(payload)
                 if response:
                     await safe_send_json(response)
+                    # Start log forwarding once user is authenticated
+                    if (
+                        response.get("type") == "user_id_set"
+                        and log_forwarder_task is None
+                    ):
+                        log_forwarder_task = asyncio.create_task(
+                            forward_logs_to_client()
+                        )
 
         except WebSocketDisconnect:
             print(f"[{log_prefix()}] WebSocket disconnected")
@@ -826,6 +1169,14 @@ class ScopeApp(fal.App, keep_alive=300):
             print(f"[{log_prefix()}] WebSocket error ({type(e).__name__}): {e}")
             await safe_send_json({"type": "error", "error": f"{type(e).__name__}: {e}"})
         finally:
+            # Cancel log forwarder task
+            if log_forwarder_task is not None:
+                log_forwarder_task.cancel()
+                try:
+                    await log_forwarder_task
+                except asyncio.CancelledError:
+                    pass
+
             # Publish websocket disconnected event
             if kafka_publisher and kafka_publisher.is_running:
                 end_time = time.time()
@@ -841,8 +1192,52 @@ class ScopeApp(fal.App, keep_alive=300):
                         "session_end_time_ms": int(end_time * 1000),
                     },
                 )
-            # Clean up session data to prevent data leakage between users
-            cleanup_session_data()
+            # Clear the fal connection ID from Scope subprocess logs
+            try:
+                async with httpx.AsyncClient() as client:
+                    await client.delete(
+                        f"{SCOPE_LOCAL_URL}/api/v1/internal/fal-connection-id",
+                        timeout=5.0,
+                    )
+            except Exception:
+                print(f"[{log_prefix()}] Warning: Failed to clear fal connection ID")
+
+            # Close the WebRTC session on the local Scope backend.
+            # The WebRTC peer connection (UDP) is independent of this WebSocket,
+            # so it must be explicitly torn down to stop video streaming.
+            if session_id:
+                import httpx
+
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.delete(
+                            f"{SCOPE_LOCAL_URL}/api/v1/webrtc/offer/{session_id}",
+                            timeout=10.0,
+                        )
+                        if resp.status_code == 204:
+                            print(
+                                f"[{log_prefix()}] Closed WebRTC session {session_id}"
+                            )
+                        else:
+                            print(
+                                f"[{log_prefix()}] Warning: Failed to close WebRTC "
+                                f"session {session_id}: {resp.status_code}"
+                            )
+                except Exception as e:
+                    print(
+                        f"[{log_prefix()}] Warning: Failed to close WebRTC "
+                        f"session {session_id}: {e}"
+                    )
+
+            # Clean up session data to prevent data leakage between users.
+            # Block the next connection's "ready" message until cleanup finishes.
+            event = _get_cleanup_event()
+            event.clear()
+            try:
+                await cleanup_installed_plugins()
+                cleanup_session_data()
+            finally:
+                event.set()
             print(
                 f"[{log_prefix()}] WebSocket connection closed, session data cleaned up"
             )

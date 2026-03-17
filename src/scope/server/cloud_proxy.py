@@ -21,6 +21,7 @@ from datetime import datetime
 from functools import wraps
 from typing import Any
 
+import aiohttp
 from fastapi import HTTPException, Request
 from fastapi.responses import Response
 
@@ -67,9 +68,11 @@ async def _proxy_to_cloud(
 
     status = response.get("status", 200)
     if status >= 400:
+        logger.error(f"Cloud proxy request failed: {response}")
         raise HTTPException(
             status_code=status,
-            detail=response.get("error", error_detail),
+            detail=response.get("data", {}).get("detail")
+            or response.get("error", error_detail),
         )
 
     # Binary response: cloud returned base64-encoded content (e.g. recording download)
@@ -94,6 +97,45 @@ PathResolver = Callable[[Request, CloudConnectionManager], str]
 
 # When path is omitted, the request URL path is used when proxying (same as route).
 CLOUD_REQUEST_FAILED = "Cloud request failed"
+
+
+async def proxy_with_body(
+    cloud_manager: CloudConnectionManager,
+    method: str,
+    path: str,
+    body: dict | None = None,
+    timeout: float = 30.0,
+) -> Any:
+    """Proxy a request to cloud with a pre-built body.
+
+    Use this instead of ``@cloud_proxy`` when the request body needs to be
+    modified before forwarding (e.g. injecting a locally-resolved token).
+    """
+    logger.info(f"Proxying to cloud: {method} {path}")
+    try:
+        response = await cloud_manager.api_request(
+            method=method,
+            path=path,
+            body=body,
+            timeout=timeout,
+        )
+    except Exception as e:
+        logger.error(f"Cloud proxy request failed: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"{CLOUD_REQUEST_FAILED}: {e}",
+        ) from e
+
+    status = response.get("status", 200)
+    if status >= 400:
+        logger.error(f"Cloud proxy request failed: {response}")
+        raise HTTPException(
+            status_code=status,
+            detail=response.get("data", {}).get("detail")
+            or response.get("error", CLOUD_REQUEST_FAILED),
+        )
+
+    return response.get("data", {})
 
 
 async def get_hardware_info_from_cloud(
@@ -137,19 +179,105 @@ async def get_hardware_info_from_cloud(
     )
 
 
+async def _upload_to_fal_cdn(
+    content: bytes,
+    filename: str,
+    content_type: str,
+    cdn_token: str,
+    token_type: str,
+    base_upload_url: str,
+) -> str:
+    """Upload file directly to fal CDN via REST API.
+
+    This bypasses the WebSocket and uploads directly to fal's storage,
+    returning a CDN URL that can be used by the cloud runner.
+
+    The CDN token must be obtained by the caller (frontend) from the Daydream
+    API at /auth/fal/cdn-token and passed through request headers.
+
+    Args:
+        content: File content as bytes
+        filename: Original filename
+        content_type: MIME type of the file
+        cdn_token: Short-lived CDN upload token from Daydream API
+        token_type: Token type (e.g. "bearer")
+        base_upload_url: Base URL for CDN uploads
+
+    Returns:
+        CDN URL of the uploaded file (https://v3.fal.media/files/...)
+
+    Raises:
+        HTTPException: If upload fails
+    """
+    logger.info(f"upload_to_fal_cdn: Uploading {len(content)} bytes ({filename})")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Upload file to CDN
+            upload_url = f"{base_upload_url}/files/upload"
+            upload_auth = f"{token_type} {cdn_token}"
+
+            async with session.post(
+                upload_url,
+                data=content,
+                headers={
+                    "Authorization": upload_auth,
+                    "Content-Type": content_type,
+                    "X-Fal-File-Name": filename,
+                    "Accept": "application/json",
+                },
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as upload_response:
+                if upload_response.status != 200:
+                    error_text = await upload_response.text()
+                    logger.error(f"upload_to_fal_cdn: Upload failed: {error_text}")
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"CDN upload failed: {upload_response.status}",
+                    )
+
+                upload_result = await upload_response.json()
+                cdn_url = upload_result.get("access_url") or upload_result.get("url")
+
+                if not cdn_url:
+                    logger.error(
+                        f"upload_to_fal_cdn: No URL in response: {upload_result}"
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="CDN upload succeeded but no URL returned",
+                    )
+
+                logger.info(f"upload_to_fal_cdn: Success, URL: {cdn_url}")
+                return cdn_url
+
+    except aiohttp.ClientError as e:
+        logger.error(f"upload_to_fal_cdn: Network error: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"CDN upload network error: {e}",
+        ) from e
+
+
 async def upload_asset_to_cloud(
     cloud_manager: CloudConnectionManager,
     content: bytes,
     filename: str,
     content_type: str,
     asset_type: str,
+    fal_cdn_token: str | None = None,
+    fal_cdn_token_type: str | None = None,
+    fal_cdn_base_url: str | None = None,
 ) -> AssetFileInfo:
-    """Upload asset to cloud (POST with base64 body) and save a local copy for thumbnails.
+    """Upload asset to cloud and save a local copy for thumbnails.
+
+    Uploads directly to fal CDN using a token obtained by the frontend from
+    the Daydream API, then notifies the cloud runner via the WebSocket.
 
     Call when cloud_manager.is_connected; raises HTTPException on cloud errors.
     """
     logger.info(
-        f"upload_asset: Uploading {asset_type} to cloud and locally: {filename}"
+        f"upload_asset: Uploading {asset_type} to cloud and locally: {filename} ({len(content)} bytes)"
     )
 
     # Save locally for thumbnail serving
@@ -159,12 +287,26 @@ async def upload_asset_to_cloud(
     local_file_path.write_bytes(content)
     logger.info(f"upload_asset: Saved local copy for thumbnails: {local_file_path}")
 
-    base64_content = base64.b64encode(content).decode("utf-8")
+    if not fal_cdn_token or not fal_cdn_token_type or not fal_cdn_base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="CDN token required for uploads (provide X-Fal-CDN-Token, X-Fal-CDN-Token-Type, X-Fal-CDN-Base-URL headers)",
+        )
+    cdn_url = await _upload_to_fal_cdn(
+        content,
+        filename,
+        content_type,
+        fal_cdn_token,
+        fal_cdn_token_type,
+        fal_cdn_base_url,
+    )
+
+    # Tell the cloud runner to fetch from CDN URL instead of receiving base64
     response = await cloud_manager.api_request(
         method="POST",
         path=f"/api/v1/assets?filename={filename}",
         body={
-            "_base64_content": base64_content,
+            "_cdn_url": cdn_url,
             "_content_type": content_type,
         },
         timeout=60.0,

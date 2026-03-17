@@ -20,7 +20,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 import numpy as np
-from aiortc import RTCPeerConnection, RTCSessionDescription
+from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
 from aiortc.mediastreams import VIDEO_TIME_BASE, MediaStreamTrack
 from av import VideoFrame
 
@@ -197,14 +197,19 @@ class CloudWebRTCClient:
             logger.info("Already connected, disconnecting first")
             await self.disconnect()
 
-        logger.info("[CLOUD-RTC] Creating WebRTC connection to cloud...")
+        logger.info("Creating WebRTC connection to cloud...")
 
         # Get ICE servers from cloud
         ice_response = await self.cloud_manager.webrtc_get_ice_servers()
-        ice_servers = ice_response.get("data", {}).get("iceServers", [])
 
-        # Create peer connection
-        config = {"iceServers": ice_servers} if ice_servers else {}
+        from .webrtc import credentials_to_rtc_ice_servers
+
+        rtc_ice_servers = credentials_to_rtc_ice_servers(ice_response)
+        config = (
+            RTCConfiguration(iceServers=rtc_ice_servers)
+            if rtc_ice_servers
+            else RTCConfiguration()
+        )
         self.pc = RTCPeerConnection(config)
 
         # Create input track for sending frames to cloud
@@ -216,16 +221,16 @@ class CloudWebRTCClient:
 
         @self._data_channel.on("open")
         def on_dc_open():
-            logger.info("[CLOUD-RTC] Data channel opened")
+            logger.info("Data channel opened")
 
         @self._data_channel.on("message")
         def on_dc_message(message):
-            logger.debug(f"[CLOUD-RTC] Data channel message: {message}")
+            logger.debug(f"Data channel message: {message}")
 
         # Handle incoming track (processed frames from cloud)
         @self.pc.on("track")
         async def on_track(track: MediaStreamTrack):
-            logger.info(f"[CLOUD-RTC] Received track: {track.kind}")
+            logger.info(f"Received track: {track.kind}")
             if track.kind == "video":
                 self._receive_task = asyncio.create_task(self._receive_frames(track))
                 # Request keyframe immediately to avoid VP8 decode errors
@@ -236,20 +241,20 @@ class CloudWebRTCClient:
         @self.pc.on("connectionstatechange")
         async def on_connection_state_change():
             state = self.pc.connectionState
-            logger.info(f"[CLOUD-RTC] Connection state: {state}")
+            logger.info(f"Connection state: {state}")
             self._stats["connection_state"] = state
 
             if state == "connected":
                 self._connected = True
                 self._stats["connected_at"] = time.time()
-                logger.info("[CLOUD-RTC] WebRTC connected to cloud")
+                logger.info("WebRTC connected to cloud")
             elif state in ("disconnected", "failed", "closed"):
                 self._connected = False
 
         @self.pc.on("icecandidate")
         async def on_ice_candidate(candidate):
             if candidate:
-                logger.debug(f"[CLOUD-RTC] Local ICE candidate: {candidate.candidate}")
+                logger.debug(f"Local ICE candidate: {candidate.candidate}")
                 # Send to cloud via WebSocket
                 if self._session_id:
                     try:
@@ -262,13 +267,13 @@ class CloudWebRTCClient:
                             },
                         )
                     except Exception as e:
-                        logger.error(f"[CLOUD-RTC] Failed to send ICE candidate: {e}")
+                        logger.error(f"Failed to send ICE candidate: {e}")
 
         # Create offer
         offer = await self.pc.createOffer()
         await self.pc.setLocalDescription(offer)
 
-        logger.info("[CLOUD-RTC] Sending offer to cloud...")
+        logger.info("Sending offer to cloud...")
 
         # Send offer through WebSocket
         response = await self.cloud_manager.webrtc_offer(
@@ -284,7 +289,7 @@ class CloudWebRTCClient:
         answer_sdp = response.get("sdp")
         answer_type = response.get("sdp_type", "answer")
 
-        logger.info(f"[CLOUD-RTC] Received answer, session: {self._session_id}")
+        logger.info(f"Received answer, session: {self._session_id}")
 
         # Set remote description
         answer = RTCSessionDescription(sdp=answer_sdp, type=answer_type)
@@ -299,58 +304,99 @@ class CloudWebRTCClient:
         if not self._connected:
             raise RuntimeError(f"WebRTC connection to cloud timed out after {timeout}s")
 
-        logger.info("[CLOUD-RTC] Connection established successfully")
+        logger.info("Connection established successfully")
 
     async def _receive_frames(self, track: MediaStreamTrack):
         """Background task to receive frames from cloud."""
-        logger.info("[CLOUD-RTC] Starting frame receive loop")
+        from aiortc.mediastreams import MediaStreamError
+
+        logger.info("Starting frame receive loop")
+        consecutive_errors = 0
+        max_consecutive_errors = 10
 
         try:
             while True:
                 try:
                     frame = await track.recv()
+                    consecutive_errors = 0
                     self._stats["frames_received"] += 1
 
-                    if self._stats["frames_received"] % 100 == 0:
+                    if self._stats["frames_received"] == 1:
+                        logger.info(
+                            "First frame received from cloud "
+                            "(keyframe decoded successfully)"
+                        )
+                    elif self._stats["frames_received"] % 100 == 0:
                         logger.debug(
-                            f"[CLOUD-RTC] Received {self._stats['frames_received']} frames"
+                            f"Received {self._stats['frames_received']} frames"
                         )
 
                     # Pass to output handler
                     self.output_handler.handle_frame(frame)
 
-                except Exception as e:
-                    if "MediaStreamError" in str(type(e)):
-                        logger.info("[CLOUD-RTC] Track ended")
-                        break
-                    logger.error(f"[CLOUD-RTC] Error receiving frame: {e}")
+                except MediaStreamError:
+                    logger.info("Track ended")
                     break
+                except Exception as e:
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        logger.error(
+                            f"Error receiving frame, stopping after "
+                            f"{consecutive_errors} consecutive errors: {e}"
+                        )
+                        break
+                    logger.warning(
+                        f"Transient error receiving frame "
+                        f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+                    )
+                    await asyncio.sleep(0.01)
 
         except asyncio.CancelledError:
-            logger.info("[CLOUD-RTC] Frame receive loop cancelled")
+            logger.info("Frame receive loop cancelled")
         finally:
             logger.info(
-                f"[CLOUD-RTC] Frame receive loop ended, "
+                f"Frame receive loop ended, "
                 f"total frames: {self._stats['frames_received']}"
             )
 
     async def _request_keyframe(self):
-        """Request a keyframe via PLI after short delay for receiver setup.
+        """Request a keyframe via PLI once the receiver has remote streams.
 
         VP8/VP9 decoders need a keyframe (I-frame) to start decoding.
         After a new WebRTC connection, we may receive P-frames first,
         causing decode errors. Sending PLI (Picture Loss Indication)
         requests the remote end to send a keyframe.
         """
-        await asyncio.sleep(0.1)  # Allow receiver to initialize
-        for receiver in self.pc.getReceivers():
-            if receiver.track and receiver.track.kind == "video":
-                try:
-                    # Access internal PLI method from aiortc
-                    await receiver._send_rtcp_pli()
-                    logger.info("[CLOUD-RTC] Sent PLI (keyframe request)")
-                except Exception as e:
-                    logger.debug(f"[CLOUD-RTC] Could not send PLI: {e}")
+        # Poll until remote_streams is populated (RTP packets have arrived)
+        timeout = 5.0
+        poll_interval = 0.1
+        elapsed = 0.0
+        receiver = None
+        remote_streams = None
+
+        while elapsed < timeout:
+            await asyncio.sleep(poll_interval)
+            elapsed += poll_interval
+            for r in self.pc.getReceivers():
+                if r.track and r.track.kind == "video":
+                    streams = r._RTCRtpReceiver__remote_streams
+                    if streams:
+                        receiver = r
+                        remote_streams = streams
+                        break
+            if remote_streams:
+                break
+
+        if not remote_streams or not receiver:
+            logger.debug("No remote streams after %.1fs, skipping PLI", timeout)
+            return
+
+        try:
+            media_ssrc = next(iter(remote_streams))
+            await receiver._send_rtcp_pli(media_ssrc)
+            logger.info(f"Sent PLI keyframe request (media_ssrc={media_ssrc})")
+        except Exception as e:
+            logger.debug(f"Could not send PLI: {e}")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a frame to cloud for processing.
@@ -375,13 +421,13 @@ class CloudWebRTCClient:
             import json
 
             self._data_channel.send(json.dumps(params))
-            logger.debug(f"[CLOUD-RTC] Sent parameters: {params}")
+            logger.debug(f"Sent parameters: {params}")
         else:
-            logger.warning("[CLOUD-RTC] Data channel not ready for parameters")
+            logger.warning("Data channel not ready for parameters")
 
     async def disconnect(self):
         """Close the WebRTC connection to cloud."""
-        logger.info("[CLOUD-RTC] Disconnecting from cloud...")
+        logger.info("Disconnecting from cloud...")
 
         self._connected = False
 
@@ -401,7 +447,7 @@ class CloudWebRTCClient:
         self._data_channel = None
         self._session_id = None
 
-        logger.info("[CLOUD-RTC] Disconnected")
+        logger.info("Disconnected")
 
     def get_stats(self) -> dict:
         """Get connection statistics."""

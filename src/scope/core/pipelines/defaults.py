@@ -102,10 +102,13 @@ def apply_mode_defaults_to_state(
     if "denoising_step_list" not in kwargs and config.denoising_steps:
         state.set("denoising_step_list", config.denoising_steps)
 
-    # For text mode, noise controls should be None (not used)
+    # For text mode, noise controls should be None unless explicitly provided
+    # (e.g. by the modulation engine injecting values into kwargs)
     if mode == INPUT_MODE_TEXT:
-        state.set("noise_scale", None)
-        state.set("noise_controller", None)
+        if "noise_scale" not in kwargs:
+            state.set("noise_scale", None)
+        if "noise_controller" not in kwargs:
+            state.set("noise_controller", None)
     else:
         # For video mode, apply defaults if not provided
         if "noise_scale" not in kwargs and config.noise_scale is not None:

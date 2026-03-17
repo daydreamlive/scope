@@ -26,6 +26,7 @@ class LoRADownloadRequest(BaseModel):
     url: str | None = None
     subfolder: str | None = None
     expected_sha256: str | None = None
+    civitai_token: str | None = None
 
 
 class LoRADownloadResult(BaseModel):
@@ -43,25 +44,37 @@ def _resolve_hf_url(repo_id: str, hf_filename: str) -> str:
 
 def resolve_civitai_metadata(
     version_id: str,
+    token: str | None = None,
 ) -> tuple[str | None, str | None]:
     """Resolve CivitAI version ID to (download_url, filename).
 
     The token is attached to the download URL when available.
     Returns (None, None) if the API call fails or returns no files.
     Used by both :func:`download_lora` and the ``install_lora_file`` endpoint.
+
+    *token* is used as a fallback when the locally-stored CivitAI token
+    is not available (e.g. on a cloud worker that received the token from
+    the proxying local app).
     """
     import httpx
 
     from .models_config import get_civitai_token
 
     api_url = f"https://civitai.com/api/v1/model-versions/{version_id}"
-    token = get_civitai_token()
+    token = get_civitai_token() or token
     headers = {}
     if token:
         headers["Authorization"] = f"Bearer {token}"
 
     response = httpx.get(api_url, headers=headers, timeout=30.0, follow_redirects=True)
     if response.status_code != 200:
+        # Surface API error messages (e.g. HTTP 451 region block) to the user
+        try:
+            body = response.json()
+        except Exception:
+            return None, None
+        if isinstance(body, dict) and "error" in body:
+            raise ValueError(str(body["error"]))
         return None, None
 
     data = response.json()
@@ -80,12 +93,14 @@ def resolve_civitai_metadata(
     return download_url, filename
 
 
-def _resolve_civitai_download_url(version_id: str) -> tuple[str, str | None]:
+def _resolve_civitai_download_url(
+    version_id: str, token: str | None = None
+) -> tuple[str, str | None]:
     """Resolve CivitAI version ID to download URL. Returns (url, filename).
 
     Raises ValueError if resolution fails.
     """
-    download_url, filename = resolve_civitai_metadata(version_id)
+    download_url, filename = resolve_civitai_metadata(version_id, token=token)
     if not download_url:
         raise ValueError(
             f"Could not resolve download URL for CivitAI version {version_id}"
@@ -124,7 +139,9 @@ def _filename_from_response(url: str) -> str:
 
 
 async def download_lora(
-    request: LoRADownloadRequest, lora_dir: Path
+    request: LoRADownloadRequest,
+    lora_dir: Path,
+    civitai_token: str | None = None,
 ) -> LoRADownloadResult:
     loop = asyncio.get_running_loop()
 
@@ -138,7 +155,7 @@ async def download_lora(
         if not request.version_id:
             raise ValueError("version_id required for CivitAI source")
         url, civitai_filename = await loop.run_in_executor(
-            None, _resolve_civitai_download_url, request.version_id
+            None, _resolve_civitai_download_url, request.version_id, civitai_token
         )
         filename = civitai_filename  # may be None, resolved below
 
@@ -185,7 +202,7 @@ async def download_lora(
         hf_filename=request.hf_filename,
         model_id=request.model_id,
         version_id=request.version_id,
-        url=request.url if request.source == "url" else None,
+        url=request.url,
     )
     add_manifest_entry(lora_dir, relative_filename, provenance, sha256, size_bytes)
 

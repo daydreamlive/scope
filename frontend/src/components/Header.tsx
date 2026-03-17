@@ -25,7 +25,7 @@ export function Header({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
-    "general" | "account" | "api-keys" | "loras"
+    "general" | "account" | "api-keys" | "loras" | "osc"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
 
@@ -92,7 +92,12 @@ export function Header({
         setPluginsOpen(true);
       } else {
         setInitialTab(
-          openSettingsTab as "general" | "account" | "api-keys" | "loras"
+          openSettingsTab as
+            | "general"
+            | "account"
+            | "api-keys"
+            | "loras"
+            | "osc"
         );
         setSettingsOpen(true);
       }
@@ -129,36 +134,43 @@ export function Header({
         <div className="flex items-center gap-1">
           <Button
             variant="ghost"
-            size="icon"
+            size="sm"
             onClick={handleCloudIconClick}
-            className={`hover:opacity-80 transition-opacity h-8 w-8 ${
+            className={`hover:opacity-80 transition-opacity h-8 gap-1.5 px-2 ${
               isConnected
-                ? "text-green-500 opacity-80"
+                ? "text-green-500 opacity-100"
                 : isConnecting
-                  ? "text-amber-400 opacity-80"
-                  : "text-muted-foreground opacity-60"
+                  ? "text-amber-400 opacity-100"
+                  : "text-muted-foreground opacity-80"
             }`}
             title={
               isConnected
                 ? "Cloud connected"
                 : isConnecting
                   ? "Connecting to cloud..."
-                  : "Cloud disconnected"
+                  : "Enable remote inference"
             }
           >
             {isConnected ? (
-              <Cloud className="h-5 w-5" />
+              <Cloud className="h-4 w-4" />
             ) : isConnecting ? (
-              <Cloud className="h-5 w-5 animate-pulse" />
+              <Cloud className="h-4 w-4 animate-pulse" />
             ) : (
-              <CloudOff className="h-5 w-5" />
+              <CloudOff className="h-4 w-4" />
             )}
+            <span className="text-xs font-medium">
+              {isConnected
+                ? "Connected"
+                : isConnecting
+                  ? "Connecting..."
+                  : "Enable Remote Inference"}
+            </span>
           </Button>
           <Button
             variant="ghost"
             size="icon"
             onClick={() => setPluginsOpen(true)}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-60 h-8 w-8"
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 w-8"
             title="Plugins"
           >
             <Plug className="h-5 w-5" />
@@ -167,7 +179,7 @@ export function Header({
             variant="ghost"
             size="icon"
             onClick={() => setSettingsOpen(true)}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-60 h-8 w-8"
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 w-8"
             title="Settings"
           >
             <Settings className="h-5 w-5" />
@@ -179,6 +191,8 @@ export function Header({
         open={pluginsOpen}
         onClose={handlePluginsClose}
         initialPluginPath={initialPluginPath}
+        disabled={cloudDisabled || isConnecting}
+        cloudConnected={isConnected}
       />
 
       <SettingsDialog

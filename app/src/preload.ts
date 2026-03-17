@@ -90,19 +90,18 @@ contextBridge.exposeInMainWorld('scope', {
 
   browseDirectory: (title?: string) => ipcRenderer.invoke(IPC_CHANNELS.BROWSE_DIRECTORY, title),
 
-  onDeepLinkAction: (callback: (data: { action: string; package: string }) => void) => {
+  onDeepLinkAction: (callback: (data: { action: string; [key: string]: string }) => void) => {
     // Validate callback
     if (typeof callback !== 'function') {
       throw new Error('Callback must be a function');
     }
 
-    const handler = (_event: Electron.IpcRendererEvent, data: { action: string; package: string }) => {
-      // Validate data structure
-      if (typeof data !== 'object' || typeof data.action !== 'string' || typeof data.package !== 'string') {
+    const handler = (_event: Electron.IpcRendererEvent, data: Record<string, unknown>) => {
+      if (typeof data !== 'object' || typeof data.action !== 'string') {
         console.error('Invalid deep link action data:', data);
         return;
       }
-      callback(data);
+      callback(data as { action: string; [key: string]: string });
     };
 
     ipcRenderer.on(IPC_CHANNELS.DEEP_LINK_ACTION, handler);

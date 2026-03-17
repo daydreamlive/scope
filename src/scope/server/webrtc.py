@@ -21,6 +21,7 @@ from aiortc.sdp import candidate_from_sdp
 
 from .cloud_track import CloudTrack
 from .credentials import get_turn_credentials
+from .headless import HeadlessSession
 from .kafka_publisher import publish_event
 from .media_clock import MediaClock
 from .pipeline_manager import PipelineManager
@@ -30,6 +31,7 @@ from .tracks import AudioProcessingTrack, VideoProcessingTrack
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
+    from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +77,17 @@ class Session:
         self.user_id = user_id
         self.connection_id = connection_id
         self.connection_info = connection_info
+        self.notification_sender = None
+        self.tempo_sync = None
 
     async def close(self):
         """Close this session and cleanup resources."""
         try:
+            if self.tempo_sync is not None and self.notification_sender is not None:
+                self.tempo_sync.unregister_notification_session(
+                    self.notification_sender
+                )
+
             # Stop video track first to properly cleanup FrameProcessor
             if self.video_track is not None:
                 await self.video_track.stop()
@@ -132,7 +141,8 @@ class NotificationSender:
                 def send_sync():
                     try:
                         self.data_channel.send(message_str)
-                        logger.info(f"Sent notification to frontend: {message}")
+                        if message.get("type") != "tempo_update":
+                            logger.info(f"Sent notification to frontend: {message}")
                     except Exception as e:
                         logger.error(f"Failed to send notification: {e}")
 
@@ -192,11 +202,15 @@ class WebRTCManager:
 
     def __init__(self):
         self.sessions: dict[str, Session] = {}
+        self.headless_session: HeadlessSession | None = None
         self.rtc_config = create_rtc_config()
         self.is_first_track = True
 
     async def handle_offer(
-        self, request: WebRTCOfferRequest, pipeline_manager: PipelineManager
+        self,
+        request: WebRTCOfferRequest,
+        pipeline_manager: PipelineManager,
+        tempo_sync=None,
     ) -> dict[str, Any]:
         """
         Handle an incoming WebRTC offer and return an answer.
@@ -204,6 +218,7 @@ class WebRTCManager:
         Args:
             offer_data: Dictionary containing SDP offer
             pipeline_manager: The pipeline manager instance
+            tempo_sync: Optional TempoSync instance for beat state injection
 
         Returns:
             Dictionary containing SDP answer
@@ -243,6 +258,7 @@ class WebRTCManager:
                 user_id=request.user_id,
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
+                tempo_sync=tempo_sync,
             )
             session.video_track = video_track
             session.media_clock = media_clock
@@ -256,6 +272,11 @@ class WebRTCManager:
                 frame_processor=video_track.frame_processor,
             )
             session.audio_track = audio_track
+
+            session.notification_sender = notification_sender
+            session.tempo_sync = tempo_sync
+            if tempo_sync is not None:
+                tempo_sync.register_notification_session(notification_sender)
 
             # Create a MediaRelay to allow multiple consumers (WebRTC and recording)
             relay = MediaRelay()
@@ -364,11 +385,22 @@ class WebRTCManager:
                     try:
                         # Parse the JSON message
                         data = json.loads(message)
-                        logger.info(f"Received parameter update: {data}")
+                        logger.debug(f"Received parameter update: {data}")
 
-                        # Check for paused parameter and call pause() method on video track
+                        # Always handle paused immediately (before quantized
+                        # scheduling) so pause/unpause is never delayed.
                         if "paused" in data and session.video_track:
                             session.video_track.pause(data["paused"])
+
+                        # Check for quantized update flag
+                        if data.pop("_quantized", False):
+                            if session.video_track and hasattr(
+                                session.video_track, "frame_processor"
+                            ):
+                                session.video_track.frame_processor.schedule_quantized_update(
+                                    data
+                                )
+                            return
 
                         # Send parameters to the frame processor
                         if session.video_track and hasattr(
@@ -466,7 +498,7 @@ class WebRTCManager:
                 initial_parameters = request.initialParameters.model_dump(
                     exclude_none=True
                 )
-            logger.info(f"[CLOUD] Received offer with parameters: {initial_parameters}")
+            logger.info(f"Received offer with parameters: {initial_parameters}")
 
             # Create new RTCPeerConnection with configuration
             pc = RTCPeerConnection(self.rtc_config)
@@ -499,13 +531,11 @@ class WebRTCManager:
             # Store relay for cleanup
             session.relay = relay
 
-            logger.info(f"[CLOUD] Created session: {session.id}")
+            logger.info(f"Created session: {session.id}")
 
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
-                logger.info(
-                    f"[CLOUD] Track received: {track.kind} for session {session.id}"
-                )
+                logger.info(f"Track received: {track.kind} for session {session.id}")
                 if track.kind == "video":
                     # Set the browser's video track as the source for the relay
                     cloud_track.set_source_track(track)
@@ -513,7 +543,7 @@ class WebRTCManager:
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
                 logger.info(
-                    f"[CLOUD] Connection state: {pc.connectionState} for session {session.id}"
+                    f"Connection state: {pc.connectionState} for session {session.id}"
                 )
                 if pc.connectionState == "failed":
                     _publish_connection_error(
@@ -534,28 +564,28 @@ class WebRTCManager:
             @pc.on("iceconnectionstatechange")
             async def on_iceconnectionstatechange():
                 logger.info(
-                    f"[CLOUD] ICE state: {pc.iceConnectionState} for session {session.id}"
+                    f"ICE state: {pc.iceConnectionState} for session {session.id}"
                 )
 
             # Handle data channel for parameter updates
             @pc.on("datachannel")
             def on_data_channel(data_channel):
-                logger.info(f"[CLOUD] Data channel: {data_channel.label}")
+                logger.info(f"Data channel: {data_channel.label}")
                 session.data_channel = data_channel
 
                 @data_channel.on("message")
                 def on_data_channel_message(message):
                     try:
                         data = json.loads(message)
-                        logger.info(f"[CLOUD] Parameter update: {data}")
+                        logger.debug(f"Parameter update: {data}")
 
                         # Forward parameters to cloud
                         cloud_track.update_parameters(data)
 
                     except json.JSONDecodeError as e:
-                        logger.error(f"[CLOUD] Failed to parse message: {e}")
+                        logger.error(f"Failed to parse message: {e}")
                     except Exception as e:
-                        logger.error(f"[CLOUD] Error handling message: {e}")
+                        logger.error(f"Error handling message: {e}")
 
             # Set remote description (the offer)
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
@@ -584,7 +614,7 @@ class WebRTCManager:
             }
 
         except Exception as e:
-            logger.error(f"[CLOUD] Error handling offer: {e}")
+            logger.error(f"Error handling offer: {e}")
             _publish_connection_error(
                 session.id if "session" in locals() else None,
                 request.connection_id,
@@ -641,6 +671,19 @@ class WebRTCManager:
             ]
         )
 
+    def add_headless_session(self, session: HeadlessSession) -> None:
+        """Register the headless session (only one supported at a time)."""
+        self.headless_session = session
+
+    async def remove_headless_session(self) -> None:
+        """Stop and remove the active headless session."""
+        session = self.headless_session
+        self.headless_session = None
+        if session:
+            await session.close()
+        else:
+            logger.warning("Attempted to remove non-existent headless session")
+
     async def add_ice_candidate(
         self,
         session_id: str,
@@ -680,15 +723,70 @@ class WebRTCManager:
             logger.error(f"Failed to add ICE candidate to session {session_id}: {e}")
             raise ValueError(f"Invalid ICE candidate: {e}") from e
 
+    def get_frame_processor(self) -> tuple[str, "FrameProcessor", bool] | None:
+        """Return (session_id, frame_processor, is_headless) for the active session, or None."""
+        for sid, session in self.sessions.items():
+            if session.pc.connectionState in ("closed", "failed"):
+                continue
+            if (
+                session.video_track
+                and hasattr(session.video_track, "frame_processor")
+                and session.video_track.frame_processor
+            ):
+                return sid, session.video_track.frame_processor, False
+        if self.headless_session and self.headless_session.frame_processor:
+            return "headless", self.headless_session.frame_processor, True
+        return None
+
+    def get_last_frame(self):
+        """Return the most recent frame from the active session, or None."""
+        for session in self.sessions.values():
+            if session.video_track and hasattr(session.video_track, "get_last_frame"):
+                frame = session.video_track.get_last_frame()
+                if frame is not None:
+                    return frame
+        if self.headless_session:
+            frame = self.headless_session.get_last_frame()
+            if frame is not None:
+                return frame
+        return None
+
+    def broadcast_parameter_update(self, parameters: dict) -> None:
+        """Send a parameter update to all active sessions (e.g. from OSC or REST API)."""
+        for session in self.sessions.values():
+            if session.pc.connectionState in ("closed", "failed"):
+                continue
+            if "paused" in parameters and session.video_track:
+                session.video_track.pause(parameters["paused"])
+            if session.video_track and hasattr(session.video_track, "frame_processor"):
+                session.video_track.frame_processor.update_parameters(parameters)
+        if self.headless_session and self.headless_session.frame_processor:
+            self.headless_session.frame_processor.update_parameters(parameters)
+
+    def broadcast_notification(self, message: dict) -> None:
+        """Send a notification message to all active sessions via their data channels."""
+        message_str = json.dumps(message)
+        for session in self.sessions.values():
+            if session.pc.connectionState in ("closed", "failed"):
+                continue
+            if session.data_channel and session.data_channel.readyState == "open":
+                try:
+                    session.data_channel.send(message_str)
+                except Exception as e:
+                    logger.error(
+                        f"Failed to send notification to session {session.id}: {e}"
+                    )
+
     async def stop(self):
-        """Close and cleanup all sessions."""
-        # Close all sessions in parallel
+        """Close and cleanup all sessions (WebRTC and headless)."""
         close_tasks = [session.close() for session in self.sessions.values()]
+        if self.headless_session:
+            close_tasks.append(self.headless_session.close())
         if close_tasks:
             await asyncio.gather(*close_tasks, return_exceptions=True)
 
-        # Clear the sessions dict
         self.sessions.clear()
+        self.headless_session = None
 
 
 def create_rtc_config() -> RTCConfiguration:

@@ -1,4 +1,11 @@
 import type { IceServersResponse, ModelStatusResponse } from "../types";
+import type {
+  ScopeWorkflow,
+  WorkflowResolutionPlan,
+  LoRADownloadRequest,
+  LoRADownloadResult,
+} from "./workflowApi";
+import { fetchFalCdnToken } from "./auth";
 
 export interface PromptItem {
   text: string;
@@ -50,6 +57,7 @@ export interface PipelineStatusResponse {
   // Optional list of loaded LoRA adapters, provided by backend when available.
   loaded_lora_adapters?: { path: string; scale: number }[];
   error?: string;
+  loading_stage?: string | null;
 }
 
 export const getIceServers = async (): Promise<IceServersResponse> => {
@@ -340,11 +348,22 @@ export const fetchCurrentLogs = async (): Promise<string> => {
   return logsText;
 };
 
+export interface LoRAProvenance {
+  source: "huggingface" | "civitai" | "url" | "local";
+  repo_id?: string | null;
+  hf_filename?: string | null;
+  model_id?: string | null;
+  version_id?: string | null;
+  url?: string | null;
+}
+
 export interface LoRAFileInfo {
   name: string;
   path: string;
   size_mb: number;
   folder?: string | null;
+  sha256?: string | null;
+  provenance?: LoRAProvenance | null;
 }
 
 export interface LoRAFilesResponse {
@@ -387,10 +406,8 @@ export const installLoRAFile = async (
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Install LoRA failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
   }
 
   const result = await response.json();
@@ -453,11 +470,22 @@ export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
   const fileContent = await file.arrayBuffer();
   const filename = encodeURIComponent(file.name);
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/octet-stream",
+  };
+
+  try {
+    const cdnToken = await fetchFalCdnToken();
+    headers["X-Fal-CDN-Token"] = cdnToken.token;
+    headers["X-Fal-CDN-Token-Type"] = cdnToken.token_type;
+    headers["X-Fal-CDN-Base-URL"] = cdnToken.base_url;
+  } catch (e) {
+    console.warn("uploadAsset: failed to fetch CDN token, upload may fail:", e);
+  }
+
   const response = await fetch(`/api/v1/assets?filename=${filename}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/octet-stream",
-    },
+    headers,
     body: fileContent,
   });
 
@@ -505,6 +533,13 @@ export interface SchemaFieldUI {
   modes?: ("text" | "video")[];
   /** If true, field is a load param (disabled when streaming); if false, runtime param (editable when streaming). Omit = treated as load param. */
   is_load_param?: boolean;
+  label?: string;
+  /** If true, this field can be targeted by the beat-synced modulation engine. */
+  modulatable?: boolean;
+  /** Safe lower bound for modulation (tighter than field validation range). */
+  modulatable_min?: number;
+  /** Safe upper bound for modulation. */
+  modulatable_max?: number;
 }
 
 // Pipeline schema types - matches output of get_schema_with_metadata()
@@ -875,4 +910,310 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+};
+
+// ---------------------------------------------------------------------------
+// Workflow
+// ---------------------------------------------------------------------------
+
+export const resolveWorkflow = async (
+  workflow: ScopeWorkflow
+): Promise<WorkflowResolutionPlan> => {
+  const response = await fetch("/api/v1/workflow/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(workflow),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+export const downloadLoRA = async (
+  request: LoRADownloadRequest
+): Promise<LoRADownloadResult> => {
+  const response = await fetch("/api/v1/lora/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// OSC settings
+// ---------------------------------------------------------------------------
+
+export interface OscSettingsRequest {
+  log_all_messages: boolean;
+}
+
+export interface OscStatusResponse {
+  enabled: boolean;
+  listening: boolean;
+  port: number | null;
+  host: string | null;
+  log_all_messages: boolean;
+}
+
+export const updateOscSettings = async (
+  settings: OscSettingsRequest
+): Promise<OscStatusResponse> => {
+  const response = await fetch("/api/v1/osc/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Update OSC settings failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// DMX settings
+// ---------------------------------------------------------------------------
+
+export interface DmxStatusResponse {
+  enabled: boolean;
+  listening: boolean;
+  port: number | null;
+  preferred_port: number;
+  host: string | null;
+  log_all_messages: boolean;
+  mapping_count: number;
+}
+
+export interface DmxMapping {
+  universe: number;
+  channel: number;
+  key: string;
+}
+
+export interface DmxConfigResponse {
+  enabled: boolean;
+  preferred_port: number;
+  log_all_messages: boolean;
+  mappings: DmxMapping[];
+}
+
+export interface DmxPathEntry {
+  key: string;
+  type: string;
+  description: string;
+  min?: number;
+  max?: number;
+  pipeline_id?: string;
+}
+
+export interface DmxPathsResponse {
+  active: Record<string, DmxPathEntry[]>;
+  available: Record<string, DmxPathEntry[]>;
+  active_pipeline_ids: string[];
+}
+
+export const getDmxStatus = async (): Promise<DmxStatusResponse> => {
+  const response = await fetch("/api/v1/dmx/status");
+  if (!response.ok) {
+    throw new Error("Failed to fetch DMX status");
+  }
+  return response.json();
+};
+
+export const updateDmxSettings = async (settings: {
+  enabled?: boolean;
+  log_all_messages?: boolean;
+  preferred_port?: number;
+}): Promise<DmxStatusResponse> => {
+  const response = await fetch("/api/v1/dmx/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to update DMX settings");
+  }
+  return response.json();
+};
+
+export const applyDmxPort = async (
+  preferredPort: number
+): Promise<DmxStatusResponse> => {
+  const response = await fetch("/api/v1/dmx/restart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ preferred_port: preferredPort }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to apply DMX port");
+  }
+  return response.json();
+};
+
+export const getDmxPaths = async (): Promise<DmxPathsResponse> => {
+  const response = await fetch("/api/v1/dmx/paths");
+  if (!response.ok) {
+    throw new Error("Failed to fetch DMX paths");
+  }
+  return response.json();
+};
+
+export const getDmxConfig = async (): Promise<DmxConfigResponse> => {
+  const response = await fetch("/api/v1/dmx/config");
+  if (!response.ok) {
+    throw new Error("Failed to fetch DMX config");
+  }
+  return response.json();
+};
+
+export const saveDmxConfig = async (
+  config: Partial<DmxConfigResponse>
+): Promise<DmxConfigResponse> => {
+  const response = await fetch("/api/v1/dmx/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to save DMX config");
+  }
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// Daydream API – workflow import from community hub
+// ---------------------------------------------------------------------------
+
+const DAYDREAM_API_BASE =
+  (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
+  "https://api.daydream.live";
+
+export const fetchDaydreamWorkflow = async (
+  workflowId: string
+): Promise<ScopeWorkflow> => {
+  const response = await fetch(
+    `${DAYDREAM_API_BASE}/v1/workflows/${encodeURIComponent(workflowId)}`
+  );
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(`Failed to fetch workflow: ${detail}`);
+  }
+  const data = await response.json();
+
+  const workflow: ScopeWorkflow | undefined = data.workflowData;
+  if (
+    !workflow ||
+    workflow.format !== "scope-workflow" ||
+    !workflow.metadata?.name ||
+    !Array.isArray(workflow.pipelines) ||
+    workflow.pipelines.length === 0
+  ) {
+    throw new Error(
+      "The fetched workflow is missing required data (workflowData, metadata, or pipelines)."
+    );
+  }
+
+  return workflow;
+};
+
+// =============================================================================
+// Tempo Sync API
+// =============================================================================
+
+export interface TempoStatusResponse {
+  enabled: boolean;
+  source: { type: string; num_peers?: number } | null;
+  beats_per_bar: number;
+  beat_state: {
+    bpm: number;
+    beat_phase: number;
+    bar_position: number;
+    beat_count: number;
+    is_playing: boolean;
+    source: string;
+  } | null;
+}
+
+export interface TempoSourcesResponse {
+  sources: Record<
+    string,
+    {
+      available: boolean;
+      name: string;
+      devices?: string[];
+      install_hint?: string;
+    }
+  >;
+}
+
+export interface TempoEnableRequest {
+  source: "link" | "midi_clock";
+  midi_device?: string;
+  bpm?: number;
+  beats_per_bar?: number;
+}
+
+export const getTempoStatus = async (): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/status");
+  if (!response.ok) {
+    throw new Error(`Failed to get tempo status: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const enableTempo = async (
+  request: TempoEnableRequest
+): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/enable", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to enable tempo: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const disableTempo = async (): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/disable", {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to disable tempo: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const setTempo = async (bpm: number): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/set_tempo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bpm }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to set tempo: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const getTempoSources = async (): Promise<TempoSourcesResponse> => {
+  const response = await fetch("/api/v1/tempo/sources");
+  if (!response.ok) {
+    throw new Error(`Failed to get tempo sources: ${response.statusText}`);
+  }
+  return response.json();
 };

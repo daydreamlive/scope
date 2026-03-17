@@ -35,6 +35,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         user_id: str | None = None,
         connection_id: str | None = None,
         connection_info: dict | None = None,
+        tempo_sync=None,
     ):
         super().__init__()
         self.pipeline_manager = pipeline_manager
@@ -45,6 +46,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.user_id = user_id
         self.connection_id = connection_id
         self.connection_info = connection_info
+        self.tempo_sync = tempo_sync
         # FPS variables (will be updated from FrameProcessor or input measurement)
         self.fps = fps
         self.frame_ptime = 1.0 / fps
@@ -57,6 +59,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._last_frame = None
         self._last_send_time: float | None = None
         self._clock_started = False
+        self._frame_lock = threading.Lock()
 
         # Server-side input mode - when enabled, frames come from the backend
         # instead of WebRTC (no browser video track needed)
@@ -71,20 +74,36 @@ class VideoProcessingTrack(MediaStreamTrack):
 
     async def input_loop(self):
         """Background loop that continuously feeds frames to the processor"""
+        consecutive_errors = 0
+        max_consecutive_errors = 10
         while self.input_task_running:
             try:
                 input_frame = await self.track.recv()
+                consecutive_errors = 0
 
                 # Store raw VideoFrame for later processing (tracks input FPS internally)
                 self.frame_processor.put(input_frame)
 
             except asyncio.CancelledError:
                 break
-            except Exception as e:
-                # Stop the input loop on connection errors to avoid spam
-                logger.error(f"Error in input loop, stopping: {e}")
+            except MediaStreamError:
+                logger.info("Source track ended")
                 self.input_task_running = False
                 break
+            except Exception as e:
+                consecutive_errors += 1
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.error(
+                        f"Error in input loop, stopping after "
+                        f"{consecutive_errors} consecutive errors: {e}"
+                    )
+                    self.input_task_running = False
+                    break
+                logger.warning(
+                    f"Transient error in input loop "
+                    f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+                )
+                await asyncio.sleep(0.01)
 
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
         """Pace output at the target frame rate and return a PTS from the shared MediaClock.
@@ -129,6 +148,7 @@ class VideoProcessingTrack(MediaStreamTrack):
                 user_id=self.user_id,
                 connection_id=self.connection_id,
                 connection_info=self.connection_info,
+                tempo_sync=self.tempo_sync,
             )
             self.frame_processor.start()
 
@@ -171,7 +191,8 @@ class VideoProcessingTrack(MediaStreamTrack):
                     frame.pts = pts
                     frame.time_base = time_base
 
-                    self._last_frame = frame
+                    with self._frame_lock:
+                        self._last_frame = frame
                     return frame
 
                 # No frame available, wait a bit before trying again
@@ -182,6 +203,11 @@ class VideoProcessingTrack(MediaStreamTrack):
                 raise
 
         raise Exception("Track stopped")
+
+    def get_last_frame(self):
+        """Return the most recently rendered frame, or None."""
+        with self._frame_lock:
+            return self._last_frame
 
     def pause(self, paused: bool):
         """Pause or resume the video track processing"""

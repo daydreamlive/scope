@@ -6,7 +6,7 @@ import type { LoRAFileInfo } from "@/lib/api";
 export interface UseLoRAFilesReturn {
   loraFiles: LoRAFileInfo[];
   isLoading: boolean;
-  refresh: () => Promise<void>;
+  refresh: () => Promise<LoRAFileInfo[]>;
 }
 
 export function useLoRAFiles(): UseLoRAFilesReturn {
@@ -15,14 +15,18 @@ export function useLoRAFiles(): UseLoRAFilesReturn {
   const [loraFiles, setLoraFiles] = useState<LoRAFileInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const prevCloudConnectedRef = useRef<boolean | null>(null);
+  const loraFilesRef = useRef<LoRAFileInfo[]>(loraFiles);
+  loraFilesRef.current = loraFiles;
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (): Promise<LoRAFileInfo[]> => {
     setIsLoading(true);
     try {
       const response = await listLoRAFiles();
       setLoraFiles(response.lora_files);
+      return response.lora_files;
     } catch (error) {
       console.error("Failed to load LoRA files:", error);
+      return loraFilesRef.current;
     } finally {
       setIsLoading(false);
     }

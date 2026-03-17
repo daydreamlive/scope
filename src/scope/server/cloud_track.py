@@ -83,7 +83,7 @@ class CloudTrack(MediaStreamTrack):
     def set_source_track(self, track: MediaStreamTrack) -> None:
         """Set the source track for input frames (from browser)."""
         self._source_track = track
-        logger.info("[CLOUD] Source track set")
+        logger.info("Source track set")
 
     async def _start(self) -> None:
         """Start the relay - called on first recv()."""
@@ -91,10 +91,10 @@ class CloudTrack(MediaStreamTrack):
             return
 
         self._started = True
-        logger.info("[CLOUD] Starting cloud relay...")
+        logger.info("Starting cloud relay...")
 
         # Start WebRTC connection to cloud with this session's parameters
-        logger.info("[CLOUD] Starting WebRTC connection to cloud...")
+        logger.info("Starting WebRTC connection to cloud...")
         await self.cloud_manager.start_webrtc(self.initial_parameters)
 
         # Create FrameProcessor in cloud mode
@@ -117,28 +117,41 @@ class CloudTrack(MediaStreamTrack):
             self._input_running = True
             self._input_task = asyncio.create_task(self._input_loop())
 
-        logger.info("[CLOUD] Relay started")
+        logger.info("Relay started")
 
     async def _input_loop(self) -> None:
         """Background loop that receives frames from source and sends to cloud."""
-        logger.info("[CLOUD] Input loop started")
+        logger.info("Input loop started")
+        consecutive_errors = 0
+        max_consecutive_errors = 10
 
         try:
             while self._input_running and self._source_track is not None:
                 try:
                     # Get frame from browser
                     frame = await self._source_track.recv()
+                    consecutive_errors = 0
 
                     # Send through FrameProcessor (which relays to cloud)
                     if self.frame_processor:
                         self.frame_processor.put(frame)
 
                 except MediaStreamError:
-                    logger.info("[CLOUD] Source track ended")
+                    logger.info("Source track ended")
                     break
                 except Exception as e:
-                    logger.error(f"[CLOUD] Error in input loop: {e}")
-                    break
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        logger.error(
+                            f"Error in input loop, stopping after "
+                            f"{consecutive_errors} consecutive errors: {e}"
+                        )
+                        break
+                    logger.warning(
+                        f"Transient error in input loop "
+                        f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+                    )
+                    await asyncio.sleep(0.01)
 
         except asyncio.CancelledError:
             pass
@@ -147,7 +160,7 @@ class CloudTrack(MediaStreamTrack):
             stats = (
                 self.frame_processor.get_frame_stats() if self.frame_processor else {}
             )
-            logger.info(f"[CLOUD] Input loop ended, stats: {stats}")
+            logger.info(f"Input loop ended, stats: {stats}")
 
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
         """Override to control frame rate."""
@@ -210,11 +223,11 @@ class CloudTrack(MediaStreamTrack):
         """Pause/unpause the relay."""
         if self.frame_processor:
             self.frame_processor.paused = paused
-        logger.info(f"[CLOUD] {'Paused' if paused else 'Resumed'}")
+        logger.info(f"{'Paused' if paused else 'Resumed'}")
 
     async def stop(self) -> None:
         """Stop the relay and clean up."""
-        logger.info("[CLOUD] Stopping...")
+        logger.info("Stopping...")
 
         self._input_running = False
         self._started = False  # Reset so next session starts fresh
@@ -231,10 +244,10 @@ class CloudTrack(MediaStreamTrack):
         if self.frame_processor:
             self.frame_processor.stop()
             stats = self.frame_processor.get_frame_stats()
-            logger.info(f"[CLOUD] Stopped. Stats: {stats}")
+            logger.info(f"Stopped. Stats: {stats}")
             self.frame_processor = None
         else:
-            logger.info("[CLOUD] Stopped.")
+            logger.info("Stopped.")
 
         # Stop WebRTC connection to cloud - next session will start fresh
         await self.cloud_manager.stop_webrtc()

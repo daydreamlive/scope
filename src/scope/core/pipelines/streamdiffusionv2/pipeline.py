@@ -42,6 +42,7 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         quantization: Quantization | None = None,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
+        stage_callback=None,
     ):
         from .modules.causal_model import CausalWanModel
 
@@ -66,6 +67,8 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         )
 
         # Load generator with VACE support via upfront loading
+        if stage_callback:
+            stage_callback("Loading diffusion model...")
         start = time.time()
 
         # Always create base CausalWanModel first
@@ -111,6 +114,8 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         else:
             generator = generator.to(device=device, dtype=dtype)
 
+        if stage_callback:
+            stage_callback("Loading text encoder...")
         start = time.time()
         text_encoder = WanTextEncoderWrapper(
             model_name=base_model_name,
@@ -123,6 +128,8 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         text_encoder = text_encoder.to(device=device)
 
         # Load VAE using unified WanVAEWrapper
+        if stage_callback:
+            stage_callback("Loading VAE...")
         start = time.time()
         vae = StreamDiffusionV2WanVAEWrapper(
             model_dir=model_dir, model_name=base_model_name
@@ -132,6 +139,8 @@ class StreamDiffusionV2Pipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         vae = vae.to(device=device, dtype=dtype)
 
         # Create components config
+        if stage_callback:
+            stage_callback("Initializing pipeline...")
         components_config = {}
         components_config.update(model_config)
         components_config["device"] = device
