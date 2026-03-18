@@ -2,6 +2,7 @@ import { useCallback } from "react";
 import { useOnboarding } from "../../contexts/OnboardingContext";
 import { InferenceModeStep } from "./InferenceModeStep";
 import { CloudAuthStep } from "./CloudAuthStep";
+import { CloudConnectingStep } from "./CloudConnectingStep";
 import { WorkflowPickerStep } from "./WorkflowPickerStep";
 import { FogOfWarBackground } from "./FogOfWarBackground";
 import type { StarterWorkflow } from "./starterWorkflows";
@@ -29,6 +30,7 @@ export function OnboardingOverlay({
     state,
     selectInferenceMode,
     completeAuth,
+    cloudConnected,
     startFromScratch,
     workflowReady,
     importWorkflowReady,
@@ -59,8 +61,14 @@ export function OnboardingOverlay({
 
   // Phase-dependent step indicator
   const phaseIndex =
-    state.phase === "inference" ? 0 : state.phase === "cloud_auth" ? 1 : 2;
-  const totalSteps = state.inferenceMode === "cloud" ? 3 : 2;
+    state.phase === "inference"
+      ? 0
+      : state.phase === "cloud_auth"
+        ? 1
+        : state.phase === "cloud_connecting"
+          ? 2
+          : 3;
+  const totalSteps = state.inferenceMode === "cloud" ? 4 : 2;
 
   return (
     <div className="fixed inset-0 z-[100] bg-background animate-in fade-in-0 duration-300">
@@ -92,6 +100,10 @@ export function OnboardingOverlay({
 
         {state.phase === "cloud_auth" && (
           <CloudAuthStep onComplete={completeAuth} />
+        )}
+
+        {state.phase === "cloud_connecting" && (
+          <CloudConnectingStep onConnected={cloudConnected} />
         )}
 
         {state.phase === "workflow" && (

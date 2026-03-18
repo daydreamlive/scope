@@ -21,7 +21,8 @@ export type OnboardingPhase =
   | "loading" // waiting for backend status check
   | "idle" // returning user or post-completion
   | "inference" // step 1: local vs cloud
-  | "cloud_auth" // step 2: sign in (only if cloud chosen)
+  | "cloud_auth" // step 2a: sign in (only if cloud chosen)
+  | "cloud_connecting" // step 2b: waiting for cloud relay connection
   | "workflow" // step 3: starter workflow picker
   | "downloading" // step 3b: workflow downloading
   | "completed"; // persist and transition to idle
@@ -40,6 +41,7 @@ export interface OnboardingState {
 type OnboardingAction =
   | { type: "SELECT_INFERENCE_MODE"; mode: "local" | "cloud" }
   | { type: "COMPLETE_AUTH" }
+  | { type: "CLOUD_CONNECTED" }
   | { type: "SELECT_WORKFLOW"; workflowId: string }
   | { type: "START_DOWNLOADING" }
   | { type: "DOWNLOAD_FAILED" }
@@ -61,6 +63,13 @@ function reducer(
     case "SELECT_INFERENCE_MODE":
       persistInferenceMode(action.mode);
       trackEvent("onboarding_inference_selected", { mode: action.mode });
+      // Set a sessionStorage flag so we can resume after a full-page auth
+      // redirect. This is consumed exactly once in the LOADED handler.
+      try {
+        sessionStorage.setItem("scope_onboarding_resume", action.mode);
+      } catch {
+        // no-op
+      }
       return {
         ...state,
         inferenceMode: action.mode,
@@ -69,6 +78,10 @@ function reducer(
 
     case "COMPLETE_AUTH":
       trackEvent("onboarding_auth_completed");
+      return { ...state, phase: "cloud_connecting" };
+
+    case "CLOUD_CONNECTED":
+      trackEvent("onboarding_cloud_connected");
       return { ...state, phase: "workflow" };
 
     case "SELECT_WORKFLOW":
@@ -111,8 +124,22 @@ function reducer(
       trackEvent("onboarding_completed");
       return { ...state, phase: "idle" };
 
-    case "LOADED":
-      return { ...state, phase: action.completed ? "idle" : "inference" };
+    case "LOADED": {
+      if (action.completed) return { ...state, phase: "idle" };
+      // Check if we're resuming after an auth redirect (sessionStorage flag
+      // is set right before the redirect and consumed here exactly once)
+      const resumeMode = sessionStorage.getItem("scope_onboarding_resume");
+      if (resumeMode) {
+        sessionStorage.removeItem("scope_onboarding_resume");
+        if (resumeMode === "cloud") {
+          return { ...state, phase: "cloud_connecting", inferenceMode: "cloud" };
+        }
+        if (resumeMode === "local") {
+          return { ...state, phase: "workflow", inferenceMode: "local" };
+        }
+      }
+      return { ...state, phase: "inference" };
+    }
 
     default:
       return state;
@@ -131,6 +158,7 @@ interface OnboardingContextValue {
   isOverlayVisible: boolean;
   selectInferenceMode: (mode: "local" | "cloud") => void;
   completeAuth: () => void;
+  cloudConnected: () => void;
   selectWorkflow: (workflowId: string) => void;
   startDownloading: () => void;
   downloadFailed: () => void;
@@ -175,6 +203,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     () => dispatch({ type: "COMPLETE_AUTH" }),
     []
   );
+  const cloudConnected = useCallback(
+    () => dispatch({ type: "CLOUD_CONNECTED" }),
+    []
+  );
   const selectWorkflow = useCallback(
     (workflowId: string) => dispatch({ type: "SELECT_WORKFLOW", workflowId }),
     []
@@ -204,6 +236,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const isOverlayVisible = [
     "inference",
     "cloud_auth",
+    "cloud_connecting",
     "workflow",
     "downloading",
   ].includes(state.phase);
@@ -216,6 +249,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         isOverlayVisible,
         selectInferenceMode,
         completeAuth,
+        cloudConnected,
         selectWorkflow,
         startDownloading,
         downloadFailed,

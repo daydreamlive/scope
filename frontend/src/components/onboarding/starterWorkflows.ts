@@ -7,6 +7,41 @@ const kubakubThumb = "/assets/onboarding/kubakub-butterfly.webp";
 const dissolvingCatThumb = "/assets/onboarding/dissolving-cat.webp";
 const pixelArtThumb = "/assets/onboarding/pixel-art.png";
 
+/**
+ * Build a graph field from a pipelines array so the graph editor can render
+ * the workflow. Layout: input → pipeline1 → pipeline2 → ... → output
+ */
+function buildGraph(
+  pipelines: Array<{ pipeline_id: string }>
+) {
+  const Y = 200;
+  const GAP = 300;
+  let x = 50;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const nodes: any[] = [];
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const edges: any[] = [];
+
+  // Source
+  nodes.push({ id: "input", type: "source", x, y: Y });
+  x += GAP;
+
+  let prev = "input";
+  for (const p of pipelines) {
+    nodes.push({ id: p.pipeline_id, type: "pipeline", pipeline_id: p.pipeline_id, x, y: Y });
+    edges.push({ from: prev, from_port: "video", to_node: p.pipeline_id, to_port: "video", kind: "stream" });
+    prev = p.pipeline_id;
+    x += GAP;
+  }
+
+  // Sink
+  nodes.push({ id: "output", type: "sink", x, y: Y });
+  edges.push({ from: prev, from_port: "video", to_node: "output", to_port: "video", kind: "stream" });
+
+  return { nodes, edges };
+}
+
 export interface StarterWorkflow {
   id: string;
   title: string;
@@ -131,6 +166,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
       transition_steps: 0,
       interpolation_method: "linear",
       temporal_interpolation_method: "slerp",
+      graph: buildGraph([{ pipeline_id: "longlive" }, { pipeline_id: "rife" }]),
     },
   },
   {
@@ -276,6 +312,11 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
       transition_steps: 0,
       interpolation_method: "linear",
       temporal_interpolation_method: "slerp",
+      graph: buildGraph([
+        { pipeline_id: "video-depth-anything" },
+        { pipeline_id: "longlive" },
+        { pipeline_id: "rife" },
+      ]),
     },
   },
   {
@@ -368,6 +409,10 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
       transition_steps: 0,
       interpolation_method: "linear",
       temporal_interpolation_method: "slerp",
+      graph: buildGraph([
+        { pipeline_id: "yolo_mask" },
+        { pipeline_id: "longlive" },
+      ]),
     },
   },
 ];
