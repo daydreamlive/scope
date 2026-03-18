@@ -7,7 +7,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  isOnboardingCompletedSync,
   fetchOnboardingStatus,
   markOnboardingCompleted,
   setInferenceMode as persistInferenceMode,
@@ -19,6 +18,7 @@ import { trackEvent } from "../lib/analytics";
 // ---------------------------------------------------------------------------
 
 export type OnboardingPhase =
+  | "loading" // waiting for backend status check
   | "idle" // returning user or post-completion
   | "inference" // step 1: local vs cloud
   | "cloud_auth" // step 2: sign in (only if cloud chosen)
@@ -47,7 +47,7 @@ type OnboardingAction =
   | { type: "START_FROM_SCRATCH" }
   | { type: "IMPORT_WORKFLOW_READY" }
   | { type: "COMPLETE" }
-  | { type: "BACKEND_SAYS_COMPLETED" };
+  | { type: "LOADED"; completed: boolean };
 
 // ---------------------------------------------------------------------------
 // Reducer
@@ -111,9 +111,8 @@ function reducer(
       trackEvent("onboarding_completed");
       return { ...state, phase: "idle" };
 
-    case "BACKEND_SAYS_COMPLETED":
-      // Backend file says onboarding was already completed — skip to idle
-      return { ...state, phase: "idle" };
+    case "LOADED":
+      return { ...state, phase: action.completed ? "idle" : "inference" };
 
     default:
       return state;
@@ -147,7 +146,7 @@ const OnboardingContext = createContext<OnboardingContextValue | null>(null);
 // ---------------------------------------------------------------------------
 
 const initialState: OnboardingState = {
-  phase: isOnboardingCompletedSync() ? "idle" : "inference",
+  phase: "loading",
   inferenceMode: null,
   selectedWorkflowId: null,
   downloadFailures: 0,
@@ -156,26 +155,15 @@ const initialState: OnboardingState = {
 export function OnboardingProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, initialState);
 
-  // Reconcile with backend file on mount. The localStorage cache gives us a
-  // fast synchronous initial value, but the backend file is the source of
-  // truth. If the backend says completed (e.g. localStorage was cleared but
-  // the file persists), skip straight to idle.
+  // Fetch onboarding status from the backend on mount. This is the sole
+  // source of truth — no localStorage cache.
   useEffect(() => {
     fetchOnboardingStatus().then(status => {
-      if (status.completed) {
-        dispatch({ type: "BACKEND_SAYS_COMPLETED" });
+      dispatch({ type: "LOADED", completed: status.completed });
+      if (!status.completed) {
+        trackEvent("onboarding_started", { is_first_launch: true });
       }
     });
-  }, []);
-
-  // Fire onboarding_started exactly once if we're entering onboarding
-  useEffect(() => {
-    if (initialState.phase !== "idle") {
-      trackEvent("onboarding_started", {
-        is_first_launch: true,
-      });
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const selectInferenceMode = useCallback(
