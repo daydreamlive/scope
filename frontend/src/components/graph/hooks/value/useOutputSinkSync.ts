@@ -4,8 +4,8 @@ import type { FlowNodeData } from "../../../../lib/graphUtils";
 
 export function useOutputSinkSync(
   nodes: Node<FlowNodeData>[],
-  onOutputSinkChangeRef: React.RefObject<
-    | ((sinkType: string, config: { enabled: boolean; name: string }) => void)
+  onOutputSinkBulkChangeRef: React.RefObject<
+    | ((sinks: Record<string, { enabled: boolean; name: string }>) => void)
     | undefined
   >
 ) {
@@ -22,19 +22,19 @@ export function useOutputSinkSync(
     if (configKey === prevOutputConfigsRef.current) return;
     prevOutputConfigsRef.current = configKey;
 
-    if (!onOutputSinkChangeRef.current) return;
+    if (!onOutputSinkBulkChangeRef.current) return;
 
-    const allSinkTypes = new Set(["spout", "ndi", "syphon"]);
+    const allSinkTypes = ["spout", "ndi", "syphon"];
     const sinkConfigs: Record<string, { enabled: boolean; name: string }> = {};
     for (const c of configs) {
       sinkConfigs[c.type] = { enabled: c.enabled, name: c.name };
     }
     for (const sinkType of allSinkTypes) {
       if (!sinkConfigs[sinkType]) {
-        onOutputSinkChangeRef.current(sinkType, { enabled: false, name: "" });
-      } else {
-        onOutputSinkChangeRef.current(sinkType, sinkConfigs[sinkType]);
+        sinkConfigs[sinkType] = { enabled: false, name: "" };
       }
     }
-  }, [nodes, onOutputSinkChangeRef]);
+
+    onOutputSinkBulkChangeRef.current(sinkConfigs);
+  }, [nodes, onOutputSinkBulkChangeRef]);
 }

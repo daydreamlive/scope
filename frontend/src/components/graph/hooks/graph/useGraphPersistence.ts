@@ -108,7 +108,6 @@ export interface EnrichNodesDeps {
   isStreaming: boolean;
   onStartRecordingRef: React.RefObject<(() => void) | undefined>;
   onStopRecordingRef: React.RefObject<(() => void) | undefined>;
-  onDownloadRecordingRef: React.RefObject<(() => void) | undefined>;
 }
 
 export function enrichNodes(
@@ -190,7 +189,6 @@ export function enrichNodes(
           isStreaming: deps.isStreaming,
           onStartRecording: deps.onStartRecordingRef.current,
           onStopRecording: deps.onStopRecordingRef.current,
-          onDownloadRecording: deps.onDownloadRecordingRef.current,
         },
       };
     }

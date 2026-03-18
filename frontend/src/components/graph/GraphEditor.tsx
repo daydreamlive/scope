@@ -136,12 +136,14 @@ interface GraphEditorProps {
     sinkType: string,
     config: { enabled: boolean; name: string }
   ) => void;
+  onOutputSinkBulkChange?: (
+    sinks: Record<string, { enabled: boolean; name: string }>
+  ) => void;
   spoutOutputAvailable?: boolean;
   ndiOutputAvailable?: boolean;
   syphonOutputAvailable?: boolean;
   onStartRecording?: () => void;
   onStopRecording?: () => void;
-  onDownloadRecording?: () => void;
 }
 
 export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
@@ -166,12 +168,12 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onNdiSourceChange,
       onSyphonSourceChange,
       onOutputSinkChange,
+      onOutputSinkBulkChange,
       spoutOutputAvailable = false,
       ndiOutputAvailable = false,
       syphonOutputAvailable = false,
       onStartRecording,
       onStopRecording,
-      onDownloadRecording,
     },
     ref
   ) {
@@ -200,7 +202,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       resolveBackendId,
       isStreamingRef,
       onNodeParamChangeRef,
-      onOutputSinkChangeRef,
+      onOutputSinkBulkChangeRef,
       handleClear,
       handleSave,
       handleImport,
@@ -220,9 +222,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onNdiSourceChange,
         onSyphonSourceChange,
         onOutputSinkChange,
+        onOutputSinkBulkChange,
         onStartRecording,
         onStopRecording,
-        onDownloadRecording,
       },
       { localStream, remoteStream, isStreaming },
       {
@@ -342,6 +344,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         pendingNodePosition,
         setPendingNodePosition,
         handleEdgeDelete,
+        enrichDepsRef,
       });
 
     const { createSubgraphFromSelection, unpackSubgraph } =
@@ -362,7 +365,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setNodes
     );
 
-    useOutputSinkSync(nodes, onOutputSinkChangeRef);
+    useOutputSinkSync(nodes, onOutputSinkBulkChangeRef);
     useKeyboardShortcuts(
       reactFlowInstanceRef,
       setPendingNodePosition,
@@ -660,7 +663,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             status={status}
             onStartStream={onStartStream}
             onStopStream={onStopStream}
-            onSave={handleSave}
             onImport={handleImport}
             onExport={handleExport}
             onClear={() => setShowClearConfirm(true)}

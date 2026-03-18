@@ -199,8 +199,8 @@ export interface FlowNodeData {
   onStartRecording?: () => void;
   /** For record nodes: callback to stop recording */
   onStopRecording?: () => void;
-  /** For record nodes: callback to download the current recording */
-  onDownloadRecording?: () => void;
+  /** For record nodes: incoming trigger value from connected nodes */
+  triggerValue?: boolean;
 
   /* ── Slider node fields ── */
   /** For slider nodes: minimum value */
@@ -757,7 +757,7 @@ const NON_SERIALIZABLE_KEYS = new Set<string>([
   "portValues",
   "onStartRecording",
   "onStopRecording",
-  "onDownloadRecording",
+  "triggerValue",
 ]);
 
 /**

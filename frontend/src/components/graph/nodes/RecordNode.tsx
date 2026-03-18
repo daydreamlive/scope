@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
+import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { NodeCard, NodeHeader, collapsedHandleStyle } from "../ui";
@@ -26,9 +27,6 @@ export function RecordNode({ id, data, selected }: NodeProps<RecordNodeType>) {
 
   const onStartRecording = data.onStartRecording as (() => void) | undefined;
   const onStopRecording = data.onStopRecording as (() => void) | undefined;
-  const onDownloadRecording = data.onDownloadRecording as
-    | (() => void)
-    | undefined;
 
   const [isRecording, setIsRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
@@ -70,11 +68,23 @@ export function RecordNode({ id, data, selected }: NodeProps<RecordNodeType>) {
     setIsRecording(false);
   }, [onStopRecording]);
 
-  const handleSave = useCallback(() => {
-    onDownloadRecording?.();
-  }, [onDownloadRecording]);
+  // Rising-edge detection for external trigger input
+  const triggerValue = Boolean(data.triggerValue);
+  const prevTriggerRef = useRef(false);
+  useEffect(() => {
+    const prev = prevTriggerRef.current;
+    prevTriggerRef.current = triggerValue;
+    if (triggerValue && !prev) {
+      if (isRecording) {
+        handleStop();
+      } else if (isStreaming) {
+        handleStart();
+      }
+    }
+  }, [triggerValue, isRecording, isStreaming, handleStart, handleStop]);
 
   const handleY = HEADER_H + 30;
+  const triggerHandleY = handleY + 20;
 
   return (
     <NodeCard selected={selected} collapsed={collapsed}>
@@ -123,18 +133,6 @@ export function RecordNode({ id, data, selected }: NodeProps<RecordNodeType>) {
               Stop
             </button>
           </div>
-
-          {/* Save button */}
-          <button
-            onClick={handleSave}
-            disabled={!isStreaming}
-            className="w-full text-[11px] font-medium px-2 py-1 rounded
-              bg-white/10 hover:bg-white/15 text-[#ccc]
-              disabled:opacity-30 disabled:cursor-not-allowed
-              transition-colors"
-          >
-            Save Recording
-          </button>
         </div>
       )}
       <Handle
@@ -146,6 +144,17 @@ export function RecordNode({ id, data, selected }: NodeProps<RecordNodeType>) {
           collapsed
             ? collapsedHandleStyle("left")
             : { top: handleY, left: 0, backgroundColor: "#ef4444" }
+        }
+      />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={buildHandleId("param", "trigger")}
+        className="!w-2.5 !h-2.5 !border-0"
+        style={
+          collapsed
+            ? collapsedHandleStyle("left")
+            : { top: triggerHandleY, left: 0, backgroundColor: "#34d399" }
         }
       />
     </NodeCard>

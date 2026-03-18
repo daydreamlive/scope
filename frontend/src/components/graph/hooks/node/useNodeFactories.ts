@@ -9,6 +9,8 @@ import {
 import { buildEdgeStyle } from "../../constants";
 import type { Blueprint } from "../../../../data/blueprints/types";
 import { toast } from "sonner";
+import type { EnrichNodesDeps } from "../graph/useGraphPersistence";
+import { enrichNodes } from "../graph/useGraphPersistence";
 
 // Node defaults
 
@@ -348,7 +350,13 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
     idPrefix: "record",
     defaultX: 900,
     style: { width: 180, height: 100 },
-    data: { label: "Record", nodeType: "record" },
+    data: {
+      label: "Record",
+      nodeType: "record",
+      parameterInputs: [
+        { name: "trigger", type: "boolean", defaultValue: false },
+      ],
+    },
   },
 };
 
@@ -368,6 +376,7 @@ interface UseNodeFactoriesArgs {
   pendingNodePosition: { x: number; y: number } | null;
   setPendingNodePosition: (pos: { x: number; y: number } | null) => void;
   handleEdgeDelete: (edgeId: string) => void;
+  enrichDepsRef: React.RefObject<EnrichNodesDeps>;
 }
 
 export function useNodeFactories({
@@ -384,6 +393,7 @@ export function useNodeFactories({
   pendingNodePosition,
   setPendingNodePosition,
   handleEdgeDelete,
+  enrichDepsRef,
 }: UseNodeFactoriesArgs) {
   const existingIds = useMemo(() => new Set(nodes.map(n => n.id)), [nodes]);
 
@@ -410,9 +420,9 @@ export function useNodeFactories({
           ...extraData,
         } as FlowNodeData,
       };
-      setNodes(nds => [...nds, newNode]);
+      setNodes(nds => enrichNodes([...nds, newNode], enrichDepsRef.current));
     },
-    [existingIds, nodes.length, setNodes]
+    [existingIds, nodes.length, setNodes, enrichDepsRef]
   );
 
   const handleNodeTypeSelect = useCallback(
@@ -585,16 +595,21 @@ export function useNodeFactories({
         };
       });
 
-      setNodes(nds => [
-        ...nds.map(n => (n.selected ? { ...n, selected: false } : n)),
-        ...newNodes,
-      ]);
+      setNodes(nds =>
+        enrichNodes(
+          [
+            ...nds.map(n => (n.selected ? { ...n, selected: false } : n)),
+            ...newNodes,
+          ],
+          enrichDepsRef.current
+        )
+      );
 
       if (newEdges.length > 0) {
         setEdges(eds => [...eds, ...newEdges]);
       }
     },
-    [nodes, setNodes, setEdges, handleEdgeDelete]
+    [nodes, setNodes, setEdges, handleEdgeDelete, enrichDepsRef]
   );
 
   return {
