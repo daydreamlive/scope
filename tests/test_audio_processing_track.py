@@ -11,7 +11,7 @@ import pytest
 import torch
 from av import AudioFrame
 
-from scope.server.tracks import (
+from scope.server.audio_track import (
     AUDIO_CLOCK_RATE,
     AUDIO_MAX_BUFFER_SAMPLES,
     AUDIO_PTIME,
