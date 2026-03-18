@@ -8,9 +8,8 @@ then map these to NTP wallclock time for receiver-side A/V sync.
 import threading
 import time
 
-# Standard WebRTC clock rates
-AUDIO_CLOCK_RATE = 48000  # WebRTC audio: 48 kHz
-VIDEO_CLOCK_RATE = 90000  # WebRTC video: 90 kHz
+# Standard WebRTC audio clock rate (48 kHz for Opus codec)
+AUDIO_CLOCK_RATE = 48000
 
 
 class MediaClock:

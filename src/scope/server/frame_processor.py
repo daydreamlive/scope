@@ -136,6 +136,7 @@ class FrameProcessor:
         self.audio_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
             maxsize=30
         )
+        self.paused = False
 
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")

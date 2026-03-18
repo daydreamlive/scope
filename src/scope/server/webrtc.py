@@ -92,9 +92,11 @@ class Session:
                     self.notification_sender
                 )
 
-            # Stop video track first
+            # Stop tracks first
             if self.video_track is not None:
                 await self.video_track.stop()
+            if self.audio_track is not None:
+                self.audio_track.stop()
 
             # Stop frame processor (owned by session, shared between tracks)
             if self.frame_processor is not None:

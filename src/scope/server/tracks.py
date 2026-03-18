@@ -10,14 +10,13 @@ from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamEr
 from av import AudioFrame, VideoFrame
 
 from .frame_processor import FrameProcessor
-from .media_clock import MediaClock
+from .media_clock import AUDIO_CLOCK_RATE, MediaClock
 from .pipeline_manager import PipelineManager
 
 logger = logging.getLogger(__name__)
 
 # Audio constants
 AUDIO_PTIME = 0.020  # 20ms audio frames (standard for WebRTC)
-AUDIO_CLOCK_RATE = 48000  # WebRTC typically uses 48kHz for Opus codec
 AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
 
 
