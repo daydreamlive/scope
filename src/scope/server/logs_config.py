@@ -11,6 +11,7 @@ import logging
 import os
 import threading
 from datetime import datetime, timedelta
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -161,3 +162,62 @@ def cleanup_old_logs(max_age_days: int = 1) -> None:
         logger.info(
             f"Cleaned up {deleted_count} old log file(s) older than {max_age_days} day(s)"
         )
+
+
+class ResilientRotatingFileHandler(RotatingFileHandler):
+    """A RotatingFileHandler that recovers gracefully when the log file or its
+    parent directory is deleted mid-session (e.g. by OS /tmp cleanup on fal.ai
+    workers).
+
+    Standard behaviour: if ``shouldRollover()`` or ``emit()`` encounters a
+    ``FileNotFoundError`` the Python logging framework catches it and writes a
+    noisy ``--- Logging error ---`` traceback to *stderr* for every subsequent
+    log call.
+
+    This subclass intercepts ``FileNotFoundError`` at both sites, recreates the
+    log directory and reopens the stream, then retries the operation once.  All
+    other exceptions are left to the default ``handleError`` path.
+    """
+
+    def _reopen_stream(self) -> None:
+        """Close the current stream (if any) and reopen the log file.
+
+        Recreates the parent directory first so the open cannot fail with
+        ``FileNotFoundError`` again.
+        """
+        if self.stream:
+            try:
+                self.stream.close()
+            except Exception:
+                pass
+            self.stream = None  # type: ignore[assignment]
+
+        Path(self.baseFilename).parent.mkdir(parents=True, exist_ok=True)
+        self.stream = self._open()
+
+    def shouldRollover(self, record: logging.LogRecord) -> int:
+        """Override to recover if the log file has been deleted."""
+        try:
+            return super().shouldRollover(record)
+        except FileNotFoundError:
+            # Log file (or its directory) was deleted; reopen before deciding.
+            try:
+                self._reopen_stream()
+            except Exception:
+                return 0  # Can't recover — skip rollover check.
+            try:
+                return super().shouldRollover(record)
+            except Exception:
+                return 0
+
+    def emit(self, record: logging.LogRecord) -> None:
+        """Override to recover if the log file has been deleted mid-session."""
+        try:
+            super().emit(record)
+        except FileNotFoundError:
+            # Directory or file was deleted; recreate and retry once.
+            try:
+                self._reopen_stream()
+                super().emit(record)
+            except Exception:
+                self.handleError(record)

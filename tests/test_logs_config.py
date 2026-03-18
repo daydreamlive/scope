@@ -2,6 +2,7 @@
 
 import logging
 import os
+import shutil
 from datetime import datetime, timedelta
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,7 @@ from freezegun import freeze_time
 
 from scope.server.logs_config import (
     LOGS_DIR_ENV_VAR,
+    ResilientRotatingFileHandler,
     cleanup_old_logs,
     get_most_recent_log_file,
 )
@@ -310,3 +312,144 @@ class TestCleanupOldLogs:
         # New files should be kept
         assert new1.exists()
         assert new2.exists()
+
+
+class TestResilientRotatingFileHandler:
+    """Tests for ResilientRotatingFileHandler — the mid-session recovery handler."""
+
+    @pytest.fixture
+    def log_file(self, tmp_path):
+        """Return a path for a log file inside a temp directory."""
+        return tmp_path / "logs" / "test.log"
+
+    @pytest.fixture
+    def handler(self, log_file):
+        """Create a ResilientRotatingFileHandler and ensure it is closed after the test."""
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        h = ResilientRotatingFileHandler(str(log_file), maxBytes=1024, backupCount=2)
+        h.setFormatter(logging.Formatter("%(message)s"))
+        yield h
+        h.close()
+
+    # ------------------------------------------------------------------
+    # Normal operation
+    # ------------------------------------------------------------------
+
+    def test_emits_record_normally(self, handler, log_file):
+        """Normal emit should write to the log file."""
+        record = logging.LogRecord("test", logging.INFO, "", 0, "hello world", (), None)
+        handler.emit(record)
+        handler.flush()
+
+        assert "hello world" in log_file.read_text()
+
+    # ------------------------------------------------------------------
+    # Recovery after directory deletion (simulates fal.ai /tmp cleanup)
+    # ------------------------------------------------------------------
+
+    def test_emit_recovers_after_directory_deleted(self, handler, log_file):
+        """emit() should recover if the log directory is deleted after stream closes.
+
+        On Linux, unlinking a file while it is open keeps the FD valid — the
+        FileNotFoundError only appears when the stream is closed (e.g. after a
+        rollover) and Python then tries to reopen it.  Simulate that by closing
+        the stream manually before deleting the directory.
+        """
+        # Write one record normally
+        record = logging.LogRecord("test", logging.INFO, "", 0, "first", (), None)
+        handler.emit(record)
+        handler.flush()
+
+        # Close the stream (as doRollover() would) then delete the directory
+        handler.stream.close()
+        handler.stream = None  # type: ignore[assignment]
+        shutil.rmtree(log_file.parent)
+        assert not log_file.parent.exists()
+
+        # emit() must not raise and must recreate the directory + file
+        record2 = logging.LogRecord("test", logging.INFO, "", 0, "second", (), None)
+        handler.emit(record2)
+        handler.flush()
+
+        assert log_file.exists()
+        assert "second" in log_file.read_text()
+
+    def test_emit_recovers_after_stream_closed_and_file_deleted(self, handler, log_file):
+        """emit() should recover if the stream is closed and the file is gone."""
+        record = logging.LogRecord("test", logging.INFO, "", 0, "first", (), None)
+        handler.emit(record)
+        handler.flush()
+
+        # Close the stream then delete the file (directory still present)
+        handler.stream.close()
+        handler.stream = None  # type: ignore[assignment]
+        log_file.unlink()
+        assert not log_file.exists()
+
+        record2 = logging.LogRecord("test", logging.INFO, "", 0, "second", (), None)
+        handler.emit(record2)
+        handler.flush()
+
+        assert log_file.exists()
+        assert "second" in log_file.read_text()
+
+    # ------------------------------------------------------------------
+    # shouldRollover recovery
+    # ------------------------------------------------------------------
+
+    def test_should_rollover_recovers_after_stream_closed_and_dir_deleted(
+        self, handler, log_file
+    ):
+        """shouldRollover() should recover without raising if the log dir is gone.
+
+        Mirrors the real failure path: stream closed by doRollover(), then
+        the directory vanishes before the next open attempt.
+        """
+        record = logging.LogRecord("test", logging.INFO, "", 0, "x" * 512, (), None)
+        handler.emit(record)
+        handler.flush()
+
+        # Close the stream then delete the directory
+        handler.stream.close()
+        handler.stream = None  # type: ignore[assignment]
+        shutil.rmtree(log_file.parent)
+
+        # shouldRollover must not raise
+        record2 = logging.LogRecord("test", logging.INFO, "", 0, "y", (), None)
+        result = handler.shouldRollover(record2)
+
+        # Result is an int (0 or 1 — either is acceptable after recovery)
+        assert isinstance(result, int)
+        # Directory should have been recreated by the recovery path
+        assert log_file.parent.exists()
+
+    # ------------------------------------------------------------------
+    # Irreversible errors still call handleError
+    # ------------------------------------------------------------------
+
+    def test_emit_calls_handle_error_on_unrecoverable_failure(self, handler, log_file):
+        """emit() should fall back to handleError if recovery itself fails."""
+        handle_error_called = []
+
+        def fake_handle_error(record):
+            handle_error_called.append(record)
+
+        handler.handleError = fake_handle_error
+
+        # Force emit to always raise FileNotFoundError (even after reopen)
+        original_open = handler._open
+
+        def always_fail():
+            raise FileNotFoundError("Cannot create file")
+
+        handler._open = always_fail
+
+        # Close the existing stream to force a reopen attempt
+        handler.stream.close()
+        handler.stream = None  # type: ignore[assignment]
+
+        record = logging.LogRecord("test", logging.INFO, "", 0, "msg", (), None)
+        handler.emit(record)  # Must not propagate an exception
+
+        assert len(handle_error_called) == 1
+        handler._open = original_open  # restore
