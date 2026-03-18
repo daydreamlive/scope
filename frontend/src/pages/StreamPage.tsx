@@ -2434,6 +2434,12 @@ export function StreamPage() {
         setTransitionSteps(promptState.transitionSteps);
         setTemporalInterpolationMethod(promptState.temporalInterpolationMethod);
       }
+
+      // Refresh the graph editor so it picks up the newly loaded workflow
+      // (the backend graph state has been updated by the settings change)
+      setTimeout(() => {
+        graphEditorRef.current?.refreshGraph();
+      }, 100);
     },
     [updateSettings, skipNextModeReset, settings.inputMode]
   );
