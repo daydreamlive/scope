@@ -457,19 +457,32 @@ class CausalWanSelfAttention(nn.Module):
             # If we are using local attention and the current KV cache size is larger than the local attention size, we need to truncate the KV cache
             kv_cache_size = kv_cache["k"].shape[1]
             num_new_tokens = roped_query.shape[1]
+            # Normalize cache indices to Python ints.  On the very first chunk after
+            # a cache reset, initialize_kv_cache() stores torch.tensor([0], ...) in
+            # these slots.  If we leave them as tensors, all subsequent arithmetic
+            # (local_end_index, cache_current_block_start, …) also becomes tensors.
+            # When cache_current_block_start is captured as a tensor in score_mod and
+            # passed to torch.compile(flex_attention, dynamic=False), flex_attention
+            # tries to re-trace score_mod on every chunk because the captured tensor
+            # *object* identity changes, which triggers:
+            #   "Detected that you are using FX to symbolically trace a
+            #    dynamo-optimized function."  (+ _dispatch_keys TypeError)
+            # int() is safe for both Python ints and single-element torch.Tensors.
+            cache_global_end: int = int(kv_cache["global_end_index"])
+            cache_local_end: int = int(kv_cache["local_end_index"])
             if (
                 self.local_attn_size != -1
-                and (current_end > kv_cache["global_end_index"])
-                and (num_new_tokens + kv_cache["local_end_index"] > kv_cache_size)
+                and (current_end > cache_global_end)
+                and (num_new_tokens + cache_local_end > kv_cache_size)
             ):
                 # Calculate the number of new tokens added in this step
                 # Shift existing cache content left to discard oldest tokens
                 # Clone the source slice to avoid overlapping memory error
                 num_evicted_tokens = (
-                    num_new_tokens + kv_cache["local_end_index"] - kv_cache_size
+                    num_new_tokens + cache_local_end - kv_cache_size
                 )
                 num_rolled_tokens = (
-                    kv_cache["local_end_index"] - num_evicted_tokens - sink_tokens
+                    cache_local_end - num_evicted_tokens - sink_tokens
                 )
                 kv_cache["k"][:, sink_tokens : sink_tokens + num_rolled_tokens] = (
                     kv_cache["k"][
@@ -489,9 +502,9 @@ class CausalWanSelfAttention(nn.Module):
                 )
                 # Insert the new keys/values at the end
                 local_end_index = (
-                    kv_cache["local_end_index"]
+                    cache_local_end
                     + current_end
-                    - kv_cache["global_end_index"]
+                    - cache_global_end
                     - num_evicted_tokens
                 )
                 local_start_index = local_end_index - num_new_tokens
@@ -500,9 +513,9 @@ class CausalWanSelfAttention(nn.Module):
             else:
                 # Assign new keys/values directly up to current_end
                 local_end_index = (
-                    kv_cache["local_end_index"]
+                    cache_local_end
                     + current_end
-                    - kv_cache["global_end_index"]
+                    - cache_global_end
                 )
                 local_start_index = local_end_index - num_new_tokens
                 kv_cache["k"][:, local_start_index:local_end_index] = roped_key
@@ -541,24 +554,30 @@ class CausalWanSelfAttention(nn.Module):
                     cached_v, target_padded_length, pad_dim=1
                 )
 
-                # Convert scalars to tensors to avoid ShapeAsConstantBuffer dtype issues during compilation
-                # This is critical when using torch.compile with flex_attention
-                frame_seqlen_tensor = torch.as_tensor(
-                    frame_seqlen, dtype=torch.int32, device=roped_query.device
-                )
-                cache_current_block_start_tensor = torch.as_tensor(
-                    cache_current_block_start, dtype=torch.int32, device=roped_query.device
-                ).squeeze()
-                log_scale_tensor = torch.as_tensor(
-                    log_scale, dtype=roped_query.dtype, device=roped_query.device
-                )
+                # Use Python scalar literals (int/float) as constants in score_mod.
+                # Capturing freshly-created CUDA tensors caused two errors:
+                #   1. FX symbolic-trace error: torch.compile(flex_attention, dynamic=False)
+                #      tries to re-trace score_mod when captured tensor *objects* change
+                #      (cache_current_block_start shifts each chunk), and the FX tracer hits
+                #      the already-compiled flex_attention, raising:
+                #      "Detected that you are using FX to symbolically trace a
+                #       dynamo-optimized function."
+                #   2. _dispatch_keys TypeError: FakeTensors (used during trace) collide
+                #      with real CUDA tensors captured in the closure.
+                # Python scalars become stable graph constants, avoiding both issues.
+                # The old tensor-conversion workaround targeted a ShapeAsConstantBuffer bug
+                # in pre-2.9 PyTorch; that bug is not present in torch>=2.9.
+                _fs: int = frame_seqlen
+                _ccbs: int = cache_current_block_start
+                _ls: float = log_scale
 
                 def score_mod(score, b_idx, h_idx, q_idx, kv_idx):
-                    # Apply bias only to past frames (exclude first frame and current block)
+                    # Apply bias only to past frames (exclude first frame and current block).
+                    # kv_idx is an int32 index scalar supplied by flex_attention; Python int
+                    # comparisons are safe and compile cleanly without tensor captures.
                     return torch.where(
-                        (kv_idx >= frame_seqlen_tensor)
-                        & (kv_idx < cache_current_block_start_tensor),
-                        score + log_scale_tensor,
+                        (kv_idx >= _fs) & (kv_idx < _ccbs),
+                        score + _ls,
                         score,
                     )
 
