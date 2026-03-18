@@ -71,6 +71,34 @@ class TestInterleaving:
         expected = np.array([1.0, 2.0, 3.0], dtype=np.float32)
         np.testing.assert_array_equal(interleaved, expected)
 
+    def test_stereo_interleave_roundtrip_through_frame(self):
+        """Interleaved samples written to an s16 AudioFrame must read back correctly.
+
+        This is the key correctness check: Fortran-order ravel on (2, N)
+        produces packed interleaved [L0, R0, L1, R1, ...] which is exactly
+        what PyAV's s16 stereo layout expects in planes[0].
+        """
+        track = _make_track(channels=2)
+        n = SAMPLES_PER_FRAME
+
+        # Deterministic left/right so we can verify exact values
+        left = np.linspace(-0.5, 0.5, n, dtype=np.float32)
+        right = np.linspace(0.5, -0.5, n, dtype=np.float32)
+        audio = np.stack([left, right])  # (2, N)
+
+        interleaved = np.ravel(audio, order="F").astype(np.float32)
+        frame = track._create_audio_frame(interleaved)
+
+        # Read back raw int16 from the frame
+        raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
+        assert len(raw) == n * 2  # stereo packed: 2 samples per time step
+
+        # Verify the interleave pattern: even indices = left, odd = right
+        expected_left = (left * 32767).clip(-32768, 32767).astype(np.int16)
+        expected_right = (right * 32767).clip(-32768, 32767).astype(np.int16)
+        np.testing.assert_array_equal(raw[0::2], expected_left)
+        np.testing.assert_array_equal(raw[1::2], expected_right)
+
     def test_many_channels_interleave(self):
         """Verify interleaving with >2 channels (future-proofing)."""
         audio = np.arange(12, dtype=np.float32).reshape(3, 4)

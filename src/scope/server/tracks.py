@@ -330,7 +330,10 @@ class AudioProcessingTrack(MediaStreamTrack):
                 elif audio_np.shape[0] == 2 and self.channels == 1:
                     audio_np = audio_np.mean(axis=0, keepdims=True)
 
-            # Interleave channels: [L0, R0, L1, R1, ...] via Fortran-order ravel
+            # Interleave channels into packed format for PyAV's "s16" layout.
+            # audio_np is (channels, samples). Fortran-order ravel traverses
+            # columns first, producing [L0, R0, L1, R1, ...] which is exactly
+            # what packed interleaved s16 expects in a single plane.
             interleaved = np.ravel(audio_np, order="F").astype(np.float32)
             self._audio_buffer = np.concatenate([self._audio_buffer, interleaved])
 
@@ -344,6 +347,12 @@ class AudioProcessingTrack(MediaStreamTrack):
         return self._create_silence_frame()
 
     def _create_audio_frame(self, samples: np.ndarray) -> AudioFrame:
+        """Build a packed s16 AudioFrame from interleaved float32 samples.
+
+        ``samples`` must already be interleaved: [L0, R0, L1, R1, …] for
+        stereo.  PyAV's ``s16`` (not ``s16p``) stores all channels in a
+        single plane in packed order, so we write directly to ``planes[0]``.
+        """
         samples_int16 = (samples * 32767).clip(-32768, 32767).astype(np.int16)
 
         layout = "stereo" if self.channels == 2 else "mono"
