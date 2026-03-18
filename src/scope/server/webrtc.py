@@ -330,7 +330,8 @@ class WebRTCManager:
                     asyncio.create_task(start_recording_when_ready())
             else:
                 logger.info(
-                    f"Audio-only pipeline(s) {pipeline_ids}, skipping video track"
+                    f"Pipeline(s) {pipeline_ids} do not produce video, "
+                    "skipping video track"
                 )
 
             audio_track = None
