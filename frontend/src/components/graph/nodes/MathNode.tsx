@@ -15,6 +15,7 @@ import {
   NodeParamRow,
   NodePillSelect,
   NodePill,
+  NodePillInput,
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
@@ -78,12 +79,15 @@ export function MathNode({ id, data, selected }: NodeProps<MathNodeType>) {
   const sourceNodeA = edgeA ? allNodes.find(n => n.id === edgeA.source) : null;
   const sourceNodeB = edgeB ? allNodes.find(n => n.id === edgeB.source) : null;
 
-  const valueA = sourceNodeA
+  const connectedA = sourceNodeA
     ? getNumberFromNode(sourceNodeA, edgeA?.sourceHandle)
     : null;
-  const valueB = sourceNodeB
+  const connectedB = sourceNodeB
     ? getNumberFromNode(sourceNodeB, edgeB?.sourceHandle)
     : null;
+
+  const valueA = connectedA ?? data.mathDefaultA ?? 0;
+  const valueB = connectedB ?? data.mathDefaultB ?? 0;
 
   let result = computeResult(operation, valueA, valueB);
 
@@ -144,16 +148,28 @@ export function MathNode({ id, data, selected }: NodeProps<MathNodeType>) {
           </NodeParamRow>
           <div ref={setRowRef("a")} className={NODE_TOKENS.paramRow}>
             <span className={NODE_TOKENS.labelText}>A</span>
-            <NodePill className="opacity-75">
-              {valueA !== null ? valueA.toFixed(3) : "—"}
-            </NodePill>
+            {edgeA ? (
+              <NodePill className="opacity-75">{valueA.toFixed(3)}</NodePill>
+            ) : (
+              <NodePillInput
+                type="number"
+                value={data.mathDefaultA ?? 0}
+                onChange={v => updateData({ mathDefaultA: Number(v) })}
+              />
+            )}
           </div>
           {!unary && (
             <div ref={setRowRef("b")} className={NODE_TOKENS.paramRow}>
               <span className={NODE_TOKENS.labelText}>B</span>
-              <NodePill className="opacity-75">
-                {valueB !== null ? valueB.toFixed(3) : "—"}
-              </NodePill>
+              {edgeB ? (
+                <NodePill className="opacity-75">{valueB.toFixed(3)}</NodePill>
+              ) : (
+                <NodePillInput
+                  type="number"
+                  value={data.mathDefaultB ?? 0}
+                  onChange={v => updateData({ mathDefaultB: Number(v) })}
+                />
+              )}
             </div>
           )}
           <div ref={setRowRef("result")} className={NODE_TOKENS.paramRow}>

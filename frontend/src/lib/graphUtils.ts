@@ -149,6 +149,10 @@ export interface FlowNodeData {
     | "toFloat";
   /** For math nodes: output type conversion (null = auto, "int" = truncate, "float" = ensure float) */
   mathOutputType?: "int" | "float" | null;
+  /** For math nodes: manual default for input A when not connected */
+  mathDefaultA?: number;
+  /** For math nodes: manual default for input B when not connected */
+  mathDefaultB?: number;
   /** For note nodes: the note text content */
   noteText?: string;
   /** For output nodes: sink type (spout, ndi, syphon) */
@@ -828,20 +832,6 @@ export function flattenSubgraphs(
     const sgOutputs = sg.data.subgraphOutputs ?? [];
     const sgPrefix = prefix ? `${prefix}${sg.id}:` : `${sg.id}:`;
 
-    // Build port maps for this subgraph
-    for (const port of sgInputs) {
-      inputPortMap.set(`${sg.id}::${port.name}`, {
-        nodeId: sgPrefix + port.innerNodeId,
-        handleId: port.innerHandleId,
-      });
-    }
-    for (const port of sgOutputs) {
-      outputPortMap.set(`${sg.id}::${port.name}`, {
-        nodeId: sgPrefix + port.innerNodeId,
-        handleId: port.innerHandleId,
-      });
-    }
-
     // Reconstruct inner nodes as React Flow nodes for recursive flattening
     const innerFlowNodes: Node<FlowNodeData>[] = innerNodesRaw.map(n => ({
       id: sgPrefix + n.id,
@@ -869,6 +859,29 @@ export function flattenSubgraphs(
 
     flatNodes.push(...hoisted);
     flatEdges.push(...hoistedEdges);
+
+    // Build port maps using actual flattened node ids (required for nested subgraphs:
+    // port.innerNodeId may refer to a node deep inside, so resolve to hoisted id)
+    const resolveFlattenedId = (innerNodeId: string): string => {
+      const direct = sgPrefix + innerNodeId;
+      const exact = hoisted.find(n => n.id === direct);
+      if (exact) return exact.id;
+      const suffix = ":" + innerNodeId;
+      const nested = hoisted.find(n => n.id.endsWith(suffix));
+      return nested ? nested.id : direct;
+    };
+    for (const port of sgInputs) {
+      inputPortMap.set(`${sg.id}::${port.name}`, {
+        nodeId: resolveFlattenedId(port.innerNodeId),
+        handleId: port.innerHandleId,
+      });
+    }
+    for (const port of sgOutputs) {
+      outputPortMap.set(`${sg.id}::${port.name}`, {
+        nodeId: resolveFlattenedId(port.innerNodeId),
+        handleId: port.innerHandleId,
+      });
+    }
   }
 
   // Now remap edges that reference subgraph ports

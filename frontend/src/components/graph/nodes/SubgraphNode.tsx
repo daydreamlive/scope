@@ -19,7 +19,7 @@ import {
 type SubgraphNodeType = Node<FlowNodeData, "subgraph">;
 
 const PORT_TYPE_COLORS: Record<string, string> = {
-  stream: "#06b6d4", // cyan-500
+  stream: "#eeeeee",
   string: "#fbbf24",
   number: "#38bdf8",
   boolean: "#34d399",

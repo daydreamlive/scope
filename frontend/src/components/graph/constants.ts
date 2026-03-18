@@ -78,18 +78,18 @@ export function getEdgeColor(
         p => p.name === parsed.name
       );
       if (port?.paramType) {
-        return PARAM_TYPE_COLORS[port.paramType] || "#06b6d4";
+        return PARAM_TYPE_COLORS[port.paramType] || "#9ca3af";
       }
-      return "#06b6d4"; // cyan-500
+      return "#9ca3af";
     }
     if (sourceNode.data.nodeType === "subgraph_input") {
       const port = sourceNode.data.subgraphInputs?.find(
         p => p.name === parsed.name
       );
       if (port?.paramType) {
-        return PARAM_TYPE_COLORS[port.paramType] || "#06b6d4";
+        return PARAM_TYPE_COLORS[port.paramType] || "#9ca3af";
       }
-      return "#06b6d4";
+      return "#9ca3af";
     }
     return "#9ca3af";
   }
@@ -106,7 +106,12 @@ export function getEdgeColor(
   }
 
   if (sourceNode.data.nodeType === "subgraph") {
-    return "#06b6d4";
+    const port = sourceNode.data.subgraphOutputs?.find(
+      p => p.name === parsed.name
+    );
+    if (port?.portType === "stream") return HANDLE_COLORS.video;
+    if (port?.paramType) return PARAM_TYPE_COLORS[port.paramType] || "#06b6d4";
+    return HANDLE_COLORS.video;
   }
 
   if (sourceNode.data.nodeType === "subgraph_input") {
@@ -114,8 +119,8 @@ export function getEdgeColor(
       p => p.name === parsed.name
     );
     if (port?.portType === "stream") return HANDLE_COLORS.video;
-    if (port?.paramType) return PARAM_TYPE_COLORS[port.paramType] || "#06b6d4";
-    return "#06b6d4";
+    if (port?.paramType) return PARAM_TYPE_COLORS[port.paramType] || "#9ca3af";
+    return HANDLE_COLORS.video;
   }
 
   return HANDLE_COLORS.video;
