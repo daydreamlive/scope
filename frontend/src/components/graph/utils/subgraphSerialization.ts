@@ -126,6 +126,32 @@ export function createBoundaryNodesAndEdges(
   const boundaryNodes: Node<FlowNodeData>[] = [];
   const boundaryEdges: Edge[] = [];
 
+  const innerNodeIds = new Set(innerNodes.map(n => n.id));
+
+  // When innerNodeId references a deeply-nested node (inside a child
+  // subgraph), resolve to the child subgraph node with a matching port.
+  function resolvePort(
+    port: SubgraphPort,
+    direction: "input" | "output"
+  ): { nodeId: string; handleId: string } {
+    if (innerNodeIds.has(port.innerNodeId)) {
+      return { nodeId: port.innerNodeId, handleId: port.innerHandleId };
+    }
+    for (const n of innerNodes) {
+      if (n.data.nodeType !== "subgraph") continue;
+      const ports =
+        direction === "input" ? n.data.subgraphInputs : n.data.subgraphOutputs;
+      const matching = ports?.find(p => p.name === port.name);
+      if (matching) {
+        return {
+          nodeId: n.id,
+          handleId: buildHandleId(port.portType, port.name),
+        };
+      }
+    }
+    return { nodeId: port.innerNodeId, handleId: port.innerHandleId };
+  }
+
   let minX = Infinity,
     maxX = -Infinity,
     minY = Infinity,
@@ -159,12 +185,13 @@ export function createBoundaryNodesAndEdges(
     } as FlowNodeData,
   });
   for (const port of subgraphInputs) {
+    const resolved = resolvePort(port, "input");
     boundaryEdges.push({
       id: `__sg_boundary_in_${port.name}`,
       source: BOUNDARY_INPUT_ID,
       sourceHandle: buildHandleId(port.portType, port.name),
-      target: port.innerNodeId,
-      targetHandle: port.innerHandleId,
+      target: resolved.nodeId,
+      targetHandle: resolved.handleId,
     });
   }
 
@@ -180,10 +207,11 @@ export function createBoundaryNodesAndEdges(
     } as FlowNodeData,
   });
   for (const port of subgraphOutputs) {
+    const resolved = resolvePort(port, "output");
     boundaryEdges.push({
       id: `__sg_boundary_out_${port.name}`,
-      source: port.innerNodeId,
-      sourceHandle: port.innerHandleId,
+      source: resolved.nodeId,
+      sourceHandle: resolved.handleId,
       target: BOUNDARY_OUTPUT_ID,
       targetHandle: buildHandleId(port.portType, port.name),
     });
