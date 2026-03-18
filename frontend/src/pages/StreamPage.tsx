@@ -1052,6 +1052,17 @@ export function StreamPage() {
     }
   };
 
+  const handleOutputSinkBulkChange = (
+    sinks: Record<string, { enabled: boolean; name: string }>
+  ) => {
+    updateSettings({ outputSinks: sinks });
+    if (isStreaming) {
+      sendParameterUpdate({
+        output_sinks: sinks,
+      });
+    }
+  };
+
   // Handle Spout input name change from InputAndControlsPanel
   const handleSpoutSourceChange = (name: string) => {
     updateSettings({
@@ -2029,6 +2040,12 @@ export function StreamPage() {
   const handleStopRecording = useCallback(async () => {
     if (!sessionId) return;
     try {
+      await api.downloadRecording(sessionId);
+    } catch (error) {
+      console.error("Error downloading recording:", error);
+      toast.error("Failed to save recording");
+    }
+    try {
       await api.stopRecording(sessionId);
     } catch (error) {
       console.error("Error stopping recording:", error);
@@ -2225,12 +2242,12 @@ export function StreamPage() {
             onNdiSourceChange={handleNdiSourceChange}
             onSyphonSourceChange={handleSyphonSourceChange}
             onOutputSinkChange={handleOutputSinkChange}
+            onOutputSinkBulkChange={handleOutputSinkBulkChange}
             spoutOutputAvailable={spoutAvailable}
             ndiOutputAvailable={ndiOutputAvailable}
             syphonOutputAvailable={syphonOutputAvailable}
             onStartRecording={handleStartRecording}
             onStopRecording={handleStopRecording}
-            onDownloadRecording={handleSaveGeneration}
           />
         </div>
 

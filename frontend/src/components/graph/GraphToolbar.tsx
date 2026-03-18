@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { Play, Square, RotateCcw } from "lucide-react";
+import { Play, Square } from "lucide-react";
 import { NODE_TOKENS } from "./ui";
 
 interface GraphToolbarProps {
@@ -9,7 +9,6 @@ interface GraphToolbarProps {
   status: string;
   onStartStream?: () => void;
   onStopStream?: () => void;
-  onSave: () => void;
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onExport: () => void;
   onClear: () => void;
@@ -22,7 +21,6 @@ export function GraphToolbar({
   status,
   onStartStream,
   onStopStream,
-  onSave,
   onImport,
   onExport,
   onClear,
@@ -65,27 +63,10 @@ export function GraphToolbar({
           <Play className="h-3.5 w-3.5" />
         )}
       </button>
-      {isStreaming && (
-        <button
-          onClick={onStopStream}
-          className={NODE_TOKENS.toolbarButton}
-          title="Stop stream"
-        >
-          <RotateCcw className="h-3.5 w-3.5" />
-        </button>
-      )}
 
       <div className="flex-1" />
 
       {status && <span className={NODE_TOKENS.toolbarStatus}>{status}</span>}
-
-      <button
-        onClick={onSave}
-        className={NODE_TOKENS.toolbarButton}
-        title="Save graph (Ctrl+S)"
-      >
-        Save
-      </button>
 
       <input
         ref={fileInputRef}

@@ -58,6 +58,7 @@ const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
   "reroute",
   "vace",
   "pipeline",
+  "record",
 ]);
 
 function resolveSubgraphTarget(
@@ -432,6 +433,11 @@ export function useValueForwarding(
           }
         } else if (targetNode.data.nodeType === "reroute") {
           nodeUpdates["value"] = sourceValue;
+        } else if (
+          targetNode.data.nodeType === "record" &&
+          targetParsed.name === "trigger"
+        ) {
+          nodeUpdates["triggerValue"] = Boolean(sourceValue);
         } else if (targetNode.data.nodeType === "pipeline") {
           // Update parameterValues so the greyed-out pill shows live values
           const prevParams = (nodeUpdates["parameterValues"] as Record<

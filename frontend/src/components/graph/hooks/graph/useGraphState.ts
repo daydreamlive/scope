@@ -67,9 +67,11 @@ export interface GraphEditorCallbacks {
     sinkType: string,
     config: { enabled: boolean; name: string }
   ) => void;
+  onOutputSinkBulkChange?: (
+    sinks: Record<string, { enabled: boolean; name: string }>
+  ) => void;
   onStartRecording?: () => void;
   onStopRecording?: () => void;
-  onDownloadRecording?: () => void;
 }
 
 export interface GraphEditorStreams {
@@ -158,14 +160,14 @@ export function useGraphState(
   const onOutputSinkChangeRef = useRef(callbacks.onOutputSinkChange);
   onOutputSinkChangeRef.current = callbacks.onOutputSinkChange;
 
+  const onOutputSinkBulkChangeRef = useRef(callbacks.onOutputSinkBulkChange);
+  onOutputSinkBulkChangeRef.current = callbacks.onOutputSinkBulkChange;
+
   const onStartRecordingRef = useRef(callbacks.onStartRecording);
   onStartRecordingRef.current = callbacks.onStartRecording;
 
   const onStopRecordingRef = useRef(callbacks.onStopRecording);
   onStopRecordingRef.current = callbacks.onStopRecording;
-
-  const onDownloadRecordingRef = useRef(callbacks.onDownloadRecording);
-  onDownloadRecordingRef.current = callbacks.onDownloadRecording;
 
   const handleEdgeDelete = useCallback(
     (edgeId: string) => {
@@ -209,7 +211,6 @@ export function useGraphState(
     isStreaming: streams.isStreaming,
     onStartRecordingRef,
     onStopRecordingRef,
-    onDownloadRecordingRef,
   };
 
   const enrichDepsRef = useRef(enrichDeps);
@@ -278,6 +279,7 @@ export function useGraphState(
     isStreamingRef,
     onNodeParamChangeRef: params.onNodeParamChangeRef,
     onOutputSinkChangeRef,
+    onOutputSinkBulkChangeRef,
     enrichDepsRef,
     handleEdgeDelete,
     status: persistence.status,
