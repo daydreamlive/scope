@@ -4,9 +4,15 @@ import {
   graphConfigToFlow,
   flowToGraphConfig,
   extractParameterPorts,
+  workflowToGraphConfig,
 } from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
-import type { PipelineSchemaInfo } from "../../../../lib/api";
+import type { PipelineSchemaInfo, PluginInfo } from "../../../../lib/api";
+import type { ScopeWorkflow } from "../../../../lib/workflowApi";
+import { buildGraphWorkflow } from "../../../../lib/workflowSettings";
+import { usePipelinesContext } from "../../../../contexts/PipelinesContext";
+import { usePluginsContext } from "../../../../contexts/PluginsContext";
+import { useServerInfoContext } from "../../../../contexts/ServerInfoContext";
 import { buildEdgeStyle } from "../../constants";
 
 const LS_GRAPH_KEY = "scope:graph:backup";
@@ -263,6 +269,10 @@ export function useGraphPersistence({
   const [status, setStatus] = useState<string>("");
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
 
+  const { pipelines: pipelineInfoMap } = usePipelinesContext();
+  const { plugins } = usePluginsContext();
+  const { version: scopeVersion } = useServerInfoContext();
+
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
   const edgesRef = useRef(edges);
@@ -415,17 +425,42 @@ export function useGraphPersistence({
       const reader = new FileReader();
       reader.onload = e => {
         try {
-          const graphConfig = JSON.parse(e.target?.result as string);
-          if (!graphConfig.nodes || !graphConfig.edges) {
-            setStatus("Import failed: invalid graph format");
+          const parsed = JSON.parse(e.target?.result as string);
+
+          let graphConfig: Parameters<typeof graphConfigToFlow>[0];
+          let importedParams: Record<string, Record<string, unknown>> | null =
+            null;
+
+          if (
+            parsed.format === "scope-workflow" &&
+            Array.isArray(parsed.pipelines)
+          ) {
+            const workflow = parsed as ScopeWorkflow;
+            if (workflow.graph?.nodes && workflow.graph?.edges) {
+              graphConfig = workflow.graph as Parameters<
+                typeof graphConfigToFlow
+              >[0];
+            } else {
+              const result = workflowToGraphConfig(workflow);
+              graphConfig = result.graphConfig as Parameters<
+                typeof graphConfigToFlow
+              >[0];
+              importedParams = result.nodeParams;
+            }
+          } else if (parsed.nodes && parsed.edges) {
+            graphConfig = parsed;
+          } else {
+            setStatus("Import failed: unrecognized format");
             return;
           }
+
           resetNavigationRef.current?.();
           const { nodes: flowNodes, edges: flowEdges } = graphConfigToFlow(
             graphConfig,
             portsMap
           );
-          const restoredParams = extractNodeParams(graphConfig.ui_state);
+          const restoredParams =
+            importedParams ?? extractNodeParams(graphConfig.ui_state);
           setNodeParams(restoredParams);
           const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
           setNodes(enriched);
@@ -469,18 +504,42 @@ export function useGraphPersistence({
       flowToGraphConfig(root.nodes, root.edges),
       nodeParamsRef.current
     );
-    const dataStr = JSON.stringify(graphConfig, null, 2);
+
+    const pluginInfoMap = new Map<string, PluginInfo>(
+      plugins.map(p => [p.name, p])
+    );
+
+    const workflow = buildGraphWorkflow({
+      name: `Graph Export ${new Date().toISOString().split("T")[0]}`,
+      graphConfig,
+      pipelineInfoMap: pipelineInfoMap ?? {},
+      pluginInfoMap,
+      scopeVersion: scopeVersion ?? "unknown",
+    });
+
+    const dataStr = JSON.stringify(workflow, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = `graph-${new Date().toISOString().split("T")[0]}.json`;
+    const safeName = workflow.metadata.name
+      .replace(/[^a-zA-Z0-9_-]/g, "_")
+      .toLowerCase();
+    link.download = `${safeName}.scope-workflow.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     setStatus("Graph exported");
-  }, [nodes, edges, nodeParamsRef, resolveRootGraphRef]);
+  }, [
+    nodes,
+    edges,
+    nodeParamsRef,
+    resolveRootGraphRef,
+    pipelineInfoMap,
+    plugins,
+    scopeVersion,
+  ]);
 
   const getCurrentGraphConfig = useCallback(() => {
     const root = resolveRootGraphRef.current(

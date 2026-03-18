@@ -14,12 +14,14 @@ import type {
 } from "../types";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import type { PromptItem, LoRAFileInfo, PluginInfo } from "./api";
+import type { GraphConfig } from "./api";
 import type {
   WorkflowPipeline,
   WorkflowPipelineSource,
   WorkflowLoRA,
   WorkflowTimeline,
   WorkflowTimelineEntry,
+  WorkflowPrompt,
   ScopeWorkflow,
 } from "./workflowApi";
 
@@ -310,6 +312,81 @@ export function buildScopeWorkflow(
   };
 
   return workflow;
+}
+
+// ---------------------------------------------------------------------------
+// Export: GraphConfig -> ScopeWorkflow (with embedded graph)
+// ---------------------------------------------------------------------------
+
+export interface BuildGraphWorkflowInput {
+  name: string;
+  graphConfig: GraphConfig;
+  pipelineInfoMap: Record<string, PipelineInfo>;
+  pluginInfoMap: Map<string, PluginInfo>;
+  scopeVersion: string;
+}
+
+/**
+ * Build a ScopeWorkflow from a graph-mode GraphConfig.
+ *
+ * The resulting workflow embeds the full graph topology in the `graph` field
+ * so graph mode can fully restore it. It also populates the `pipelines`
+ * array so perform mode (and the backend resolution API) can consume the
+ * same file without needing the graph.
+ */
+export function buildGraphWorkflow(
+  input: BuildGraphWorkflowInput
+): ScopeWorkflow {
+  const { name, graphConfig, pipelineInfoMap, pluginInfoMap, scopeVersion } =
+    input;
+
+  const nodeParams = (
+    graphConfig.ui_state as Record<string, unknown> | undefined
+  )?.node_params as Record<string, Record<string, unknown>> | undefined;
+
+  const pipelineNodes = graphConfig.nodes.filter(n => n.type === "pipeline");
+
+  const pipelines: WorkflowPipeline[] = pipelineNodes.map(node => {
+    const pipelineId = node.pipeline_id ?? "";
+    const bag = nodeParams?.[node.id] ?? {};
+
+    const params: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(bag)) {
+      if (key === "__prompt") continue;
+      params[key] = value;
+    }
+
+    return {
+      pipeline_id: pipelineId,
+      pipeline_version: pipelineInfoMap[pipelineId]?.version ?? null,
+      source: buildPipelineSource(pipelineId, pipelineInfoMap, pluginInfoMap),
+      loras: [],
+      params,
+    };
+  });
+
+  // Extract prompts: use __prompt from the first pipeline node that has one
+  const prompts: WorkflowPrompt[] = [];
+  for (const node of pipelineNodes) {
+    const text = nodeParams?.[node.id]?.__prompt as string | undefined;
+    if (text) {
+      prompts.push({ text, weight: 1.0 });
+      break;
+    }
+  }
+
+  return {
+    format: "scope-workflow",
+    format_version: "1.0",
+    metadata: {
+      name,
+      created_at: new Date().toISOString(),
+      scope_version: scopeVersion,
+    },
+    pipelines,
+    prompts: prompts.length > 0 ? prompts : undefined,
+    graph: graphConfig,
+  };
 }
 
 // ---------------------------------------------------------------------------
