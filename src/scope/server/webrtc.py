@@ -21,6 +21,7 @@ from aiortc.sdp import candidate_from_sdp
 
 from scope.core.pipelines.registry import PipelineRegistry
 
+from .audio_track import AudioProcessingTrack
 from .cloud_track import CloudTrack
 from .credentials import get_turn_credentials
 from .frame_processor import FrameProcessor
@@ -29,7 +30,7 @@ from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
-from .tracks import AudioProcessingTrack, VideoProcessingTrack
+from .tracks import VideoProcessingTrack
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
