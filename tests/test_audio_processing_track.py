@@ -68,9 +68,11 @@ class TestStop:
     def test_empty_buffer_after_stop(self):
         """stop() should clear the buffer."""
         track = _make_track(channels=2)
-        track._audio_buffer = np.ones(5000, dtype=np.float32)
+        track._chunks.append(np.ones(5000, dtype=np.float32))
+        track._buffered_samples = 5000
         track.stop()
-        assert len(track._audio_buffer) == 0
+        assert len(track._chunks) == 0
+        assert track._buffered_samples == 0
 
 
 # ---------------------------------------------------------------------------
@@ -190,7 +192,7 @@ class TestAdversarialInputs:
 
 
 class TestResampling:
-    """Test the FFT-based resampler."""
+    """Test the linear-interpolation resampler."""
 
     def test_same_rate_passthrough(self):
         """Same source and target rate should return the input unchanged."""
@@ -400,7 +402,7 @@ class TestRecvIntegration:
         assert chunks_returned == 5, "recv() should drain all queued audio chunks"
         # Buffer should have 5 * 200 * 2 = 2000 interleaved samples
         # minus 1920 consumed for the frame = 80 remaining
-        assert len(track._audio_buffer) == 80
+        assert track._buffered_samples == 80
 
     def test_recv_caps_buffer_at_max(self):
         """Buffer should be capped at AUDIO_MAX_BUFFER_SAMPLES to prevent unbounded growth."""
@@ -409,10 +411,11 @@ class TestRecvIntegration:
         track = _make_track(channels=2, init_timestamp=False)
         # Stuff the buffer with more than the max
         oversized = np.ones(AUDIO_MAX_BUFFER_SAMPLES * 2 + 5000, dtype=np.float32)
-        track._audio_buffer = oversized
+        track._chunks.append(oversized)
+        track._buffered_samples = len(oversized)
 
         # recv() should trim the buffer
         track.frame_processor.get_audio = MagicMock(return_value=(None, None))
         self._run(track.recv())
         # After trimming and consuming one frame, buffer should be under max
-        assert len(track._audio_buffer) <= AUDIO_MAX_BUFFER_SAMPLES * 2
+        assert track._buffered_samples <= AUDIO_MAX_BUFFER_SAMPLES * 2

@@ -433,6 +433,9 @@ class PipelineProcessor:
             output_dict = self.pipeline(**call_params)
             processing_time = time.time() - processing_start
 
+            if not output_dict:
+                return
+
             # Pass audio to callback regardless of whether video exists.
             # This ensures audio-only pipelines can deliver audio.
             audio_output = output_dict.get("audio")

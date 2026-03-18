@@ -1,4 +1,5 @@
 import asyncio
+import collections
 import fractions
 import logging
 import threading
@@ -219,8 +220,8 @@ class AudioProcessingTrack(MediaStreamTrack):
     """WebRTC audio track that streams generated audio from the pipeline.
 
     Receives raw audio chunks from FrameProcessor, resamples to 48kHz
-    using soxr (polyphase resampler), buffers samples, and delivers
-    20ms stereo frames for WebRTC/Opus.
+    via linear interpolation, buffers samples, and delivers 20ms stereo
+    frames for WebRTC/Opus.
 
     Timing follows aiortc's AudioStreamTrack pattern (monotonic _timestamp
     counter) to ensure proper frame pacing without wall-clock drift.
@@ -238,7 +239,8 @@ class AudioProcessingTrack(MediaStreamTrack):
         self.channels = channels
 
         self._samples_per_frame = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960
-        self._audio_buffer = np.array([], dtype=np.float32)
+        self._chunks: collections.deque[np.ndarray] = collections.deque()
+        self._buffered_samples: int = 0  # total interleaved sample count
         self._first_audio_logged = False
         self._start: float | None = None
         self._timestamp: int = 0
@@ -247,7 +249,12 @@ class AudioProcessingTrack(MediaStreamTrack):
     def _resample_audio(
         audio: np.ndarray, source_rate: int, target_rate: int
     ) -> np.ndarray:
-        """Resample audio (channels, samples) via FFT for clean upsampling."""
+        """Resample audio (channels, samples) using linear interpolation.
+
+        Linear interpolation is chunk-boundary safe (no spectral leakage
+        artifacts from treating each chunk as periodic) and fast enough for
+        real-time 20ms frame delivery.
+        """
         if source_rate == target_rate:
             return audio
 
@@ -256,18 +263,12 @@ class AudioProcessingTrack(MediaStreamTrack):
         if n_out == n_in:
             return audio
 
-        resampled = np.zeros((audio.shape[0], n_out), dtype=np.float32)
+        x_in = np.linspace(0, 1, n_in, dtype=np.float64)
+        x_out = np.linspace(0, 1, n_out, dtype=np.float64)
+
+        resampled = np.empty((audio.shape[0], n_out), dtype=np.float32)
         for ch in range(audio.shape[0]):
-            spectrum = np.fft.rfft(audio[ch])
-            n_freq_out = n_out // 2 + 1
-            if n_freq_out > len(spectrum):
-                padded = np.zeros(n_freq_out, dtype=spectrum.dtype)
-                padded[: len(spectrum)] = spectrum
-                resampled[ch] = np.fft.irfft(padded, n=n_out) * (n_out / n_in)
-            else:
-                resampled[ch] = np.fft.irfft(spectrum[:n_freq_out], n=n_out) * (
-                    n_out / n_in
-                )
+            resampled[ch] = np.interp(x_out, x_in, audio[ch])
         return resampled
 
     async def recv(self) -> AudioFrame:
@@ -321,22 +322,27 @@ class AudioProcessingTrack(MediaStreamTrack):
             # columns first, producing [L0, R0, L1, R1, ...] which is exactly
             # what packed interleaved s16 expects in a single plane.
             interleaved = np.ravel(audio_np, order="F").astype(np.float32)
-            self._audio_buffer = np.concatenate([self._audio_buffer, interleaved])
+            self._chunks.append(interleaved)
+            self._buffered_samples += len(interleaved)
 
         # Cap buffer to prevent unbounded growth (1 second of interleaved audio)
         max_interleaved = AUDIO_MAX_BUFFER_SAMPLES * self.channels
-        if len(self._audio_buffer) > max_interleaved:
-            overflow = len(self._audio_buffer) - max_interleaved
-            self._audio_buffer = self._audio_buffer[overflow:]
-            logger.warning(
-                f"Audio buffer overflow, dropped {overflow // self.channels} samples"
-            )
+        if self._buffered_samples > max_interleaved:
+            while self._buffered_samples > max_interleaved and self._chunks:
+                dropped = self._chunks.popleft()
+                self._buffered_samples -= len(dropped)
+            logger.warning("Audio buffer overflow, dropped oldest chunks")
 
         # Serve a 20ms frame from the buffer
         samples_needed = self._samples_per_frame * self.channels
-        if len(self._audio_buffer) >= samples_needed:
-            frame_samples = self._audio_buffer[:samples_needed]
-            self._audio_buffer = self._audio_buffer[samples_needed:]
+        if self._buffered_samples >= samples_needed:
+            flat = np.concatenate(list(self._chunks))
+            self._chunks.clear()
+            frame_samples = flat[:samples_needed]
+            remainder = flat[samples_needed:]
+            if len(remainder) > 0:
+                self._chunks.append(remainder)
+            self._buffered_samples = len(remainder)
             return self._create_audio_frame(frame_samples)
 
         return self._create_silence_frame()
@@ -369,5 +375,6 @@ class AudioProcessingTrack(MediaStreamTrack):
         return frame
 
     def stop(self):
-        self._audio_buffer = np.array([], dtype=np.float32)
+        self._chunks.clear()
+        self._buffered_samples = 0
         super().stop()
