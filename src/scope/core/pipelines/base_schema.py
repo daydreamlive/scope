@@ -107,6 +107,7 @@ def ui_field_config(
     label: str | None = None,
     category: Literal["configuration", "input"] | None = None,
     disabled_when: dict[str, Any] | None = None,
+    cloud_disabled: bool = False,
 ) -> dict[str, Any]:
     """Build json_schema_extra for a field so the frontend renders it in Settings or Input & Controls.
 
@@ -133,6 +134,7 @@ def ui_field_config(
             value. Format: {"field": "<field_name>", "in": [<value>, ...]}.
             When the referenced field's current value is in the list, this field
             is disabled. Omit to never conditionally disable.
+        cloud_disabled: If True, this field is disabled when running in cloud mode.
 
     Returns:
         Dict to pass as json_schema_extra (produces "ui" key in JSON schema).
@@ -151,6 +153,8 @@ def ui_field_config(
         ui["label"] = label
     if disabled_when is not None:
         ui["disabled_when"] = disabled_when
+    if cloud_disabled:
+        ui["cloud_disabled"] = True
     return {"ui": ui}
 
 

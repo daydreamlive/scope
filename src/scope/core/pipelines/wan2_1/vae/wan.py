@@ -229,6 +229,12 @@ class WanVAEWrapper(torch.nn.Module):
             height: Output video height in pixels (needed for warmup latent shape).
             width: Output video width in pixels (needed for warmup latent shape).
         """
+        # Skip compilation for remote/cloud inference where containers are
+        # ephemeral and the compilation cost outweighs the per-session benefit.
+        if os.environ.get("SCOPE_CLOUD_APP_ID"):
+            logger.info("Skipping VAE compilation (cloud mode)")
+            return
+
         import time
 
         latents = torch.zeros(

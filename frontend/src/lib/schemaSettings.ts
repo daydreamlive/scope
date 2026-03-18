@@ -21,6 +21,8 @@ export interface SchemaFieldUI {
   label?: string;
   /** Condition to disable this field based on another field's value. */
   disabled_when?: DisabledWhen;
+  /** If true, this field is disabled in cloud mode. */
+  cloud_disabled?: boolean;
 }
 
 /**

@@ -72,6 +72,7 @@ class RewardForcingConfig(BasePipelineConfig):
             is_load_param=True,
             label="Compile VAE",
             disabled_when={"field": "vae_type", "in": ["tae", "lighttae"]},
+            cloud_disabled=True,
         ),
     )
     height: int = Field(

@@ -73,6 +73,7 @@ function PluginConfigFields({
   onChange,
   isStreaming = false,
   isLoading = false,
+  isCloudMode = false,
 }: {
   configSchema: import("../lib/schemaSettings").ConfigSchemaLike;
   inputMode?: InputMode;
@@ -80,6 +81,7 @@ function PluginConfigFields({
   onChange?: (key: string, value: unknown, isRuntimeParam?: boolean) => void;
   isStreaming?: boolean;
   isLoading?: boolean;
+  isCloudMode?: boolean;
 }) {
   const fields = parseConfigurationFields(configSchema, inputMode);
   const primitiveFields = fields.filter(
@@ -103,11 +105,9 @@ function PluginConfigFields({
       {primitiveFields.map(({ key, prop, ui, fieldType }) => {
         const value = overrides?.[key] ?? prop.default;
         const isRuntimeParam = ui.is_load_param === false;
-        const conditionDisabled = isFieldDisabledByCondition(
-          ui,
-          overrides,
-          configSchema
-        );
+        const conditionDisabled =
+          isFieldDisabledByCondition(ui, overrides, configSchema) ||
+          (ui.cloud_disabled === true && isCloudMode);
         const enumValues =
           fieldType === "enum" && typeof prop.$ref === "string"
             ? enumValuesByRef[prop.$ref.split("/").pop() ?? ""]
@@ -776,11 +776,13 @@ export function SettingsPanel({
                     const isRuntimeParam = ui.is_load_param === false;
                     const setValue = (v: unknown) =>
                       onSchemaFieldOverrideChange?.(key, v, isRuntimeParam);
-                    const conditionDisabled = isFieldDisabledByCondition(
-                      ui,
-                      schemaFieldOverrides,
-                      configSchema
-                    );
+                    const conditionDisabled =
+                      isFieldDisabledByCondition(
+                        ui,
+                        schemaFieldOverrides,
+                        configSchema
+                      ) ||
+                      (ui.cloud_disabled === true && isCloudMode);
                     const primitiveDisabled =
                       conditionDisabled ||
                       (isStreaming && !isRuntimeParam) ||
