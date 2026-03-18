@@ -7,11 +7,13 @@ import time
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 import torch
 from av import AudioFrame
 
 from scope.server.tracks import (
     AUDIO_CLOCK_RATE,
+    AUDIO_MAX_BUFFER_SAMPLES,
     AUDIO_PTIME,
     AudioProcessingTrack,
 )
@@ -20,27 +22,35 @@ from scope.server.tracks import (
 # Helpers
 # ---------------------------------------------------------------------------
 
+SAMPLES_PER_FRAME = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960
 
-def _make_track(channels: int = 2, init_timestamp: bool = True) -> AudioProcessingTrack:
+
+def _make_track(channels: int = 2, started: bool = True) -> AudioProcessingTrack:
     """Create an AudioProcessingTrack with a mocked FrameProcessor.
 
     Args:
         channels: Number of audio channels.
-        init_timestamp: If True, pre-set _start and _timestamp so that
-            _create_audio_frame can be called without going through recv().
-            Set to False for tests that exercise recv() directly.
+        started: If True, pre-set _start so that frame helpers can be called
+            without going through recv().  Set to False for recv() tests so
+            the first-call initialisation branch is exercised.
     """
     fp = MagicMock()
     fp.paused = False
     fp.get_audio = MagicMock(return_value=(None, None))
     track = AudioProcessingTrack(frame_processor=fp, channels=channels)
-    if init_timestamp:
+    if started:
         track._start = time.time()
         track._timestamp = 0
     return track
 
 
-SAMPLES_PER_FRAME = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960
+def _run(coro):
+    """Run an async coroutine synchronously."""
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(coro)
+    finally:
+        loop.close()
 
 
 def _once(audio_tensor, sample_rate: int):
@@ -63,11 +73,8 @@ def _once(audio_tensor, sample_rate: int):
 
 
 class TestStop:
-    """Test stop() side-effects."""
-
-    def test_empty_buffer_after_stop(self):
-        """stop() should clear the buffer."""
-        track = _make_track(channels=2)
+    def test_clears_buffer(self):
+        track = _make_track()
         track._chunks.append(np.ones(5000, dtype=np.float32))
         track._buffered_samples = 5000
         track.stop()
@@ -76,15 +83,12 @@ class TestStop:
 
 
 # ---------------------------------------------------------------------------
-# Frame construction
+# Frame construction & edge cases
 # ---------------------------------------------------------------------------
 
 
 class TestFrameConstruction:
-    """Test _create_audio_frame and _create_silence_frame."""
-
-    def test_create_audio_frame_normal(self):
-        """Normal float32 samples should produce a valid s16 AudioFrame."""
+    def test_normal_samples(self):
         track = _make_track(channels=2)
         samples = np.random.uniform(-1, 1, SAMPLES_PER_FRAME * 2).astype(np.float32)
         frame = track._create_audio_frame(samples)
@@ -93,97 +97,50 @@ class TestFrameConstruction:
         assert frame.sample_rate == AUDIO_CLOCK_RATE
         assert frame.samples == SAMPLES_PER_FRAME
 
-    def test_create_audio_frame_clipping(self):
-        """Values outside [-1, 1] must be clipped, not wrap around."""
+    @pytest.mark.parametrize(
+        "value, expected_int16",
+        [
+            (5.0, 32767),  # positive overflow clips to max
+            (-5.0, -32768),  # negative overflow clips to min
+            (np.inf, 32767),  # +inf clips to max
+            (-np.inf, -32767),  # -inf clamped to -1.0, then scaled
+        ],
+    )
+    def test_clipping(self, value, expected_int16):
         track = _make_track(channels=2)
-        n = SAMPLES_PER_FRAME * 2
-        samples = np.full(n, 5.0, dtype=np.float32)  # way above 1.0
+        samples = np.full(SAMPLES_PER_FRAME * 2, value, dtype=np.float32)
         frame = track._create_audio_frame(samples)
-
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
-        assert np.all(raw == 32767), "Positive overflow should clip to 32767"
+        assert np.all(raw == expected_int16)
 
-    def test_create_audio_frame_negative_clipping(self):
-        """Large negative values must clip to -32768."""
+    def test_nan_becomes_silence(self):
         track = _make_track(channels=2)
-        n = SAMPLES_PER_FRAME * 2
-        samples = np.full(n, -5.0, dtype=np.float32)
+        samples = np.full(SAMPLES_PER_FRAME * 2, np.nan, dtype=np.float32)
         frame = track._create_audio_frame(samples)
-
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
-        assert np.all(raw == -32768)
+        assert np.all(raw == 0)
 
-    def test_create_silence_frame(self):
-        """Silence frame should be all zeros."""
+    def test_dc_offset_preserved(self):
+        track = _make_track(channels=1)
+        dc = 0.5
+        samples = np.full(SAMPLES_PER_FRAME, dc, dtype=np.float32)
+        frame = track._create_audio_frame(samples)
+        raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
+        assert np.all(raw == int(dc * 32767))
+
+    def test_silence_frame_is_zeros(self):
         track = _make_track(channels=2)
         frame = track._create_silence_frame()
-
         assert isinstance(frame, AudioFrame)
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
         assert np.all(raw == 0)
 
-    def test_mono_frame_layout(self):
-        """Mono track should produce a mono-layout AudioFrame."""
-        track = _make_track(channels=1)
-        samples = np.zeros(SAMPLES_PER_FRAME, dtype=np.float32)
+    @pytest.mark.parametrize("channels, layout", [(1, "mono"), (2, "stereo")])
+    def test_layout(self, channels, layout):
+        track = _make_track(channels=channels)
+        samples = np.zeros(SAMPLES_PER_FRAME * channels, dtype=np.float32)
         frame = track._create_audio_frame(samples)
-        assert frame.layout.name == "mono"
-
-    def test_stereo_frame_layout(self):
-        """Stereo track should produce a stereo-layout AudioFrame."""
-        track = _make_track(channels=2)
-        samples = np.zeros(SAMPLES_PER_FRAME * 2, dtype=np.float32)
-        frame = track._create_audio_frame(samples)
-        assert frame.layout.name == "stereo"
-
-
-# ---------------------------------------------------------------------------
-# Adversarial frame inputs
-# ---------------------------------------------------------------------------
-
-
-class TestAdversarialInputs:
-    """Edge-case inputs for _create_audio_frame."""
-
-    def test_nan_values_dont_crash(self):
-        """NaN in audio should not crash frame creation."""
-        track = _make_track(channels=2)
-        n = SAMPLES_PER_FRAME * 2
-        samples = np.full(n, np.nan, dtype=np.float32)
-        frame = track._create_audio_frame(samples)
-        assert isinstance(frame, AudioFrame)
-
-    def test_inf_values_get_clipped(self):
-        """Inf values should clip to int16 bounds."""
-        track = _make_track(channels=2)
-        n = SAMPLES_PER_FRAME * 2
-        samples = np.full(n, np.inf, dtype=np.float32)
-        frame = track._create_audio_frame(samples)
-
-        raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
-        assert np.all(raw == 32767)
-
-    def test_negative_inf_values_get_clipped(self):
-        """-Inf values should clip to -32768."""
-        track = _make_track(channels=2)
-        n = SAMPLES_PER_FRAME * 2
-        samples = np.full(n, -np.inf, dtype=np.float32)
-        frame = track._create_audio_frame(samples)
-
-        raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
-        assert np.all(raw == -32768)
-
-    def test_dc_offset_preserved(self):
-        """A constant DC offset should survive frame creation intact."""
-        track = _make_track(channels=1)
-        dc = 0.5
-        n = SAMPLES_PER_FRAME
-        samples = np.full(n, dc, dtype=np.float32)
-        frame = track._create_audio_frame(samples)
-
-        raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
-        expected = int(dc * 32767)
-        assert np.all(raw == expected)
+        assert frame.layout.name == layout
 
 
 # ---------------------------------------------------------------------------
@@ -192,186 +149,130 @@ class TestAdversarialInputs:
 
 
 class TestResampling:
-    """Test the linear-interpolation resampler."""
-
     def test_same_rate_passthrough(self):
-        """Same source and target rate should return the input unchanged."""
         audio = np.random.randn(2, 1000).astype(np.float32)
         result = AudioProcessingTrack._resample_audio(audio, 48000, 48000)
         np.testing.assert_array_equal(result, audio)
 
-    def test_upsample_length(self):
-        """Upsampling 24kHz -> 48kHz should double the sample count."""
-        audio = np.random.randn(2, 1000).astype(np.float32)
-        result = AudioProcessingTrack._resample_audio(audio, 24000, 48000)
-        assert result.shape == (2, 2000)
+    @pytest.mark.parametrize(
+        "source_rate, n_in, expected_n_out",
+        [
+            (24000, 1000, 2000),  # 2x upsample
+            (96000, 2000, 1000),  # 2x downsample
+            (44100, 4410, int(round(4410 * 48000 / 44100))),  # non-integer ratio
+        ],
+    )
+    def test_output_length(self, source_rate, n_in, expected_n_out):
+        audio = np.random.randn(2, n_in).astype(np.float32)
+        result = AudioProcessingTrack._resample_audio(audio, source_rate, 48000)
+        assert result.shape == (2, expected_n_out)
 
-    def test_downsample_length(self):
-        """Downsampling 96kHz -> 48kHz should halve the sample count."""
-        audio = np.random.randn(2, 2000).astype(np.float32)
-        result = AudioProcessingTrack._resample_audio(audio, 96000, 48000)
-        assert result.shape == (2, 1000)
-
-    def test_resample_single_sample(self):
-        """Resampling a single sample should not crash."""
+    def test_single_sample(self):
         audio = np.array([[0.5], [0.5]], dtype=np.float32)
         result = AudioProcessingTrack._resample_audio(audio, 24000, 48000)
         assert result.shape[0] == 2
         assert result.shape[1] >= 1
 
-    def test_resample_preserves_silence(self):
-        """All-zero input should remain all-zero after resampling."""
+    def test_preserves_silence(self):
         audio = np.zeros((2, 1000), dtype=np.float32)
         result = AudioProcessingTrack._resample_audio(audio, 24000, 48000)
         np.testing.assert_array_almost_equal(result, 0.0, decimal=10)
 
-    def test_resample_preserves_dc(self):
-        """A DC signal should roughly preserve its level after resampling."""
+    def test_preserves_dc(self):
         dc = 0.7
         audio = np.full((1, 4800), dc, dtype=np.float32)
         result = AudioProcessingTrack._resample_audio(audio, 24000, 48000)
+        # Ignore edges where interpolation tapers
         mid = result[0, 100:-100]
         np.testing.assert_allclose(mid, dc, atol=0.05)
 
-    def test_resample_odd_ratio(self):
-        """Non-integer ratio (44100 -> 48000) should not crash."""
-        audio = np.random.randn(2, 4410).astype(np.float32)
-        result = AudioProcessingTrack._resample_audio(audio, 44100, 48000)
-        expected_len = int(round(4410 * 48000 / 44100))
-        assert result.shape == (2, expected_len)
-
-    def test_resample_very_short_audio(self):
-        """Two-sample audio resampled should not crash."""
-        audio = np.array([[0.1, -0.1], [0.2, -0.2]], dtype=np.float32)
-        result = AudioProcessingTrack._resample_audio(audio, 24000, 48000)
-        assert result.shape[0] == 2
-        assert result.shape[1] >= 2
-
 
 # ---------------------------------------------------------------------------
-# Full recv() integration (async)
+# recv() integration (async)
 # ---------------------------------------------------------------------------
 
 
-class TestRecvIntegration:
-    """Integration tests that exercise the full recv() path."""
-
-    def _run(self, coro):
-        """Run an async coroutine synchronously."""
-        loop = asyncio.new_event_loop()
-        try:
-            return loop.run_until_complete(coro)
-        finally:
-            loop.close()
-
-    def test_recv_no_audio_returns_silence(self):
-        """When no audio is queued, recv() should return a silence frame."""
-        track = _make_track(channels=2, init_timestamp=False)
-        frame = self._run(track.recv())
-
-        assert isinstance(frame, AudioFrame)
+class TestRecv:
+    def test_no_audio_returns_silence(self):
+        track = _make_track(started=False)
+        frame = _run(track.recv())
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
         assert np.all(raw == 0)
 
-    def test_recv_with_audio_tensor(self):
-        """recv() should process a torch tensor and return an AudioFrame."""
-        track = _make_track(channels=2, init_timestamp=False)
-        n_samples = SAMPLES_PER_FRAME + 100
-        audio_tensor = torch.randn(2, n_samples)
-        track.frame_processor.get_audio = MagicMock(
-            side_effect=_once(audio_tensor, 48000)
-        )
+    def test_with_audio_tensor(self):
+        track = _make_track(started=False)
+        audio = torch.randn(2, SAMPLES_PER_FRAME + 100)
+        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 48000))
 
-        frame = self._run(track.recv())
+        frame = _run(track.recv())
         assert isinstance(frame, AudioFrame)
         assert frame.samples == SAMPLES_PER_FRAME
 
-    def test_recv_with_resampling(self):
-        """recv() should resample 24kHz audio to 48kHz."""
-        track = _make_track(channels=2, init_timestamp=False)
-        n_input = SAMPLES_PER_FRAME  # more than enough after upsampling
-        audio_tensor = torch.randn(2, n_input)
-        track.frame_processor.get_audio = MagicMock(
-            side_effect=_once(audio_tensor, 24000)
-        )
+    def test_resamples_to_48khz(self):
+        track = _make_track(started=False)
+        audio = torch.randn(2, SAMPLES_PER_FRAME)  # enough after 2x upsample
+        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 24000))
 
-        frame = self._run(track.recv())
-        assert isinstance(frame, AudioFrame)
+        frame = _run(track.recv())
         assert frame.sample_rate == AUDIO_CLOCK_RATE
 
-    def test_recv_mono_input_stereo_output(self):
-        """Mono audio should be upmixed to stereo in recv()."""
-        track = _make_track(channels=2, init_timestamp=False)
-        n_samples = SAMPLES_PER_FRAME + 100
-        audio_tensor = torch.randn(1, n_samples)  # mono
-        track.frame_processor.get_audio = MagicMock(
-            side_effect=_once(audio_tensor, 48000)
-        )
+    def test_mono_upmixed_to_stereo(self):
+        track = _make_track(started=False)
+        audio = torch.randn(1, SAMPLES_PER_FRAME + 100)
+        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 48000))
 
-        frame = self._run(track.recv())
-        assert isinstance(frame, AudioFrame)
+        frame = _run(track.recv())
         assert frame.layout.name == "stereo"
 
-    def test_recv_1d_tensor(self):
-        """A 1D tensor (no channel dim) should be handled as mono."""
-        track = _make_track(channels=2, init_timestamp=False)
-        n_samples = SAMPLES_PER_FRAME + 100
-        audio_tensor = torch.randn(n_samples)  # 1D
-        track.frame_processor.get_audio = MagicMock(
-            side_effect=_once(audio_tensor, 48000)
-        )
+    def test_1d_tensor_treated_as_mono(self):
+        track = _make_track(started=False)
+        audio = torch.randn(SAMPLES_PER_FRAME + 100)  # 1D
+        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 48000))
 
-        frame = self._run(track.recv())
+        frame = _run(track.recv())
         assert isinstance(frame, AudioFrame)
 
-    def test_recv_paused_returns_silence(self):
-        """When paused, recv() should return silence regardless of queued audio."""
-        track = _make_track(channels=2, init_timestamp=False)
+    def test_paused_returns_silence(self):
+        track = _make_track(started=False)
         track.frame_processor.paused = True
-        audio_tensor = torch.randn(2, SAMPLES_PER_FRAME + 100)
-        track.frame_processor.get_audio = MagicMock(
-            side_effect=_once(audio_tensor, 48000)
-        )
+        audio = torch.randn(2, SAMPLES_PER_FRAME + 100)
+        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 48000))
 
-        frame = self._run(track.recv())
+        frame = _run(track.recv())
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
         assert np.all(raw == 0)
 
-    def test_recv_undersized_audio_then_silence(self):
-        """If audio chunk is too small for a frame, recv() should return silence."""
-        track = _make_track(channels=2, init_timestamp=False)
-        small_audio = torch.randn(2, 100)
-        track.frame_processor.get_audio = MagicMock(
-            side_effect=_once(small_audio, 48000)
-        )
+    def test_undersized_chunk_returns_silence(self):
+        track = _make_track(started=False)
+        audio = torch.randn(2, 100)  # too small for a 960-sample frame
+        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 48000))
 
-        frame = self._run(track.recv())
+        frame = _run(track.recv())
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
         assert np.all(raw == 0)
 
-    def test_recv_accumulates_across_calls(self):
-        """Multiple recv() calls with small chunks should accumulate until a frame is ready."""
-        track = _make_track(channels=2, init_timestamp=False)
-        chunk_size = 200  # Need 960 stereo samples = 1920 interleaved
+    def test_accumulates_small_chunks(self):
+        """Small chunks across multiple recv() calls accumulate into a real frame."""
+        track = _make_track(started=False)
+        chunk_size = 500  # Need 960 * 2 = 1920 interleaved → 2 chunks of 500*2=1000
 
-        # Each recv() call gets one small chunk, then None
-        call_idx = 0
+        call_count = 0
 
-        def get_audio_side_effect():
-            nonlocal call_idx
-            call_idx += 1
-            # Alternate: odd calls return a chunk, even calls return None
-            # This simulates one chunk available per recv() cycle
-            if call_idx % 2 == 1:
+        def get_audio():
+            nonlocal call_count
+            call_count += 1
+            # Return one chunk per drain cycle (odd calls), None to end drain (even)
+            if call_count % 2 == 1:
                 return (torch.randn(2, chunk_size), 48000)
             return (None, None)
 
-        track.frame_processor.get_audio = MagicMock(side_effect=get_audio_side_effect)
+        track.frame_processor.get_audio = MagicMock(side_effect=get_audio)
 
+        # Call recv() repeatedly until we get a non-silence frame
+        got_real_frame = False
         loop = asyncio.new_event_loop()
         try:
-            got_real_frame = False
-            for _ in range(10):
+            for _ in range(5):
                 frame = loop.run_until_complete(track.recv())
                 raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
                 if not np.all(raw == 0):
@@ -382,40 +283,36 @@ class TestRecvIntegration:
 
         assert got_real_frame, "Should have accumulated enough for a real frame"
 
-    def test_recv_drains_queue(self):
-        """recv() should drain all available audio from the queue, not just one chunk."""
-        track = _make_track(channels=2, init_timestamp=False)
+    def test_drains_full_queue(self):
+        """A single recv() drains all available chunks, not just one."""
+        track = _make_track(started=False)
         chunk_size = 200
         chunks_returned = 0
 
-        def get_audio_side_effect():
+        def get_audio():
             nonlocal chunks_returned
             if chunks_returned < 5:
                 chunks_returned += 1
                 return (torch.randn(2, chunk_size), 48000)
             return (None, None)
 
-        track.frame_processor.get_audio = MagicMock(side_effect=get_audio_side_effect)
+        track.frame_processor.get_audio = MagicMock(side_effect=get_audio)
 
-        # Single recv() call should drain all 5 chunks
-        self._run(track.recv())
-        assert chunks_returned == 5, "recv() should drain all queued audio chunks"
-        # Buffer should have 5 * 200 * 2 = 2000 interleaved samples
-        # minus 1920 consumed for the frame = 80 remaining
+        _run(track.recv())
+        assert chunks_returned == 5
+        # 5 chunks × 200 samples × 2 channels = 2000 interleaved
+        # minus 960 × 2 = 1920 consumed for one frame = 80 remaining
         assert track._buffered_samples == 80
 
-    def test_recv_caps_buffer_at_max(self):
-        """Buffer should be capped at AUDIO_MAX_BUFFER_SAMPLES to prevent unbounded growth."""
-        from scope.server.tracks import AUDIO_MAX_BUFFER_SAMPLES
-
-        track = _make_track(channels=2, init_timestamp=False)
-        # Stuff the buffer with more than the max
-        oversized = np.ones(AUDIO_MAX_BUFFER_SAMPLES * 2 + 5000, dtype=np.float32)
+    def test_caps_buffer_at_max(self):
+        """Oversized buffer is trimmed to the cap after recv()."""
+        track = _make_track(started=False)
+        max_interleaved = AUDIO_MAX_BUFFER_SAMPLES * track.channels
+        oversized = np.ones(max_interleaved + 5000, dtype=np.float32)
         track._chunks.append(oversized)
         track._buffered_samples = len(oversized)
 
-        # recv() should trim the buffer
-        track.frame_processor.get_audio = MagicMock(return_value=(None, None))
-        self._run(track.recv())
-        # After trimming and consuming one frame, buffer should be under max
-        assert track._buffered_samples <= AUDIO_MAX_BUFFER_SAMPLES * 2
+        _run(track.recv())
+
+        # After cap-trimming and consuming one 20ms frame, must be under the cap
+        assert track._buffered_samples <= max_interleaved

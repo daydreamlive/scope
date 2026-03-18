@@ -354,7 +354,11 @@ class AudioProcessingTrack(MediaStreamTrack):
         stereo.  PyAV's ``s16`` (not ``s16p``) stores all channels in a
         single plane in packed order, so we write directly to ``planes[0]``.
         """
-        samples_int16 = (samples * 32767).clip(-32768, 32767).astype(np.int16)
+        samples_int16 = (
+            (np.nan_to_num(samples, nan=0.0, posinf=1.0, neginf=-1.0) * 32767)
+            .clip(-32768, 32767)
+            .astype(np.int16)
+        )
 
         layout = "stereo" if self.channels == 2 else "mono"
         frame = AudioFrame(format="s16", layout=layout, samples=self._samples_per_frame)
