@@ -256,6 +256,7 @@ class ModulationEngine:
         # otherwise the controller overwrites the modulated value with its own.
         if "noise_scale" in modulated_keys:
             params["noise_controller"] = False
+            params["_modulated_noise_scale"] = True
 
         # Prevent SetTimestepsBlock from triggering a cache reset every frame
         # when the step list is being continuously modulated.
