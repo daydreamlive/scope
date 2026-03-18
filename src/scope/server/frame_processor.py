@@ -743,6 +743,12 @@ class FrameProcessor:
             if sink_class is None:
                 logger.error(f"Unknown output sink type: {sink_type}")
                 return
+            if not sink_class.is_available():
+                logger.warning(
+                    "Output sink '%s' is not available on this platform, skipping",
+                    sink_type,
+                )
+                return
             try:
                 sink = sink_class()
                 if sink.create(sink_name, width, height):
@@ -889,8 +895,9 @@ class FrameProcessor:
             return
 
         if not source_class.is_available():
-            logger.error(
-                f"Input source '{source_type}' is not available on this platform"
+            logger.warning(
+                "Input source '%s' is not available on this platform, skipping",
+                source_type,
             )
             return
 
