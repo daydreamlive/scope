@@ -215,7 +215,15 @@ class WanVAEWrapper(torch.nn.Module):
 
         Compiles the steady-state streaming decode path (cache_bufs) for ~1.4x
         speedup. First-time compilation takes several minutes (triton kernel
-        generation); subsequent runs use the cached kernels.
+        generation); subsequent runs with the same resolution use the cached
+        kernels from disk and complete in seconds.
+
+        Compiled kernels are cached to ~/.daydream-scope/cache/ (inductor and
+        triton subdirectories). Cache directories are configured at server
+        startup via TORCHINDUCTOR_CACHE_DIR and TRITON_CACHE_DIR env vars
+        (see app.py). The cache is keyed on tensor shapes, dtype, model
+        structure, and GPU architecture, so changing resolution or vae_type
+        triggers recompilation.
 
         Args:
             height: Output video height in pixels (needed for warmup latent shape).

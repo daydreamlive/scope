@@ -91,6 +91,7 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
         quantization: str | None = None,
         vace_enabled: bool | None = None,
         vae_type: str | None = None,
+        compile_vae: bool | None = None,
     ) -> str:
         """Load a pipeline for video generation.
 
@@ -102,6 +103,7 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
             quantization: Quantization method ("fp8_e4m3fn", "fp8_e5m2", or null for none)
             vace_enabled: Enable VACE for reference image conditioning
             vae_type: VAE type ("wan", "lightvae", "tae", "lighttae")
+            compile_vae: Compile VAE decoder with torch.compile for faster decoding
         """
         load_params = {
             k: v
@@ -112,6 +114,7 @@ def create_mcp_server(base_url: str = "http://localhost:8000") -> FastMCP:
                 "quantization": quantization,
                 "vace_enabled": vace_enabled,
                 "vae_type": vae_type,
+                "compile_vae": compile_vae,
             }.items()
             if v is not None
         }
