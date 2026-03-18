@@ -18,6 +18,8 @@ logger = logging.getLogger(__name__)
 AUDIO_CLOCK_RATE = 48000  # Standard WebRTC audio clock rate (48 kHz for Opus)
 AUDIO_PTIME = 0.020  # 20ms audio frames (standard for WebRTC)
 AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
+# Maximum buffered audio before we start dropping oldest samples (1 second)
+AUDIO_MAX_BUFFER_SAMPLES = AUDIO_CLOCK_RATE
 
 
 class VideoProcessingTrack(MediaStreamTrack):
@@ -216,17 +218,15 @@ class VideoProcessingTrack(MediaStreamTrack):
 class AudioProcessingTrack(MediaStreamTrack):
     """WebRTC audio track that streams generated audio from the pipeline.
 
-    Receives raw audio chunks from FrameProcessor, resamples to 48kHz,
-    buffers samples, and delivers 20ms stereo frames for WebRTC/Opus.
+    Receives raw audio chunks from FrameProcessor, resamples to 48kHz
+    using soxr (polyphase resampler), buffers samples, and delivers
+    20ms stereo frames for WebRTC/Opus.
 
     Timing follows aiortc's AudioStreamTrack pattern (monotonic _timestamp
     counter) to ensure proper frame pacing without wall-clock drift.
     """
 
     kind = "audio"
-
-    _start: float
-    _timestamp: int
 
     def __init__(
         self,
@@ -240,6 +240,8 @@ class AudioProcessingTrack(MediaStreamTrack):
         self._samples_per_frame = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960
         self._audio_buffer = np.array([], dtype=np.float32)
         self._first_audio_logged = False
+        self._start: float | None = None
+        self._timestamp: int = 0
 
     @staticmethod
     def _resample_audio(
@@ -273,7 +275,7 @@ class AudioProcessingTrack(MediaStreamTrack):
             raise MediaStreamError
 
         # aiortc timing pattern: monotonic timestamp counter with wall-clock pacing
-        if hasattr(self, "_timestamp"):
+        if self._start is not None:
             self._timestamp += self._samples_per_frame
             wait = self._start + (self._timestamp / AUDIO_CLOCK_RATE) - time.time()
             if wait > 0:
@@ -285,10 +287,13 @@ class AudioProcessingTrack(MediaStreamTrack):
         if self.frame_processor.paused:
             return self._create_silence_frame()
 
-        # Pull audio from the pipeline (non-blocking)
-        audio_tensor, sample_rate = self.frame_processor.get_audio()
+        # Drain all available audio from the queue to minimise latency
+        # for bursty or small-chunk pipelines.
+        while True:
+            audio_tensor, sample_rate = self.frame_processor.get_audio()
+            if audio_tensor is None or sample_rate is None:
+                break
 
-        if audio_tensor is not None and sample_rate is not None:
             if not self._first_audio_logged:
                 logger.info(
                     f"AudioTrack received first audio: shape={audio_tensor.shape}, "
@@ -317,6 +322,15 @@ class AudioProcessingTrack(MediaStreamTrack):
             # what packed interleaved s16 expects in a single plane.
             interleaved = np.ravel(audio_np, order="F").astype(np.float32)
             self._audio_buffer = np.concatenate([self._audio_buffer, interleaved])
+
+        # Cap buffer to prevent unbounded growth (1 second of interleaved audio)
+        max_interleaved = AUDIO_MAX_BUFFER_SAMPLES * self.channels
+        if len(self._audio_buffer) > max_interleaved:
+            overflow = len(self._audio_buffer) - max_interleaved
+            self._audio_buffer = self._audio_buffer[overflow:]
+            logger.warning(
+                f"Audio buffer overflow, dropped {overflow // self.channels} samples"
+            )
 
         # Serve a 20ms frame from the buffer
         samples_needed = self._samples_per_frame * self.channels
@@ -348,7 +362,7 @@ class AudioProcessingTrack(MediaStreamTrack):
         layout = "stereo" if self.channels == 2 else "mono"
         frame = AudioFrame(format="s16", layout=layout, samples=self._samples_per_frame)
         frame.sample_rate = AUDIO_CLOCK_RATE
-        frame.pts = getattr(self, "_timestamp", 0)
+        frame.pts = self._timestamp
         frame.time_base = AUDIO_TIME_BASE
         for p in frame.planes:
             p.update(bytes(p.buffer_size))

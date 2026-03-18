@@ -247,6 +247,10 @@ class BasePipelineConfig(BaseModel):
     # Whether this pipeline produces video output. Audio-only pipelines set this
     # to False so the server can skip creating a video track.
     produces_video: ClassVar[bool] = True
+    # Whether this pipeline produces audio output. When False (the default),
+    # the server skips creating an AudioProcessingTrack to avoid wasting CPU
+    # on silence frames.
+    produces_audio: ClassVar[bool] = False
     supports_cache_management: ClassVar[bool] = False
     supports_kv_cache_bias: ClassVar[bool] = False
     supports_quantization: ClassVar[bool] = False
@@ -403,6 +407,7 @@ class BasePipelineConfig(BaseModel):
         )
         metadata["modified"] = cls.modified
         metadata["produces_video"] = cls.produces_video
+        metadata["produces_audio"] = cls.produces_audio
         # Convert UsageType enum values to strings for JSON serialization
         metadata["usage"] = [usage.value for usage in cls.usage] if cls.usage else []
         metadata["inputs"] = list(cls.inputs)

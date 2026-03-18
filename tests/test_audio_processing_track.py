@@ -10,7 +10,11 @@ import numpy as np
 import torch
 from av import AudioFrame
 
-from scope.server.tracks import AUDIO_CLOCK_RATE, AUDIO_PTIME, AudioProcessingTrack
+from scope.server.tracks import (
+    AUDIO_CLOCK_RATE,
+    AUDIO_PTIME,
+    AudioProcessingTrack,
+)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -37,6 +41,20 @@ def _make_track(channels: int = 2, init_timestamp: bool = True) -> AudioProcessi
 
 
 SAMPLES_PER_FRAME = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960
+
+
+def _once(audio_tensor, sample_rate: int):
+    """Return a side_effect callable that yields (tensor, rate) once, then (None, None)."""
+    returned = False
+
+    def _side_effect():
+        nonlocal returned
+        if not returned:
+            returned = True
+            return (audio_tensor, sample_rate)
+        return (None, None)
+
+    return _side_effect
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +276,9 @@ class TestRecvIntegration:
         track = _make_track(channels=2, init_timestamp=False)
         n_samples = SAMPLES_PER_FRAME + 100
         audio_tensor = torch.randn(2, n_samples)
-        track.frame_processor.get_audio = MagicMock(return_value=(audio_tensor, 48000))
+        track.frame_processor.get_audio = MagicMock(
+            side_effect=_once(audio_tensor, 48000)
+        )
 
         frame = self._run(track.recv())
         assert isinstance(frame, AudioFrame)
@@ -269,7 +289,9 @@ class TestRecvIntegration:
         track = _make_track(channels=2, init_timestamp=False)
         n_input = SAMPLES_PER_FRAME  # more than enough after upsampling
         audio_tensor = torch.randn(2, n_input)
-        track.frame_processor.get_audio = MagicMock(return_value=(audio_tensor, 24000))
+        track.frame_processor.get_audio = MagicMock(
+            side_effect=_once(audio_tensor, 24000)
+        )
 
         frame = self._run(track.recv())
         assert isinstance(frame, AudioFrame)
@@ -280,7 +302,9 @@ class TestRecvIntegration:
         track = _make_track(channels=2, init_timestamp=False)
         n_samples = SAMPLES_PER_FRAME + 100
         audio_tensor = torch.randn(1, n_samples)  # mono
-        track.frame_processor.get_audio = MagicMock(return_value=(audio_tensor, 48000))
+        track.frame_processor.get_audio = MagicMock(
+            side_effect=_once(audio_tensor, 48000)
+        )
 
         frame = self._run(track.recv())
         assert isinstance(frame, AudioFrame)
@@ -291,7 +315,9 @@ class TestRecvIntegration:
         track = _make_track(channels=2, init_timestamp=False)
         n_samples = SAMPLES_PER_FRAME + 100
         audio_tensor = torch.randn(n_samples)  # 1D
-        track.frame_processor.get_audio = MagicMock(return_value=(audio_tensor, 48000))
+        track.frame_processor.get_audio = MagicMock(
+            side_effect=_once(audio_tensor, 48000)
+        )
 
         frame = self._run(track.recv())
         assert isinstance(frame, AudioFrame)
@@ -301,7 +327,9 @@ class TestRecvIntegration:
         track = _make_track(channels=2, init_timestamp=False)
         track.frame_processor.paused = True
         audio_tensor = torch.randn(2, SAMPLES_PER_FRAME + 100)
-        track.frame_processor.get_audio = MagicMock(return_value=(audio_tensor, 48000))
+        track.frame_processor.get_audio = MagicMock(
+            side_effect=_once(audio_tensor, 48000)
+        )
 
         frame = self._run(track.recv())
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
@@ -311,23 +339,30 @@ class TestRecvIntegration:
         """If audio chunk is too small for a frame, recv() should return silence."""
         track = _make_track(channels=2, init_timestamp=False)
         small_audio = torch.randn(2, 100)
-        track.frame_processor.get_audio = MagicMock(return_value=(small_audio, 48000))
+        track.frame_processor.get_audio = MagicMock(
+            side_effect=_once(small_audio, 48000)
+        )
 
         frame = self._run(track.recv())
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
         assert np.all(raw == 0)
 
     def test_recv_accumulates_across_calls(self):
-        """Multiple undersized recv() calls should accumulate until a frame is ready."""
+        """Multiple recv() calls with small chunks should accumulate until a frame is ready."""
         track = _make_track(channels=2, init_timestamp=False)
         chunk_size = 200  # Need 960 stereo samples = 1920 interleaved
 
-        call_count = 0
+        # Each recv() call gets one small chunk, then None
+        call_idx = 0
 
         def get_audio_side_effect():
-            nonlocal call_count
-            call_count += 1
-            return (torch.randn(2, chunk_size), 48000)
+            nonlocal call_idx
+            call_idx += 1
+            # Alternate: odd calls return a chunk, even calls return None
+            # This simulates one chunk available per recv() cycle
+            if call_idx % 2 == 1:
+                return (torch.randn(2, chunk_size), 48000)
+            return (None, None)
 
         track.frame_processor.get_audio = MagicMock(side_effect=get_audio_side_effect)
 
@@ -344,3 +379,40 @@ class TestRecvIntegration:
             loop.close()
 
         assert got_real_frame, "Should have accumulated enough for a real frame"
+
+    def test_recv_drains_queue(self):
+        """recv() should drain all available audio from the queue, not just one chunk."""
+        track = _make_track(channels=2, init_timestamp=False)
+        chunk_size = 200
+        chunks_returned = 0
+
+        def get_audio_side_effect():
+            nonlocal chunks_returned
+            if chunks_returned < 5:
+                chunks_returned += 1
+                return (torch.randn(2, chunk_size), 48000)
+            return (None, None)
+
+        track.frame_processor.get_audio = MagicMock(side_effect=get_audio_side_effect)
+
+        # Single recv() call should drain all 5 chunks
+        self._run(track.recv())
+        assert chunks_returned == 5, "recv() should drain all queued audio chunks"
+        # Buffer should have 5 * 200 * 2 = 2000 interleaved samples
+        # minus 1920 consumed for the frame = 80 remaining
+        assert len(track._audio_buffer) == 80
+
+    def test_recv_caps_buffer_at_max(self):
+        """Buffer should be capped at AUDIO_MAX_BUFFER_SAMPLES to prevent unbounded growth."""
+        from scope.server.tracks import AUDIO_MAX_BUFFER_SAMPLES
+
+        track = _make_track(channels=2, init_timestamp=False)
+        # Stuff the buffer with more than the max
+        oversized = np.ones(AUDIO_MAX_BUFFER_SAMPLES * 2 + 5000, dtype=np.float32)
+        track._audio_buffer = oversized
+
+        # recv() should trim the buffer
+        track.frame_processor.get_audio = MagicMock(return_value=(None, None))
+        self._run(track.recv())
+        # After trimming and consuming one frame, buffer should be under max
+        assert len(track._audio_buffer) <= AUDIO_MAX_BUFFER_SAMPLES * 2

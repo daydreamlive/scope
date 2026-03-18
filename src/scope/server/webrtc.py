@@ -220,6 +220,21 @@ def _pipelines_produce_video(pipeline_ids: list[str]) -> bool:
     return getattr(config_cls, "produces_video", True)
 
 
+def _pipelines_produce_audio(pipeline_ids: list[str]) -> bool:
+    """Check whether any pipeline in the chain produces audio output.
+
+    Returns True if *any* pipeline in the chain declares
+    ``produces_audio = True`` in its config.  Returns False (the default)
+    otherwise, so the server can skip creating an AudioProcessingTrack.
+    """
+
+    for pid in pipeline_ids:
+        config_cls = PipelineRegistry.get_config_class(pid)
+        if config_cls is not None and getattr(config_cls, "produces_audio", False):
+            return True
+    return False
+
+
 class WebRTCManager:
     """
     Manages multiple WebRTC peer connections using sessions.
@@ -351,10 +366,18 @@ class WebRTCManager:
                     f"Audio-only pipeline(s) {pipeline_ids}, skipping video track"
                 )
 
-            audio_track = AudioProcessingTrack(
-                frame_processor=frame_processor,
-            )
-            session.audio_track = audio_track
+            audio_track = None
+            produces_audio = _pipelines_produce_audio(pipeline_ids)
+            if produces_audio:
+                audio_track = AudioProcessingTrack(
+                    frame_processor=frame_processor,
+                )
+                session.audio_track = audio_track
+            else:
+                logger.info(
+                    f"Pipeline(s) {pipeline_ids} do not produce audio, "
+                    "skipping audio track"
+                )
 
             session.notification_sender = notification_sender
             session.tempo_sync = tempo_sync
@@ -463,12 +486,15 @@ class WebRTCManager:
             # Attach our audio track to the transceiver that aiortc created
             # from the browser's recvonly audio m-line. We find it by kind,
             # assign our track to its sender, and set direction to sendonly.
-            for t in pc.getTransceivers():
-                if t.kind == "audio":
-                    t.sender.replaceTrack(audio_track)
-                    t.direction = "sendonly"
-                    logger.info(f"Audio track attached to transceiver (mid={t.mid})")
-                    break
+            if audio_track is not None:
+                for t in pc.getTransceivers():
+                    if t.kind == "audio":
+                        t.sender.replaceTrack(audio_track)
+                        t.direction = "sendonly"
+                        logger.info(
+                            f"Audio track attached to transceiver (mid={t.mid})"
+                        )
+                        break
 
             # Create answer
             answer = await pc.createAnswer()
