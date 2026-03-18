@@ -131,11 +131,6 @@ class FrameProcessor:
         self._playback_ready_emitted = False
         self._stream_start_time: float | None = None
 
-        # Audio output: raw (audio_tensor, sample_rate) tuples from the pipeline.
-        # AudioProcessingTrack consumes these, handles resampling and buffering.
-        self.audio_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
-            maxsize=30
-        )
         self.paused = False
 
         # Store pipeline_ids from initial_parameters if provided
@@ -267,12 +262,13 @@ class FrameProcessor:
         # Clear pipeline processors
         self.pipeline_processors.clear()
 
-        # Clear audio queue
-        while not self.audio_queue.empty():
-            try:
-                self.audio_queue.get_nowait()
-            except queue.Empty:
-                break
+        # Clear audio queue on the sink processor
+        if self._sink_processor is not None:
+            while not self._sink_processor.audio_output_queue.empty():
+                try:
+                    self._sink_processor.audio_output_queue.get_nowait()
+                except queue.Empty:
+                    break
 
         # Clean up all output sinks
         for sink_type, entry in list(self.output_sinks.items()):
@@ -516,6 +512,9 @@ class FrameProcessor:
     def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
         """Get the next audio chunk and its sample rate.
 
+        Reads directly from the sink processor's audio output queue,
+        matching how video frames are read from the sink's output queue.
+
         Returns:
             Tuple of (audio_tensor, sample_rate) or (None, None) if no audio available.
             audio_tensor shape: (channels, samples) - typically (2, N) for stereo
@@ -523,18 +522,14 @@ class FrameProcessor:
         if not self.running:
             return None, None
 
+        if self._sink_processor is None:
+            return None, None
+
         try:
-            audio, sample_rate = self.audio_queue.get_nowait()
+            audio, sample_rate = self._sink_processor.audio_output_queue.get_nowait()
             return audio, sample_rate
         except queue.Empty:
             return None, None
-
-    def _handle_audio_output(self, audio_tensor: torch.Tensor, sample_rate: int):
-        """Callback invoked by the last PipelineProcessor when audio is produced."""
-        try:
-            self.audio_queue.put_nowait((audio_tensor, sample_rate))
-        except queue.Full:
-            logger.warning("Audio queue full, dropping audio chunk")
 
     def _on_frame_from_cloud(self, frame: "VideoFrame") -> None:
         """Callback when a processed frame is received from cloud (cloud mode)."""
@@ -1075,11 +1070,6 @@ class FrameProcessor:
         self._sink_processor = graph_run.sink_processor
         self.pipeline_processors = graph_run.processors
         self.pipeline_ids = graph_run.pipeline_ids
-
-        # Wire audio callback to the sink processor so pipeline audio
-        # reaches the WebRTC AudioProcessingTrack
-        if self._sink_processor is not None:
-            self._sink_processor.audio_callback = self._handle_audio_output
 
         # Index processors by node_id for per-node parameter routing
         for proc in self.pipeline_processors:

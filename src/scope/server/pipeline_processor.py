@@ -37,7 +37,6 @@ class PipelineProcessor:
         pipeline: Any,
         pipeline_id: str,
         initial_parameters: dict = None,
-        audio_callback: callable = None,
         session_id: str | None = None,
         user_id: str | None = None,
         connection_id: str | None = None,
@@ -52,7 +51,6 @@ class PipelineProcessor:
             pipeline: Pipeline instance to process frames with
             pipeline_id: ID of the pipeline (used for logging)
             initial_parameters: Initial parameters for the pipeline
-            audio_callback: Optional callback for audio output (audio_tensor, sample_rate)
             session_id: Session ID for event tracking
             user_id: User ID for event tracking
             connection_id: Connection ID from fal.ai WebSocket for event correlation
@@ -63,7 +61,6 @@ class PipelineProcessor:
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
-        self.audio_callback = audio_callback
         self.node_id = node_id or pipeline_id
         self.session_id = session_id
         self.user_id = user_id
@@ -77,6 +74,12 @@ class PipelineProcessor:
         self.output_queues: dict[str, list[queue.Queue]] = {}
         # Lock to protect input_queues assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
+
+        # Audio output queue: (audio_tensor, sample_rate) tuples.
+        # Consumed by FrameProcessor.get_audio() on the sink processor.
+        self.audio_output_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
+            maxsize=30
+        )
 
         # Current parameters used by processing thread
         self.parameters = initial_parameters or {}
@@ -436,20 +439,19 @@ class PipelineProcessor:
             if not output_dict:
                 return
 
-            # Pass audio to callback regardless of whether video exists.
+            # Pass audio to output queue regardless of whether video exists.
             # This ensures audio-only pipelines can deliver audio.
             audio_output = output_dict.get("audio")
             audio_sample_rate = output_dict.get("audio_sample_rate")
-            if (
-                audio_output is not None
-                and audio_sample_rate is not None
-                and self.audio_callback
-            ):
+            if audio_output is not None and audio_sample_rate is not None:
                 try:
                     audio_cpu = audio_output.detach().cpu()
-                    self.audio_callback(audio_cpu, audio_sample_rate)
-                except Exception as e:
-                    logger.error(f"Error in audio callback: {e}")
+                    self.audio_output_queue.put_nowait((audio_cpu, audio_sample_rate))
+                except queue.Full:
+                    logger.warning(
+                        "Audio output queue full for %s, dropping audio chunk",
+                        self.pipeline_id,
+                    )
 
             # Extract video from the returned dictionary
             output = output_dict.get("video")
