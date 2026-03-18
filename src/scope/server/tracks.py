@@ -10,12 +10,12 @@ from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamEr
 from av import AudioFrame, VideoFrame
 
 from .frame_processor import FrameProcessor
-from .media_clock import AUDIO_CLOCK_RATE, MediaClock
 from .pipeline_manager import PipelineManager
 
 logger = logging.getLogger(__name__)
 
 # Audio constants
+AUDIO_CLOCK_RATE = 48000  # Standard WebRTC audio clock rate (48 kHz for Opus)
 AUDIO_PTIME = 0.020  # 20ms audio frames (standard for WebRTC)
 AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
 
@@ -29,7 +29,6 @@ class VideoProcessingTrack(MediaStreamTrack):
         fps: int = 30,
         initial_parameters: dict = None,
         notification_callback: callable = None,
-        media_clock: MediaClock | None = None,
         session_id: str | None = None,
         user_id: str | None = None,
         connection_id: str | None = None,
@@ -41,7 +40,6 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.pipeline_manager = pipeline_manager
         self.initial_parameters = initial_parameters or {}
         self.notification_callback = notification_callback
-        self.media_clock = media_clock
         self.session_id = session_id
         self.user_id = user_id
         self.connection_id = connection_id
@@ -58,7 +56,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._paused_lock = threading.Lock()
         self._last_frame = None
         self._last_send_time: float | None = None
-        self._clock_started = False
+        self._pts: int = 0
         self._frame_lock = threading.Lock()
 
         # Server-side input mode - when enabled, frames come from the backend
@@ -106,11 +104,7 @@ class VideoProcessingTrack(MediaStreamTrack):
                 await asyncio.sleep(0.01)
 
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
-        """Pace output at the target frame rate and return a PTS from the shared MediaClock.
-
-        Using the shared clock ensures the video PTS is correlated with the
-        audio PTS so the WebRTC receiver can synchronize playback.
-        """
+        """Pace output at the target frame rate and return a monotonic PTS."""
         if self.readyState != "live":
             raise MediaStreamError
 
@@ -120,23 +114,11 @@ class VideoProcessingTrack(MediaStreamTrack):
             wait = self.frame_ptime - elapsed
             if wait > 0:
                 await asyncio.sleep(wait)
+            self._pts += int(self.frame_ptime * VIDEO_CLOCK_RATE)
 
         self._last_send_time = time.time()
 
-        # Start the shared clock on the first frame (idempotent)
-        if self.media_clock and not self._clock_started:
-            self.media_clock.start()
-            self._clock_started = True
-
-        if self.media_clock:
-            return self.media_clock.to_pts(VIDEO_CLOCK_RATE), VIDEO_TIME_BASE
-
-        # Fallback for cases without a media clock (shouldn't happen in normal flow)
-        if not hasattr(self, "_fallback_pts"):
-            self._fallback_pts = 0
-        else:
-            self._fallback_pts += int(self.frame_ptime * VIDEO_CLOCK_RATE)
-        return self._fallback_pts, VIDEO_TIME_BASE
+        return self._pts, VIDEO_TIME_BASE
 
     def initialize_output_processing(self):
         """No-op guard; FrameProcessor is injected via constructor."""

@@ -26,7 +26,6 @@ from .credentials import get_turn_credentials
 from .frame_processor import FrameProcessor
 from .headless import HeadlessSession
 from .kafka_publisher import publish_event
-from .media_clock import MediaClock
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
@@ -61,7 +60,6 @@ class Session:
         video_track: MediaStreamTrack | None = None,
         audio_track: "AudioProcessingTrack | None" = None,
         frame_processor: "FrameProcessor | None" = None,
-        media_clock: "MediaClock | None" = None,
         data_channel: RTCDataChannel | None = None,
         relay: MediaRelay | None = None,
         recording_manager: RecordingManager | None = None,
@@ -74,7 +72,6 @@ class Session:
         self.video_track = video_track
         self.audio_track = audio_track
         self.frame_processor = frame_processor
-        self.media_clock = media_clock
         self.data_channel = data_channel
         self.relay = relay
         self.recording_manager = recording_manager
@@ -274,10 +271,6 @@ class WebRTCManager:
             # Create NotificationSender for this session to send notifications to the frontend
             notification_sender = NotificationSender()
 
-            # Create shared media clock for A/V synchronization
-            media_clock = MediaClock()
-            session.media_clock = media_clock
-
             # Determine whether the pipeline produces video.
             # If all pipelines in the chain are audio-only, skip video track creation.
             pipeline_ids = initial_parameters.get("pipeline_ids", [])
@@ -305,7 +298,6 @@ class WebRTCManager:
                     pipeline_manager,
                     initial_parameters=initial_parameters,
                     notification_callback=notification_sender.call,
-                    media_clock=media_clock,
                     session_id=session.id,
                     user_id=request.user_id,
                     connection_id=request.connection_id,
