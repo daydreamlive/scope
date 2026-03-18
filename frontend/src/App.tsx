@@ -8,6 +8,7 @@ import { ServerInfoProvider } from "./contexts/ServerInfoContext";
 import { CloudProvider } from "./lib/cloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
 import { OnboardingProvider } from "./contexts/OnboardingContext";
+import { BillingProvider } from "./contexts/BillingContext";
 import {
   handleOAuthCallback,
   initElectronAuthListener,
@@ -113,7 +114,9 @@ function App() {
               <ServerInfoProvider>
                 <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
                   <OnboardingProvider>
-                    <StreamPage />
+                    <BillingProvider>
+                      <StreamPage />
+                    </BillingProvider>
                   </OnboardingProvider>
                 </CloudProvider>
               </ServerInfoProvider>
