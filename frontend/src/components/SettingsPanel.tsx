@@ -54,6 +54,7 @@ import { MIDIMappingsModal } from "./MIDIMappingsModal";
 import {
   parseConfigurationFields,
   COMPLEX_COMPONENTS,
+  isFieldDisabledByCondition,
 } from "../lib/schemaSettings";
 import {
   SchemaComplexField,
@@ -102,6 +103,11 @@ function PluginConfigFields({
       {primitiveFields.map(({ key, prop, ui, fieldType }) => {
         const value = overrides?.[key] ?? prop.default;
         const isRuntimeParam = ui.is_load_param === false;
+        const conditionDisabled = isFieldDisabledByCondition(
+          ui,
+          overrides,
+          configSchema
+        );
         const enumValues =
           fieldType === "enum" && typeof prop.$ref === "string"
             ? enumValuesByRef[prop.$ref.split("/").pop() ?? ""]
@@ -113,7 +119,9 @@ function PluginConfigFields({
             prop={prop}
             value={value}
             onChange={v => onChange?.(key, v, isRuntimeParam)}
-            disabled={(isStreaming && !isRuntimeParam) || isLoading}
+            disabled={
+              conditionDisabled || (isStreaming && !isRuntimeParam) || isLoading
+            }
             label={ui.label}
             fieldType={
               typeof fieldType === "string" &&
@@ -768,8 +776,15 @@ export function SettingsPanel({
                     const isRuntimeParam = ui.is_load_param === false;
                     const setValue = (v: unknown) =>
                       onSchemaFieldOverrideChange?.(key, v, isRuntimeParam);
+                    const conditionDisabled = isFieldDisabledByCondition(
+                      ui,
+                      schemaFieldOverrides,
+                      configSchema
+                    );
                     const primitiveDisabled =
-                      (isStreaming && !isRuntimeParam) || isLoading;
+                      conditionDisabled ||
+                      (isStreaming && !isRuntimeParam) ||
+                      isLoading;
                     const enumValues =
                       fieldType === "enum" && typeof prop.$ref === "string"
                         ? enumValuesByRef[prop.$ref.split("/").pop() ?? ""]

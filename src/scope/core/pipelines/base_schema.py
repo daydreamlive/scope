@@ -106,6 +106,7 @@ def ui_field_config(
     is_load_param: bool = False,
     label: str | None = None,
     category: Literal["configuration", "input"] | None = None,
+    disabled_when: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build json_schema_extra for a field so the frontend renders it in Settings or Input & Controls.
 
@@ -128,6 +129,10 @@ def ui_field_config(
             the field label; description remains available as tooltip.
         category: "configuration" for Settings panel, "input" for Input & Controls
             (below Prompts). Omit to default to "configuration".
+        disabled_when: Condition to disable this field based on another field's
+            value. Format: {"field": "<field_name>", "in": [<value>, ...]}.
+            When the referenced field's current value is in the list, this field
+            is disabled. Omit to never conditionally disable.
 
     Returns:
         Dict to pass as json_schema_extra (produces "ui" key in JSON schema).
@@ -144,6 +149,8 @@ def ui_field_config(
         ui["modes"] = modes
     if label is not None:
         ui["label"] = label
+    if disabled_when is not None:
+        ui["disabled_when"] = disabled_when
     return {"ui": ui}
 
 

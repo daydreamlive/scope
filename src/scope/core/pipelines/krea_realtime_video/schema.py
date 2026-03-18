@@ -77,7 +77,10 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         default=False,
         description="Use torch.compile on the VAE decoder for ~1.4x faster decoding. First-time compilation takes several minutes.",
         json_schema_extra=ui_field_config(
-            order=3, is_load_param=True, label="Compile VAE"
+            order=3,
+            is_load_param=True,
+            label="Compile VAE",
+            disabled_when={"field": "vae_type", "in": ["tae", "lighttae"]},
         ),
     )
     height: int = Field(

@@ -219,7 +219,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
 
         print(f"Warmed up ({warmup_runs} runs) in {time.time() - start:.2f}s")
 
-        if compile_vae:
+        if compile_vae and hasattr(self.components.vae, "compile_decoder"):
             if stage_callback:
                 stage_callback(
                     "Compiling VAE decoder (this may take several minutes)..."

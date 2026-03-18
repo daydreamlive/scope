@@ -5,6 +5,11 @@
  * - If category is missing, it is treated as "configuration".
  */
 
+export interface DisabledWhen {
+  field: string;
+  in: unknown[];
+}
+
 export interface SchemaFieldUI {
   category?: string;
   order?: number;
@@ -14,6 +19,24 @@ export interface SchemaFieldUI {
   is_load_param?: boolean;
   /** Short label for the UI. When set, used instead of description for the field label. */
   label?: string;
+  /** Condition to disable this field based on another field's value. */
+  disabled_when?: DisabledWhen;
+}
+
+/**
+ * Check if a field should be disabled based on its disabled_when condition.
+ * Evaluates the referenced field's current value against the condition's value list.
+ */
+export function isFieldDisabledByCondition(
+  ui: SchemaFieldUI,
+  overrides: Record<string, unknown> | undefined,
+  schema: ConfigSchemaLike | undefined
+): boolean {
+  if (!ui.disabled_when) return false;
+  const { field, in: values } = ui.disabled_when;
+  const currentValue =
+    overrides?.[field] ?? schema?.properties?.[field]?.default;
+  return values.includes(currentValue);
 }
 
 export interface SchemaProperty {

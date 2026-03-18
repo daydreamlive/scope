@@ -215,7 +215,7 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline):
             )
             self._warmup(inner_model)
 
-        if compile_vae:
+        if compile_vae and hasattr(self.components.vae, "compile_decoder"):
             if stage_callback:
                 stage_callback(
                     "Compiling VAE decoder (this may take several minutes)..."

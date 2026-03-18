@@ -170,7 +170,7 @@ class RewardForcingPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "base_seed", 42))
 
-        if compile_vae:
+        if compile_vae and hasattr(self.components.vae, "compile_decoder"):
             if stage_callback:
                 stage_callback(
                     "Compiling VAE decoder (this may take several minutes)..."
