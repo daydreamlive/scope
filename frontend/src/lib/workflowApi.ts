@@ -13,7 +13,7 @@
 // Schema types (frontend-owned — the backend ignores extra fields)
 // ---------------------------------------------------------------------------
 
-import type { LoRAProvenance } from "./api";
+import type { LoRAProvenance, GraphConfig } from "./api";
 export type { LoRAProvenance as WorkflowLoRAProvenance } from "./api";
 
 export interface WorkflowLoRA {
@@ -76,6 +76,8 @@ export interface ScopeWorkflow {
   interpolation_method?: "linear" | "slerp" | null;
   transition_steps?: number | null;
   temporal_interpolation_method?: "linear" | "slerp" | null;
+  /** Full graph topology (present when exported from graph mode). Ignored by perform mode and backend. */
+  graph?: GraphConfig | null;
 }
 
 // ---------------------------------------------------------------------------

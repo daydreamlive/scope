@@ -90,7 +90,7 @@ export function GraphToolbar({
       <input
         ref={fileInputRef}
         type="file"
-        accept=".json"
+        accept=".json,.scope-workflow.json"
         onChange={e => {
           if (isStreaming) onStopStream?.();
           onImport(e);

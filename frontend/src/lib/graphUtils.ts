@@ -1236,5 +1236,104 @@ export function stripUIFields(graph: GraphConfig): GraphConfig {
   };
 }
 
+// ---------------------------------------------------------------------------
+// Import: ScopeWorkflow (without graph field) -> GraphConfig
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a linear GraphConfig from a ScopeWorkflow that has no embedded graph.
+ *
+ * Creates: source -> pipeline1 -> pipeline2 -> ... -> sink
+ * with automatic horizontal layout. Pipeline params and prompts are stored
+ * in the returned `nodeParams` map (keyed by node ID).
+ */
+export function workflowToGraphConfig(workflow: {
+  pipelines: Array<{
+    pipeline_id: string;
+    params?: Record<string, unknown>;
+    role?: string | null;
+  }>;
+  prompts?: Array<{ text: string; weight: number }> | null;
+  timeline?: { entries: Array<{ prompts: Array<{ text: string }> }> } | null;
+}): {
+  graphConfig: GraphConfig;
+  nodeParams: Record<string, Record<string, unknown>>;
+} {
+  const nodes: GraphNode[] = [];
+  const edges: GraphEdge[] = [];
+  const nodeParams: Record<string, Record<string, unknown>> = {};
+
+  const Y = 200;
+  let x = START_X;
+
+  // Source node
+  const sourceId = "input";
+  nodes.push({ id: sourceId, type: "source", x, y: Y });
+  x += COLUMN_GAP;
+
+  let prevNodeId = sourceId;
+
+  for (const wp of workflow.pipelines) {
+    const nodeId = wp.pipeline_id;
+    nodes.push({
+      id: nodeId,
+      type: "pipeline",
+      pipeline_id: wp.pipeline_id,
+      x,
+      y: Y,
+    });
+
+    edges.push({
+      from: prevNodeId,
+      from_port: "video",
+      to_node: nodeId,
+      to_port: "video",
+      kind: "stream",
+    });
+
+    if (wp.params && Object.keys(wp.params).length > 0) {
+      nodeParams[nodeId] = { ...wp.params };
+    }
+
+    prevNodeId = nodeId;
+    x += COLUMN_GAP;
+  }
+
+  // Sink node
+  const sinkId = "output";
+  nodes.push({ id: sinkId, type: "sink", x, y: Y });
+  edges.push({
+    from: prevNodeId,
+    from_port: "video",
+    to_node: sinkId,
+    to_port: "video",
+    kind: "stream",
+  });
+
+  // Assign prompt to the main pipeline node
+  const mainPipeline =
+    workflow.pipelines.find(p => p.role === "main") ?? workflow.pipelines[0];
+  if (mainPipeline) {
+    const promptText =
+      workflow.timeline?.entries?.[0]?.prompts?.[0]?.text ??
+      workflow.prompts?.[0]?.text;
+    if (promptText) {
+      const bag = nodeParams[mainPipeline.pipeline_id] ?? {};
+      bag.__prompt = promptText;
+      nodeParams[mainPipeline.pipeline_id] = bag;
+    }
+  }
+
+  return {
+    graphConfig: {
+      nodes,
+      edges,
+      ui_state:
+        Object.keys(nodeParams).length > 0 ? { node_params: nodeParams } : null,
+    },
+    nodeParams,
+  };
+}
+
 // Default node dimensions for reference
 export { NODE_WIDTH, NODE_HEIGHT };
