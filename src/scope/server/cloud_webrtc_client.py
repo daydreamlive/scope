@@ -254,6 +254,10 @@ class CloudWebRTCClient:
         self.input_track = FrameInputTrack(fps=30)
         self.pc.addTrack(self.input_track)
 
+        # Add a recvonly audio transceiver so the cloud can send audio back.
+        # This mirrors the browser's addTransceiver("audio", {direction: "recvonly"}).
+        self.pc.addTransceiver("audio", direction="recvonly")
+
         # Create data channel for parameter updates
         self._data_channel = self.pc.createDataChannel("parameters", ordered=True)
 
