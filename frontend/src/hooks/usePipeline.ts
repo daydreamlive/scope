@@ -16,8 +16,16 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
   const [status, setStatus] =
     useState<PipelineStatusResponse["status"]>("not_loaded");
-  const [pipelineInfo, setPipelineInfo] =
+  const [pipelineInfo, setPipelineInfoState] =
     useState<PipelineStatusResponse | null>(null);
+  // Ref mirrors pipelineInfo but updates synchronously, so code that
+  // runs right after loadPipeline resolves (same tick, before React
+  // re-renders) sees the latest values.
+  const pipelineInfoRef = useRef<PipelineStatusResponse | null>(null);
+  const setPipelineInfo = useCallback((info: PipelineStatusResponse) => {
+    pipelineInfoRef.current = info;
+    setPipelineInfoState(info);
+  }, []);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -223,6 +231,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
   return {
     status,
     pipelineInfo,
+    pipelineInfoRef,
     isLoading,
     error,
     loadPipeline: loadPipelineAsync,

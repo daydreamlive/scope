@@ -561,16 +561,13 @@ class WebRTCManager:
             )
             self.sessions[session.id] = session
 
-            # Determine media modalities from initial_parameters (set by the
-            # frontend from the pipeline/status endpoint) with fallback to
-            # the local registry.
-            pipeline_ids = initial_parameters.get("pipeline_ids", [])
-            produces_video = initial_parameters.get("produces_video")
-            if produces_video is None:
-                produces_video = PipelineRegistry.chain_produces_video(pipeline_ids)
-            produces_audio = initial_parameters.get("produces_audio")
-            if produces_audio is None:
-                produces_audio = PipelineRegistry.chain_produces_audio(pipeline_ids)
+            # Determine media modalities from initial_parameters. These are
+            # set by the frontend from the pipeline/status endpoint, which is
+            # proxied to the cloud backend — so they reflect the cloud
+            # pipeline's actual capabilities (even for cloud-only pipelines
+            # not registered locally).
+            produces_video = initial_parameters.get("produces_video", True)
+            produces_audio = initial_parameters.get("produces_audio", False)
 
             # Create FrameProcessor in cloud mode so it can be shared
             # between CloudTrack (video) and AudioProcessingTrack (audio)

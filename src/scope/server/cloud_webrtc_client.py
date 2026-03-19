@@ -256,8 +256,7 @@ class CloudWebRTCClient:
 
         # Only add a recvonly audio transceiver when the pipeline produces
         # audio, so the cloud doesn't waste resources encoding/sending silence.
-        produces_audio = (initial_parameters or {}).get("produces_audio", False)
-        if produces_audio:
+        if (initial_parameters or {}).get("produces_audio", False):
             self.pc.addTransceiver("audio", direction="recvonly")
 
         # Create data channel for parameter updates

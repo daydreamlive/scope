@@ -435,6 +435,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
+    pipelineInfoRef,
     loadingStage: pipelineLoadingStage,
   } = usePipeline();
 
@@ -2065,11 +2066,13 @@ export function StreamPage() {
       // Pipeline chain: preprocessors + main pipeline (already built above)
       initialParameters.pipeline_ids = pipelineIds;
 
-      // Media modalities from pipeline status — used by WebRTC to decide
-      // which tracks and transceivers to create (avoids unnecessary audio
-      // negotiation for video-only pipelines, and vice versa).
-      initialParameters.produces_video = pipelineInfo?.produces_video ?? true;
-      initialParameters.produces_audio = pipelineInfo?.produces_audio ?? false;
+      // Media modalities from pipeline status — used by the backend to decide
+      // which tracks to create (avoids unnecessary audio processing for
+      // video-only pipelines, and vice versa). Read from the ref (not React
+      // state) to guarantee fresh values in the same tick loadPipeline resolved.
+      const latestInfo = pipelineInfoRef.current;
+      initialParameters.produces_video = latestInfo?.produces_video ?? true;
+      initialParameters.produces_audio = latestInfo?.produces_audio ?? false;
 
       // VACE-specific parameters
       if (currentPipeline?.supportsVACE) {
