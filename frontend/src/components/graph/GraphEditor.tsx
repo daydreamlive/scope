@@ -46,6 +46,7 @@ import { SubgraphNode } from "./nodes/SubgraphNode";
 import { SubgraphInputNode } from "./nodes/SubgraphInputNode";
 import { SubgraphOutputNode } from "./nodes/SubgraphOutputNode";
 import { RecordNode } from "./nodes/RecordNode";
+import { GenericCustomNode } from "./nodes/GenericCustomNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -102,6 +103,7 @@ const nodeTypes = {
   subgraph_input: SubgraphInputNode,
   subgraph_output: SubgraphOutputNode,
   record: RecordNode,
+  generic_custom: GenericCustomNode,
 };
 
 const edgeTypes = {

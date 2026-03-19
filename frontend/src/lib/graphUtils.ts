@@ -95,7 +95,10 @@ export interface FlowNodeData {
     | "subgraph"
     | "subgraph_input"
     | "subgraph_output"
-    | "record";
+    | "record"
+    | (string & {}); // Allow plugin-provided custom node types
+  /** Backend node definition for plugin-provided custom nodes (GenericCustomNode) */
+  _backendDefinition?: Record<string, unknown>;
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];

@@ -783,6 +783,85 @@ async def get_pipeline_schemas(
 
 
 # ---------------------------------------------------------------------------
+# Node / Graph endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/nodes")
+async def list_node_types():
+    """Return all registered node type definitions (ports, categories, metadata).
+
+    The frontend uses this to populate the add-node catalog including
+    plugin-provided custom nodes.
+    """
+    from scope.core.nodes.registry import NodeRegistry
+
+    definitions = NodeRegistry.get_all_definitions()
+    return {"nodes": [d.model_dump() for d in definitions]}
+
+
+@app.post("/api/v1/graph")
+async def submit_graph(request: Request):
+    """Submit or update a graph definition to start/update graph execution.
+
+    Expects a JSON body matching ``GraphDefinition`` schema.
+    """
+    from scope.core.nodes.schema import GraphDefinition
+
+    body = await request.json()
+    graph_def = GraphDefinition.model_validate(body)
+
+    webrtc_mgr: WebRTCManager = app.state.webrtc_manager
+    tempo_sync = getattr(app.state, "tempo_sync", None)
+
+    # Apply to all active sessions
+    started = 0
+    for session in webrtc_mgr.sessions.values():
+        graph_session = getattr(session, "graph_session", None)
+        if graph_session is None:
+            from scope.server.graph_session import GraphSession
+
+            pipeline_param_cb = None
+            if session.video_track and hasattr(session.video_track, "frame_processor"):
+
+                def _make_cb(fp):
+                    def cb(pipeline_id, params):
+                        fp.update_parameters(params)
+
+                    return cb
+
+                pipeline_param_cb = _make_cb(session.video_track.frame_processor)
+
+            graph_session = GraphSession(
+                session_id=session.id,
+                tempo_sync=tempo_sync,
+                notification_callback=session.notification_sender.call,
+                pipeline_param_callback=pipeline_param_cb,
+            )
+            session.graph_session = graph_session
+
+        graph_session.load_and_start(graph_def)
+        started += 1
+
+    return {"status": "ok", "sessions": started}
+
+
+@app.delete("/api/v1/graph")
+async def stop_graph():
+    """Stop graph execution and clean up all graph sessions."""
+    webrtc_mgr: WebRTCManager = app.state.webrtc_manager
+    stopped = 0
+    for session in webrtc_mgr.sessions.values():
+        graph_session = getattr(session, "graph_session", None)
+        if graph_session is not None:
+            graph_session.stop()
+            session.graph_session = None
+            stopped += 1
+
+    return {"status": "ok", "sessions": stopped}
+
+
+# ---------------------------------------------------------------------------
 # OSC endpoints
 # ---------------------------------------------------------------------------
 

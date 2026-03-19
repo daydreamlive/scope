@@ -7,57 +7,24 @@ import {
   DialogDescription,
 } from "../ui/dialog";
 
+/** Plugin node definition from the backend `/api/v1/nodes` endpoint. */
+export interface PluginNodeCatalogItem {
+  node_type_id: string;
+  display_name: string;
+  category: string;
+  description?: string;
+}
+
 interface AddNodeModalProps {
   open: boolean;
   onClose: () => void;
-  onSelectNodeType: (
-    type:
-      | "source"
-      | "pipeline"
-      | "sink"
-      | "primitive"
-      | "control"
-      | "math"
-      | "note"
-      | "output"
-      | "slider"
-      | "knobs"
-      | "xypad"
-      | "tuple"
-      | "reroute"
-      | "image"
-      | "vace"
-      | "midi"
-      | "bool"
-      | "trigger"
-      | "subgraph"
-      | "record",
-    subType?: string
-  ) => void;
+  onSelectNodeType: (type: string, subType?: string) => void;
+  /** Plugin-provided nodes fetched from the backend */
+  pluginNodes?: PluginNodeCatalogItem[];
 }
 
 interface NodeCatalogItem {
-  type:
-    | "source"
-    | "pipeline"
-    | "sink"
-    | "primitive"
-    | "control"
-    | "math"
-    | "note"
-    | "output"
-    | "slider"
-    | "knobs"
-    | "xypad"
-    | "tuple"
-    | "reroute"
-    | "image"
-    | "vace"
-    | "midi"
-    | "bool"
-    | "trigger"
-    | "subgraph"
-    | "record";
+  type: string;
   subType?: string;
   name: string;
   description: string;
@@ -330,17 +297,53 @@ function NodeTile({
   );
 }
 
+const CATEGORY_COLOR_MAP: Record<string, string> = {
+  math: "#38bdf8",
+  control: "#38bdf8",
+  input: "#4ade80",
+  output: "#fb923c",
+  pipeline: "#60a5fa",
+  utility: "#9ca3af",
+};
+
 export function AddNodeModal({
   open,
   onClose,
   onSelectNodeType,
+  pluginNodes,
 }: AddNodeModalProps) {
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
 
+  // Merge built-in catalog with plugin-provided nodes
+  const fullCatalog = useMemo(() => {
+    const catalog = [...NODE_CATALOG];
+    if (pluginNodes) {
+      // Only add plugin nodes whose type isn't already a built-in
+      const builtinTypes = new Set(NODE_CATALOG.map(item => item.type));
+      for (const pn of pluginNodes) {
+        if (!builtinTypes.has(pn.node_type_id)) {
+          catalog.push({
+            type: pn.node_type_id,
+            name: pn.display_name,
+            description: pn.description || "",
+            color: CATEGORY_COLOR_MAP[pn.category] || "#6366f1",
+            category: "Plugins",
+          });
+        }
+      }
+    }
+    return catalog;
+  }, [pluginNodes]);
+
+  const categories = useMemo(() => {
+    const hasPlugins = fullCatalog.some(item => item.category === "Plugins");
+    return hasPlugins ? [...CATEGORIES, "Plugins"] : CATEGORIES;
+  }, [fullCatalog]);
+
   const filteredItems = useMemo(() => {
     const lowerSearch = searchText.toLowerCase();
-    return NODE_CATALOG.filter(item => {
+    return fullCatalog.filter(item => {
       const matchesSearch =
         !lowerSearch ||
         item.name.toLowerCase().includes(lowerSearch) ||
@@ -349,7 +352,7 @@ export function AddNodeModal({
         activeCategory === "All" || item.category === activeCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [searchText, activeCategory]);
+  }, [searchText, activeCategory, fullCatalog]);
 
   const handleSelect = (item: NodeCatalogItem) => {
     onSelectNodeType(item.type, item.subType);
@@ -404,7 +407,7 @@ export function AddNodeModal({
 
           {/* Category tabs */}
           <div className="flex items-center gap-1.5 px-4 py-2 border-b border-[rgba(119,119,119,0.12)]">
-            {CATEGORIES.map(cat => (
+            {categories.map(cat => (
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}

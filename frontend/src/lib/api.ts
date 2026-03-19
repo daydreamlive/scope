@@ -1284,3 +1284,39 @@ export const getTempoSources = async (): Promise<TempoSourcesResponse> => {
   }
   return response.json();
 };
+
+// ---------------------------------------------------------------------------
+// Node definitions (graph engine)
+// ---------------------------------------------------------------------------
+
+export interface BackendNodePort {
+  name: string;
+  port_type: string;
+  default_value?: unknown;
+  label?: string;
+  min_value?: number;
+  max_value?: number;
+}
+
+export interface BackendNodeDefinition {
+  node_type_id: string;
+  display_name: string;
+  category: string;
+  description?: string;
+  inputs: BackendNodePort[];
+  outputs: BackendNodePort[];
+  is_animated?: boolean;
+  is_stream_node?: boolean;
+}
+
+export interface NodeDefinitionsResponse {
+  nodes: BackendNodeDefinition[];
+}
+
+export async function getNodeDefinitions(): Promise<NodeDefinitionsResponse> {
+  const response = await fetch("/api/v1/nodes");
+  if (!response.ok) {
+    throw new Error(`Failed to fetch node definitions: ${response.statusText}`);
+  }
+  return response.json();
+}

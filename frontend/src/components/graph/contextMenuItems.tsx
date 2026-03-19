@@ -34,30 +34,7 @@ import type { ContextMenuItem } from "./ContextMenu";
 
 /* ── Pane (canvas) context menu ──────────────────────────────────────────── */
 
-type NodeTypeSelectFn = (
-  type:
-    | "source"
-    | "pipeline"
-    | "sink"
-    | "primitive"
-    | "control"
-    | "math"
-    | "note"
-    | "output"
-    | "slider"
-    | "knobs"
-    | "xypad"
-    | "tuple"
-    | "reroute"
-    | "image"
-    | "vace"
-    | "midi"
-    | "bool"
-    | "trigger"
-    | "subgraph"
-    | "record",
-  subType?: string
-) => void;
+type NodeTypeSelectFn = (type: string, subType?: string) => void;
 
 export function buildPaneMenuItems(deps: {
   handleNodeTypeSelect: NodeTypeSelectFn;

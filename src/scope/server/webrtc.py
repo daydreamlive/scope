@@ -74,10 +74,16 @@ class Session:
         self.connection_info = connection_info
         self.notification_sender = None
         self.tempo_sync = None
+        self.graph_session = None
 
     async def close(self):
         """Close this session and cleanup resources."""
         try:
+            # Stop graph engine before video track
+            if self.graph_session is not None:
+                self.graph_session.stop()
+                self.graph_session = None
+
             if self.tempo_sync is not None and self.notification_sender is not None:
                 self.tempo_sync.unregister_notification_session(
                     self.notification_sender
@@ -136,7 +142,7 @@ class NotificationSender:
                 def send_sync():
                     try:
                         self.data_channel.send(message_str)
-                        if message.get("type") != "tempo_update":
+                        if message.get("type") not in ("tempo_update", "node_values"):
                             logger.info(f"Sent notification to frontend: {message}")
                     except Exception as e:
                         logger.error(f"Failed to send notification: {e}")
@@ -366,6 +372,57 @@ class WebRTCManager:
                         # Parse the JSON message
                         data = json.loads(message)
                         logger.debug(f"Received parameter update: {data}")
+
+                        msg_type = data.get("type")
+
+                        # --------------------------------------------------
+                        # Graph engine messages
+                        # --------------------------------------------------
+                        if msg_type == "node_event":
+                            graph_session = getattr(session, "graph_session", None)
+                            if graph_session is not None:
+                                graph_session.handle_event(
+                                    data["node_id"],
+                                    data["event_type"],
+                                    data.get("payload", {}),
+                                )
+                            return
+
+                        if msg_type == "graph_update":
+                            from scope.core.nodes.schema import GraphDefinition
+                            from scope.server.graph_session import GraphSession
+
+                            graph_def = GraphDefinition.model_validate(data["graph"])
+                            graph_session = getattr(session, "graph_session", None)
+                            if graph_session is None:
+                                pipeline_param_cb = None
+                                if session.video_track and hasattr(
+                                    session.video_track, "frame_processor"
+                                ):
+                                    fp = session.video_track.frame_processor
+
+                                    def _make_cb(_fp):
+                                        def cb(pipeline_id, params):
+                                            _fp.update_parameters(params)
+
+                                        return cb
+
+                                    pipeline_param_cb = _make_cb(fp)
+
+                                graph_session = GraphSession(
+                                    session_id=session.id,
+                                    tempo_sync=tempo_sync,
+                                    notification_callback=notification_sender.call,
+                                    pipeline_param_callback=pipeline_param_cb,
+                                )
+                                session.graph_session = graph_session
+
+                            graph_session.update_graph(graph_def)
+                            return
+
+                        # --------------------------------------------------
+                        # Existing parameter update path (backward compatible)
+                        # --------------------------------------------------
 
                         # Always handle paused immediately (before quantized
                         # scheduling) so pause/unpause is never delayed.
