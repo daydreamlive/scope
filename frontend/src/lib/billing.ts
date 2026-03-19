@@ -114,3 +114,25 @@ export async function setOverageEnabled(
   });
   if (!res.ok) throw new Error(`Failed to set overage: ${res.status}`);
 }
+
+export interface RedeemCodeResponse {
+  credits: number;
+  label: string | null;
+  newBalance: number;
+}
+
+export async function redeemCreditCode(
+  apiKey: string,
+  code: string,
+): Promise<RedeemCodeResponse> {
+  const res = await fetch(`${DAYDREAM_API_BASE}/credits/codes/redeem`, {
+    method: "POST",
+    headers: headers(apiKey),
+    body: JSON.stringify({ code }),
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    throw new Error(body?.message ?? `Failed to redeem code: ${res.status}`);
+  }
+  return res.json();
+}
