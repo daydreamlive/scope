@@ -725,7 +725,11 @@ class WebRTCManager:
                 continue
             if "paused" in parameters and session.video_track:
                 session.video_track.pause(parameters["paused"])
-            if session.video_track and hasattr(session.video_track, "frame_processor"):
+            if (
+                session.video_track
+                and hasattr(session.video_track, "frame_processor")
+                and session.video_track.frame_processor
+            ):
                 session.video_track.frame_processor.update_parameters(parameters)
         if self.headless_session and self.headless_session.frame_processor:
             self.headless_session.frame_processor.update_parameters(parameters)

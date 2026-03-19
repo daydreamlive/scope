@@ -24,6 +24,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<VideoSourceMode>("video");
+  const modeRef = useRef<VideoSourceMode>("video");
   const [selectedVideoFile, setSelectedVideoFile] = useState<string | File>(
     "/assets/test.mp4"
   );
@@ -189,11 +190,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
 
   const switchMode = useCallback(
     async (newMode: VideoSourceMode) => {
-      // Don't switch modes if not enabled
-      if (!props?.enabled) {
-        return;
-      }
-
+      modeRef.current = newMode;
       setMode(newMode);
       setError(null);
 
@@ -330,7 +327,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     setIsInitializing(true);
     setError(null);
 
-    // Ensure we're in video mode when reinitializing
+    modeRef.current = "video";
     setMode("video");
 
     try {
@@ -369,10 +366,16 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       setIsInitializing(true);
       try {
         const stream = await createVideoFileStream(FPS);
-        setLocalStream(stream);
+        if (modeRef.current === "video") {
+          setLocalStream(stream);
+        } else {
+          stream.getTracks().forEach(track => track.stop());
+        }
       } catch (error) {
-        console.error("Failed to create initial video file stream:", error);
-        setError("Failed to load test video");
+        if (modeRef.current === "video") {
+          console.error("Failed to create initial video file stream:", error);
+          setError("Failed to load test video");
+        }
       } finally {
         setIsInitializing(false);
       }

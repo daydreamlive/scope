@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { X, Upload } from "lucide-react";
+import { X, Upload, Film } from "lucide-react";
 import { Button } from "./ui/button";
 import {
   listAssets,
@@ -9,11 +9,28 @@ import {
 } from "../lib/api";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 
+const VIDEO_EXTENSIONS = new Set([
+  ".mp4",
+  ".webm",
+  ".mov",
+  ".avi",
+  ".mkv",
+  ".m4v",
+]);
+
+/** Returns true when the file path / name looks like a video. */
+export function isVideoAsset(path: string): boolean {
+  const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
+  return VIDEO_EXTENSIONS.has(ext);
+}
+
 interface MediaPickerProps {
   isOpen: boolean;
   onClose: () => void;
   onSelectImage: (imagePath: string) => void;
   disabled?: boolean;
+  /** Which asset types to show. Default "image". */
+  accept?: "image" | "video" | "all";
 }
 
 export function MediaPicker({
@@ -21,20 +38,34 @@ export function MediaPicker({
   onClose,
   onSelectImage,
   disabled,
+  accept = "image",
 }: MediaPickerProps) {
-  const [images, setImages] = useState<AssetFileInfo[]>([]);
+  const [assets, setAssets] = useState<AssetFileInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
-  const loadImages = async () => {
+  const loadAssets = async () => {
     setIsLoading(true);
     try {
-      const response = await listAssets("image");
-      setImages(response.assets);
+      if (accept === "all") {
+        // Fetch both image and video assets
+        const [imgRes, vidRes] = await Promise.all([
+          listAssets("image"),
+          listAssets("video"),
+        ]);
+        // Merge and sort by created_at descending
+        const merged = [...imgRes.assets, ...vidRes.assets].sort(
+          (a, b) => b.created_at - a.created_at
+        );
+        setAssets(merged);
+      } else {
+        const response = await listAssets(accept);
+        setAssets(response.assets);
+      }
     } catch (error) {
-      console.error("loadImages: Failed to load images:", error);
+      console.error("loadAssets: Failed to load assets:", error);
     } finally {
       setIsLoading(false);
     }
@@ -42,11 +73,11 @@ export function MediaPicker({
 
   useEffect(() => {
     if (isOpen) {
-      loadImages();
+      loadAssets();
     }
   }, [isOpen]);
 
-  // Refresh image list when cloud connection state changes while picker is open
+  // Refresh asset list when cloud connection state changes while picker is open
   const { isConnected: isCloudConnected } = useCloudStatus();
   const prevCloudConnectedRef = useRef<boolean | null>(null);
 
@@ -57,13 +88,13 @@ export function MediaPicker({
       return;
     }
 
-    // If connection state changed and picker is open, reload images
+    // If connection state changed and picker is open, reload assets
     if (prevCloudConnectedRef.current !== isCloudConnected && isOpen) {
-      loadImages();
+      loadAssets();
     }
 
     prevCloudConnectedRef.current = isCloudConnected;
-  }, [isCloudConnected, isOpen, loadImages]);
+  }, [isCloudConnected, isOpen, loadAssets]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -86,22 +117,33 @@ export function MediaPicker({
     fileInputRef.current?.click();
   };
 
+  // Build the accept attribute and allowed MIME types based on `accept` prop
+  const imageTypes = [
+    "image/png",
+    "image/jpeg",
+    "image/jpg",
+    "image/webp",
+    "image/bmp",
+  ];
+  const videoTypes = ["video/mp4", "video/webm", "video/quicktime"];
+
+  const allowedTypes =
+    accept === "all"
+      ? [...imageTypes, ...videoTypes]
+      : accept === "video"
+        ? videoTypes
+        : imageTypes;
+  const fileAcceptAttr = allowedTypes.join(",");
+
   const handleFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>
   ) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
-    const allowedTypes = [
-      "image/png",
-      "image/jpeg",
-      "image/jpg",
-      "image/webp",
-      "image/bmp",
-    ];
     if (!allowedTypes.includes(file.type)) {
       console.error(
-        "handleFileUpload: Invalid file type. Allowed types: PNG, JPEG, JPG, WEBP, BMP"
+        `handleFileUpload: Invalid file type "${file.type}". Allowed: ${allowedTypes.join(", ")}`
       );
       return;
     }
@@ -117,10 +159,10 @@ export function MediaPicker({
     setIsUploading(true);
     try {
       const uploadedFile = await uploadAsset(file);
-      await loadImages();
+      await loadAssets();
       onSelectImage(uploadedFile.path);
     } catch (error) {
-      console.error("handleFileUpload: Failed to upload image:", error);
+      console.error("handleFileUpload: Failed to upload asset:", error);
     } finally {
       setIsUploading(false);
       if (fileInputRef.current) {
@@ -129,11 +171,17 @@ export function MediaPicker({
     }
   };
 
-  const handleSelectImage = (imagePath: string) => {
-    onSelectImage(imagePath);
+  const handleSelectAsset = (path: string) => {
+    onSelectImage(path);
   };
 
   if (!isOpen) return null;
+
+  const titleMap = {
+    image: "Image Picker",
+    video: "Video Picker",
+    all: "Media Picker",
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
@@ -142,7 +190,7 @@ export function MediaPicker({
         className="bg-card border rounded-lg shadow-lg p-6 max-w-2xl w-full mx-4"
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">Media Picker</h2>
+          <h2 className="text-lg font-semibold">{titleMap[accept]}</h2>
           <Button
             size="sm"
             variant="ghost"
@@ -155,7 +203,7 @@ export function MediaPicker({
 
         <input
           type="file"
-          accept="image/png,image/jpeg,image/jpg,image/webp,image/bmp"
+          accept={fileAcceptAttr}
           onChange={handleFileUpload}
           className="hidden"
           ref={fileInputRef}
@@ -164,7 +212,7 @@ export function MediaPicker({
 
         {isLoading ? (
           <div className="text-center py-12 text-muted-foreground">
-            Loading images...
+            Loading assets...
           </div>
         ) : (
           <div className="max-h-96 overflow-y-auto">
@@ -180,26 +228,38 @@ export function MediaPicker({
                 </span>
               </button>
 
-              {images.map(image => (
-                <button
-                  key={image.path}
-                  onClick={() => handleSelectImage(image.path)}
-                  disabled={disabled}
-                  className="aspect-square border rounded-lg overflow-hidden hover:ring-2 hover:ring-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all relative"
-                  title={image.name}
-                >
-                  <img
-                    src={getAssetUrl(image.path)}
-                    alt={image.name}
-                    className="w-full h-full object-cover"
-                    loading="lazy"
-                  />
-                </button>
-              ))}
+              {assets.map(asset => {
+                const isVideo = isVideoAsset(asset.name);
+                return (
+                  <button
+                    key={asset.path}
+                    onClick={() => handleSelectAsset(asset.path)}
+                    disabled={disabled}
+                    className="aspect-square border rounded-lg overflow-hidden hover:ring-2 hover:ring-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all relative"
+                    title={asset.name}
+                  >
+                    {isVideo ? (
+                      <div className="w-full h-full flex flex-col items-center justify-center bg-[#1a1a1a]">
+                        <Film className="h-10 w-10 text-blue-400 mb-1" />
+                        <span className="text-[10px] text-[#999] truncate max-w-[90%] px-1">
+                          {asset.name}
+                        </span>
+                      </div>
+                    ) : (
+                      <img
+                        src={getAssetUrl(asset.path)}
+                        alt={asset.name}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    )}
+                  </button>
+                );
+              })}
 
-              {images.length === 0 && (
+              {assets.length === 0 && (
                 <div className="col-span-2 text-center py-8 text-muted-foreground text-sm">
-                  No images found. Upload an image to get started.
+                  No assets found. Upload to get started.
                 </div>
               )}
             </div>
@@ -207,9 +267,9 @@ export function MediaPicker({
         )}
 
         <p className="text-xs text-muted-foreground mt-4">
-          {images.length > 0
-            ? `${images.length} images available, sorted by most recent`
-            : "No images available"}
+          {assets.length > 0
+            ? `${assets.length} assets available, sorted by most recent`
+            : "No assets available"}
         </p>
       </div>
     </div>
