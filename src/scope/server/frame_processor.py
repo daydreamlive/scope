@@ -567,11 +567,24 @@ class FrameProcessor:
 
         Converts the AudioFrame to a torch tensor and queues it for
         AudioProcessingTrack to consume via get_audio().
+
+        Packed formats (s16) store interleaved channels in a single plane,
+        so to_ndarray() returns (1, samples*channels).  We de-interleave
+        into (channels, samples) so AudioProcessingTrack sees the correct
+        channel count and doesn't erroneously duplicate data.
         """
         try:
-            audio_np = frame.to_ndarray()  # shape: (channels, samples) for planar
+            n_channels = len(frame.layout.channels)
+            audio_np = frame.to_ndarray()
             if audio_np.ndim == 1:
                 audio_np = audio_np.reshape(1, -1)
+
+            # Packed formats (e.g. s16) have 1 plane with interleaved channels:
+            # [L0, R0, L1, R1, ...].  De-interleave into (channels, samples).
+            if audio_np.shape[0] == 1 and n_channels > 1:
+                flat = audio_np.ravel()
+                audio_np = flat.reshape(-1, n_channels).T
+
             audio_tensor = torch.from_numpy(audio_np.astype(np.float32))
 
             # Normalise int16 range to [-1, 1] float if needed
