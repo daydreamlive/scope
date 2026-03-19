@@ -1,14 +1,20 @@
+from __future__ import annotations
+
 import asyncio
 import fractions
 import logging
 import threading
 import time
+from typing import TYPE_CHECKING
 
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import VideoFrame
 
 from .pipeline_manager import PipelineManager
+
+if TYPE_CHECKING:
+    from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +33,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         connection_id: str | None = None,
         connection_info: dict | None = None,
         tempo_sync=None,
-        frame_processor: "FrameProcessor | None" = None,
+        frame_processor: FrameProcessor | None = None,
     ):
         super().__init__()
         self.pipeline_manager = pipeline_manager
