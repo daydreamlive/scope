@@ -1,15 +1,20 @@
+from __future__ import annotations
+
 import asyncio
 import fractions
 import logging
 import threading
 import time
+from typing import TYPE_CHECKING
 
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import VideoFrame
 
-from .frame_processor import FrameProcessor
 from .pipeline_manager import PipelineManager
+
+if TYPE_CHECKING:
+    from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +33,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         connection_id: str | None = None,
         connection_info: dict | None = None,
         tempo_sync=None,
+        frame_processor: FrameProcessor | None = None,
     ):
         super().__init__()
         self.pipeline_manager = pipeline_manager
@@ -42,12 +48,14 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.fps = fps
         self.frame_ptime = 1.0 / fps
 
-        self.frame_processor = None
+        self.frame_processor = frame_processor
         self.input_task = None
         self.input_task_running = False
         self._paused = False
         self._paused_lock = threading.Lock()
         self._last_frame = None
+        self._last_send_time: float | None = None
+        self._pts: int = 0
         self._frame_lock = threading.Lock()
 
         # Server-side input mode - when enabled, frames come from the backend
@@ -94,47 +102,30 @@ class VideoProcessingTrack(MediaStreamTrack):
                 )
                 await asyncio.sleep(0.01)
 
-    # Copied from https://github.com/livepeer/fastworld/blob/e649ef788cd33d78af6d8e1da915cd933761535e/backend/track.py#L267
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
-        """Override to control frame rate"""
+        """Pace output at the target frame rate and return a monotonic PTS."""
         if self.readyState != "live":
             raise MediaStreamError
 
-        if hasattr(self, "timestamp"):
-            # Calculate wait time based on current frame rate
-            current_time = time.time()
-            time_since_last_frame = current_time - self.last_frame_time
+        # Pace frames at the target interval
+        if self._last_send_time is not None:
+            elapsed = time.time() - self._last_send_time
+            wait = self.frame_ptime - elapsed
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._pts += int(self.frame_ptime * VIDEO_CLOCK_RATE)
 
-            # Wait for the appropriate interval based on current FPS
-            target_interval = self.frame_ptime  # Current frame period
-            wait_time = target_interval - time_since_last_frame
+        self._last_send_time = time.time()
 
-            if wait_time > 0:
-                await asyncio.sleep(wait_time)
-
-            # Update timestamp and last frame time
-            self.timestamp += int(self.frame_ptime * VIDEO_CLOCK_RATE)
-            self.last_frame_time = time.time()
-        else:
-            self.start = time.time()
-            self.last_frame_time = time.time()
-            self.timestamp = 0
-
-        return self.timestamp, VIDEO_TIME_BASE
+        return self._pts, VIDEO_TIME_BASE
 
     def initialize_output_processing(self):
+        """No-op guard; FrameProcessor is injected via constructor."""
         if not self.frame_processor:
-            self.frame_processor = FrameProcessor(
-                pipeline_manager=self.pipeline_manager,
-                initial_parameters=self.initial_parameters,
-                notification_callback=self.notification_callback,
-                session_id=self.session_id,
-                user_id=self.user_id,
-                connection_id=self.connection_id,
-                connection_info=self.connection_info,
-                tempo_sync=self.tempo_sync,
+            raise RuntimeError(
+                "VideoProcessingTrack requires a FrameProcessor. "
+                "Pass one via the constructor."
             )
-            self.frame_processor.start()
 
     def initialize_input_processing(self, track: MediaStreamTrack):
         self.track = track
@@ -198,6 +189,10 @@ class VideoProcessingTrack(MediaStreamTrack):
         with self._paused_lock:
             self._paused = paused
 
+        # Propagate to frame_processor so AudioProcessingTrack can check it
+        if self.frame_processor:
+            self.frame_processor.paused = paused
+
         logger.info(f"Video track {'paused' if paused else 'resumed'}")
 
     async def stop(self):
@@ -211,7 +206,7 @@ class VideoProcessingTrack(MediaStreamTrack):
             except asyncio.CancelledError:
                 pass
 
-        if self.frame_processor is not None:
-            self.frame_processor.stop()
+        # Note: frame_processor.stop() is handled by Session.close(),
+        # not here, because the FrameProcessor is shared with AudioProcessingTrack.
 
         super().stop()

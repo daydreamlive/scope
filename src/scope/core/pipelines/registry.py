@@ -96,6 +96,37 @@ class PipelineRegistry:
         """
         return list(cls._pipelines.keys())
 
+    @classmethod
+    def chain_produces_video(cls, pipeline_ids: list[str]) -> bool:
+        """Check whether the pipeline chain produces video output.
+
+        Returns True (the default) unless the *last* pipeline in the chain
+        explicitly declares ``produces_video = False`` in its config.
+        """
+        if not pipeline_ids:
+            return True
+
+        # The last pipeline in the chain determines the final output modality
+        last_id = pipeline_ids[-1]
+        config_cls = cls.get_config_class(last_id)
+        if config_cls is None:
+            return True
+        return getattr(config_cls, "produces_video", True)
+
+    @classmethod
+    def chain_produces_audio(cls, pipeline_ids: list[str]) -> bool:
+        """Check whether any pipeline in the chain produces audio output.
+
+        Returns True if *any* pipeline in the chain declares
+        ``produces_audio = True`` in its config.  Returns False (the default)
+        otherwise, so the server can skip creating an AudioProcessingTrack.
+        """
+        for pid in pipeline_ids:
+            config_cls = cls.get_config_class(pid)
+            if config_cls is not None and getattr(config_cls, "produces_audio", False):
+                return True
+        return False
+
 
 def _get_gpu_vram_gb() -> float | None:
     """Get total GPU VRAM in GB if available.

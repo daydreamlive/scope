@@ -435,6 +435,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
+    pipelineInfoRef,
     loadingStage: pipelineLoadingStage,
   } = usePipeline();
 
@@ -2025,6 +2026,8 @@ export function StreamPage() {
         vace_context_scale?: number;
         vace_enabled?: boolean;
         pipeline_ids?: string[];
+        produces_video?: boolean;
+        produces_audio?: boolean;
         first_frame_image?: string;
         last_frame_image?: string;
         images?: string[];
@@ -2062,6 +2065,14 @@ export function StreamPage() {
 
       // Pipeline chain: preprocessors + main pipeline (already built above)
       initialParameters.pipeline_ids = pipelineIds;
+
+      // Media modalities from pipeline status — used by the backend to decide
+      // which tracks to create (avoids unnecessary audio processing for
+      // video-only pipelines, and vice versa). Read from the ref (not React
+      // state) to guarantee fresh values in the same tick loadPipeline resolved.
+      const latestInfo = pipelineInfoRef.current;
+      initialParameters.produces_video = latestInfo?.produces_video ?? true;
+      initialParameters.produces_audio = latestInfo?.produces_audio ?? false;
 
       // VACE-specific parameters
       if (currentPipeline?.supportsVACE) {

@@ -75,6 +75,12 @@ class PipelineProcessor:
         # Lock to protect input_queues assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
 
+        # Audio output queue: (audio_tensor, sample_rate) tuples.
+        # Consumed by FrameProcessor.get_audio() on the sink processor.
+        self.audio_output_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
+            maxsize=30
+        )
+
         # Current parameters used by processing thread
         self.parameters = initial_parameters or {}
         # Queue for parameter updates from external threads
@@ -113,6 +119,11 @@ class PipelineProcessor:
         # Beat-synced cache reset: fire init_cache=True at rhythmic intervals
         self._beat_cache_reset_rate: str = "none"
         self._last_reset_boundary: int = -1
+
+        # Native frame rate reported by the pipeline (e.g. 24fps for LTX-2).
+        # When set, get_fps() returns this instead of the measured production rate,
+        # giving the video track a stable playback speed for A/V sync.
+        self.native_fps: float | None = None
 
     def set_beat_cache_reset_rate(self, rate: str) -> None:
         """Set the beat-synced cache reset rate and reset the boundary tracker."""
@@ -428,6 +439,25 @@ class PipelineProcessor:
             if not output_dict:
                 return
 
+            # Pass audio to output queue regardless of whether video exists.
+            # This ensures audio-only pipelines can deliver audio.
+            audio_output = output_dict.get("audio")
+            audio_sample_rate = output_dict.get("audio_sample_rate")
+            if audio_output is not None and audio_sample_rate is not None:
+                try:
+                    audio_cpu = audio_output.detach().cpu()
+                    self.audio_output_queue.put_nowait((audio_cpu, audio_sample_rate))
+                except queue.Full:
+                    logger.warning(
+                        "Audio output queue full for %s, dropping audio chunk",
+                        self.pipeline_id,
+                    )
+
+            # Extract video from the returned dictionary
+            output = output_dict.get("video")
+            if output is None:
+                return
+
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
             # These parameters should only be sent when explicitly provided in parameter updates
             one_shot_params = [
@@ -452,7 +482,6 @@ class PipelineProcessor:
                 if not transition_active or transition is None:
                     self.parameters.pop("transition", None)
 
-            output = output_dict.get("video")
             num_frames = 0
             if output is not None:
                 num_frames = output.shape[0]
@@ -489,6 +518,14 @@ class PipelineProcessor:
                             logger.debug(
                                 f"Output queue full for {self.pipeline_id} port '{port}', dropping frame"
                             )
+
+            # Latch native frame rate for stable playback speed.
+            # Check output dict first, then pipeline config as fallback.
+            frame_rate = output_dict.get("frame_rate")
+            if frame_rate is None and hasattr(self.pipeline, "config"):
+                frame_rate = getattr(self.pipeline.config, "frame_rate", None)
+            if frame_rate is not None and float(frame_rate) > 0:
+                self.native_fps = float(frame_rate)
 
             # Track batch-level throughput for FPS calculation
             if output is not None and num_frames > 0:
@@ -601,11 +638,14 @@ class PipelineProcessor:
                     self.current_output_fps = max(MIN_FPS, min(MAX_FPS, fps))
 
     def get_fps(self) -> float:
-        """Get the current dynamically calculated pipeline FPS.
+        """Get the playback FPS for this pipeline's output.
 
-        Returns the FPS based on how fast frames are produced into the output queue,
-        adjusted for queue fill level to prevent buildup.
+        If the pipeline reports a native frame rate (e.g. 24fps for LTX-2),
+        that value is returned for stable playback. Otherwise falls back to
+        the measured production rate.
         """
+        if self.native_fps is not None:
+            return self.native_fps
         with self.output_fps_lock:
             output_fps = self.current_output_fps
         return min(MAX_FPS, output_fps)

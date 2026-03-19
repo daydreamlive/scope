@@ -113,18 +113,60 @@ class TimestampNormalizingTrack(MediaStreamTrack):
         super().stop()
 
 
+class AudioTimestampNormalizingTrack(MediaStreamTrack):
+    """Wraps an audio track and normalizes frame timestamps to start from 0.
+
+    Analogous to TimestampNormalizingTrack but for AudioFrame objects.
+    Unlike video, audio frames are not rate-limited here because the
+    source AudioProcessingTrack already paces at 20ms intervals.
+    """
+
+    kind = "audio"
+
+    def __init__(self, source_track: MediaStreamTrack):
+        super().__init__()
+        self._source = source_track
+        self._base_pts = None
+
+    async def recv(self):
+        from av import AudioFrame as AvAudioFrame
+
+        frame = await self._source.recv()
+
+        if self._base_pts is None:
+            self._base_pts = frame.pts
+
+        # Create a copy with normalized PTS (relay shares frame objects,
+        # so we must not mutate in place).
+        new_frame = AvAudioFrame(
+            format=frame.format.name,
+            layout=frame.layout.name,
+            samples=frame.samples,
+        )
+        new_frame.sample_rate = frame.sample_rate
+        new_frame.pts = frame.pts - self._base_pts
+        new_frame.time_base = frame.time_base
+        for i, plane in enumerate(frame.planes):
+            new_frame.planes[i].update(bytes(plane))
+        return new_frame
+
+    def stop(self):
+        self._source.stop()
+        super().stop()
+
+
 class RecordingManager:
-    """Manages recording functionality for a video track."""
+    """Manages recording functionality for video and/or audio tracks."""
 
-    def __init__(self, video_track: MediaStreamTrack):
-        """
-        Initialize the recording manager.
-
-        Args:
-            video_track: The video track to record from
-        """
+    def __init__(
+        self,
+        video_track: MediaStreamTrack | None = None,
+        audio_track: MediaStreamTrack | None = None,
+    ):
         self.video_track = video_track
+        self.audio_track = audio_track
         self.relay = None
+        self.audio_relay = None
 
         # Recording state
         self.recording_file = None
@@ -132,14 +174,19 @@ class RecordingManager:
         self.recording_started = False
         self.recording_lock = threading.Lock()
         self.recording_track = None
+        self.audio_recording_track = None
 
         # Max length tracking
         self.first_recording_start_time = None
         self.max_length_reached = False
 
     def set_relay(self, relay: MediaRelay):
-        """Set the MediaRelay instance for creating recording track."""
+        """Set the MediaRelay instance for creating video recording track."""
         self.relay = relay
+
+    def set_audio_relay(self, relay: MediaRelay):
+        """Set the MediaRelay instance for creating audio recording track."""
+        self.audio_relay = relay
 
     @staticmethod
     def _create_temp_file(suffix: str, prefix: str) -> str:
@@ -158,18 +205,37 @@ class RecordingManager:
             except Exception as e:
                 logger.warning(f"Error stopping recording track: {e}")
 
-    def _create_recording_track(self) -> MediaStreamTrack:
-        """Create a recording track from the video track.
+    def _create_recording_track(self) -> MediaStreamTrack | None:
+        """Create a video recording track.
 
-        The track is wrapped in TimestampNormalizingTrack to ensure frame
-        timestamps start from 0 for each new recording.
+        Returns None if no video track is configured.  The track is wrapped
+        in TimestampNormalizingTrack to ensure frame timestamps start from 0
+        for each new recording.
         """
+        if self.video_track is None:
+            return None
         if self.relay:
             relay_track = self.relay.subscribe(self.video_track)
             return TimestampNormalizingTrack(relay_track)
         else:
             logger.warning("No relay available for recording, using track directly")
             return TimestampNormalizingTrack(self.video_track)
+
+    def _create_audio_recording_track(self) -> MediaStreamTrack | None:
+        """Create an audio recording track.
+
+        Returns None if no audio track is configured.
+        """
+        if self.audio_track is None:
+            return None
+        if self.audio_relay:
+            relay_track = self.audio_relay.subscribe(self.audio_track)
+            return AudioTimestampNormalizingTrack(relay_track)
+        else:
+            logger.warning(
+                "No audio relay available for recording, using track directly"
+            )
+            return AudioTimestampNormalizingTrack(self.audio_track)
 
     def _create_media_recorder(self, file_path: str) -> MediaRecorder:
         """Create a MediaRecorder instance with standard settings."""
@@ -191,26 +257,38 @@ class RecordingManager:
         recording_file = None
         media_recorder = None
         recording_track = None
+        audio_recording_track = None
 
         try:
             recording_file = self._create_temp_file(
                 ".mp4", TEMP_FILE_PREFIXES["recording"]
             )
             media_recorder = self._create_media_recorder(recording_file)
+
             recording_track = self._create_recording_track()
-            media_recorder.addTrack(recording_track)
+            if recording_track is not None:
+                media_recorder.addTrack(recording_track)
+
+            audio_recording_track = self._create_audio_recording_track()
+            if audio_recording_track is not None:
+                media_recorder.addTrack(audio_recording_track)
+
             await media_recorder.start()
 
             with self.recording_lock:
                 if self.recording_started:
                     # Another thread started recording while we were doing I/O
                     await self._cleanup_recording(
-                        media_recorder, recording_track, recording_file
+                        media_recorder,
+                        recording_track,
+                        recording_file,
+                        audio_recording_track,
                     )
                     return
                 self.recording_file = recording_file
                 self.media_recorder = media_recorder
                 self.recording_track = recording_track
+                self.audio_recording_track = audio_recording_track
                 self.recording_started = True
 
                 # Track first recording start time
@@ -221,7 +299,10 @@ class RecordingManager:
         except Exception as e:
             logger.error(f"Error starting recording: {e}")
             await self._cleanup_recording(
-                media_recorder, recording_track, recording_file
+                media_recorder,
+                recording_track,
+                recording_file,
+                audio_recording_track,
             )
             raise
 
@@ -265,6 +346,7 @@ class RecordingManager:
         media_recorder: MediaRecorder | None,
         recording_track: MediaStreamTrack | None,
         recording_file: str | None,
+        audio_recording_track: MediaStreamTrack | None = None,
     ) -> None:
         """Clean up recording resources."""
         if media_recorder:
@@ -273,6 +355,7 @@ class RecordingManager:
             except Exception as e:
                 logger.warning(f"Error stopping media recorder: {e}")
         self._stop_track_safe(recording_track)
+        self._stop_track_safe(audio_recording_track)
         if recording_file and os.path.exists(recording_file):
             try:
                 os.remove(recording_file)
@@ -283,23 +366,30 @@ class RecordingManager:
         """Extract and clear recording state, returning resources for cleanup."""
         with self.recording_lock:
             if not self.recording_started or not self.media_recorder:
-                return None, None, None
+                return None, None, None, None
 
             recording_file = self.recording_file
             media_recorder = self.media_recorder
             recording_track = self.recording_track
+            audio_recording_track = self.audio_recording_track
 
             self.media_recorder = None
             self.recording_track = None
+            self.audio_recording_track = None
             self.recording_started = False
             self.recording_file = None
 
-            return recording_file, media_recorder, recording_track
+            return (
+                recording_file,
+                media_recorder,
+                recording_track,
+                audio_recording_track,
+            )
 
     async def stop_recording(self):
         """Stop recording and close the output file."""
         try:
-            recording_file, media_recorder, recording_track = (
+            recording_file, media_recorder, recording_track, audio_recording_track = (
                 self._extract_recording_state()
             )
             if not recording_file:
@@ -307,6 +397,7 @@ class RecordingManager:
 
             await media_recorder.stop()
             self._stop_track_safe(recording_track)
+            self._stop_track_safe(audio_recording_track)
             logger.info(f"Stopped recording, saved to {recording_file}")
         except Exception as e:
             logger.error(f"Error stopping recording: {e}")
@@ -323,7 +414,7 @@ class RecordingManager:
             if not has_active_recording:
                 return None
 
-            recording_file, media_recorder, recording_track = (
+            recording_file, media_recorder, recording_track, audio_recording_track = (
                 self._extract_recording_state()
             )
 
@@ -332,6 +423,7 @@ class RecordingManager:
                 logger.info(f"Finalized recording: {recording_file}")
 
             self._stop_track_safe(recording_track)
+            self._stop_track_safe(audio_recording_track)
 
             if recording_file and os.path.exists(recording_file):
                 # Create a copy for download
@@ -382,10 +474,11 @@ class RecordingManager:
         files_to_delete = []
         media_recorder = None
         recording_track = None
+        audio_recording_track = None
 
         try:
             # Extract recording state and stop the recorder before deleting
-            recording_file, media_recorder, recording_track = (
+            recording_file, media_recorder, recording_track, audio_recording_track = (
                 self._extract_recording_state()
             )
             if recording_file:
@@ -400,8 +493,9 @@ class RecordingManager:
             except Exception as e:
                 logger.warning(f"Error stopping media recorder during delete: {e}")
 
-        # Stop the recording track
+        # Stop the recording tracks
         self._stop_track_safe(recording_track)
+        self._stop_track_safe(audio_recording_track)
 
         # Now delete the file(s) - the file handle should be closed
         for file_path in files_to_delete:

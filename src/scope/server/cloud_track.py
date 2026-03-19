@@ -26,6 +26,7 @@ from av import VideoFrame
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
+    from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +57,7 @@ class CloudTrack(MediaStreamTrack):
         connection_id: str | None = None,
         connection_info: dict | None = None,
         session_id: str | None = None,
+        frame_processor: FrameProcessor | None = None,
     ):
         super().__init__()
         self.cloud_manager = cloud_manager
@@ -76,7 +78,7 @@ class CloudTrack(MediaStreamTrack):
         self._input_running = False
 
         # FrameProcessor handles relay to cloud and Spout integration
-        self.frame_processor = None
+        self.frame_processor = frame_processor
         self._last_frame: VideoFrame | None = None
         self._started = False
 
@@ -97,19 +99,20 @@ class CloudTrack(MediaStreamTrack):
         logger.info("Starting WebRTC connection to cloud...")
         await self.cloud_manager.start_webrtc(self.initial_parameters)
 
-        # Create FrameProcessor in cloud mode
-        from .frame_processor import FrameProcessor
+        # Create FrameProcessor in cloud mode (unless one was injected)
+        if self.frame_processor is None:
+            from .frame_processor import FrameProcessor
 
-        self.frame_processor = FrameProcessor(
-            pipeline_manager=None,  # Not needed in cloud mode
-            initial_parameters=self.initial_parameters,
-            notification_callback=self.notification_callback,
-            cloud_manager=self.cloud_manager,  # Enable cloud mode
-            session_id=self.session_id,
-            user_id=self.user_id,
-            connection_id=self.connection_id,
-            connection_info=self.connection_info,
-        )
+            self.frame_processor = FrameProcessor(
+                pipeline_manager=None,  # Not needed in cloud mode
+                initial_parameters=self.initial_parameters,
+                notification_callback=self.notification_callback,
+                cloud_manager=self.cloud_manager,  # Enable cloud mode
+                session_id=self.session_id,
+                user_id=self.user_id,
+                connection_id=self.connection_id,
+                connection_info=self.connection_info,
+            )
         self.frame_processor.start()
 
         # Start input processing if we have a source track
@@ -191,12 +194,10 @@ class CloudTrack(MediaStreamTrack):
         # Lazy initialization
         await self._start()
 
-        # Wait for a processed frame from FrameProcessor
         while True:
             if self.frame_processor:
                 frame_tensor = self.frame_processor.get()
                 if frame_tensor is not None:
-                    # Convert tensor to VideoFrame
                     frame_np = frame_tensor.numpy()
                     frame = VideoFrame.from_ndarray(frame_np, format="rgb24")
 
@@ -207,7 +208,6 @@ class CloudTrack(MediaStreamTrack):
                     self._last_frame = frame
                     return frame
 
-            # No frame yet, wait a bit
             await asyncio.sleep(0.01)
 
     def update_parameters(self, params: dict) -> None:

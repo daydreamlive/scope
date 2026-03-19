@@ -421,6 +421,13 @@ class PipelineManager:
             # The ERROR status is sufficient for the frontend
             combined_error = None
 
+            # Determine media modalities from the loaded pipeline chain
+            from scope.core.pipelines.registry import PipelineRegistry
+
+            loaded_ids = list(self._pipelines.keys())
+            produces_video = PipelineRegistry.chain_produces_video(loaded_ids)
+            produces_audio = PipelineRegistry.chain_produces_audio(loaded_ids)
+
             # Return the captured state (with error status if it was an error)
             return {
                 "status": current_status.value,
@@ -429,6 +436,8 @@ class PipelineManager:
                 "loaded_lora_adapters": loaded_lora_adapters,
                 "error": combined_error,
                 "loading_stage": self._loading_stage,
+                "produces_video": produces_video,
+                "produces_audio": produces_audio,
             }
 
     async def get_pipeline_async(self):
