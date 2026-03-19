@@ -17,8 +17,10 @@ logger = logging.getLogger(__name__)
 AUDIO_CLOCK_RATE = 48000  # Standard WebRTC audio clock rate (48 kHz for Opus)
 AUDIO_PTIME = 0.020  # 20ms audio frames (standard for WebRTC)
 AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
-# Maximum buffered audio before we start dropping oldest samples (1 second)
-AUDIO_MAX_BUFFER_SAMPLES = AUDIO_CLOCK_RATE
+# Maximum buffered audio before we start dropping oldest samples (3 seconds).
+# Must be large enough for bursty pipelines like LTX2 that deliver >1s of audio
+# in a single chunk after each denoising pass.
+AUDIO_MAX_BUFFER_SAMPLES = AUDIO_CLOCK_RATE * 3
 
 
 class AudioProcessingTrack(MediaStreamTrack):
@@ -130,12 +132,17 @@ class AudioProcessingTrack(MediaStreamTrack):
             self._chunks.append(interleaved)
             self._buffered_samples += len(interleaved)
 
-        # Cap buffer to prevent unbounded growth (1 second of interleaved audio)
+        # Cap buffer to prevent unbounded growth.
+        # Trim-to-tail: concatenate and keep only the newest samples so a
+        # single large chunk (e.g. LTX2 delivering >1s at once) is never
+        # discarded entirely.
         max_interleaved = AUDIO_MAX_BUFFER_SAMPLES * self.channels
         if self._buffered_samples > max_interleaved:
-            while self._buffered_samples > max_interleaved and self._chunks:
-                dropped = self._chunks.popleft()
-                self._buffered_samples -= len(dropped)
+            flat = np.concatenate(list(self._chunks))
+            self._chunks.clear()
+            trimmed = flat[-max_interleaved:]
+            self._chunks.append(trimmed)
+            self._buffered_samples = len(trimmed)
             logger.warning("Audio buffer overflow, dropped oldest chunks")
 
         # Serve a 20ms frame from the buffer

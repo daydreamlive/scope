@@ -58,6 +58,10 @@ export interface PipelineStatusResponse {
   loaded_lora_adapters?: { path: string; scale: number }[];
   error?: string;
   loading_stage?: string | null;
+  /** Whether the loaded pipeline chain produces video output. */
+  produces_video?: boolean;
+  /** Whether the loaded pipeline chain produces audio output. */
+  produces_audio?: boolean;
 }
 
 export const getIceServers = async (): Promise<IceServersResponse> => {

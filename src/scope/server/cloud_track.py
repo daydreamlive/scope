@@ -24,12 +24,6 @@ from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import VideoFrame
 
-# When the cloud pipeline doesn't produce video, emit a small black
-# frame at this rate so the browser's MediaStream stays active and
-# audio playback is not blocked.
-_BLACK_FRAME_FPS = 1
-_BLACK_FRAME_SIZE = (64, 64)
-
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
     from .frame_processor import FrameProcessor
@@ -196,19 +190,11 @@ class CloudTrack(MediaStreamTrack):
         return self.timestamp, VIDEO_TIME_BASE
 
     async def recv(self) -> VideoFrame:
-        """Return the next processed frame from cloud.
-
-        If the cloud pipeline doesn't produce video, we emit a small
-        black frame at a low rate so the browser's MediaStream stays
-        active and audio playback is not blocked.
-        """
+        """Return the next processed frame from cloud."""
         # Lazy initialization
         await self._start()
 
-        # Poll for a real frame for up to ~1 second before falling
-        # back to a black frame.
-        deadline = time.monotonic() + (1.0 / _BLACK_FRAME_FPS)
-        while time.monotonic() < deadline:
+        while True:
             if self.frame_processor:
                 frame_tensor = self.frame_processor.get()
                 if frame_tensor is not None:
@@ -223,20 +209,6 @@ class CloudTrack(MediaStreamTrack):
                     return frame
 
             await asyncio.sleep(0.01)
-
-        # No video from cloud — emit a black frame to keep the
-        # browser's MediaStream alive (critical for audio-only
-        # pipelines relayed through cloud).
-        import numpy as np
-
-        black = np.zeros(
-            (_BLACK_FRAME_SIZE[1], _BLACK_FRAME_SIZE[0], 3), dtype=np.uint8
-        )
-        frame = VideoFrame.from_ndarray(black, format="rgb24")
-        pts, time_base = await self.next_timestamp()
-        frame.pts = pts
-        frame.time_base = time_base
-        return frame
 
     def update_parameters(self, params: dict) -> None:
         """Update pipeline parameters on cloud."""

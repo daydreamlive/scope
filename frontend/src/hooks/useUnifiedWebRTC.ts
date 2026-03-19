@@ -34,6 +34,8 @@ interface InitialParameters {
     source_type: string;
     source_name: string;
   };
+  produces_video?: boolean;
+  produces_audio?: boolean;
 }
 
 interface UseUnifiedWebRTCOptions {
@@ -242,8 +244,8 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         }
 
         // Add a receive-only audio transceiver so the SDP offer includes an
-        // audio m-line. The backend will attach its audio track to this
-        // transceiver after processing the offer.
+        // audio m-line. The backend decides whether to attach an audio track
+        // based on the pipeline's produces_audio flag.
         pc.addTransceiver("audio", { direction: "recvonly" });
 
         // Force VP8-only for aiortc compatibility

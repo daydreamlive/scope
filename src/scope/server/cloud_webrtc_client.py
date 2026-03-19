@@ -254,9 +254,11 @@ class CloudWebRTCClient:
         self.input_track = FrameInputTrack(fps=30)
         self.pc.addTrack(self.input_track)
 
-        # Add a recvonly audio transceiver so the cloud can send audio back.
-        # This mirrors the browser's addTransceiver("audio", {direction: "recvonly"}).
-        self.pc.addTransceiver("audio", direction="recvonly")
+        # Only add a recvonly audio transceiver when the pipeline produces
+        # audio, so the cloud doesn't waste resources encoding/sending silence.
+        produces_audio = (initial_parameters or {}).get("produces_audio", False)
+        if produces_audio:
+            self.pc.addTransceiver("audio", direction="recvonly")
 
         # Create data channel for parameter updates
         self._data_channel = self.pc.createDataChannel("parameters", ordered=True)

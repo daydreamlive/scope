@@ -2025,6 +2025,8 @@ export function StreamPage() {
         vace_context_scale?: number;
         vace_enabled?: boolean;
         pipeline_ids?: string[];
+        produces_video?: boolean;
+        produces_audio?: boolean;
         first_frame_image?: string;
         last_frame_image?: string;
         images?: string[];
@@ -2062,6 +2064,12 @@ export function StreamPage() {
 
       // Pipeline chain: preprocessors + main pipeline (already built above)
       initialParameters.pipeline_ids = pipelineIds;
+
+      // Media modalities from pipeline status — used by WebRTC to decide
+      // which tracks and transceivers to create (avoids unnecessary audio
+      // negotiation for video-only pipelines, and vice versa).
+      initialParameters.produces_video = pipelineInfo?.produces_video ?? true;
+      initialParameters.produces_audio = pipelineInfo?.produces_audio ?? false;
 
       // VACE-specific parameters
       if (currentPipeline?.supportsVACE) {

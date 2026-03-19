@@ -539,6 +539,14 @@ class PipelineStatusResponse(BaseModel):
         default=None,
         description="Current loading substage (e.g., 'Loading diffusion model...')",
     )
+    produces_video: bool = Field(
+        default=True,
+        description="Whether the loaded pipeline chain produces video output",
+    )
+    produces_audio: bool = Field(
+        default=False,
+        description="Whether the loaded pipeline chain produces audio output",
+    )
 
 
 class PipelineSchemasResponse(BaseModel):

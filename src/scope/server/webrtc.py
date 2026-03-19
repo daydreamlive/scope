@@ -254,8 +254,9 @@ class WebRTCManager:
             # Create NotificationSender for this session to send notifications to the frontend
             notification_sender = NotificationSender()
 
-            # Determine whether the pipeline produces video.
-            # If all pipelines in the chain are audio-only, skip video track creation.
+            # Determine media modalities from the local pipeline registry
+            # (authoritative for local mode). initial_parameters values are not
+            # used here because they may be stale from a previous pipeline load.
             pipeline_ids = initial_parameters.get("pipeline_ids", [])
             produces_video = PipelineRegistry.chain_produces_video(pipeline_ids)
 
@@ -560,6 +561,17 @@ class WebRTCManager:
             )
             self.sessions[session.id] = session
 
+            # Determine media modalities from initial_parameters (set by the
+            # frontend from the pipeline/status endpoint) with fallback to
+            # the local registry.
+            pipeline_ids = initial_parameters.get("pipeline_ids", [])
+            produces_video = initial_parameters.get("produces_video")
+            if produces_video is None:
+                produces_video = PipelineRegistry.chain_produces_video(pipeline_ids)
+            produces_audio = initial_parameters.get("produces_audio")
+            if produces_audio is None:
+                produces_audio = PipelineRegistry.chain_produces_audio(pipeline_ids)
+
             # Create FrameProcessor in cloud mode so it can be shared
             # between CloudTrack (video) and AudioProcessingTrack (audio)
             frame_processor = FrameProcessor(
@@ -573,36 +585,49 @@ class WebRTCManager:
             )
             session.frame_processor = frame_processor
 
-            # In relay mode, always create both video and audio tracks.
-            # The cloud pipeline decides what it actually sends — unused
-            # tracks are harmless (audio returns silence, video waits).
-            cloud_track = CloudTrack(
-                cloud_manager=cloud_manager,
-                initial_parameters=initial_parameters,
-                user_id=request.user_id,
-                connection_id=request.connection_id,
-                connection_info=request.connection_info,
-                session_id=session.id,
-                frame_processor=frame_processor,
-            )
-            session.video_track = cloud_track
+            cloud_track = None
+            audio_track = None
 
-            relay = MediaRelay()
-            relayed_track = relay.subscribe(cloud_track)
-            pc.addTrack(relayed_track)
-            session.relay = relay
+            if produces_video:
+                cloud_track = CloudTrack(
+                    cloud_manager=cloud_manager,
+                    initial_parameters=initial_parameters,
+                    user_id=request.user_id,
+                    connection_id=request.connection_id,
+                    connection_info=request.connection_info,
+                    session_id=session.id,
+                    frame_processor=frame_processor,
+                )
+                session.video_track = cloud_track
 
-            audio_track = AudioProcessingTrack(
-                frame_processor=frame_processor,
-            )
-            session.audio_track = audio_track
+                relay = MediaRelay()
+                relayed_track = relay.subscribe(cloud_track)
+                pc.addTrack(relayed_track)
+                session.relay = relay
+            else:
+                logger.info(
+                    "Audio-only cloud pipeline, skipping CloudTrack. "
+                    "Starting cloud connection directly."
+                )
+
+                async def _start_cloud():
+                    await cloud_manager.start_webrtc(initial_parameters)
+                    frame_processor.start()
+
+                asyncio.create_task(_start_cloud())
+
+            if produces_audio:
+                audio_track = AudioProcessingTrack(
+                    frame_processor=frame_processor,
+                )
+                session.audio_track = audio_track
 
             logger.info(f"Created session: {session.id}")
 
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
                 logger.info(f"Track received: {track.kind} for session {session.id}")
-                if track.kind == "video":
+                if track.kind == "video" and cloud_track is not None:
                     cloud_track.set_source_track(track)
 
             @pc.on("connectionstatechange")
@@ -622,7 +647,8 @@ class WebRTCManager:
                         mode="relay",
                     )
                 if pc.connectionState in ["closed", "failed"]:
-                    await cloud_track.stop()
+                    if cloud_track is not None:
+                        await cloud_track.stop()
                     await self.remove_session(session.id)
 
             @pc.on("iceconnectionstatechange")
@@ -643,8 +669,13 @@ class WebRTCManager:
                         data = json.loads(message)
                         logger.debug(f"Parameter update: {data}")
 
-                        # Forward parameters to cloud
-                        cloud_track.update_parameters(data)
+                        # Forward parameters to cloud and frame processor
+                        if cloud_track is not None:
+                            cloud_track.update_parameters(data)
+                        else:
+                            if frame_processor:
+                                frame_processor.update_parameters(data)
+                            cloud_manager.send_parameters(data)
 
                     except json.JSONDecodeError as e:
                         logger.error(f"Failed to parse message: {e}")
@@ -652,21 +683,20 @@ class WebRTCManager:
                         logger.error(f"Error handling message: {e}")
 
             # Set remote description (the offer).
-            # The browser's offer may include a recvonly audio m-line
-            # (from addTransceiver("audio", {direction: "recvonly"})).
-            # aiortc will create an audio transceiver for it during
-            # setRemoteDescription.
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
             await pc.setRemoteDescription(offer_sdp)
 
             # Attach our audio track to the transceiver that aiortc
-            # created from the browser's recvonly audio m-line.
-            for t in pc.getTransceivers():
-                if t.kind == "audio":
-                    t.sender.replaceTrack(audio_track)
-                    t.direction = "sendonly"
-                    logger.info(f"Audio track attached to transceiver (mid={t.mid})")
-                    break
+            # created from the browser's recvonly audio m-line (if present).
+            if audio_track is not None:
+                for t in pc.getTransceivers():
+                    if t.kind == "audio":
+                        t.sender.replaceTrack(audio_track)
+                        t.direction = "sendonly"
+                        logger.info(
+                            f"Audio track attached to transceiver (mid={t.mid})"
+                        )
+                        break
 
             # Create answer
             answer = await pc.createAnswer()
