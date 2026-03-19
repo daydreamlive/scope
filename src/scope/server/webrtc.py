@@ -573,7 +573,9 @@ class WebRTCManager:
             )
             session.frame_processor = frame_processor
 
-            # Create CloudTrack instead of VideoProcessingTrack
+            # In relay mode, always create both video and audio tracks.
+            # The cloud pipeline decides what it actually sends — unused
+            # tracks are harmless (audio returns silence, video waits).
             cloud_track = CloudTrack(
                 cloud_manager=cloud_manager,
                 initial_parameters=initial_parameters,
@@ -585,21 +587,15 @@ class WebRTCManager:
             )
             session.video_track = cloud_track
 
-            # Create a MediaRelay for the output
             relay = MediaRelay()
             relayed_track = relay.subscribe(cloud_track)
-
-            # Add the relayed track to WebRTC connection
             pc.addTrack(relayed_track)
+            session.relay = relay
 
-            # Create AudioProcessingTrack for cloud audio
             audio_track = AudioProcessingTrack(
                 frame_processor=frame_processor,
             )
             session.audio_track = audio_track
-
-            # Store relay for cleanup
-            session.relay = relay
 
             logger.info(f"Created session: {session.id}")
 
@@ -607,7 +603,6 @@ class WebRTCManager:
             def on_track(track: MediaStreamTrack):
                 logger.info(f"Track received: {track.kind} for session {session.id}")
                 if track.kind == "video":
-                    # Set the browser's video track as the source for the relay
                     cloud_track.set_source_track(track)
 
             @pc.on("connectionstatechange")
@@ -627,8 +622,7 @@ class WebRTCManager:
                         mode="relay",
                     )
                 if pc.connectionState in ["closed", "failed"]:
-                    if hasattr(cloud_track, "stop"):
-                        await cloud_track.stop()
+                    await cloud_track.stop()
                     await self.remove_session(session.id)
 
             @pc.on("iceconnectionstatechange")

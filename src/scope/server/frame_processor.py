@@ -16,6 +16,8 @@ from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
 
 if TYPE_CHECKING:
+    from av import AudioFrame
+
     from scope.core.inputs import InputSource
     from scope.core.outputs import OutputSink
 
