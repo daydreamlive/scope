@@ -456,11 +456,6 @@ class PipelineProcessor:
             # Extract video from the returned dictionary
             output = output_dict.get("video")
             if output is None:
-                # No video produced. If the pipeline also has no input
-                # requirements (audio-only), sleep to prevent CPU spinning.
-                # 20ms matches WebRTC audio frame cadence.
-                if requirements is None:
-                    self.shutdown_event.wait(0.02)
                 return
 
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
@@ -487,7 +482,6 @@ class PipelineProcessor:
                 if not transition_active or transition is None:
                     self.parameters.pop("transition", None)
 
-            output = output_dict.get("video")
             num_frames = 0
             if output is not None:
                 num_frames = output.shape[0]
