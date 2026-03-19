@@ -205,6 +205,11 @@ def _register_pipelines():
         ("gray", ".gray.pipeline", "GrayPipeline"),
         ("optical_flow", ".optical_flow.pipeline", "OpticalFlowPipeline"),
         ("audio_beep", ".audio_beep.pipeline", "AudioBeepPipeline"),
+        (
+            "audio_video_test",
+            ".audio_video_test.pipeline",
+            "AudioVideoTestPipeline",
+        ),
     ]
 
     # Try to import and register each pipeline
