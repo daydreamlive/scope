@@ -343,6 +343,8 @@ export function validateConnection(
       return true;
     if (targetParam.type === "list_number" && sourceType === "list_number")
       return true;
+    if (targetParam.type === "string" && sourceType === "video_path")
+      return true;
 
     return sourceType === targetParam.type;
   }

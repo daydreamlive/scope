@@ -73,6 +73,9 @@ export function getEdgeColor(
     if (sourceNode.data.nodeType === "bool") {
       return "#34d399"; // emerald-400
     }
+    if (sourceNode.data.nodeType === "trigger") {
+      return "#34d399"; // emerald-400 (boolean)
+    }
     if (sourceNode.data.nodeType === "subgraph") {
       const port = sourceNode.data.subgraphOutputs?.find(
         p => p.name === parsed.name

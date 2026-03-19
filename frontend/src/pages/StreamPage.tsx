@@ -116,7 +116,7 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
-    connectStage: _cloudConnectStage, // eslint-disable-line @typescript-eslint/no-unused-vars
+    connectStage: cloudConnectStage,
   } = useCloudStatus();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
@@ -350,7 +350,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
-    loadingStage: _pipelineLoadingStage, // eslint-disable-line @typescript-eslint/no-unused-vars
+    loadingStage: pipelineLoadingStage,
   } = usePipeline();
 
   // Tempo sync
@@ -2466,6 +2466,7 @@ export function StreamPage() {
         >
           <GraphEditor
             ref={graphEditorRef}
+            visible={graphMode}
             isStreaming={isStreaming}
             isConnecting={isConnecting || isCloudConnecting}
             isLoading={isPipelineLoading || isDownloading}

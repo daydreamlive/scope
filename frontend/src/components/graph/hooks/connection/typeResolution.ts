@@ -37,6 +37,7 @@ export function resolveSourceType(
   if (nt === "vace") return "vace";
   if (nt === "midi") return "number";
   if (nt === "bool") return "boolean";
+  if (nt === "trigger") return "boolean";
   if (nt === "reroute") {
     // Walk upstream
     for (const e of edges) {

@@ -384,7 +384,8 @@ function toNumber(val: unknown): number | null {
 export function useSubgraphEval(
   nodes: Node<FlowNodeData>[],
   edges: Edge[],
-  setNodes: SetNodes
+  setNodes: SetNodes,
+  visible = true
 ) {
   const setNodesRef = useRef(setNodes);
   setNodesRef.current = setNodes;
@@ -409,7 +410,7 @@ export function useSubgraphEval(
 
     const sgNodes = currentNodes.filter(n => n.data.nodeType === "subgraph");
     if (sgNodes.length === 0) {
-      rafHandle.current = requestAnimationFrame(evaluate);
+      rafHandle.current = null;
       return;
     }
 
@@ -487,10 +488,22 @@ export function useSubgraphEval(
     rafHandle.current = requestAnimationFrame(evaluate);
   }, []);
 
+  const hasSubgraphs = nodes.some(n => n.data.nodeType === "subgraph");
+
   useEffect(() => {
+    if (!visible) return; // Don't run when graph is hidden (perform mode)
     rafHandle.current = requestAnimationFrame(evaluate);
     return () => {
       if (rafHandle.current !== null) cancelAnimationFrame(rafHandle.current);
+      rafHandle.current = null;
     };
-  }, [evaluate]);
+  }, [evaluate, visible]);
+
+  // Restart RAF loop when subgraph nodes appear after being idle
+  useEffect(() => {
+    if (!visible) return;
+    if (!hasSubgraphs) return;
+    if (rafHandle.current !== null) return; // already running
+    rafHandle.current = requestAnimationFrame(evaluate);
+  }, [hasSubgraphs, evaluate, visible]);
 }

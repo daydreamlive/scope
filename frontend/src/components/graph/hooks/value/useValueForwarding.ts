@@ -131,8 +131,27 @@ export function useValueForwarding(
 ) {
   const lastForwardTimeRef = useRef<Record<string, number>>({});
 
+  // Track previous node data to skip backend sends when only positions changed
+  const prevNodeDataRef = useRef<Map<string, FlowNodeData>>(new Map());
+
   useEffect(() => {
     if (!isStreamingRef.current || !onNodeParamChangeRef.current) return;
+
+    // Check if any producer node data actually changed (not just positions)
+    let anyDataChanged = false;
+    const prevData = prevNodeDataRef.current;
+    const nextData = new Map<string, FlowNodeData>();
+    for (const node of nodes) {
+      if (!PRODUCER_TYPES.has(node.data.nodeType)) continue;
+      nextData.set(node.id, node.data);
+      if (prevData.get(node.id) !== node.data) {
+        anyDataChanged = true;
+      }
+    }
+    // Also detect removed nodes
+    if (nextData.size !== prevData.size) anyDataChanged = true;
+    prevNodeDataRef.current = nextData;
+    if (!anyDataChanged) return;
 
     const throttleMs = 100;
 

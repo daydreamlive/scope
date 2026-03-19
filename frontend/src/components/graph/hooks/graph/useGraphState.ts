@@ -11,6 +11,7 @@ import { usePipelineParams } from "../node/usePipelineParams";
 import {
   useGraphPersistence,
   enrichNodes,
+  colorEdges,
   type EnrichNodesDeps,
 } from "./useGraphPersistence";
 import { useRerouteTypeSync } from "../value/useRerouteTypeSync";
@@ -239,6 +240,12 @@ export function useGraphState(
     availability.ndiOutputAvailable,
     availability.syphonOutputAvailable,
   ]);
+
+  // Re-color edges when nodes change (e.g. after enrichNodes updates node data)
+  useEffect(() => {
+    if (nodes.length === 0) return;
+    setEdges(eds => colorEdges(eds, nodes, handleEdgeDelete));
+  }, [nodes, setEdges, handleEdgeDelete]);
 
   useRerouteTypeSync(edges, nodesRef, setNodes, setEdges);
 

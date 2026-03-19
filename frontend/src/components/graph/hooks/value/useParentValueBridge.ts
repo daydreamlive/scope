@@ -234,190 +234,94 @@ export function useParentValueBridge(
     };
   }, [depth, buildMappings, writeValue, stackRef]);
 
-  // ── Control animation bridge ─────────────────────────────────────────────
+  // ── Unified evaluation loop (controls + subgraph sources + recursive) ───
+  // Merges control animation, subgraph source evaluation, and recursive
+  // chain evaluation into a single RAF loop to reduce CPU overhead.
   useEffect(() => {
     if (depth === 0) return;
     const mappings = buildMappings();
+    const stack = stackRef.current;
+
+    // Control animation mappings (all depths)
     const controlMappings = mappings.filter(
       m =>
         m.sourceNode.data.nodeType === "control" &&
         m.sourceNode.data.isPlaying === true
     );
-    if (controlMappings.length === 0) return;
 
-    let running = true;
-    let handle: number;
-
-    const animate = () => {
-      if (!running) return;
-      const now = Date.now();
-
-      for (const mapping of controlMappings) {
-        const sn = mapping.sourceNode.data;
-        const pattern = (sn.controlPattern ?? "sine") as
-          | "sine"
-          | "bounce"
-          | "random_walk"
-          | "linear"
-          | "step";
-        const speed = (sn.controlSpeed as number) ?? 1.0;
-        const min = (sn.controlMin as number) ?? 0;
-        const max = (sn.controlMax as number) ?? 1.0;
-        const controlType = (sn.controlType as string) ?? "float";
-        const t = now / 1000;
-        const last = lastControlValues.current[mapping.portName] ?? min;
-
-        const raw = computePatternValue(pattern, t, speed, min, max, last);
-        lastControlValues.current[mapping.portName] = raw;
-        const final = controlType === "int" ? Math.round(raw) : raw;
-        writeValue(mapping.portName, final);
-      }
-
-      handle = requestAnimationFrame(animate);
-    };
-
-    handle = requestAnimationFrame(animate);
-    return () => {
-      running = false;
-      cancelAnimationFrame(handle);
-    };
-  }, [depth, buildMappings, writeValue]);
-
-  // ── Subgraph source evaluation (rAF loop) — depth 1 only ───────────────
-  useEffect(() => {
-    if (depth !== 1) return;
-    const mappings = buildMappings();
-    const sgMappings = mappings.filter(
-      m => m.sourceNode.data.nodeType === "subgraph"
-    );
-    if (sgMappings.length === 0) return;
-
-    const stack = stackRef.current;
-    const top = stack[stack.length - 1];
-    const parentNodes = top?.nodes ?? [];
-    const parentEdges = top?.edges ?? [];
-
-    // Group mappings by source subgraph node id
-    const bySource = new Map<string, SourceMapping[]>();
-    for (const m of sgMappings) {
-      const arr = bySource.get(m.sourceNode.id) ?? [];
-      arr.push(m);
-      bySource.set(m.sourceNode.id, arr);
-    }
-
-    let running = true;
-    let handle: number;
-
-    const evaluate = () => {
-      if (!running) return;
-
-      for (const [sgId, portMappings] of bySource) {
-        const sgNode = parentNodes.find(n => n.id === sgId);
-        if (!sgNode) continue;
-
-        const sgInputs: SubgraphPort[] = sgNode.data.subgraphInputs ?? [];
-        const sgOutputs: SubgraphPort[] = sgNode.data.subgraphOutputs ?? [];
-        const innerNodes = (sgNode.data.subgraphNodes ??
-          []) as SerializedSubgraphNode[];
-        const innerEdges = (sgNode.data.subgraphEdges ??
-          []) as SerializedSubgraphEdge[];
-        if (innerNodes.length === 0) continue;
-
-        const inputPortValues: Record<string, unknown> = {};
-        for (const port of sgInputs) {
-          if (port.portType !== "param") continue;
-          const handleId = buildHandleId("param", port.name);
-          const edge = parentEdges.find(
-            e => e.target === sgId && e.targetHandle === handleId
-          );
-          if (!edge) continue;
-          const srcNode = parentNodes.find(n => n.id === edge.source);
-          if (!srcNode) continue;
-
-          const srcParsed = parseHandleId(edge.sourceHandle);
-          if (!srcParsed) continue;
-
-          const midiKey = `${srcNode.id}:${srcParsed.name}`;
-          if (
-            srcNode.data.nodeType === "midi" &&
-            liveMidiValues.current[midiKey] !== undefined
-          ) {
-            inputPortValues[port.name] = liveMidiValues.current[midiKey];
-          } else {
-            inputPortValues[port.name] = getAnyValueFromNode(
-              srcNode,
-              edge.sourceHandle
-            );
-          }
-        }
-
-        const outputValues = evaluateInnerGraph(
-          innerNodes,
-          innerEdges,
-          sgInputs,
-          sgOutputs,
-          inputPortValues
-        );
-
-        for (const pm of portMappings) {
-          const parsed = parseHandleId(pm.sourceHandle);
-          if (!parsed) continue;
-          const val = outputValues[parsed.name];
-          if (val !== undefined && val !== null) {
-            writeValue(pm.portName, val);
-          }
+    // Subgraph source mappings (depth 1 only)
+    let sgBySource: Map<string, SourceMapping[]> | null = null;
+    let sgParentNodes: Node<FlowNodeData>[] = [];
+    let sgParentEdges: GraphLevel["edges"] = [];
+    if (depth === 1) {
+      const sgMappings = mappings.filter(
+        m => m.sourceNode.data.nodeType === "subgraph"
+      );
+      if (sgMappings.length > 0) {
+        const top = stack[stack.length - 1];
+        sgParentNodes = top?.nodes ?? [];
+        sgParentEdges = top?.edges ?? [];
+        sgBySource = new Map<string, SourceMapping[]>();
+        for (const m of sgMappings) {
+          const arr = sgBySource.get(m.sourceNode.id) ?? [];
+          arr.push(m);
+          sgBySource.set(m.sourceNode.id, arr);
         }
       }
-
-      handle = requestAnimationFrame(evaluate);
-    };
-
-    handle = requestAnimationFrame(evaluate);
-    return () => {
-      running = false;
-      cancelAnimationFrame(handle);
-    };
-  }, [depth, buildMappings, writeValue, stackRef]);
-
-  // ── Static snapshot for all other producer types — depth 1 only ─────────
-  useEffect(() => {
-    if (depth !== 1) return;
-    const mappings = buildMappings();
-
-    for (const mapping of mappings) {
-      const t = mapping.sourceNode.data.nodeType;
-      if (t === "midi") continue;
-      if (t === "control" && mapping.sourceNode.data.isPlaying) continue;
-      if (t === "subgraph") continue;
-
-      const val = getAnyValueFromNode(mapping.sourceNode, mapping.sourceHandle);
-      if (val !== null && val !== undefined) {
-        writeValue(mapping.portName, val);
-      }
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [depth]);
 
-  // ── Recursive evaluation for depth >= 2 ────────────────────────────────
-  // When navigating into a sub-sub-graph (depth 2+), the intermediate
-  // canvas levels are unmounted.  We re-evaluate the full subgraph chain
-  // from level 0 down to the current depth using `evaluateInnerGraph` so
-  // that live MIDI values propagate through all intermediate nodes.
-  useEffect(() => {
-    if (depth < 2) return;
-
-    const stack = stackRef.current;
-    const mappings = buildMappings();
-
-    // Ports driven by animated controls are handled by the control bridge
+    // Animated control ports (depth >= 2, to skip in recursive eval)
     const animatedControlPorts = new Set<string>();
-    for (const m of mappings) {
-      if (
-        m.sourceNode.data.nodeType === "control" &&
-        m.sourceNode.data.isPlaying
-      ) {
-        animatedControlPorts.add(m.portName);
+    if (depth >= 2) {
+      for (const m of mappings) {
+        if (
+          m.sourceNode.data.nodeType === "control" &&
+          m.sourceNode.data.isPlaying
+        ) {
+          animatedControlPorts.add(m.portName);
+        }
       }
+    }
+
+    // Static value poll for non-dynamic producer types (depth 1 only).
+    // Re-reads parent static values every 200ms so changes propagate.
+    const staticMappings =
+      depth === 1
+        ? mappings.filter(m => {
+            const t = m.sourceNode.data.nodeType;
+            if (t === "midi") return false;
+            if (t === "control" && m.sourceNode.data.isPlaying) return false;
+            if (t === "subgraph") return false;
+            return true;
+          })
+        : [];
+
+    let staticInterval: ReturnType<typeof setInterval> | null = null;
+    if (staticMappings.length > 0) {
+      const pollStatic = () => {
+        for (const mapping of staticMappings) {
+          const val = getAnyValueFromNode(
+            mapping.sourceNode,
+            mapping.sourceHandle
+          );
+          if (val !== null && val !== undefined) {
+            writeValue(mapping.portName, val);
+          }
+        }
+      };
+      pollStatic(); // initial snapshot
+      staticInterval = setInterval(pollStatic, 200);
+    }
+
+    const hasControlWork = controlMappings.length > 0;
+    const hasSgWork = sgBySource !== null && sgBySource.size > 0;
+    const hasRecursiveWork = depth >= 2;
+
+    if (!hasControlWork && !hasSgWork && !hasRecursiveWork) {
+      // Still need to clean up static interval on unmount
+      return () => {
+        if (staticInterval !== null) clearInterval(staticInterval);
+      };
     }
 
     let running = true;
@@ -426,75 +330,163 @@ export function useParentValueBridge(
     const evaluate = () => {
       if (!running) return;
 
-      let prevAllComputed: Map<string, unknown> | null = null;
+      // ── Control animations ──
+      if (hasControlWork) {
+        const now = Date.now();
+        for (const mapping of controlMappings) {
+          const sn = mapping.sourceNode.data;
+          const pattern = (sn.controlPattern ?? "sine") as
+            | "sine"
+            | "bounce"
+            | "random_walk"
+            | "linear"
+            | "step";
+          const speed = (sn.controlSpeed as number) ?? 1.0;
+          const min = (sn.controlMin as number) ?? 0;
+          const max = (sn.controlMax as number) ?? 1.0;
+          const controlType = (sn.controlType as string) ?? "float";
+          const t = now / 1000;
+          const last = lastControlValues.current[mapping.portName] ?? min;
 
-      for (let lvl = 0; lvl < depth; lvl++) {
-        const level = stack[lvl];
-        const sgNodeId = level.subgraphNodeId;
-        const levelNodes = level.nodes;
-        const levelEdges = level.edges;
-
-        const sgNode = levelNodes.find(n => n.id === sgNodeId);
-        if (!sgNode) break;
-
-        const sgInputs: SubgraphPort[] = sgNode.data.subgraphInputs ?? [];
-
-        // Resolve boundary inputs for this subgraph
-        const boundaryInputs: Record<string, unknown> = {};
-        for (const port of sgInputs) {
-          if (port.portType !== "param") continue;
-          const handleId = buildHandleId("param", port.name);
-          const edge = levelEdges.find(
-            e => e.target === sgNodeId && e.targetHandle === handleId
-          );
-          if (!edge) continue;
-          const srcNode = levelNodes.find(n => n.id === edge.source);
-          if (!srcNode) continue;
-
-          const parsed = parseHandleId(edge.sourceHandle);
-          const handleName = parsed?.name ?? "value";
-
-          if (srcNode.data.nodeType === "midi") {
-            const midiKey = `${srcNode.id}:${handleName}`;
-            boundaryInputs[port.name] =
-              liveMidiValues.current[midiKey] ??
-              getAnyValueFromNode(srcNode, edge.sourceHandle);
-          } else if (prevAllComputed) {
-            const computedKey = `${srcNode.id}:output:${handleName}`;
-            boundaryInputs[port.name] = prevAllComputed.has(computedKey)
-              ? prevAllComputed.get(computedKey)
-              : getAnyValueFromNode(srcNode, edge.sourceHandle);
-          } else {
-            boundaryInputs[port.name] = getAnyValueFromNode(
-              srcNode,
-              edge.sourceHandle
-            );
-          }
+          const raw = computePatternValue(pattern, t, speed, min, max, last);
+          lastControlValues.current[mapping.portName] = raw;
+          const final = controlType === "int" ? Math.round(raw) : raw;
+          writeValue(mapping.portName, final);
         }
+      }
 
-        if (lvl < depth - 1) {
+      // ── Subgraph source evaluation (depth 1) ──
+      if (hasSgWork && sgBySource) {
+        for (const [sgId, portMappings] of sgBySource) {
+          const sgNode = sgParentNodes.find(n => n.id === sgId);
+          if (!sgNode) continue;
+
+          const sgInputs: SubgraphPort[] = sgNode.data.subgraphInputs ?? [];
+          const sgOutputs: SubgraphPort[] = sgNode.data.subgraphOutputs ?? [];
           const innerNodes = (sgNode.data.subgraphNodes ??
             []) as SerializedSubgraphNode[];
           const innerEdges = (sgNode.data.subgraphEdges ??
             []) as SerializedSubgraphEdge[];
-          const sgOutputs: SubgraphPort[] = sgNode.data.subgraphOutputs ?? [];
+          if (innerNodes.length === 0) continue;
 
-          const allComputed = new Map<string, unknown>();
-          evaluateInnerGraph(
+          const inputPortValues: Record<string, unknown> = {};
+          for (const port of sgInputs) {
+            if (port.portType !== "param") continue;
+            const handleId = buildHandleId("param", port.name);
+            const edge = sgParentEdges.find(
+              e => e.target === sgId && e.targetHandle === handleId
+            );
+            if (!edge) continue;
+            const srcNode = sgParentNodes.find(n => n.id === edge.source);
+            if (!srcNode) continue;
+
+            const srcParsed = parseHandleId(edge.sourceHandle);
+            if (!srcParsed) continue;
+
+            const midiKey = `${srcNode.id}:${srcParsed.name}`;
+            if (
+              srcNode.data.nodeType === "midi" &&
+              liveMidiValues.current[midiKey] !== undefined
+            ) {
+              inputPortValues[port.name] = liveMidiValues.current[midiKey];
+            } else {
+              inputPortValues[port.name] = getAnyValueFromNode(
+                srcNode,
+                edge.sourceHandle
+              );
+            }
+          }
+
+          const outputValues = evaluateInnerGraph(
             innerNodes,
             innerEdges,
             sgInputs,
             sgOutputs,
-            boundaryInputs,
-            undefined,
-            allComputed
+            inputPortValues
           );
-          prevAllComputed = allComputed;
-        } else {
-          for (const [portName, val] of Object.entries(boundaryInputs)) {
-            if (animatedControlPorts.has(portName)) continue;
+
+          for (const pm of portMappings) {
+            const parsed = parseHandleId(pm.sourceHandle);
+            if (!parsed) continue;
+            const val = outputValues[parsed.name];
             if (val !== undefined && val !== null) {
-              writeValue(portName, val);
+              writeValue(pm.portName, val);
+            }
+          }
+        }
+      }
+
+      // ── Recursive evaluation (depth >= 2) ──
+      if (hasRecursiveWork) {
+        let prevAllComputed: Map<string, unknown> | null = null;
+
+        for (let lvl = 0; lvl < depth; lvl++) {
+          const level = stack[lvl];
+          const sgNodeId = level.subgraphNodeId;
+          const levelNodes = level.nodes;
+          const levelEdges = level.edges;
+
+          const sgNode = levelNodes.find(n => n.id === sgNodeId);
+          if (!sgNode) break;
+
+          const sgInputs: SubgraphPort[] = sgNode.data.subgraphInputs ?? [];
+
+          const boundaryInputs: Record<string, unknown> = {};
+          for (const port of sgInputs) {
+            if (port.portType !== "param") continue;
+            const handleId = buildHandleId("param", port.name);
+            const edge = levelEdges.find(
+              e => e.target === sgNodeId && e.targetHandle === handleId
+            );
+            if (!edge) continue;
+            const srcNode = levelNodes.find(n => n.id === edge.source);
+            if (!srcNode) continue;
+
+            const parsed = parseHandleId(edge.sourceHandle);
+            const handleName = parsed?.name ?? "value";
+
+            if (srcNode.data.nodeType === "midi") {
+              const midiKey = `${srcNode.id}:${handleName}`;
+              boundaryInputs[port.name] =
+                liveMidiValues.current[midiKey] ??
+                getAnyValueFromNode(srcNode, edge.sourceHandle);
+            } else if (prevAllComputed) {
+              const computedKey = `${srcNode.id}:output:${handleName}`;
+              boundaryInputs[port.name] = prevAllComputed.has(computedKey)
+                ? prevAllComputed.get(computedKey)
+                : getAnyValueFromNode(srcNode, edge.sourceHandle);
+            } else {
+              boundaryInputs[port.name] = getAnyValueFromNode(
+                srcNode,
+                edge.sourceHandle
+              );
+            }
+          }
+
+          if (lvl < depth - 1) {
+            const innerNodes = (sgNode.data.subgraphNodes ??
+              []) as SerializedSubgraphNode[];
+            const innerEdges = (sgNode.data.subgraphEdges ??
+              []) as SerializedSubgraphEdge[];
+            const sgOutputs: SubgraphPort[] = sgNode.data.subgraphOutputs ?? [];
+
+            const allComputed = new Map<string, unknown>();
+            evaluateInnerGraph(
+              innerNodes,
+              innerEdges,
+              sgInputs,
+              sgOutputs,
+              boundaryInputs,
+              undefined,
+              allComputed
+            );
+            prevAllComputed = allComputed;
+          } else {
+            for (const [portName, val] of Object.entries(boundaryInputs)) {
+              if (animatedControlPorts.has(portName)) continue;
+              if (val !== undefined && val !== null) {
+                writeValue(portName, val);
+              }
             }
           }
         }
@@ -507,6 +499,7 @@ export function useParentValueBridge(
     return () => {
       running = false;
       cancelAnimationFrame(handle);
+      if (staticInterval !== null) clearInterval(staticInterval);
     };
   }, [depth, buildMappings, writeValue, stackRef]);
 

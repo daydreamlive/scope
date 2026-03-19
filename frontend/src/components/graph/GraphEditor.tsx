@@ -122,6 +122,7 @@ export interface GraphEditorHandle {
 }
 
 interface GraphEditorProps {
+  visible?: boolean;
   isStreaming?: boolean;
   isConnecting?: boolean;
   isLoading?: boolean;
@@ -157,6 +158,7 @@ interface GraphEditorProps {
 export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
   function GraphEditor(
     {
+      visible = true,
       isStreaming = false,
       isConnecting = false,
       isLoading = false,
@@ -411,7 +413,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     } = useGraphNavigation();
 
     useParentValueBridge(navStackRef, navDepth, setNodes);
-    useSubgraphEval(nodes, edges, setNodes);
+    useSubgraphEval(nodes, edges, setNodes, visible);
     resolveRootGraphRef.current = getRootGraph;
     resetNavigationRef.current = resetStack;
     addSubgraphPortRef.current = addSubgraphPort;
