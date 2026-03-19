@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from aiortc import RTCConfiguration, RTCPeerConnection, RTCSessionDescription
 from aiortc.mediastreams import VIDEO_TIME_BASE, MediaStreamTrack
-from av import VideoFrame
+from av import AudioFrame, VideoFrame
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
@@ -141,6 +141,41 @@ class FrameOutputHandler:
         return self._last_frame
 
 
+class AudioOutputHandler:
+    """Handles audio frames received FROM cloud.
+
+    Audio frames from cloud are passed to registered callbacks,
+    which can forward them to FrameProcessor's cloud audio queue.
+    """
+
+    def __init__(self):
+        self._callbacks: list[Callable[[AudioFrame], None]] = []
+        self._frame_count = 0
+
+    def add_callback(self, callback: Callable[[AudioFrame], None]):
+        """Register a callback to receive audio frames."""
+        self._callbacks.append(callback)
+
+    def remove_callback(self, callback: Callable[[AudioFrame], None]):
+        """Remove an audio callback."""
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+
+    def handle_frame(self, frame: AudioFrame):
+        """Called when an audio frame is received from cloud."""
+        self._frame_count += 1
+
+        for callback in self._callbacks:
+            try:
+                callback(frame)
+            except Exception as e:
+                logger.error(f"Error in audio callback: {e}")
+
+    @property
+    def frame_count(self) -> int:
+        return self._frame_count
+
+
 class CloudWebRTCClient:
     """WebRTC client that connects to cloud for remote processing.
 
@@ -163,15 +198,18 @@ class CloudWebRTCClient:
         self.pc: RTCPeerConnection | None = None
         self.input_track: FrameInputTrack | None = None
         self.output_handler = FrameOutputHandler()
+        self.audio_output_handler = AudioOutputHandler()
         self._data_channel = None
         self._session_id: str | None = None
         self._connected = False
         self._receive_task: asyncio.Task | None = None
+        self._audio_receive_task: asyncio.Task | None = None
 
         # Stats
         self._stats = {
             "frames_sent": 0,
             "frames_received": 0,
+            "audio_frames_received": 0,
             "connected_at": None,
             "connection_state": "new",
         }
@@ -236,6 +274,10 @@ class CloudWebRTCClient:
                 # Request keyframe immediately to avoid VP8 decode errors
                 # PLI (Picture Loss Indication) tells remote to send an I-frame
                 asyncio.create_task(self._request_keyframe())
+            elif track.kind == "audio":
+                self._audio_receive_task = asyncio.create_task(
+                    self._receive_audio(track)
+                )
 
         # Monitor connection state
         @self.pc.on("connectionstatechange")
@@ -359,6 +401,55 @@ class CloudWebRTCClient:
                 f"total frames: {self._stats['frames_received']}"
             )
 
+    async def _receive_audio(self, track: MediaStreamTrack):
+        """Background task to receive audio frames from cloud."""
+        from aiortc.mediastreams import MediaStreamError
+
+        logger.info("Starting audio receive loop")
+        consecutive_errors = 0
+        max_consecutive_errors = 10
+
+        try:
+            while True:
+                try:
+                    frame = await track.recv()
+                    consecutive_errors = 0
+                    self._stats["audio_frames_received"] += 1
+
+                    if self._stats["audio_frames_received"] == 1:
+                        logger.info(
+                            f"First audio frame received from cloud "
+                            f"(sample_rate={frame.sample_rate}, "
+                            f"samples={frame.samples})"
+                        )
+
+                    self.audio_output_handler.handle_frame(frame)
+
+                except MediaStreamError:
+                    logger.info("Audio track ended")
+                    break
+                except Exception as e:
+                    consecutive_errors += 1
+                    if consecutive_errors >= max_consecutive_errors:
+                        logger.error(
+                            f"Error receiving audio, stopping after "
+                            f"{consecutive_errors} consecutive errors: {e}"
+                        )
+                        break
+                    logger.warning(
+                        f"Transient error receiving audio "
+                        f"({consecutive_errors}/{max_consecutive_errors}): {e}"
+                    )
+                    await asyncio.sleep(0.01)
+
+        except asyncio.CancelledError:
+            logger.info("Audio receive loop cancelled")
+        finally:
+            logger.info(
+                f"Audio receive loop ended, "
+                f"total frames: {self._stats['audio_frames_received']}"
+            )
+
     async def _request_keyframe(self):
         """Request a keyframe via PLI once the receiver has remote streams.
 
@@ -438,6 +529,14 @@ class CloudWebRTCClient:
             except asyncio.CancelledError:
                 pass
             self._receive_task = None
+
+        if self._audio_receive_task:
+            self._audio_receive_task.cancel()
+            try:
+                await self._audio_receive_task
+            except asyncio.CancelledError:
+                pass
+            self._audio_receive_task = None
 
         if self.pc:
             await self.pc.close()

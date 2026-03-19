@@ -5,6 +5,7 @@ import time
 import uuid
 from typing import TYPE_CHECKING, Any
 
+import numpy as np
 import torch
 from aiortc.mediastreams import VideoFrame
 
@@ -98,6 +99,7 @@ class FrameProcessor:
         # Cloud mode: send frames to cloud instead of local processing
         self._cloud_mode = cloud_manager is not None
         self._cloud_output_queue: queue.Queue = queue.Queue(maxsize=2)
+        self._cloud_audio_queue: queue.Queue = queue.Queue(maxsize=50)
         self._frames_to_cloud = 0
         self._frames_from_cloud = 0
 
@@ -168,9 +170,10 @@ class FrameProcessor:
             # Cloud mode: frames go to cloud instead of local pipelines
             logger.info("[FRAME-PROCESSOR] Starting in CLOUD mode (cloud)")
 
-            # Register callback to receive frames from cloud
+            # Register callbacks to receive frames from cloud
             if self.cloud_manager:
                 self.cloud_manager.add_frame_callback(self._on_frame_from_cloud)
+                self.cloud_manager.add_audio_callback(self._on_audio_from_cloud)
 
             logger.info("[FRAME-PROCESSOR] Started in cloud mode")
 
@@ -302,9 +305,10 @@ class FrameProcessor:
                 logger.error(f"Error closing input source: {e}")
             self.input_source = None
 
-        # Clean up cloud callback in cloud mode
+        # Clean up cloud callbacks in cloud mode
         if self._cloud_mode and self.cloud_manager:
             self.cloud_manager.remove_frame_callback(self._on_frame_from_cloud)
+            self.cloud_manager.remove_audio_callback(self._on_audio_from_cloud)
 
         # Log final frame stats
         if self._cloud_mode:
@@ -512,8 +516,9 @@ class FrameProcessor:
     def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
         """Get the next audio chunk and its sample rate.
 
-        Reads directly from the sink processor's audio output queue,
-        matching how video frames are read from the sink's output queue.
+        In local mode, reads from the sink processor's audio output queue.
+        In cloud mode, reads from the cloud audio queue (populated by
+        _on_audio_from_cloud).
 
         Returns:
             Tuple of (audio_tensor, sample_rate) or (None, None) if no audio available.
@@ -521,6 +526,13 @@ class FrameProcessor:
         """
         if not self.running:
             return None, None
+
+        if self._cloud_mode:
+            try:
+                audio, sample_rate = self._cloud_audio_queue.get_nowait()
+                return audio, sample_rate
+            except queue.Empty:
+                return None, None
 
         if self._sink_processor is None:
             return None, None
@@ -549,6 +561,36 @@ class FrameProcessor:
                     pass
         except Exception as e:
             logger.error(f"[FRAME-PROCESSOR] Error processing frame from cloud: {e}")
+
+    def _on_audio_from_cloud(self, frame: "AudioFrame") -> None:
+        """Callback when an audio frame is received from cloud (cloud mode).
+
+        Converts the AudioFrame to a torch tensor and queues it for
+        AudioProcessingTrack to consume via get_audio().
+        """
+        try:
+            audio_np = frame.to_ndarray()  # shape: (channels, samples) for planar
+            if audio_np.ndim == 1:
+                audio_np = audio_np.reshape(1, -1)
+            audio_tensor = torch.from_numpy(audio_np.astype(np.float32))
+
+            # Normalise int16 range to [-1, 1] float if needed
+            if frame.format.name in ("s16", "s16p"):
+                audio_tensor = audio_tensor / 32768.0
+
+            try:
+                self._cloud_audio_queue.put_nowait((audio_tensor, frame.sample_rate))
+            except queue.Full:
+                # Drop oldest to keep latency low
+                try:
+                    self._cloud_audio_queue.get_nowait()
+                    self._cloud_audio_queue.put_nowait(
+                        (audio_tensor, frame.sample_rate)
+                    )
+                except queue.Empty:
+                    pass
+        except Exception as e:
+            logger.error(f"[FRAME-PROCESSOR] Error processing audio from cloud: {e}")
 
     def get_fps(self) -> float:
         """Get the playback FPS for the video track.

@@ -560,6 +560,19 @@ class WebRTCManager:
             )
             self.sessions[session.id] = session
 
+            # Create FrameProcessor in cloud mode so it can be shared
+            # between CloudTrack (video) and AudioProcessingTrack (audio)
+            frame_processor = FrameProcessor(
+                pipeline_manager=None,  # Not needed in cloud mode
+                initial_parameters=initial_parameters,
+                cloud_manager=cloud_manager,
+                session_id=session.id,
+                user_id=request.user_id,
+                connection_id=request.connection_id,
+                connection_info=request.connection_info,
+            )
+            session.frame_processor = frame_processor
+
             # Create CloudTrack instead of VideoProcessingTrack
             cloud_track = CloudTrack(
                 cloud_manager=cloud_manager,
@@ -568,6 +581,7 @@ class WebRTCManager:
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
                 session_id=session.id,
+                frame_processor=frame_processor,
             )
             session.video_track = cloud_track
 
@@ -577,6 +591,12 @@ class WebRTCManager:
 
             # Add the relayed track to WebRTC connection
             pc.addTrack(relayed_track)
+
+            # Create AudioProcessingTrack for cloud audio
+            audio_track = AudioProcessingTrack(
+                frame_processor=frame_processor,
+            )
+            session.audio_track = audio_track
 
             # Store relay for cleanup
             session.relay = relay
@@ -637,9 +657,22 @@ class WebRTCManager:
                     except Exception as e:
                         logger.error(f"Error handling message: {e}")
 
-            # Set remote description (the offer)
+            # Set remote description (the offer).
+            # The browser's offer may include a recvonly audio m-line
+            # (from addTransceiver("audio", {direction: "recvonly"})).
+            # aiortc will create an audio transceiver for it during
+            # setRemoteDescription.
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
             await pc.setRemoteDescription(offer_sdp)
+
+            # Attach our audio track to the transceiver that aiortc
+            # created from the browser's recvonly audio m-line.
+            for t in pc.getTransceivers():
+                if t.kind == "audio":
+                    t.sender.replaceTrack(audio_track)
+                    t.direction = "sendonly"
+                    logger.info(f"Audio track attached to transceiver (mid={t.mid})")
+                    break
 
             # Create answer
             answer = await pc.createAnswer()

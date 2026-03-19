@@ -76,6 +76,7 @@ class CloudConnectionManager:
         # WebRTC client for media relay
         self._webrtc_client: CloudWebRTCClient | None = None
         self._frame_callbacks: list[Callable[[VideoFrame], None]] = []
+        self._audio_callbacks: list[Callable] = []
 
         # Stats tracking
         self._stats = {
@@ -631,6 +632,7 @@ class CloudConnectionManager:
 
         # Register frame callback to update stats and forward to subscribers
         self._webrtc_client.output_handler.add_callback(self._on_frame_from_cloud)
+        self._webrtc_client.audio_output_handler.add_callback(self._on_audio_from_cloud)
 
         try:
             await self._webrtc_client.connect(initial_parameters)
@@ -701,6 +703,23 @@ class CloudConnectionManager:
                 callback(frame)
             except Exception as e:
                 logger.error(f"Error in frame callback: {e}")
+
+    def add_audio_callback(self, callback: Callable) -> None:
+        """Register a callback to receive audio frames from cloud.ai."""
+        self._audio_callbacks.append(callback)
+
+    def remove_audio_callback(self, callback: Callable) -> None:
+        """Remove an audio callback."""
+        if callback in self._audio_callbacks:
+            self._audio_callbacks.remove(callback)
+
+    def _on_audio_from_cloud(self, frame) -> None:
+        """Handle audio frames received from cloud.ai."""
+        for callback in self._audio_callbacks:
+            try:
+                callback(frame)
+            except Exception as e:
+                logger.error(f"Error in audio callback: {e}")
 
     @property
     def cloud_session_id(self) -> str | None:
