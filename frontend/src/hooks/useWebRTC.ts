@@ -56,6 +56,8 @@ export function useWebRTC(options?: UseWebRTCOptions) {
   const currentStreamRef = useRef<MediaStream | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidate[]>([]);
+  const nodeValuesRef = useRef<Record<string, Record<string, unknown>>>({});
+  const nodeValuesListenersRef = useRef<Set<() => void>>(new Set());
 
   const startStream = useCallback(
     async (initialParameters?: InitialParameters, stream?: MediaStream) => {
@@ -114,6 +116,33 @@ export function useWebRTC(options?: UseWebRTCOptions) {
 
           try {
             const data = JSON.parse(event.data);
+
+            // Handle node value updates from backend graph engine
+            if (
+              data.type === "node_values" ||
+              data.type === "node_values_full"
+            ) {
+              const values = data.values as Record<
+                string,
+                Record<string, unknown>
+              >;
+              if (data.type === "node_values_full") {
+                nodeValuesRef.current = values;
+              } else {
+                // Merge changed values
+                for (const [nodeId, outputs] of Object.entries(values)) {
+                  nodeValuesRef.current[nodeId] = {
+                    ...nodeValuesRef.current[nodeId],
+                    ...outputs,
+                  };
+                }
+              }
+              // Notify listeners
+              for (const listener of nodeValuesListenersRef.current) {
+                listener();
+              }
+              return;
+            }
 
             // Handle stream stop notification from backend
             if (data.type === "stream_stopped") {
@@ -452,6 +481,58 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     []
   );
 
+  const sendNodeEvent = useCallback(
+    (nodeId: string, eventType: string, payload: Record<string, unknown>) => {
+      if (
+        dataChannelRef.current &&
+        dataChannelRef.current.readyState === "open"
+      ) {
+        try {
+          const message = JSON.stringify({
+            type: "node_event",
+            node_id: nodeId,
+            event_type: eventType,
+            payload,
+          });
+          dataChannelRef.current.send(message);
+        } catch (error) {
+          console.error("Failed to send node event:", error);
+        }
+      }
+    },
+    []
+  );
+
+  const sendGraphUpdate = useCallback(
+    (graph: {
+      nodes: Array<Record<string, unknown>>;
+      edges: Array<Record<string, unknown>>;
+    }) => {
+      if (
+        dataChannelRef.current &&
+        dataChannelRef.current.readyState === "open"
+      ) {
+        try {
+          const message = JSON.stringify({
+            type: "graph_update",
+            graph,
+          });
+          dataChannelRef.current.send(message);
+        } catch (error) {
+          console.error("Failed to send graph update:", error);
+        }
+      }
+    },
+    []
+  );
+
+  const subscribeNodeValues = useCallback((listener: () => void) => {
+    nodeValuesListenersRef.current.add(listener);
+    return () => {
+      nodeValuesListenersRef.current.delete(listener);
+    };
+  }, []);
+
   const stopStream = useCallback(() => {
     // Close peer connection
     if (peerConnectionRef.current) {
@@ -496,5 +577,9 @@ export function useWebRTC(options?: UseWebRTCOptions) {
     stopStream,
     updateVideoTrack,
     sendParameterUpdate,
+    sendNodeEvent,
+    sendGraphUpdate,
+    nodeValuesRef,
+    subscribeNodeValues,
   };
 }

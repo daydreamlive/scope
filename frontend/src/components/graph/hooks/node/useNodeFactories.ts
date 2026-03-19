@@ -38,7 +38,8 @@ type NodeTypeKey =
   | "subgraph"
   | "subgraph_input"
   | "subgraph_output"
-  | "record";
+  | "record"
+  | (string & {}); // Allow plugin-provided custom node types
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -404,7 +405,13 @@ export function useNodeFactories({
       position?: { x: number; y: number },
       extraData?: Partial<FlowNodeData>
     ) => {
-      const def = NODE_DEFAULTS[key];
+      const def = NODE_DEFAULTS[key] ?? {
+        type: "generic_custom",
+        idPrefix: key,
+        defaultX: 300,
+        style: { width: 240 },
+        data: { nodeType: key as FlowNodeData["nodeType"] },
+      };
       const id = generateNodeId(def.idPrefix, existingIds);
       const newNode: Node<FlowNodeData> = {
         id,
@@ -426,30 +433,7 @@ export function useNodeFactories({
   );
 
   const handleNodeTypeSelect = useCallback(
-    (
-      type:
-        | "source"
-        | "pipeline"
-        | "sink"
-        | "primitive"
-        | "control"
-        | "math"
-        | "note"
-        | "output"
-        | "slider"
-        | "knobs"
-        | "xypad"
-        | "tuple"
-        | "reroute"
-        | "image"
-        | "vace"
-        | "midi"
-        | "bool"
-        | "trigger"
-        | "subgraph"
-        | "record",
-      subType?: string
-    ) => {
+    (type: string, subType?: string) => {
       if (!pendingNodePosition) return;
 
       // Enforce single source and single sink
