@@ -52,6 +52,7 @@ import { AddNodeModal } from "./AddNodeModal";
 import { BlueprintBrowserModal } from "./BlueprintBrowserModal";
 import { BreadcrumbNav } from "./BreadcrumbNav";
 import { GraphToolbar } from "./GraphToolbar";
+import { GraphWorkflowImportDialog } from "./GraphWorkflowImportDialog";
 import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import {
@@ -153,6 +154,7 @@ interface GraphEditorProps {
   syphonOutputAvailable?: boolean;
   onStartRecording?: () => void;
   onStopRecording?: () => void;
+  resolution?: { width: number; height: number } | null;
 }
 
 export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
@@ -184,6 +186,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       syphonOutputAvailable = false,
       onStartRecording,
       onStopRecording,
+      resolution,
     },
     ref
   ) {
@@ -222,6 +225,12 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       getGraphNodePrompts,
       getGraphVaceSettings,
       fitViewTrigger,
+      pendingImportWorkflow,
+      pendingResolutionPlan,
+      pendingImportResolving,
+      confirmImport,
+      cancelImport,
+      reResolveImport,
     } = useGraphState(
       {
         onNodeParameterChange,
@@ -682,6 +691,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             isConnecting={isConnecting}
             isLoading={isLoading}
             status={status}
+            resolution={resolution}
             onStartStream={onStartStream}
             onStopStream={onStopStream}
             onImport={handleImport}
@@ -842,6 +852,15 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
+
+          <GraphWorkflowImportDialog
+            workflow={pendingImportWorkflow}
+            plan={pendingResolutionPlan}
+            resolving={pendingImportResolving}
+            onConfirm={confirmImport}
+            onCancel={cancelImport}
+            onReResolve={reResolveImport}
+          />
         </div>
       </div>
     );

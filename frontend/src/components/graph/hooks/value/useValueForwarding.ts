@@ -339,7 +339,6 @@ export function useValueForwarding(
     onNodeParamChangeRef,
   ]);
 
-  const inputRafRef = useRef<number>(0);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   nodesRef.current = nodes;
@@ -348,8 +347,8 @@ export function useValueForwarding(
   useEffect(() => {
     if (!setNodes) return;
 
-    cancelAnimationFrame(inputRafRef.current);
-    inputRafRef.current = requestAnimationFrame(() => {
+    let handle = 0;
+    const tick = () => {
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
 
@@ -500,30 +499,33 @@ export function useValueForwarding(
         }
       }
 
-      if (updates.size === 0) return;
+      if (updates.size > 0) {
+        setNodes(nds => {
+          let anyNodeChanged = false;
+          const result = nds.map(n => {
+            const upd = updates.get(n.id);
+            if (!upd) return n;
 
-      setNodes(nds => {
-        let anyNodeChanged = false;
-        const result = nds.map(n => {
-          const upd = updates.get(n.id);
-          if (!upd) return n;
-
-          let changed = false;
-          for (const [key, val] of Object.entries(upd)) {
-            if (!valuesEqual(n.data[key], val)) {
-              changed = true;
-              break;
+            let changed = false;
+            for (const [key, val] of Object.entries(upd)) {
+              if (!valuesEqual(n.data[key], val)) {
+                changed = true;
+                break;
+              }
             }
-          }
-          if (!changed) return n;
+            if (!changed) return n;
 
-          anyNodeChanged = true;
-          return { ...n, data: { ...n.data, ...upd } };
+            anyNodeChanged = true;
+            return { ...n, data: { ...n.data, ...upd } };
+          });
+          return anyNodeChanged ? result : nds;
         });
-        return anyNodeChanged ? result : nds;
-      });
-    });
+      }
 
-    return () => cancelAnimationFrame(inputRafRef.current);
-  }, [nodes, edges, setNodes]);
+      handle = requestAnimationFrame(tick);
+    };
+    handle = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(handle);
+  }, [setNodes]);
 }

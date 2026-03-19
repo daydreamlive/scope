@@ -2498,6 +2498,14 @@ export function StreamPage() {
             syphonOutputAvailable={syphonOutputAvailable}
             onStartRecording={handleStartRecording}
             onStopRecording={handleStopRecording}
+            resolution={
+              settings.resolution || {
+                height: getDefaults(settings.pipelineId, settings.inputMode)
+                  .height,
+                width: getDefaults(settings.pipelineId, settings.inputMode)
+                  .width,
+              }
+            }
           />
         </div>
 

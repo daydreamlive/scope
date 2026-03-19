@@ -164,6 +164,10 @@ export function useSubgraphCallbackSync(deps: {
 
   // ── Orphaned boundary-port cleanup ────────────────────────────────────
   useEffect(() => {
+    const inputBoundary = nodes.find(n => n.id === BOUNDARY_INPUT_ID);
+    const outputBoundary = nodes.find(n => n.id === BOUNDARY_OUTPUT_ID);
+    if (!inputBoundary && !outputBoundary) return; // Not in a subgraph
+
     const currentInputHandles = new Set<string>();
     const currentOutputHandles = new Set<string>();
     for (const e of edges) {
@@ -178,9 +182,6 @@ export function useSubgraphCallbackSync(deps: {
           currentOutputHandles.add(parsed.name);
       }
     }
-
-    const inputBoundary = nodes.find(n => n.id === BOUNDARY_INPUT_ID);
-    const outputBoundary = nodes.find(n => n.id === BOUNDARY_OUTPUT_ID);
 
     if (inputBoundary) {
       const ports = inputBoundary.data.subgraphInputs ?? [];

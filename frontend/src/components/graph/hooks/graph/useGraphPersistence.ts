@@ -9,7 +9,11 @@ import {
 } from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 import type { PipelineSchemaInfo, PluginInfo } from "../../../../lib/api";
-import type { ScopeWorkflow } from "../../../../lib/workflowApi";
+import { resolveWorkflow } from "../../../../lib/api";
+import type {
+  ScopeWorkflow,
+  WorkflowResolutionPlan,
+} from "../../../../lib/workflowApi";
 import { buildGraphWorkflow } from "../../../../lib/workflowSettings";
 import { usePipelinesContext } from "../../../../contexts/PipelinesContext";
 import { usePluginsContext } from "../../../../contexts/PluginsContext";
@@ -441,77 +445,66 @@ export function useGraphPersistence({
     onGraphClear?.();
   }, [setNodes, setEdges, onGraphClear, resetNavigationRef]);
 
-  const handleImport = useCallback(
-    (event: React.ChangeEvent<HTMLInputElement>) => {
-      const file = event.target.files?.[0];
-      if (!file) return;
+  // -- Pending import state for workflow review dialog ----------------------
+  const [pendingImportWorkflow, setPendingImportWorkflow] =
+    useState<ScopeWorkflow | null>(null);
+  const [pendingResolutionPlan, setPendingResolutionPlan] =
+    useState<WorkflowResolutionPlan | null>(null);
+  const [pendingImportResolving, setPendingImportResolving] = useState(false);
 
-      const reader = new FileReader();
-      reader.onload = e => {
-        try {
-          const parsed = JSON.parse(e.target?.result as string);
+  const loadGraphFromParsed = useCallback(
+    (parsed: Record<string, unknown>, fileName: string) => {
+      let graphConfig: Parameters<typeof graphConfigToFlow>[0];
+      let importedParams: Record<string, Record<string, unknown>> | null = null;
 
-          let graphConfig: Parameters<typeof graphConfigToFlow>[0];
-          let importedParams: Record<string, Record<string, unknown>> | null =
-            null;
-
-          if (
-            parsed.format === "scope-workflow" &&
-            Array.isArray(parsed.pipelines)
-          ) {
-            const workflow = parsed as ScopeWorkflow;
-            if (workflow.graph?.nodes && workflow.graph?.edges) {
-              graphConfig = workflow.graph as Parameters<
-                typeof graphConfigToFlow
-              >[0];
-            } else {
-              const result = workflowToGraphConfig(workflow);
-              graphConfig = result.graphConfig as Parameters<
-                typeof graphConfigToFlow
-              >[0];
-              importedParams = result.nodeParams;
-            }
-          } else if (parsed.nodes && parsed.edges) {
-            graphConfig = parsed;
-          } else {
-            setStatus("Import failed: unrecognized format");
-            return;
-          }
-
-          resetNavigationRef.current?.();
-          const { nodes: flowNodes, edges: flowEdges } = graphConfigToFlow(
-            graphConfig,
-            portsMap
-          );
-          const restoredParams =
-            importedParams ?? extractNodeParams(graphConfig.ui_state);
-          setNodeParams(restoredParams);
-          const sized = resetAutoHeightNodes(flowNodes);
-          const enriched = enrichNodes(sized, enrichDepsRef.current);
-          setNodes(enriched);
-          setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
-          setStatus(`Imported from ${file.name}`);
-          setFitViewTrigger(c => c + 1);
-
-          const sourceNode = flowNodes.find(n => n.data.nodeType === "source");
-          const importedMode = sourceNode?.data.sourceMode as
-            | string
-            | undefined;
-          if (importedMode) {
-            setTimeout(() => {
-              enrichDepsRef.current.onSourceModeChangeRef.current?.(
-                importedMode
-              );
-            }, 0);
-          }
-        } catch {
-          setStatus("Import failed: invalid JSON");
+      if (
+        parsed.format === "scope-workflow" &&
+        Array.isArray(parsed.pipelines)
+      ) {
+        const workflow = parsed as unknown as ScopeWorkflow;
+        if (workflow.graph?.nodes && workflow.graph?.edges) {
+          graphConfig = workflow.graph as Parameters<
+            typeof graphConfigToFlow
+          >[0];
+        } else {
+          const result = workflowToGraphConfig(workflow);
+          graphConfig = result.graphConfig as Parameters<
+            typeof graphConfigToFlow
+          >[0];
+          importedParams = result.nodeParams;
         }
-      };
-      reader.readAsText(file);
-      event.target.value = "";
-    },
+      } else if (parsed.nodes && parsed.edges) {
+        graphConfig = parsed as unknown as Parameters<
+          typeof graphConfigToFlow
+        >[0];
+      } else {
+        setStatus("Import failed: unrecognized format");
+        return;
+      }
 
+      resetNavigationRef.current?.();
+      const { nodes: flowNodes, edges: flowEdges } = graphConfigToFlow(
+        graphConfig,
+        portsMap
+      );
+      const restoredParams =
+        importedParams ?? extractNodeParams(graphConfig.ui_state);
+      setNodeParams(restoredParams);
+      const sized = resetAutoHeightNodes(flowNodes);
+      const enriched = enrichNodes(sized, enrichDepsRef.current);
+      setNodes(enriched);
+      setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
+      setStatus(`Imported from ${fileName}`);
+      setFitViewTrigger(c => c + 1);
+
+      const sourceNode = flowNodes.find(n => n.data.nodeType === "source");
+      const importedMode = sourceNode?.data.sourceMode as string | undefined;
+      if (importedMode) {
+        setTimeout(() => {
+          enrichDepsRef.current.onSourceModeChangeRef.current?.(importedMode);
+        }, 0);
+      }
+    },
     [
       portsMap,
       setNodes,
@@ -522,6 +515,78 @@ export function useGraphPersistence({
       resetNavigationRef,
     ]
   );
+
+  const handleImport = useCallback(
+    (event: React.ChangeEvent<HTMLInputElement>) => {
+      const file = event.target.files?.[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = async e => {
+        try {
+          const parsed = JSON.parse(e.target?.result as string);
+
+          // If it's a scope-workflow, resolve dependencies and show review dialog
+          if (
+            parsed.format === "scope-workflow" &&
+            Array.isArray(parsed.pipelines)
+          ) {
+            const workflow = parsed as ScopeWorkflow;
+            setPendingImportWorkflow(workflow);
+            setPendingImportResolving(true);
+            try {
+              const plan = await resolveWorkflow(workflow);
+              setPendingResolutionPlan(plan);
+            } catch (err) {
+              console.error("Workflow resolution failed:", err);
+              setStatus("Import failed: could not resolve dependencies");
+              setPendingImportWorkflow(null);
+            } finally {
+              setPendingImportResolving(false);
+            }
+            return;
+          }
+
+          // Plain graph JSON — load directly
+          if (parsed.nodes && parsed.edges) {
+            loadGraphFromParsed(parsed, file.name);
+          } else {
+            setStatus("Import failed: unrecognized format");
+          }
+        } catch {
+          setStatus("Import failed: invalid JSON");
+        }
+      };
+      reader.readAsText(file);
+      event.target.value = "";
+    },
+    [loadGraphFromParsed]
+  );
+
+  const confirmImport = useCallback(() => {
+    if (!pendingImportWorkflow) return;
+    loadGraphFromParsed(
+      pendingImportWorkflow as unknown as Record<string, unknown>,
+      pendingImportWorkflow.metadata?.name ?? "workflow"
+    );
+    setPendingImportWorkflow(null);
+    setPendingResolutionPlan(null);
+  }, [pendingImportWorkflow, loadGraphFromParsed]);
+
+  const cancelImport = useCallback(() => {
+    setPendingImportWorkflow(null);
+    setPendingResolutionPlan(null);
+  }, []);
+
+  const reResolveImport = useCallback(async () => {
+    if (!pendingImportWorkflow) return;
+    try {
+      const plan = await resolveWorkflow(pendingImportWorkflow);
+      setPendingResolutionPlan(plan);
+    } catch (err) {
+      console.error("Failed to re-resolve workflow:", err);
+    }
+  }, [pendingImportWorkflow]);
 
   const handleExport = useCallback(() => {
     const root = resolveRootGraphRef.current(nodes, edges);
@@ -661,5 +726,11 @@ export function useGraphPersistence({
     getGraphNodePrompts,
     getGraphVaceSettings,
     initialLoadDone,
+    pendingImportWorkflow,
+    pendingResolutionPlan,
+    pendingImportResolving,
+    confirmImport,
+    cancelImport,
+    reResolveImport,
   };
 }

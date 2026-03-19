@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { useNodesState, useEdgesState } from "@xyflow/react";
 import type { Edge, Node } from "@xyflow/react";
 import { buildPipelinePortsMap } from "../../../../lib/graphUtils";
@@ -241,11 +241,18 @@ export function useGraphState(
     availability.syphonOutputAvailable,
   ]);
 
-  // Re-color edges when nodes change (e.g. after enrichNodes updates node data)
+  // Re-color edges only when node types change (not positions/selections)
+  const nodeTypeFingerprint = useMemo(
+    () => nodes.map(n => `${n.id}:${n.data.nodeType}`).join(","),
+    [nodes]
+  );
+  const prevNodeTypesRef = useRef("");
   useEffect(() => {
     if (nodes.length === 0) return;
+    if (nodeTypeFingerprint === prevNodeTypesRef.current) return;
+    prevNodeTypesRef.current = nodeTypeFingerprint;
     setEdges(eds => colorEdges(eds, nodes, handleEdgeDelete));
-  }, [nodes, setEdges, handleEdgeDelete]);
+  }, [nodes, nodeTypeFingerprint, setEdges, handleEdgeDelete]);
 
   useRerouteTypeSync(edges, nodesRef, setNodes, setEdges);
 
@@ -299,5 +306,11 @@ export function useGraphState(
     getCurrentGraphConfig: persistence.getCurrentGraphConfig,
     getGraphNodePrompts: persistence.getGraphNodePrompts,
     getGraphVaceSettings: persistence.getGraphVaceSettings,
+    pendingImportWorkflow: persistence.pendingImportWorkflow,
+    pendingResolutionPlan: persistence.pendingResolutionPlan,
+    pendingImportResolving: persistence.pendingImportResolving,
+    confirmImport: persistence.confirmImport,
+    cancelImport: persistence.cancelImport,
+    reResolveImport: persistence.reResolveImport,
   };
 }
