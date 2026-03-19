@@ -27,7 +27,7 @@
     {
       "id": "math_x",
       "type": "math",
-      "position": { "x": 280, "y": 0 },
+      "position": { "x": 360, "y": 0 },
       "data": {
         "label": "Scale X",
         "nodeType": "math",
@@ -40,7 +40,7 @@
     {
       "id": "math_y",
       "type": "math",
-      "position": { "x": 280, "y": 140 },
+      "position": { "x": 360, "y": 200 },
       "data": {
         "label": "Scale Y",
         "nodeType": "math",

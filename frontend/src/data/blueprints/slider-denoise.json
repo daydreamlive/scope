@@ -26,7 +26,7 @@
     {
       "id": "subgraph",
       "type": "subgraph",
-      "position": { "x": 335, "y": 0 },
+      "position": { "x": 360, "y": 0 },
       "width": 240,
       "height": 141,
       "data": {
@@ -55,7 +55,7 @@
           {
             "id": "math_toInt",
             "type": "math",
-            "position": { "x": 249, "y": -50 },
+            "position": { "x": 280, "y": -50 },
             "width": 240,
             "height": 144,
             "data": {
@@ -70,13 +70,13 @@
           {
             "id": "math_step1",
             "type": "math",
-            "position": { "x": 249, "y": 104 },
+            "position": { "x": 280, "y": 130 },
             "width": 240,
-            "height": 171,
             "data": {
               "label": "Step +1",
               "nodeType": "math",
               "mathOp": "add",
+              "mathDefaultB": 100,
               "parameterOutputs": [
                 { "name": "value", "type": "number", "defaultValue": 0 }
               ]
@@ -85,13 +85,13 @@
           {
             "id": "math_step2",
             "type": "math",
-            "position": { "x": 249, "y": 285 },
+            "position": { "x": 280, "y": 340 },
             "width": 240,
-            "height": 167,
             "data": {
               "label": "Step +2",
               "nodeType": "math",
               "mathOp": "add",
+              "mathDefaultB": 100,
               "parameterOutputs": [
                 { "name": "value", "type": "number", "defaultValue": 0 }
               ]
@@ -100,29 +100,13 @@
           {
             "id": "math_step3",
             "type": "math",
-            "position": { "x": 249, "y": 463 },
+            "position": { "x": 280, "y": 550 },
             "width": 240,
-            "height": 166,
             "data": {
               "label": "Step +3",
               "nodeType": "math",
               "mathOp": "add",
-              "parameterOutputs": [
-                { "name": "value", "type": "number", "defaultValue": 0 }
-              ]
-            }
-          },
-          {
-            "id": "increment",
-            "type": "primitive",
-            "position": { "x": -100, "y": 318 },
-            "width": 240,
-            "height": 80,
-            "data": {
-              "label": "Increment",
-              "nodeType": "primitive",
-              "valueType": "number",
-              "value": 100,
+              "mathDefaultB": 100,
               "parameterOutputs": [
                 { "name": "value", "type": "number", "defaultValue": 0 }
               ]
@@ -131,7 +115,7 @@
           {
             "id": "tuple",
             "type": "tuple",
-            "position": { "x": 609, "y": 141 },
+            "position": { "x": 660, "y": 180 },
             "width": 240,
             "height": 200,
             "data": {
@@ -174,27 +158,6 @@
             "sourceHandle": "param:value",
             "target": "tuple",
             "targetHandle": "param:row_3"
-          },
-          {
-            "id": "se4",
-            "source": "increment",
-            "sourceHandle": "param:value",
-            "target": "math_step1",
-            "targetHandle": "param:b"
-          },
-          {
-            "id": "se5",
-            "source": "increment",
-            "sourceHandle": "param:value",
-            "target": "math_step2",
-            "targetHandle": "param:b"
-          },
-          {
-            "id": "se6",
-            "source": "increment",
-            "sourceHandle": "param:value",
-            "target": "math_step3",
-            "targetHandle": "param:b"
           },
           {
             "id": "se7",
@@ -254,7 +217,7 @@
     {
       "id": "tuple_out",
       "type": "tuple",
-      "position": { "x": 673, "y": 8 },
+      "position": { "x": 720, "y": 8 },
       "width": 240,
       "height": 200,
       "data": {

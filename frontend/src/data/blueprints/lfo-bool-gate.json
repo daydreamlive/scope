@@ -26,7 +26,7 @@
     {
       "id": "bool_gate",
       "type": "bool",
-      "position": { "x": 260, "y": 0 },
+      "position": { "x": 360, "y": 0 },
       "data": {
         "label": "Gate",
         "nodeType": "bool",

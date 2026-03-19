@@ -7,13 +7,11 @@ interface NodeCardProps {
   children: ReactNode;
   selected?: boolean;
   className?: string;
-  // Measures content height and enforces as minHeight on resize
+  /** Enforce min height from content. */
   autoMinHeight?: boolean;
-  // Override default min width (240px)
   minWidth?: number;
-  // Override default min height (60px)
   minHeight?: number;
-  /** When true, render as a compact pill (no resizer, no min-width). */
+  /** Compact pill (no resizer). */
   collapsed?: boolean;
 }
 
@@ -50,12 +48,12 @@ export function NodeCard({
     return () => ro.disconnect();
   }, [autoMinHeight]);
 
-  // Block pointer-events when locked (NodeHeader overrides to keep buttons clickable)
+  // Locked: block pointer-events
   const lockStyle: React.CSSProperties | undefined = locked
     ? { pointerEvents: "none" }
     : undefined;
 
-  /* ── Collapsed pill ── */
+  /* Collapsed pill */
   if (collapsed) {
     return (
       <div
@@ -70,7 +68,7 @@ export function NodeCard({
     );
   }
 
-  /* ── Normal card ── */
+  /* Normal card */
   return (
     <div
       className={`group ${NODE_TOKENS.card} ${selected ? NODE_TOKENS.cardSelected : ""} ${className}`}

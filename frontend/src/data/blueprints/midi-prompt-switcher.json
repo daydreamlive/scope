@@ -47,7 +47,7 @@
     {
       "id": "subgraph",
       "type": "subgraph",
-      "position": { "x": 432, "y": 15 },
+      "position": { "x": 450, "y": 15 },
       "width": 240,
       "height": 191,
       "data": {
@@ -59,7 +59,7 @@
             "id": "primitive",
             "type": "primitive",
             "position": { "x": 86, "y": 39 },
-            "width": 285,
+            "width": 300,
             "height": 133,
             "data": {
               "label": "Prompt A",
@@ -74,8 +74,8 @@
           {
             "id": "primitive_1",
             "type": "primitive",
-            "position": { "x": 86, "y": 183 },
-            "width": 287,
+            "position": { "x": 86, "y": 200 },
+            "width": 300,
             "height": 136,
             "data": {
               "label": "Prompt B",
@@ -90,8 +90,8 @@
           {
             "id": "primitive_2",
             "type": "primitive",
-            "position": { "x": 86, "y": 330 },
-            "width": 284,
+            "position": { "x": 86, "y": 370 },
+            "width": 300,
             "height": 133,
             "data": {
               "label": "Prompt C",
@@ -106,8 +106,8 @@
           {
             "id": "control",
             "type": "control",
-            "position": { "x": 495, "y": 81 },
-            "width": 267,
+            "position": { "x": 510, "y": 120 },
+            "width": 280,
             "height": 212,
             "data": {
               "label": "Prompt Switch",
@@ -186,7 +186,7 @@
     {
       "id": "output",
       "type": "primitive",
-      "position": { "x": 785, "y": 51 },
+      "position": { "x": 810, "y": 51 },
       "width": 240,
       "height": 135,
       "data": {

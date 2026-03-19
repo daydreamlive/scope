@@ -5,12 +5,15 @@ import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
+import { useHandlePositions } from "../hooks/node/useHandlePositions";
+import { useConnectedNumber } from "../hooks/node/useConnectedValue";
 import {
   NodeCard,
   NodeHeader,
   NodeBody,
   NodeParamRow,
   NodePillInput,
+  NodePill,
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
@@ -28,10 +31,19 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
   const max = data.sliderMax ?? 1;
   const rawStep = data.sliderStep ?? 0.01;
   const step = Number.isFinite(rawStep) && rawStep > 0 ? rawStep : 0.01;
-  const value = typeof data.value === "number" ? data.value : min;
 
-  const clampedValue = Math.min(Math.max(value, min), max);
-  const pct = max > min ? ((clampedValue - min) / (max - min)) * 100 : 0;
+  const minIn = useConnectedNumber(id, "min", min);
+  const maxIn = useConnectedNumber(id, "max", max);
+  const effectiveMin = minIn.value;
+  const effectiveMax = maxIn.value;
+
+  const value = typeof data.value === "number" ? data.value : effectiveMin;
+
+  const clampedValue = Math.min(Math.max(value, effectiveMin), effectiveMax);
+  const pct =
+    effectiveMax > effectiveMin
+      ? ((clampedValue - effectiveMin) / (effectiveMax - effectiveMin)) * 100
+      : 0;
 
   const setValueFromMouse = useCallback(
     (clientX: number) => {
@@ -39,14 +51,18 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
       const rect = sliderRef.current.getBoundingClientRect();
       let ratio = (clientX - rect.left) / rect.width;
       ratio = Math.min(Math.max(ratio, 0), 1);
-      let newVal = min + ratio * (max - min);
-      // snap to step (anchored to min so values align to min + n*step)
-      newVal = min + Math.round((newVal - min) / step) * step;
-      newVal = Math.min(Math.max(newVal, min), max);
+      let newVal = effectiveMin + ratio * (effectiveMax - effectiveMin);
+      newVal = effectiveMin + Math.round((newVal - effectiveMin) / step) * step;
+      newVal = Math.min(Math.max(newVal, effectiveMin), effectiveMax);
       updateData({ value: parseFloat(newVal.toFixed(10)) });
     },
-    [min, max, step, updateData]
+    [effectiveMin, effectiveMax, step, updateData]
   );
+
+  const { setRowRef, rowPositions } = useHandlePositions([
+    minIn.connected,
+    maxIn.connected,
+  ]);
 
   const handlePointerDown = useCallback(
     (e: React.PointerEvent) => {
@@ -115,20 +131,32 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
           </div>
 
           {/* Min / Max / Step */}
-          <NodeParamRow label="Min">
-            <NodePillInput
-              type="number"
-              value={min}
-              onChange={v => updateData({ sliderMin: Number(v) })}
-            />
-          </NodeParamRow>
-          <NodeParamRow label="Max">
-            <NodePillInput
-              type="number"
-              value={max}
-              onChange={v => updateData({ sliderMax: Number(v) })}
-            />
-          </NodeParamRow>
+          <div ref={setRowRef("min")}>
+            <NodeParamRow label="Min">
+              {minIn.connected ? (
+                <NodePill className="opacity-50">{effectiveMin}</NodePill>
+              ) : (
+                <NodePillInput
+                  type="number"
+                  value={min}
+                  onChange={v => updateData({ sliderMin: Number(v) })}
+                />
+              )}
+            </NodeParamRow>
+          </div>
+          <div ref={setRowRef("max")}>
+            <NodeParamRow label="Max">
+              {maxIn.connected ? (
+                <NodePill className="opacity-50">{effectiveMax}</NodePill>
+              ) : (
+                <NodePillInput
+                  type="number"
+                  value={max}
+                  onChange={v => updateData({ sliderMax: Number(v) })}
+                />
+              )}
+            </NodeParamRow>
+          </div>
           <NodeParamRow label="Step">
             <NodePillInput
               type="number"
@@ -149,6 +177,47 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
           collapsed
             ? collapsedHandleStyle("left")
             : { top: 44, left: 0, backgroundColor: COLOR }
+        }
+      />
+
+      {/* Min input handle */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={buildHandleId("param", "min")}
+        className={
+          collapsed
+            ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+            : "!w-2.5 !h-2.5 !border-0"
+        }
+        style={
+          collapsed
+            ? { ...collapsedHandleStyle("left"), opacity: 0 }
+            : {
+                top: rowPositions["min"] ?? 100,
+                left: 0,
+                backgroundColor: COLOR,
+              }
+        }
+      />
+      {/* Max input handle */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={buildHandleId("param", "max")}
+        className={
+          collapsed
+            ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+            : "!w-2.5 !h-2.5 !border-0"
+        }
+        style={
+          collapsed
+            ? { ...collapsedHandleStyle("left"), opacity: 0 }
+            : {
+                top: rowPositions["max"] ?? 122,
+                left: 0,
+                backgroundColor: COLOR,
+              }
         }
       />
 

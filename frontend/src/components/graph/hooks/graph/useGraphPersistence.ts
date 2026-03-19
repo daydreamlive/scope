@@ -5,6 +5,7 @@ import {
   flowToGraphConfig,
   extractParameterPorts,
   workflowToGraphConfig,
+  parseHandleId,
 } from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 import type { PipelineSchemaInfo, PluginInfo } from "../../../../lib/api";
@@ -108,6 +109,30 @@ export interface EnrichNodesDeps {
   isStreaming: boolean;
   onStartRecordingRef: React.RefObject<(() => void) | undefined>;
   onStopRecordingRef: React.RefObject<(() => void) | undefined>;
+}
+
+const FIXED_SIZE_NODE_TYPES = new Set(["source", "sink", "image"]);
+
+/**
+ * Clear saved height from nodes that use autoMinHeight so NodeCard's
+ * ResizeObserver can recalculate the proper minimum. Width is preserved.
+ */
+export function resetAutoHeightNodes(
+  nodes: Node<FlowNodeData>[]
+): Node<FlowNodeData>[] {
+  return nodes.map(n => {
+    if (FIXED_SIZE_NODE_TYPES.has(n.data.nodeType as string)) return n;
+    if (n.height == null && n.style?.height == null) return n;
+    const { height: _h, measured: _m, ...rest } = n;
+    const { height: _sh, ...restStyle } = (n.style ?? {}) as Record<
+      string,
+      unknown
+    >;
+    return {
+      ...rest,
+      style: Object.keys(restStyle).length > 0 ? restStyle : undefined,
+    } as Node<FlowNodeData>;
+  });
 }
 
 export function enrichNodes(
@@ -306,7 +331,8 @@ export function useGraphPersistence({
             | undefined
         );
         setNodeParams(restoredParams);
-        const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
+        const sized = resetAutoHeightNodes(flowNodes);
+        const enriched = enrichNodes(sized, enrichDepsRef.current);
         setNodes(enriched);
         setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
         setStatus("Restored from local storage");
@@ -460,7 +486,8 @@ export function useGraphPersistence({
           const restoredParams =
             importedParams ?? extractNodeParams(graphConfig.ui_state);
           setNodeParams(restoredParams);
-          const enriched = enrichNodes(flowNodes, enrichDepsRef.current);
+          const sized = resetAutoHeightNodes(flowNodes);
+          const enriched = enrichNodes(sized, enrichDepsRef.current);
           setNodes(enriched);
           setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
           setStatus(`Imported from ${file.name}`);
@@ -563,6 +590,65 @@ export function useGraphPersistence({
     return results;
   }, [nodeParamsRef]);
 
+  /**
+   * Extract VACE settings from VaceNode -> PipelineNode connections.
+   * Returns per-pipeline-node VACE params that should be included in
+   * initialParameters at stream start.
+   */
+  const getGraphVaceSettings = useCallback((): Array<{
+    pipelineNodeId: string;
+    vace_context_scale: number;
+    vace_use_input_video: boolean;
+    vace_ref_images?: string[];
+    first_frame_image?: string;
+    last_frame_image?: string;
+  }> => {
+    const results: Array<{
+      pipelineNodeId: string;
+      vace_context_scale: number;
+      vace_use_input_video: boolean;
+      vace_ref_images?: string[];
+      first_frame_image?: string;
+      last_frame_image?: string;
+    }> = [];
+    const currentNodes = nodesRef.current;
+    const currentEdges = edgesRef.current;
+
+    for (const edge of currentEdges) {
+      const sourceParsed = parseHandleId(edge.sourceHandle);
+      const targetParsed = parseHandleId(edge.targetHandle);
+      if (sourceParsed?.name !== "__vace" || targetParsed?.name !== "__vace")
+        continue;
+
+      const vaceNode = currentNodes.find(n => n.id === edge.source);
+      const pipelineNode = currentNodes.find(n => n.id === edge.target);
+      if (!vaceNode || !pipelineNode) continue;
+      if (vaceNode.data.nodeType !== "vace") continue;
+      if (pipelineNode.data.nodeType !== "pipeline") continue;
+
+      const entry: (typeof results)[number] = {
+        pipelineNodeId: pipelineNode.id,
+        vace_context_scale:
+          typeof vaceNode.data.vaceContextScale === "number"
+            ? vaceNode.data.vaceContextScale
+            : 1.0,
+        vace_use_input_video: false,
+      };
+
+      const refImg = (vaceNode.data.vaceRefImage as string) || "";
+      if (refImg) entry.vace_ref_images = [refImg];
+
+      const firstFrame = (vaceNode.data.vaceFirstFrame as string) || "";
+      if (firstFrame) entry.first_frame_image = firstFrame;
+
+      const lastFrame = (vaceNode.data.vaceLastFrame as string) || "";
+      if (lastFrame) entry.last_frame_image = lastFrame;
+
+      results.push(entry);
+    }
+    return results;
+  }, []);
+
   return {
     status,
     fitViewTrigger,
@@ -573,6 +659,7 @@ export function useGraphPersistence({
     refreshGraph: loadGraph,
     getCurrentGraphConfig,
     getGraphNodePrompts,
+    getGraphVaceSettings,
     initialLoadDone,
   };
 }

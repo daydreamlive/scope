@@ -11,6 +11,7 @@ import { computePatternValue } from "../utils/computePatternValue";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { useHandlePositions } from "../hooks/node/useHandlePositions";
+import { useConnectedNumber } from "../hooks/node/useConnectedValue";
 import {
   NodeCard,
   NodeHeader,
@@ -79,6 +80,13 @@ export function ControlNode({
 
   const edges = useEdges();
   const allNodes = useNodes() as Node<FlowNodeData>[];
+
+  const speedIn = useConnectedNumber(id, "speed", speed);
+  const effectiveSpeed = speedIn.value;
+  const minIn = useConnectedNumber(id, "min", min);
+  const effectiveMin = minIn.value;
+  const maxIn = useConnectedNumber(id, "max", max);
+  const effectiveMax = maxIn.value;
 
   const [currentValue, setCurrentValue] = useState<number | string>(
     controlType === "string" ? items[0] || "" : min
@@ -166,7 +174,7 @@ export function ControlNode({
         const patternValue = computePatternValue(
           pattern,
           elapsed,
-          speed,
+          effectiveSpeed,
           0,
           items.length - 1,
           lastValueRef.current
@@ -179,9 +187,9 @@ export function ControlNode({
         const floatValue = computePatternValue(
           pattern,
           elapsed,
-          speed,
-          min,
-          max,
+          effectiveSpeed,
+          effectiveMin,
+          effectiveMax,
           lastValueRef.current
         );
         lastValueRef.current = floatValue;
@@ -200,7 +208,16 @@ export function ControlNode({
         cancelAnimationFrame(animationFrameRef.current);
       }
     };
-  }, [isSwitchMode, isPlaying, pattern, speed, min, max, controlType, items]);
+  }, [
+    isSwitchMode,
+    isPlaying,
+    pattern,
+    effectiveSpeed,
+    effectiveMin,
+    effectiveMax,
+    controlType,
+    items,
+  ]);
 
   const lastUpdateTimeRef = useRef<number>(0);
   useEffect(() => {
@@ -278,6 +295,9 @@ export function ControlNode({
   const { setRowRef, rowPositions } = useHandlePositions([
     isSwitchMode,
     items.length,
+    speedIn.connected,
+    minIn.connected,
+    maxIn.connected,
   ]);
 
   return (
@@ -337,31 +357,55 @@ export function ControlNode({
                 </NodeParamRow>
               ) : (
                 <>
-                  <NodeParamRow label="Min">
-                    <NodePillInput
-                      type="number"
-                      value={min}
-                      onChange={handleMinChange}
-                    />
-                  </NodeParamRow>
-                  <NodeParamRow label="Max">
-                    <NodePillInput
-                      type="number"
-                      value={max}
-                      onChange={handleMaxChange}
-                    />
-                  </NodeParamRow>
+                  <div ref={setRowRef("min")}>
+                    <NodeParamRow label="Min">
+                      {minIn.connected ? (
+                        <NodePill className="opacity-50">
+                          {effectiveMin}
+                        </NodePill>
+                      ) : (
+                        <NodePillInput
+                          type="number"
+                          value={min}
+                          onChange={handleMinChange}
+                        />
+                      )}
+                    </NodeParamRow>
+                  </div>
+                  <div ref={setRowRef("max")}>
+                    <NodeParamRow label="Max">
+                      {maxIn.connected ? (
+                        <NodePill className="opacity-50">
+                          {effectiveMax}
+                        </NodePill>
+                      ) : (
+                        <NodePillInput
+                          type="number"
+                          value={max}
+                          onChange={handleMaxChange}
+                        />
+                      )}
+                    </NodeParamRow>
+                  </div>
                 </>
               )}
 
-              <NodeParamRow label="Speed">
-                <NodePillInput
-                  type="number"
-                  value={speed}
-                  onChange={handleSpeedChange}
-                  min={0.1}
-                />
-              </NodeParamRow>
+              <div ref={setRowRef("speed")}>
+                <NodeParamRow label="Speed">
+                  {speedIn.connected ? (
+                    <NodePill className="opacity-50">
+                      {effectiveSpeed.toFixed(2)}
+                    </NodePill>
+                  ) : (
+                    <NodePillInput
+                      type="number"
+                      value={speed}
+                      onChange={handleSpeedChange}
+                      min={0.1}
+                    />
+                  )}
+                </NodeParamRow>
+              </div>
             </>
           )}
 
@@ -507,6 +551,69 @@ export function ControlNode({
             />
           </span>
         ))}
+
+      {/* Param input handles (animated mode only) */}
+      {!isSwitchMode && (
+        <>
+          <Handle
+            type="target"
+            position={Position.Left}
+            id={buildHandleId("param", "min")}
+            className={
+              collapsed
+                ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+                : "!w-2.5 !h-2.5 !border-0"
+            }
+            style={
+              collapsed
+                ? { ...collapsedHandleStyle("left"), opacity: 0 }
+                : {
+                    top: rowPositions["min"] ?? 44,
+                    left: 0,
+                    backgroundColor: "#38bdf8",
+                  }
+            }
+          />
+          <Handle
+            type="target"
+            position={Position.Left}
+            id={buildHandleId("param", "max")}
+            className={
+              collapsed
+                ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+                : "!w-2.5 !h-2.5 !border-0"
+            }
+            style={
+              collapsed
+                ? { ...collapsedHandleStyle("left"), opacity: 0 }
+                : {
+                    top: rowPositions["max"] ?? 44,
+                    left: 0,
+                    backgroundColor: "#38bdf8",
+                  }
+            }
+          />
+          <Handle
+            type="target"
+            position={Position.Left}
+            id={buildHandleId("param", "speed")}
+            className={
+              collapsed
+                ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+                : "!w-2.5 !h-2.5 !border-0"
+            }
+            style={
+              collapsed
+                ? { ...collapsedHandleStyle("left"), opacity: 0 }
+                : {
+                    top: rowPositions["speed"] ?? 44,
+                    left: 0,
+                    backgroundColor: "#38bdf8",
+                  }
+            }
+          />
+        </>
+      )}
 
       {/* Output handle */}
       <Handle

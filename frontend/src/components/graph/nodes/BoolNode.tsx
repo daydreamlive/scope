@@ -7,6 +7,7 @@ import { getNumberFromNode } from "../utils/getValueFromNode";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { useHandlePositions } from "../hooks/node/useHandlePositions";
+import { useConnectedNumber } from "../hooks/node/useConnectedValue";
 import {
   NodeCard,
   NodeHeader,
@@ -36,6 +37,8 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
 
   const mode = data.boolMode || "gate";
   const threshold = data.boolThreshold ?? 0;
+  const thresholdIn = useConnectedNumber(id, "threshold", threshold);
+  const effectiveThreshold = thresholdIn.value;
   const currentOutput = Boolean(data.value);
 
   const inputEdge = edges.find(
@@ -49,9 +52,9 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
     ? getNumberFromNode(sourceNode, inputEdge?.sourceHandle)
     : null;
 
-  const isAboveThreshold = inputValue !== null && inputValue > threshold;
+  const isAboveThreshold =
+    inputValue !== null && inputValue > effectiveThreshold;
 
-  // rising-edge ref for toggle mode
   const prevAboveRef = useRef(false);
   const toggleStateRef = useRef(currentOutput);
 
@@ -61,7 +64,6 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
     if (mode === "gate") {
       newOutput = isAboveThreshold;
     } else {
-      // Toggle: flip on rising edge
       const wasAbove = prevAboveRef.current;
       if (isAboveThreshold && !wasAbove) {
         toggleStateRef.current = !toggleStateRef.current;
@@ -87,7 +89,10 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
     }
   }, [mode, isAboveThreshold]);
 
-  const { setRowRef, rowPositions } = useHandlePositions([mode]);
+  const { setRowRef, rowPositions } = useHandlePositions([
+    mode,
+    thresholdIn.connected,
+  ]);
 
   return (
     <NodeCard selected={selected} collapsed={collapsed}>
@@ -106,13 +111,19 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
               options={MODE_OPTIONS}
             />
           </NodeParamRow>
-          <NodeParamRow label="Threshold">
-            <NodePillInput
-              type="number"
-              value={threshold}
-              onChange={v => updateData({ boolThreshold: Number(v) })}
-            />
-          </NodeParamRow>
+          <div ref={setRowRef("threshold")}>
+            <NodeParamRow label="Threshold">
+              {thresholdIn.connected ? (
+                <NodePill className="opacity-50">{effectiveThreshold}</NodePill>
+              ) : (
+                <NodePillInput
+                  type="number"
+                  value={threshold}
+                  onChange={v => updateData({ boolThreshold: Number(v) })}
+                />
+              )}
+            </NodeParamRow>
+          </div>
           <div ref={setRowRef("input")} className={NODE_TOKENS.paramRow}>
             <span className={NODE_TOKENS.labelText}>In</span>
             <NodePill className="opacity-75">
@@ -139,6 +150,27 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
         </NodeBody>
       )}
 
+      {/* Threshold input handle */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={buildHandleId("param", "threshold")}
+        className={
+          collapsed
+            ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+            : "!w-2.5 !h-2.5 !border-0"
+        }
+        style={
+          collapsed
+            ? { ...collapsedHandleStyle("left"), opacity: 0 }
+            : {
+                top: rowPositions["threshold"] ?? 56,
+                left: 0,
+                backgroundColor: "#38bdf8",
+              }
+        }
+      />
+
       {/* Input handle (number) */}
       <Handle
         type="target"
@@ -151,7 +183,7 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
             : {
                 top: rowPositions["input"] ?? 78,
                 left: 0,
-                backgroundColor: "#38bdf8", // sky-400, number color
+                backgroundColor: "#38bdf8",
               }
         }
       />

@@ -17,7 +17,6 @@ export function NodeBody({
   const zoomedOut = useIsZoomedOut();
   const { locked } = useNodeFlags();
 
-  // Opacity only (pointer-events handled by NodeCard)
   const style: React.CSSProperties | undefined = zoomedOut
     ? { opacity: 0.07, pointerEvents: "none" }
     : locked
@@ -26,7 +25,7 @@ export function NodeBody({
 
   return (
     <div
-      className={`${withGap ? NODE_TOKENS.bodyWithGap : NODE_TOKENS.body} flex-1 min-h-0 ${className} transition-opacity duration-200`}
+      className={`${withGap ? NODE_TOKENS.bodyWithGap : NODE_TOKENS.body} flex-1 min-h-0 overflow-hidden ${className} transition-opacity duration-200`}
       style={style}
     >
       {children}

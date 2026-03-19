@@ -291,5 +291,6 @@ export function useGraphState(
     refreshGraph: persistence.refreshGraph,
     getCurrentGraphConfig: persistence.getCurrentGraphConfig,
     getGraphNodePrompts: persistence.getGraphNodePrompts,
+    getGraphVaceSettings: persistence.getGraphVaceSettings,
   };
 }

@@ -111,6 +111,14 @@ export interface GraphEditorHandle {
   refreshGraph: () => void;
   getCurrentGraphConfig: () => import("../../lib/api").GraphConfig;
   getGraphNodePrompts: () => Array<{ nodeId: string; text: string }>;
+  getGraphVaceSettings: () => Array<{
+    pipelineNodeId: string;
+    vace_context_scale: number;
+    vace_use_input_video: boolean;
+    vace_ref_images?: string[];
+    first_frame_image?: string;
+    last_frame_image?: string;
+  }>;
 }
 
 interface GraphEditorProps {
@@ -210,6 +218,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       refreshGraph,
       getCurrentGraphConfig,
       getGraphNodePrompts,
+      getGraphVaceSettings,
       fitViewTrigger,
     } = useGraphState(
       {
@@ -241,8 +250,18 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
 
     useImperativeHandle(
       ref,
-      () => ({ refreshGraph, getCurrentGraphConfig, getGraphNodePrompts }),
-      [refreshGraph, getCurrentGraphConfig, getGraphNodePrompts]
+      () => ({
+        refreshGraph,
+        getCurrentGraphConfig,
+        getGraphNodePrompts,
+        getGraphVaceSettings,
+      }),
+      [
+        refreshGraph,
+        getCurrentGraphConfig,
+        getGraphNodePrompts,
+        getGraphVaceSettings,
+      ]
     );
 
     const [showAddNodeModal, setShowAddNodeModal] = useState(false);

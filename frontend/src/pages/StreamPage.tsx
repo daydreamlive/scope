@@ -1977,23 +1977,55 @@ export function StreamPage() {
       // Build a linear graph for perform mode so backend uses the unified graph path.
       // In graph/nonLinearGraph mode, graphConfigForStream is already set above.
       if (!graphMode && !nonLinearGraph) {
+        // Resolve which pipelines should receive input as vace_input_frames
+        // (mirrors the backend's _setup_pipelines_sync fallback logic)
+        const vaceInputVideoIds = new Set<string>();
+        if (
+          vaceEnabled &&
+          (settings.vaceUseInputVideo ?? false) &&
+          currentMode === "video"
+        ) {
+          const allIds = [
+            ...(settings.preprocessorIds ?? []),
+            pipelineIdToUse,
+            ...(settings.postprocessorIds ?? []),
+          ];
+          for (const pid of allIds) {
+            if (pipelines?.[pid]?.supportsVACE) {
+              vaceInputVideoIds.add(pid);
+            }
+          }
+        }
+
         graphConfigForStream = linearGraphFromSettings(
           pipelineIdToUse,
           settings.preprocessorIds ?? [],
-          settings.postprocessorIds ?? []
+          settings.postprocessorIds ?? [],
+          vaceInputVideoIds.size > 0 ? vaceInputVideoIds : undefined
         );
       }
 
       // Build PipelineLoadItem[] from graph nodes (always available at this
       // point — perform mode builds a linear graph above).
+      // Per-node load_params ensures each pipeline gets vace_enabled when it supports VACE.
       const loadItems: PipelineLoadItem[] = graphConfigForStream
         ? graphConfigForStream.nodes
             .filter(n => n.type === "pipeline" && n.pipeline_id)
-            .map(n => ({
-              node_id: n.id,
-              pipeline_id: n.pipeline_id as string,
-              load_params: loadParams,
-            }))
+            .map(n => {
+              const pid = n.pipeline_id as string;
+              const pipeSchema = pipelines?.[pid];
+              const nodeLoadParams = { ...(loadParams ?? {}) };
+              if (pipeSchema?.supportsVACE) {
+                nodeLoadParams.vace_enabled = true;
+                nodeLoadParams.vace_context_scale =
+                  settings.vaceContextScale ?? 1.0;
+              }
+              return {
+                node_id: n.id,
+                pipeline_id: pid,
+                load_params: nodeLoadParams,
+              };
+            })
         : pipelineIds.map(pid => ({
             node_id: pid,
             pipeline_id: pid,
@@ -2093,7 +2125,53 @@ export function StreamPage() {
       initialParameters.pipeline_ids = pipelineIds;
 
       // VACE-specific parameters
-      if (currentPipeline?.supportsVACE) {
+      if (graphMode || nonLinearGraph) {
+        // In graph mode, extract VACE settings from VaceNode connections.
+        // The VaceNode's compound output (__vace) carries context_scale,
+        // ref_images, and frame references to the connected pipeline node.
+        const vaceSettings =
+          graphEditorRef.current?.getGraphVaceSettings() ?? [];
+        if (vaceSettings.length > 0) {
+          // Use the first VaceNode's settings for global initialParameters
+          // (backend broadcasts initial_parameters to all processors)
+          const first = vaceSettings[0];
+          initialParameters.vace_enabled = true;
+          initialParameters.vace_context_scale = first.vace_context_scale;
+          initialParameters.vace_use_input_video = first.vace_use_input_video;
+          if (first.vace_ref_images?.length) {
+            initialParameters.vace_ref_images = first.vace_ref_images;
+          }
+          if (first.first_frame_image) {
+            initialParameters.first_frame_image = first.first_frame_image;
+          }
+          if (first.last_frame_image) {
+            initialParameters.last_frame_image = first.last_frame_image;
+          }
+        } else {
+          // No VaceNode in graph; check if any pipeline supports VACE and
+          // use perform-mode settings as fallback
+          const anyVace = pipelineIds.some(
+            pid => pipelines?.[pid]?.supportsVACE
+          );
+          if (anyVace) {
+            initialParameters.vace_enabled = vaceEnabled;
+            initialParameters.vace_context_scale =
+              settings.vaceContextScale ?? 1.0;
+            if (currentMode === "video") {
+              initialParameters.vace_use_input_video =
+                settings.vaceUseInputVideo ?? false;
+            }
+            const vaceParams = getVaceParams(
+              settings.refImages,
+              settings.vaceContextScale
+            );
+            if ("vace_ref_images" in vaceParams) {
+              initialParameters.vace_ref_images = vaceParams.vace_ref_images;
+            }
+          }
+        }
+      } else if (currentPipeline?.supportsVACE) {
+        // Perform mode: use settings panel values
         const vaceParams = getVaceParams(
           settings.refImages,
           settings.vaceContextScale
@@ -2101,10 +2179,7 @@ export function StreamPage() {
         if ("vace_ref_images" in vaceParams) {
           initialParameters.vace_ref_images = vaceParams.vace_ref_images;
         }
-        // Always send vace_context_scale when VACE is supported,
-        // not just when ref images are present (it also applies to input video VACE)
         initialParameters.vace_context_scale = settings.vaceContextScale ?? 1.0;
-        // Add vace_use_input_video parameter
         if (currentMode === "video") {
           initialParameters.vace_use_input_video =
             settings.vaceUseInputVideo ?? false;
@@ -2114,7 +2189,6 @@ export function StreamPage() {
         currentPipeline?.supportsImages &&
         settings.refImages?.length
       ) {
-        // Non-VACE pipelines that support images
         initialParameters.images = settings.refImages;
       }
 

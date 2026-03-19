@@ -1,4 +1,4 @@
-import { useCallback, useRef, useEffect } from "react";
+import { useCallback, useRef, useEffect, useLayoutEffect } from "react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
@@ -10,15 +10,24 @@ export function NoteNode({ id, data, selected }: NodeProps<NoteNodeType>) {
   const { updateData } = useNodeData(id);
   const noteText = (data.noteText as string) || "";
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const cursorRef = useRef<number | null>(null);
 
   const handleTextChange = useCallback(
-    (newText: string) => {
+    (newText: string, selectionStart: number | null) => {
+      cursorRef.current = selectionStart;
       updateData({ noteText: newText });
     },
     [updateData]
   );
 
-  // Auto-resize textarea to fit content
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (el && cursorRef.current !== null && document.activeElement === el) {
+      el.selectionStart = cursorRef.current;
+      el.selectionEnd = cursorRef.current;
+    }
+  }, [noteText]);
+
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -39,7 +48,9 @@ export function NoteNode({ id, data, selected }: NodeProps<NoteNodeType>) {
       <textarea
         ref={textareaRef}
         value={noteText}
-        onChange={e => handleTextChange(e.target.value)}
+        onChange={e =>
+          handleTextChange(e.target.value, e.target.selectionStart)
+        }
         onWheel={handleWheel}
         placeholder="Type a note…"
         className="flex-1 w-full resize-none bg-transparent border-none outline-none px-2 py-1.5 text-[#fafafa] text-[11px] leading-relaxed placeholder:text-[#555] nowheel nodrag"

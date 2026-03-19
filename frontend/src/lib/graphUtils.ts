@@ -1106,7 +1106,8 @@ export function generateNodeId(
 export function linearGraphFromSettings(
   pipelineId: string,
   preprocessorIds: string[],
-  postprocessorIds: string[]
+  postprocessorIds: string[],
+  vaceInputVideoIds?: Set<string>
 ): GraphConfig {
   const allPipelineIds = [...preprocessorIds, pipelineId, ...postprocessorIds];
   // Generate unique node IDs so duplicate pipeline_ids get distinct nodes
@@ -1129,12 +1130,13 @@ export function linearGraphFromSettings(
 
   const edges: GraphEdge[] = [];
   let prev = "input";
-  for (const { nodeId } of nodeEntries) {
+  for (const { nodeId, pid } of nodeEntries) {
+    const toPort = vaceInputVideoIds?.has(pid) ? "vace_input_frames" : "video";
     edges.push({
       from: prev,
       from_port: "video",
       to_node: nodeId,
-      to_port: "video",
+      to_port: toPort,
       kind: "stream",
     });
     prev = nodeId;

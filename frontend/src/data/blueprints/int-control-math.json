@@ -26,7 +26,7 @@
     {
       "id": "slider_stepSize",
       "type": "slider",
-      "position": { "x": 0, "y": 140 },
+      "position": { "x": 0, "y": 260 },
       "data": {
         "label": "Step Size",
         "nodeType": "slider",
@@ -42,7 +42,7 @@
     {
       "id": "math_step",
       "type": "math",
-      "position": { "x": 280, "y": 60 },
+      "position": { "x": 360, "y": 100 },
       "data": {
         "label": "Scale Step",
         "nodeType": "math",
