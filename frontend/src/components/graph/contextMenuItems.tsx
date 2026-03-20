@@ -27,6 +27,7 @@ import {
   BookOpen,
   Zap,
   Circle,
+  Layers,
 } from "lucide-react";
 import type { Node, Edge } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
@@ -51,6 +52,7 @@ type NodeTypeSelectFn = (
     | "reroute"
     | "image"
     | "vace"
+    | "lora"
     | "midi"
     | "bool"
     | "trigger"
@@ -226,6 +228,12 @@ export function buildPaneMenuItems(deps: {
       icon: <Sparkles />,
       onClick: () => handleNodeTypeSelect("vace"),
       keywords: ["vace", "conditioning", "reference", "frame"],
+    },
+    {
+      label: "LoRA",
+      icon: <Layers />,
+      onClick: () => handleNodeTypeSelect("lora"),
+      keywords: ["lora", "adapter", "finetune", "weight"],
     },
     {
       label: "Primitive",

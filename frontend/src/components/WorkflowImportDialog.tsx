@@ -44,6 +44,7 @@ import {
   workflowToSettings,
   workflowTimelineToPrompts,
   workflowToPromptState,
+  extractFilename,
 } from "../lib/workflowSettings";
 import type { WorkflowPromptState } from "../lib/workflowSettings";
 import {
@@ -66,6 +67,8 @@ interface WorkflowImportDialogProps {
     timelinePrompts: TimelinePrompt[],
     promptState: WorkflowPromptState | null
   ) => void;
+  /** When set, the dialog calls this instead of onLoad (used for graph-mode import). */
+  onLoadToGraph?: (workflow: ScopeWorkflow) => void;
   initialWorkflow?: ScopeWorkflow | null;
 }
 
@@ -145,6 +148,7 @@ export function WorkflowImportDialog({
   open,
   onClose,
   onLoad,
+  onLoadToGraph,
   initialWorkflow,
 }: WorkflowImportDialogProps) {
   const [step, setStep] = useState<ImportStep>("select");
@@ -378,6 +382,30 @@ export function WorkflowImportDialog({
     );
     if (!confirmed) return;
 
+    if (onLoadToGraph) {
+      const freshLoraFiles = await refreshLoRAs();
+      const patchedWorkflow = {
+        ...workflow,
+        pipelines: workflow.pipelines.map(p => ({
+          ...p,
+          loras: p.loras.map(l => {
+            const resolved = freshLoraFiles.find(
+              f =>
+                extractFilename(f.path).toLowerCase() ===
+                l.filename.toLowerCase()
+            );
+            return resolved ? { ...l, filename: resolved.path } : l;
+          }),
+        })),
+      };
+      onLoadToGraph(patchedWorkflow);
+      toast.success("Workflow loaded into graph", {
+        description: `"${workflow.metadata.name}" loaded into the graph editor`,
+      });
+      handleClose();
+      return;
+    }
+
     // Fetch fresh LoRA files to avoid stale closure after downloads
     const freshLoraFiles = await refreshLoRAs();
     const importedSettings = workflowToSettings(workflow, freshLoraFiles);
@@ -389,7 +417,7 @@ export function WorkflowImportDialog({
       description: `"${workflow.metadata.name}" loaded into the interface`,
     });
     handleClose();
-  }, [workflow, onLoad, handleClose, showConfirm, refreshLoRAs]);
+  }, [workflow, onLoad, onLoadToGraph, handleClose, showConfirm, refreshLoRAs]);
 
   // -----------------------------------------------------------------------
   // Derived state

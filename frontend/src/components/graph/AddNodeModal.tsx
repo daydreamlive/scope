@@ -27,6 +27,7 @@ interface AddNodeModalProps {
       | "reroute"
       | "image"
       | "vace"
+      | "lora"
       | "midi"
       | "bool"
       | "trigger"
@@ -53,6 +54,7 @@ interface NodeCatalogItem {
     | "reroute"
     | "image"
     | "vace"
+    | "lora"
     | "midi"
     | "bool"
     | "trigger"
@@ -201,6 +203,15 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     description:
       "Bundle VACE parameters (context scale, reference images) for pipeline conditioning",
     color: "#a78bfa",
+    category: "I/O",
+  },
+  // Pink
+  {
+    type: "lora",
+    name: "LoRA",
+    description:
+      "Configure LoRA adapters (file, scale, merge mode) and connect to a pipeline node",
+    color: "#f472b6",
     category: "I/O",
   },
   // Gray

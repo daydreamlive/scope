@@ -39,6 +39,7 @@ import { XYPadNode } from "./nodes/XYPadNode";
 import { TupleNode } from "./nodes/TupleNode";
 import { ImageNode } from "./nodes/ImageNode";
 import { VaceNode } from "./nodes/VaceNode";
+import { LoraNode } from "./nodes/LoraNode";
 import { MidiNode } from "./nodes/MidiNode";
 import { BoolNode } from "./nodes/BoolNode";
 import { TriggerNode } from "./nodes/TriggerNode";
@@ -95,6 +96,7 @@ const nodeTypes = {
   reroute: RerouteNode,
   image: ImageNode,
   vace: VaceNode,
+  lora: LoraNode,
   midi: MidiNode,
   bool: BoolNode,
   trigger: TriggerNode,
@@ -120,6 +122,14 @@ export interface GraphEditorHandle {
     first_frame_image?: string;
     last_frame_image?: string;
   }>;
+  getGraphLoRASettings: () => Array<{
+    pipelineNodeId: string;
+    loras: Array<{ path: string; scale: number; merge_mode?: string }>;
+    lora_merge_mode: string;
+  }>;
+  loadWorkflow: (
+    workflow: import("../../lib/workflowApi").ScopeWorkflow
+  ) => void;
 }
 
 interface GraphEditorProps {
@@ -224,6 +234,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       getCurrentGraphConfig,
       getGraphNodePrompts,
       getGraphVaceSettings,
+      getGraphLoRASettings,
       fitViewTrigger,
       pendingImportWorkflow,
       pendingResolutionPlan,
@@ -231,6 +242,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       confirmImport,
       cancelImport,
       reResolveImport,
+      loadGraphFromParsed,
     } = useGraphState(
       {
         onNodeParameterChange,
@@ -266,12 +278,23 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         getCurrentGraphConfig,
         getGraphNodePrompts,
         getGraphVaceSettings,
+        getGraphLoRASettings,
+        loadWorkflow: (
+          workflow: import("../../lib/workflowApi").ScopeWorkflow
+        ) => {
+          loadGraphFromParsed(
+            workflow as unknown as Record<string, unknown>,
+            workflow.metadata?.name ?? "workflow"
+          );
+        },
       }),
       [
         refreshGraph,
         getCurrentGraphConfig,
         getGraphNodePrompts,
         getGraphVaceSettings,
+        getGraphLoRASettings,
+        loadGraphFromParsed,
       ]
     );
 

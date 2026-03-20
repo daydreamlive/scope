@@ -17,6 +17,7 @@ import type {
 import { buildGraphWorkflow } from "../../../../lib/workflowSettings";
 import { usePipelinesContext } from "../../../../contexts/PipelinesContext";
 import { usePluginsContext } from "../../../../contexts/PluginsContext";
+import { useLoRAsContext } from "../../../../contexts/LoRAsContext";
 import { useServerInfoContext } from "../../../../contexts/ServerInfoContext";
 import { buildEdgeStyle } from "../../constants";
 
@@ -152,6 +153,7 @@ export function enrichNodes(
       const supportsCacheManagement =
         schema?.supports_cache_management ?? false;
       const supportsVace = schema?.supports_vace ?? false;
+      const supportsLoRA = schema?.supports_lora ?? false;
       const nodeParamValues = deps.nodeParamsRef.current?.[n.id] || {};
       const pipelineAvailable = pipelineId
         ? deps.availablePipelineIds.includes(pipelineId)
@@ -171,6 +173,7 @@ export function enrichNodes(
           supportsPrompts,
           supportsCacheManagement,
           supportsVace,
+          supportsLoRA,
           promptText: (nodeParamValues.__prompt as string) || "",
           onPromptChange: deps.handlePromptChange,
           onPromptSubmit: deps.handlePromptSubmit,
@@ -296,8 +299,10 @@ export function useGraphPersistence({
   const [status, setStatus] = useState<string>("");
   const [fitViewTrigger, setFitViewTrigger] = useState(0);
 
-  const { pipelines: pipelineInfoMap } = usePipelinesContext();
-  const { plugins } = usePluginsContext();
+  const { pipelines: pipelineInfoMap, refreshPipelines } =
+    usePipelinesContext();
+  const { plugins, refresh: refreshPlugins } = usePluginsContext();
+  const { loraFiles, refresh: refreshLoRAs } = useLoRAsContext();
   const { version: scopeVersion } = useServerInfoContext();
 
   const nodesRef = useRef(nodes);
@@ -467,7 +472,9 @@ export function useGraphPersistence({
             typeof graphConfigToFlow
           >[0];
         } else {
-          const result = workflowToGraphConfig(workflow);
+          const result = workflowToGraphConfig(workflow, {
+            availableLoRAs: loraFiles,
+          });
           graphConfig = result.graphConfig as Parameters<
             typeof graphConfigToFlow
           >[0];
@@ -507,6 +514,7 @@ export function useGraphPersistence({
     },
     [
       portsMap,
+      loraFiles,
       setNodes,
       setEdges,
       handleEdgeDelete,
@@ -581,12 +589,13 @@ export function useGraphPersistence({
   const reResolveImport = useCallback(async () => {
     if (!pendingImportWorkflow) return;
     try {
+      await Promise.all([refreshPipelines(), refreshLoRAs(), refreshPlugins()]);
       const plan = await resolveWorkflow(pendingImportWorkflow);
       setPendingResolutionPlan(plan);
     } catch (err) {
       console.error("Failed to re-resolve workflow:", err);
     }
-  }, [pendingImportWorkflow]);
+  }, [pendingImportWorkflow, refreshPipelines, refreshLoRAs, refreshPlugins]);
 
   const handleExport = useCallback(() => {
     const root = resolveRootGraphRef.current(nodes, edges);
@@ -714,6 +723,62 @@ export function useGraphPersistence({
     return results;
   }, []);
 
+  /**
+   * Extract LoRA settings from LoraNode -> PipelineNode connections.
+   * Returns per-pipeline-node LoRA config for load_params at stream start.
+   */
+  const getGraphLoRASettings = useCallback((): Array<{
+    pipelineNodeId: string;
+    loras: Array<{ path: string; scale: number; merge_mode?: string }>;
+    lora_merge_mode: string;
+  }> => {
+    const results: Array<{
+      pipelineNodeId: string;
+      loras: Array<{ path: string; scale: number; merge_mode?: string }>;
+      lora_merge_mode: string;
+    }> = [];
+    const currentNodes = nodesRef.current;
+    const currentEdges = edgesRef.current;
+
+    for (const edge of currentEdges) {
+      const sourceParsed = parseHandleId(edge.sourceHandle);
+      const targetParsed = parseHandleId(edge.targetHandle);
+      if (sourceParsed?.name !== "__loras" || targetParsed?.name !== "__loras")
+        continue;
+
+      const loraNode = currentNodes.find(n => n.id === edge.source);
+      const pipelineNode = currentNodes.find(n => n.id === edge.target);
+      if (!loraNode || !pipelineNode) continue;
+      if (loraNode.data.nodeType !== "lora") continue;
+      if (pipelineNode.data.nodeType !== "pipeline") continue;
+
+      const entries =
+        (loraNode.data.loras as Array<{
+          path: string;
+          scale: number;
+          mergeMode?: string;
+        }>) || [];
+
+      const validLoras = entries
+        .filter(l => l.path)
+        .map(l => ({
+          path: l.path,
+          scale: l.scale,
+          ...(l.mergeMode ? { merge_mode: l.mergeMode } : {}),
+        }));
+
+      if (validLoras.length > 0) {
+        results.push({
+          pipelineNodeId: pipelineNode.id,
+          loras: validLoras,
+          lora_merge_mode:
+            (loraNode.data.loraMergeMode as string) || "permanent_merge",
+        });
+      }
+    }
+    return results;
+  }, []);
+
   return {
     status,
     fitViewTrigger,
@@ -725,6 +790,7 @@ export function useGraphPersistence({
     getCurrentGraphConfig,
     getGraphNodePrompts,
     getGraphVaceSettings,
+    getGraphLoRASettings,
     initialLoadDone,
     pendingImportWorkflow,
     pendingResolutionPlan,
@@ -732,5 +798,6 @@ export function useGraphPersistence({
     confirmImport,
     cancelImport,
     reResolveImport,
+    loadGraphFromParsed,
   };
 }

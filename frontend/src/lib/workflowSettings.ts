@@ -101,20 +101,36 @@ const KNOWN_PARAMS = new Set([
 // ---------------------------------------------------------------------------
 
 /** Extract just the filename from a full file path. */
-function extractFilename(path: string): string {
+export function extractFilename(path: string): string {
   const parts = path.split(/[/\\]/);
   return parts[parts.length - 1] || path;
 }
 
 /** Resolve a LoRA filename to the full path from the available files list. */
-function resolveLoRAPath(
+export function resolveLoRAPath(
   filename: string,
   availableLoRAs: LoRAFileInfo[]
 ): string {
-  const match = availableLoRAs.find(
-    f => extractFilename(f.path).toLowerCase() === filename.toLowerCase()
+  // Already a known full path
+  const exact = availableLoRAs.find(f => f.path === filename);
+  if (exact) return exact.path;
+
+  // Match by basename (with extension)
+  const basename = extractFilename(filename).toLowerCase();
+  const byBasename = availableLoRAs.find(
+    f => extractFilename(f.path).toLowerCase() === basename
   );
-  return match?.path ?? filename;
+  if (byBasename) return byBasename.path;
+
+  // Match by stem (without extension) — handles f.name which is the stem
+  const byStem = availableLoRAs.find(
+    f =>
+      f.name.toLowerCase() === basename ||
+      f.name.toLowerCase() === filename.toLowerCase()
+  );
+  if (byStem) return byStem.path;
+
+  return filename;
 }
 
 /** Determine the pipeline source (builtin vs plugin). */
@@ -209,6 +225,58 @@ function buildMainPipelineParams(
   }
 
   return params;
+}
+
+/**
+ * Extract LoRA configurations from ui_state LoRA nodes and their edges
+ * to pipeline nodes. Returns a map of pipelineNodeId -> LoRA entries.
+ */
+function extractLoRAsFromUiState(
+  uiState: Record<string, unknown> | undefined
+): Map<string, Array<{ path: string; scale: number; mergeMode?: string }>> {
+  const result = new Map<
+    string,
+    Array<{ path: string; scale: number; mergeMode?: string }>
+  >();
+  if (!uiState) return result;
+
+  const uiNodes = (uiState.nodes ?? []) as Array<{
+    id: string;
+    data?: { nodeType?: string; loras?: unknown; loraMergeMode?: string };
+  }>;
+  const uiEdges = (uiState.edges ?? []) as Array<{
+    source: string;
+    target: string;
+    sourceHandle?: string;
+    targetHandle?: string;
+  }>;
+
+  const loraNodes = new Map(
+    uiNodes.filter(n => n.data?.nodeType === "lora").map(n => [n.id, n])
+  );
+
+  for (const edge of uiEdges) {
+    if (
+      !edge.sourceHandle?.includes("__loras") ||
+      !edge.targetHandle?.includes("__loras")
+    )
+      continue;
+
+    const loraNode = loraNodes.get(edge.source);
+    if (!loraNode?.data?.loras) continue;
+
+    const entries = loraNode.data.loras as Array<{
+      path: string;
+      scale: number;
+      mergeMode?: string;
+    }>;
+    const validEntries = entries.filter(l => l.path);
+    if (validEntries.length > 0) {
+      result.set(edge.target, validEntries);
+    }
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -340,9 +408,13 @@ export function buildGraphWorkflow(
   const { name, graphConfig, pipelineInfoMap, pluginInfoMap, scopeVersion } =
     input;
 
-  const nodeParams = (
-    graphConfig.ui_state as Record<string, unknown> | undefined
-  )?.node_params as Record<string, Record<string, unknown>> | undefined;
+  const uiState = graphConfig.ui_state as Record<string, unknown> | undefined;
+  const nodeParams = uiState?.node_params as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+
+  // Build a map: pipelineNodeId -> LoRA entries from LoRA nodes in ui_state
+  const lorasByPipeline = extractLoRAsFromUiState(uiState);
 
   const pipelineNodes = graphConfig.nodes.filter(n => n.type === "pipeline");
 
@@ -356,11 +428,21 @@ export function buildGraphWorkflow(
       params[key] = value;
     }
 
+    const loraEntries = lorasByPipeline.get(node.id);
+    const loras: WorkflowLoRA[] = loraEntries
+      ? loraEntries.map((l, idx) => ({
+          id: `lora-${idx}`,
+          filename: extractFilename(l.path),
+          weight: l.scale,
+          merge_mode: l.mergeMode ?? "permanent_merge",
+        }))
+      : [];
+
     return {
       pipeline_id: pipelineId,
       pipeline_version: pipelineInfoMap[pipelineId]?.version ?? null,
       source: buildPipelineSource(pipelineId, pipelineInfoMap, pluginInfoMap),
-      loras: [],
+      loras,
       params,
     };
   });

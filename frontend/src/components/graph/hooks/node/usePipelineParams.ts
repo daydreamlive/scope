@@ -62,6 +62,7 @@ export function usePipelineParams({
           const supportsCacheManagement =
             schema?.supports_cache_management ?? false;
           const supportsVace = schema?.supports_vace ?? false;
+          const supportsLoRA = schema?.supports_lora ?? false;
           const newStyle = { ...n.style };
           delete newStyle.height;
           return {
@@ -79,6 +80,7 @@ export function usePipelineParams({
               supportsPrompts,
               supportsCacheManagement,
               supportsVace,
+              supportsLoRA,
             },
           };
         })

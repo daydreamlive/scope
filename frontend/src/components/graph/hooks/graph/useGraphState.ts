@@ -4,8 +4,9 @@ import type { Edge, Node } from "@xyflow/react";
 import { buildPipelinePortsMap } from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 import type { PipelineSchemaInfo } from "../../../../lib/api";
-import { getPipelineSchemas } from "../../../../lib/api";
 import { useState } from "react";
+import { useApi } from "../../../../hooks/useApi";
+import { useCloudStatus } from "../../../../hooks/useCloudStatus";
 
 import { usePipelineParams } from "../node/usePipelineParams";
 import {
@@ -122,17 +123,27 @@ export function useGraphState(
     Record<string, PipelineSchemaInfo>
   >({});
 
+  const { getPipelineSchemas, isCloudMode, isReady } = useApi();
+  const { isConnected: isCloudConnected } = useCloudStatus();
+
   useEffect(() => {
+    if (isCloudMode && !isReady) return;
+    let mounted = true;
     getPipelineSchemas()
       .then(schemas => {
+        if (!mounted) return;
         setAvailablePipelineIds(Object.keys(schemas.pipelines));
         setPortsMap(buildPipelinePortsMap(schemas.pipelines));
         setPipelineSchemas(schemas.pipelines);
       })
       .catch(err => {
+        if (!mounted) return;
         console.error("Failed to fetch pipeline schemas:", err);
       });
-  }, []);
+    return () => {
+      mounted = false;
+    };
+  }, [getPipelineSchemas, isCloudMode, isReady, isCloudConnected]);
 
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
@@ -306,11 +317,13 @@ export function useGraphState(
     getCurrentGraphConfig: persistence.getCurrentGraphConfig,
     getGraphNodePrompts: persistence.getGraphNodePrompts,
     getGraphVaceSettings: persistence.getGraphVaceSettings,
+    getGraphLoRASettings: persistence.getGraphLoRASettings,
     pendingImportWorkflow: persistence.pendingImportWorkflow,
     pendingResolutionPlan: persistence.pendingResolutionPlan,
     pendingImportResolving: persistence.pendingImportResolving,
     confirmImport: persistence.confirmImport,
     cancelImport: persistence.cancelImport,
     reResolveImport: persistence.reResolveImport,
+    loadGraphFromParsed: persistence.loadGraphFromParsed,
   };
 }

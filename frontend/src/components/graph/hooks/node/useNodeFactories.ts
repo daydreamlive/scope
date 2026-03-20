@@ -32,6 +32,7 @@ type NodeTypeKey =
   | "output"
   | "image"
   | "vace"
+  | "lora"
   | "midi"
   | "bool"
   | "trigger"
@@ -275,6 +276,19 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       parameterOutputs: [{ name: "__vace", type: "string", defaultValue: "" }],
     },
   },
+  lora: {
+    type: "lora",
+    idPrefix: "lora",
+    defaultX: 50,
+    style: { width: 220 },
+    data: {
+      label: "LoRA",
+      nodeType: "lora",
+      loras: [],
+      loraMergeMode: "permanent_merge",
+      parameterOutputs: [{ name: "__loras", type: "string", defaultValue: "" }],
+    },
+  },
   midi: {
     type: "midi",
     idPrefix: "midi",
@@ -443,6 +457,7 @@ export function useNodeFactories({
         | "reroute"
         | "image"
         | "vace"
+        | "lora"
         | "midi"
         | "bool"
         | "trigger"

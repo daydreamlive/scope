@@ -78,6 +78,7 @@ export function PipelineNode({
   const supportsCacheManagement = data.supportsCacheManagement ?? false;
   const pipelineAvailable = data.pipelineAvailable ?? true;
   const supportsVace = data.supportsVace ?? false;
+  const supportsLoRA = data.supportsLoRA ?? false;
   const isStreaming = data.isStreaming ?? false;
 
   const pipelineName = data.pipelineId || "Pipeline";
@@ -113,6 +114,10 @@ export function PipelineNode({
     e => e.target === id && e.targetHandle === buildHandleId("param", "__vace")
   );
 
+  const isLoraConnected = edges.some(
+    e => e.target === id && e.targetHandle === buildHandleId("param", "__loras")
+  );
+
   const listParams = parameterInputs.filter(p => p.type === "list_number");
   const primitiveParams = parameterInputs.filter(
     p => p.type !== "list_number" && p.name !== "reset_cache"
@@ -139,6 +144,7 @@ export function PipelineNode({
     listParams.length,
     supportsPrompts,
     supportsVace,
+    supportsLoRA,
   ]);
 
   return (
@@ -351,6 +357,17 @@ export function PipelineNode({
             );
           })}
 
+          {/* LoRA input */}
+          {supportsLoRA && (
+            <div ref={setRowRef("lora")}>
+              <NodeParamRow label="LoRA">
+                <NodePill className={isLoraConnected ? "" : "opacity-40"}>
+                  {isLoraConnected ? "Connected" : "Not connected"}
+                </NodePill>
+              </NodeParamRow>
+            </div>
+          )}
+
           {/* VACE input */}
           {supportsVace && (
             <div ref={setRowRef("vace")}>
@@ -527,6 +544,29 @@ export function PipelineNode({
                   top: rowPositions["prompt"] ?? 0,
                   left: 0,
                   backgroundColor: PARAM_TYPE_COLORS.string,
+                }
+          }
+        />
+      )}
+
+      {/* LoRA compound input handle */}
+      {supportsLoRA && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          id={buildHandleId("param", "__loras")}
+          className={
+            collapsed
+              ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+              : "!w-2.5 !h-2.5 !border-0"
+          }
+          style={
+            collapsed
+              ? { ...collapsedHandleStyle("left"), opacity: 0 }
+              : {
+                  top: rowPositions["lora"] ?? 0,
+                  left: 0,
+                  backgroundColor: "#f472b6",
                 }
           }
         />

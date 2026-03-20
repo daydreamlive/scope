@@ -41,6 +41,16 @@ const TARGET_RULES: TargetRule[] = [
     if (sourceType === "vace") return targetParsedName === "__vace";
     return undefined;
   },
+  // __loras param – only lora type
+  ({ sourceType, targetParsedName }) => {
+    if (targetParsedName === "__loras") return sourceType === "lora";
+    return undefined;
+  },
+  // lora source can only go to __loras
+  ({ sourceType, targetParsedName }) => {
+    if (sourceType === "lora") return targetParsedName === "__loras";
+    return undefined;
+  },
   // vace node targets
   ({ sourceType, targetParsedName, targetNode }) => {
     if (targetNode.data.nodeType !== "vace") return undefined;

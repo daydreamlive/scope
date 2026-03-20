@@ -4,8 +4,10 @@ import type {
   GraphNode,
   GraphEdge,
   PipelineSchemaInfo,
+  LoRAFileInfo,
 } from "./api";
 import { inferPrimitiveFieldType } from "./schemaSettings";
+import { resolveLoRAPath } from "./workflowSettings";
 import type { SchemaProperty } from "./schemaSettings";
 
 // Layout constants
@@ -89,6 +91,7 @@ export interface FlowNodeData {
     | "reroute"
     | "image"
     | "vace"
+    | "lora"
     | "midi"
     | "bool"
     | "trigger"
@@ -281,6 +284,16 @@ export interface FlowNodeData {
   /* ── Pipeline VACE support ── */
   /** For pipeline nodes: whether the selected pipeline supports VACE */
   supportsVace?: boolean;
+
+  /* ── LoRA node fields ── */
+  /** For lora nodes: list of configured LoRA adapters */
+  loras?: Array<{ path: string; scale: number; mergeMode?: string }>;
+  /** For lora nodes: global merge strategy */
+  loraMergeMode?: string;
+
+  /* ── Pipeline LoRA support ── */
+  /** For pipeline nodes: whether the selected pipeline supports LoRA */
+  supportsLoRA?: boolean;
 
   /* ── Subgraph node fields ── */
   /** For subgraph nodes: serialized inner nodes */
@@ -734,6 +747,7 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "reroute",
   "image",
   "vace",
+  "lora",
   "midi",
   "bool",
   "trigger",
@@ -1262,31 +1276,42 @@ export function stripUIFields(graph: GraphConfig): GraphConfig {
  * with automatic horizontal layout. Pipeline params and prompts are stored
  * in the returned `nodeParams` map (keyed by node ID).
  */
-export function workflowToGraphConfig(workflow: {
-  pipelines: Array<{
-    pipeline_id: string;
-    params?: Record<string, unknown>;
-    role?: string | null;
-  }>;
-  prompts?: Array<{ text: string; weight: number }> | null;
-  timeline?: { entries: Array<{ prompts: Array<{ text: string }> }> } | null;
-}): {
+export function workflowToGraphConfig(
+  workflow: {
+    pipelines: Array<{
+      pipeline_id: string;
+      params?: Record<string, unknown>;
+      loras?: Array<{
+        filename: string;
+        weight: number;
+        merge_mode?: string;
+      }>;
+      role?: string | null;
+    }>;
+    prompts?: Array<{ text: string; weight: number }> | null;
+    timeline?: { entries: Array<{ prompts: Array<{ text: string }> }> } | null;
+  },
+  options?: { availableLoRAs?: LoRAFileInfo[] }
+): {
   graphConfig: GraphConfig;
   nodeParams: Record<string, Record<string, unknown>>;
 } {
   const nodes: GraphNode[] = [];
   const edges: GraphEdge[] = [];
   const nodeParams: Record<string, Record<string, unknown>> = {};
+  const uiNodes: UIStateNode[] = [];
+  const uiEdges: UIStateEdge[] = [];
 
   const Y = 200;
   let x = START_X;
 
   // Source node
   const sourceId = "input";
-  nodes.push({ id: sourceId, type: "source", x, y: Y });
+  nodes.push({ id: sourceId, type: "source", source_mode: "video", x, y: Y });
   x += COLUMN_GAP;
 
   let prevNodeId = sourceId;
+  let loraIdx = 0;
 
   for (const wp of workflow.pipelines) {
     const nodeId = wp.pipeline_id;
@@ -1298,16 +1323,53 @@ export function workflowToGraphConfig(workflow: {
       y: Y,
     });
 
+    const isVaceTarget =
+      wp.params?.vace_enabled === true &&
+      wp.params?.vace_use_input_video === true;
     edges.push({
       from: prevNodeId,
       from_port: "video",
       to_node: nodeId,
-      to_port: "video",
+      to_port: isVaceTarget ? "vace_input_frames" : "video",
       kind: "stream",
     });
 
     if (wp.params && Object.keys(wp.params).length > 0) {
       nodeParams[nodeId] = { ...wp.params };
+    }
+
+    // Create LoRA node for pipelines that have LoRAs configured
+    if (wp.loras && wp.loras.length > 0) {
+      const loraNodeId = `lora-${loraIdx++}`;
+      const loraEntries = wp.loras.map(l => ({
+        path: options?.availableLoRAs
+          ? resolveLoRAPath(l.filename, options.availableLoRAs)
+          : l.filename,
+        scale: l.weight,
+        mergeMode: l.merge_mode ?? "permanent_merge",
+      }));
+      const globalMergeMode = wp.loras[0].merge_mode ?? "permanent_merge";
+
+      uiNodes.push({
+        id: loraNodeId,
+        type: "lora",
+        position: { x: x - 180, y: Y - 160 },
+        data: {
+          label: "LoRA",
+          nodeType: "lora",
+          loras: loraEntries,
+          loraMergeMode: globalMergeMode,
+        } as FlowNodeData,
+      });
+
+      const edgeId = `e-${loraNodeId}-${nodeId}`;
+      uiEdges.push({
+        id: edgeId,
+        source: loraNodeId,
+        sourceHandle: buildHandleId("param", "__loras"),
+        target: nodeId,
+        targetHandle: buildHandleId("param", "__loras"),
+      });
     }
 
     prevNodeId = nodeId;
@@ -1339,12 +1401,22 @@ export function workflowToGraphConfig(workflow: {
     }
   }
 
+  const uiState: Record<string, unknown> = {};
+  if (Object.keys(nodeParams).length > 0) {
+    uiState.node_params = nodeParams;
+  }
+  if (uiNodes.length > 0) {
+    uiState.nodes = uiNodes;
+  }
+  if (uiEdges.length > 0) {
+    uiState.edges = uiEdges;
+  }
+
   return {
     graphConfig: {
       nodes,
       edges,
-      ui_state:
-        Object.keys(nodeParams).length > 0 ? { node_params: nodeParams } : null,
+      ui_state: Object.keys(uiState).length > 0 ? uiState : null,
     },
     nodeParams,
   };

@@ -62,6 +62,8 @@ import {
 } from "../lib/api";
 import type { ScopeWorkflow } from "../lib/workflowApi";
 import { linearGraphFromSettings, stripUIFields } from "../lib/graphUtils";
+import { resolveLoRAPath } from "../lib/workflowSettings";
+import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 
@@ -118,6 +120,8 @@ export function StreamPage() {
     isConnecting: isBackendCloudConnecting,
     connectStage: cloudConnectStage,
   } = useCloudStatus();
+
+  const { loraFiles } = useLoRAsContext();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
@@ -1783,7 +1787,16 @@ export function StreamPage() {
             if (graphPipelineIds.length > 0) {
               pipelineIds.length = 0;
               pipelineIds.push(...graphPipelineIds);
-              pipelineIdToUse = graphPipelineIds[0];
+              // Find the main pipeline (first non-preprocessor, non-postprocessor)
+              const mainPid = graphPipelineIds.find(pid => {
+                const schema = pipelines?.[pid];
+                const usage = schema?.usage ?? [];
+                return (
+                  !usage.includes("preprocessor") &&
+                  !usage.includes("postprocessor")
+                );
+              });
+              pipelineIdToUse = mainPid ?? graphPipelineIds[0];
             }
 
             // Extract source mode from the graph's source node and normalize
@@ -2007,7 +2020,11 @@ export function StreamPage() {
 
       // Build PipelineLoadItem[] from graph nodes (always available at this
       // point — perform mode builds a linear graph above).
-      // Per-node load_params ensures each pipeline gets vace_enabled when it supports VACE.
+      // Per-node load_params ensures each pipeline gets vace_enabled when it supports VACE
+      // and LoRA adapters when configured via LoRA nodes.
+      const loraSettings = graphEditorRef.current?.getGraphLoRASettings() ?? [];
+      const loraByNode = new Map(loraSettings.map(s => [s.pipelineNodeId, s]));
+
       const loadItems: PipelineLoadItem[] = graphConfigForStream
         ? graphConfigForStream.nodes
             .filter(n => n.type === "pipeline" && n.pipeline_id)
@@ -2015,10 +2032,29 @@ export function StreamPage() {
               const pid = n.pipeline_id as string;
               const pipeSchema = pipelines?.[pid];
               const nodeLoadParams = { ...(loadParams ?? {}) };
+              const nParams = graphConfigForStream?.ui_state?.node_params as
+                | Record<string, Record<string, unknown>>
+                | undefined;
+              const nodeBag = nParams?.[n.id];
+              if (typeof nodeBag?.height === "number")
+                nodeLoadParams.height = nodeBag.height;
+              if (typeof nodeBag?.width === "number")
+                nodeLoadParams.width = nodeBag.width;
               if (pipeSchema?.supportsVACE) {
                 nodeLoadParams.vace_enabled = true;
+                const nodeVaceScale = nodeBag?.vace_context_scale;
                 nodeLoadParams.vace_context_scale =
-                  settings.vaceContextScale ?? 1.0;
+                  typeof nodeVaceScale === "number"
+                    ? nodeVaceScale
+                    : (settings.vaceContextScale ?? 1.0);
+              }
+              const loraConfig = loraByNode.get(n.id);
+              if (loraConfig && loraConfig.loras.length > 0) {
+                nodeLoadParams.loras = loraConfig.loras.map(l => ({
+                  ...l,
+                  path: resolveLoRAPath(l.path, loraFiles),
+                }));
+                nodeLoadParams.lora_merge_mode = loraConfig.lora_merge_mode;
               }
               return {
                 node_id: n.id,
@@ -2241,6 +2277,41 @@ export function StreamPage() {
         Object.assign(initialParameters, settings.schemaFieldOverrides);
       }
 
+      // Override initialParameters with graph node params for the main pipeline.
+      // When a workflow is imported into graph mode, per-node params (denoising
+      // steps, noise scale, etc.) are stored in ui_state.node_params but not
+      // reflected in settings.*. Apply them so the backend receives the correct
+      // values at stream start.
+      if ((graphMode || nonLinearGraph) && graphConfigForStream?.ui_state) {
+        const nodeParams = graphConfigForStream.ui_state.node_params as
+          | Record<string, Record<string, unknown>>
+          | undefined;
+        if (nodeParams) {
+          const mainNode = graphConfigForStream.nodes.find(
+            n => n.type === "pipeline" && n.pipeline_id === pipelineIdToUse
+          );
+          const mainNodeParams = mainNode ? nodeParams[mainNode.id] : undefined;
+          if (mainNodeParams) {
+            const RUNTIME_PARAMS = [
+              "denoising_step_list",
+              "noise_scale",
+              "noise_controller",
+              "manage_cache",
+              "kv_cache_attention_bias",
+              "vace_enabled",
+              "vace_context_scale",
+              "vace_use_input_video",
+            ] as const;
+            for (const key of RUNTIME_PARAMS) {
+              if (mainNodeParams[key] !== undefined) {
+                (initialParameters as Record<string, unknown>)[key] =
+                  mainNodeParams[key];
+              }
+            }
+          }
+        }
+      }
+
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 
@@ -2342,6 +2413,10 @@ export function StreamPage() {
     },
     [updateSettings, skipNextModeReset, settings.inputMode]
   );
+
+  const handleWorkflowLoadToGraph = useCallback((workflow: ScopeWorkflow) => {
+    graphEditorRef.current?.loadWorkflow(workflow);
+  }, []);
 
   return (
     <MIDIProvider
@@ -3000,6 +3075,7 @@ export function StreamPage() {
             setPreloadedWorkflow(null);
           }}
           onLoad={handleWorkflowLoad}
+          onLoadToGraph={graphMode ? handleWorkflowLoadToGraph : undefined}
           initialWorkflow={preloadedWorkflow}
         />
       </div>

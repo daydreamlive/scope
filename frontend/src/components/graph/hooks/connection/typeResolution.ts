@@ -10,6 +10,7 @@ export type ResolvedType =
   | "list_number"
   | "video_path"
   | "vace"
+  | "lora"
   | undefined;
 
 // Source types
@@ -35,6 +36,7 @@ export function resolveSourceType(
     return node.data.mediaType === "video" ? "video_path" : "string";
   }
   if (nt === "vace") return "vace";
+  if (nt === "lora") return "lora";
   if (nt === "midi") return "number";
   if (nt === "bool") return "boolean";
   if (nt === "trigger") return "boolean";
