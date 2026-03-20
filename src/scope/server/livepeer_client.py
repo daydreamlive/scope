@@ -118,6 +118,7 @@ class LivepeerClient:
             self._orchestrator_url,
             request,
             token=self._token,
+            timeout=300.0,
         )
 
         # start_lv2v runs in a worker thread without an event loop, so

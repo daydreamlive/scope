@@ -1415,7 +1415,7 @@ async def install_lora_file(
     if scope_cloud.is_connected:
         body = {"url": url, "filename": request.filename}
         return await proxy_with_body(
-            cloud_manager, "POST", "/api/v1/loras", body, timeout=300.0
+            scope_cloud, "POST", "/api/v1/loras", body, timeout=300.0
         )
 
     # Local installation
@@ -1869,7 +1869,7 @@ async def upload_asset(
 
         # Apply upload size validation only for cloud uploads.
         # Local mode keeps files on the same machine, so no explicit cap is enforced.
-        if cloud_manager.is_connected:
+        if scope_cloud.is_connected:
             max_size = 50 * 1024 * 1024  # 50MB
             if len(content) > max_size:
                 raise HTTPException(
