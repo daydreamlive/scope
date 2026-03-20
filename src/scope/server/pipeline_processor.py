@@ -437,6 +437,10 @@ class PipelineProcessor:
             processing_time = time.time() - processing_start
 
             if not output_dict:
+                # 1) Some pipelines return {} when idle
+                # 2) For those, prepare() is None, so we never wait on input queues.
+                # 3) Without this sleep the worker thread would busy-loop.
+                self.shutdown_event.wait(SLEEP_TIME)
                 return
 
             # Pass audio to output queue regardless of whether video exists.
@@ -456,6 +460,8 @@ class PipelineProcessor:
             # Extract video from the returned dictionary
             output = output_dict.get("video")
             if output is None:
+                self.is_prepared = True
+                self._pending_cache_init = False
                 return
 
             # Clear one-shot parameters after use to prevent sending them on subsequent chunks
