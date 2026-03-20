@@ -77,6 +77,8 @@ class CloudConnectionManager:
         self._webrtc_client: CloudWebRTCClient | None = None
         self._frame_callbacks: list[Callable[[VideoFrame], None]] = []
         self._audio_callbacks: list[Callable] = []
+        # Callbacks to notify on worker-reported errors (e.g. param-update failures)
+        self._worker_error_callbacks: list[Callable[[str, dict], None]] = []
 
         # Stats tracking
         self._stats = {
@@ -692,6 +694,45 @@ class CloudConnectionManager:
         """Remove a frame callback."""
         if callback in self._frame_callbacks:
             self._frame_callbacks.remove(callback)
+
+    def add_worker_error_callback(
+        self, callback: Callable[[str, dict], None]
+    ) -> None:
+        """Register a callback to be notified when the cloud worker reports an error.
+
+        This covers errors such as "Request timeout while fetching image from URL"
+        that come back over the WebRTC data channel after a param update.
+
+        Args:
+            callback: Called with (error_message: str, raw_payload: dict).
+        """
+        self._worker_error_callbacks.append(callback)
+
+    def remove_worker_error_callback(
+        self, callback: Callable[[str, dict], None]
+    ) -> None:
+        """Remove a worker error callback."""
+        if callback in self._worker_error_callbacks:
+            self._worker_error_callbacks.remove(callback)
+
+    def _on_worker_error(self, error_message: str, raw_payload: dict) -> None:
+        """Handle an error response received from the cloud worker via data channel.
+
+        Logs the error, publishes a Kafka event, and notifies all registered
+        worker-error callbacks (e.g. so the UI can surface it to the user).
+        """
+        logger.warning(f"Cloud worker param-update error: {error_message}")
+        self._publish_cloud_error(
+            error_message,
+            exception_type="WorkerParamUpdateError",
+            error_type="cloud_worker_param_update_error",
+            extra_error_fields={"raw_payload": raw_payload},
+        )
+        for cb in self._worker_error_callbacks:
+            try:
+                cb(error_message, raw_payload)
+            except Exception as exc:
+                logger.error(f"Error in worker_error_callback: {exc}")
 
     def _on_frame_from_cloud(self, frame: VideoFrame) -> None:
         """Handle frames received from cloud.ai."""

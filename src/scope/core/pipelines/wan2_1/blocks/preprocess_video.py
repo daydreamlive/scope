@@ -44,6 +44,12 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
                 description="Input frames for VACE conditioning",
             ),
             InputParam(
+                "vace_input_masks",
+                default=None,
+                type_hint=torch.Tensor | None,
+                description="Spatial control masks [B, 1, F, H, W] for VACE conditioning",
+            ),
+            InputParam(
                 "height",
                 required=True,
                 type_hint=int,
@@ -70,6 +76,11 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
                 "video",
                 type_hint=torch.Tensor,
                 description="Input video to convert into noisy latents",
+            ),
+            OutputParam(
+                "vace_input_masks",
+                type_hint=torch.Tensor,
+                description="Resampled VACE spatial control masks [B, 1, F, H, W]",
             ),
         ]
 
@@ -106,6 +117,34 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
                 width=block_state.width,
                 target_num_frames=target_num_frames,
             )
+
+        # Resample vace_input_masks to match target_num_frames.
+        # On the first chunk (current_start_frame == 0), target_num_frames is one
+        # greater than the default chunk size, so masks arriving from the queue
+        # (or a client parameter) would otherwise be one frame short, causing a
+        # shape mismatch inside VaceEncodingBlock._encode_with_conditioning.
+        if block_state.vace_input_masks is not None:
+            masks = block_state.vace_input_masks
+            if isinstance(masks, list):
+                masks = (
+                    torch.stack(masks, dim=2)
+                    if masks[0].dim() == 4
+                    else torch.stack(masks, dim=0)
+                )
+            mask_frames = masks.shape[2]
+            if mask_frames != target_num_frames:
+                indices = (
+                    torch.linspace(
+                        0,
+                        mask_frames - 1,
+                        target_num_frames,
+                        device=masks.device,
+                    )
+                    .round()
+                    .long()
+                )
+                masks = masks[:, :, indices]
+            block_state.vace_input_masks = masks
 
         self.set_block_state(state, block_state)
         return components, state
