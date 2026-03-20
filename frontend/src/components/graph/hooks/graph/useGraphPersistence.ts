@@ -614,6 +614,7 @@ export function useGraphPersistence({
       pipelineInfoMap: pipelineInfoMap ?? {},
       pluginInfoMap,
       scopeVersion: scopeVersion ?? "unknown",
+      loraFiles,
     });
 
     const dataStr = JSON.stringify(workflow, null, 2);
@@ -638,6 +639,7 @@ export function useGraphPersistence({
     pipelineInfoMap,
     plugins,
     scopeVersion,
+    loraFiles,
   ]);
 
   const getCurrentGraphConfig = useCallback(() => {

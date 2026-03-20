@@ -392,6 +392,7 @@ export interface BuildGraphWorkflowInput {
   pipelineInfoMap: Record<string, PipelineInfo>;
   pluginInfoMap: Map<string, PluginInfo>;
   scopeVersion: string;
+  loraFiles?: LoRAFileInfo[];
 }
 
 /**
@@ -405,8 +406,14 @@ export interface BuildGraphWorkflowInput {
 export function buildGraphWorkflow(
   input: BuildGraphWorkflowInput
 ): ScopeWorkflow {
-  const { name, graphConfig, pipelineInfoMap, pluginInfoMap, scopeVersion } =
-    input;
+  const {
+    name,
+    graphConfig,
+    pipelineInfoMap,
+    pluginInfoMap,
+    scopeVersion,
+    loraFiles = [],
+  } = input;
 
   const uiState = graphConfig.ui_state as Record<string, unknown> | undefined;
   const nodeParams = uiState?.node_params as
@@ -430,12 +437,16 @@ export function buildGraphWorkflow(
 
     const loraEntries = lorasByPipeline.get(node.id);
     const loras: WorkflowLoRA[] = loraEntries
-      ? loraEntries.map((l, idx) => ({
-          id: `lora-${idx}`,
-          filename: extractFilename(l.path),
-          weight: l.scale,
-          merge_mode: l.mergeMode ?? "permanent_merge",
-        }))
+      ? buildWorkflowLoRAs(
+          loraEntries.map(l => ({
+            id: `lora-${loraEntries.indexOf(l)}`,
+            path: l.path,
+            scale: l.scale,
+            mergeMode: l.mergeMode as LoraMergeStrategy | undefined,
+          })),
+          loraFiles,
+          "permanent_merge"
+        )
       : [];
 
     return {
