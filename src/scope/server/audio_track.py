@@ -10,6 +10,7 @@ from aiortc.mediastreams import MediaStreamError
 from av import AudioFrame
 
 from .frame_processor import FrameProcessor
+from .pipeline_processor import AUDIO_FLUSH_SENTINEL
 
 logger = logging.getLogger(__name__)
 
@@ -17,10 +18,11 @@ logger = logging.getLogger(__name__)
 AUDIO_CLOCK_RATE = 48000  # Standard WebRTC audio clock rate (48 kHz for Opus)
 AUDIO_PTIME = 0.020  # 20ms audio frames (standard for WebRTC)
 AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
-# Maximum buffered audio before we start dropping oldest samples (3 seconds).
+# Maximum buffered audio before we start dropping oldest samples (60 seconds).
 # Must be large enough for bursty pipelines like LTX2 that deliver >1s of audio
-# in a single chunk after each denoising pass.
-AUDIO_MAX_BUFFER_SAMPLES = AUDIO_CLOCK_RATE * 3
+# in a single chunk after each denoising pass, and for TTS pipelines that may
+# generate many seconds of speech before playback catches up.
+AUDIO_MAX_BUFFER_SAMPLES = AUDIO_CLOCK_RATE * 60
 
 
 class AudioProcessingTrack(MediaStreamTrack):
@@ -99,8 +101,16 @@ class AudioProcessingTrack(MediaStreamTrack):
         # for bursty or small-chunk pipelines.
         while True:
             audio_tensor, sample_rate = self.frame_processor.get_audio()
-            if audio_tensor is None or sample_rate is None:
+            if audio_tensor is None and sample_rate is None:
                 break
+
+            # Flush sentinel: discard buffered audio so a new prompt
+            # is heard immediately instead of after the old speech finishes.
+            if audio_tensor is None and sample_rate == AUDIO_FLUSH_SENTINEL:
+                self._chunks.clear()
+                self._buffered_samples = 0
+                logger.info("Audio buffer flushed (prompt change)")
+                continue
 
             if not self._first_audio_logged:
                 logger.info(
