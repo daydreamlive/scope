@@ -1,22 +1,21 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { useNodesState, useEdgesState } from "@xyflow/react";
 import type { Edge, Node } from "@xyflow/react";
-import { buildPipelinePortsMap } from "../../../../lib/graphUtils";
-import type { FlowNodeData } from "../../../../lib/graphUtils";
-import type { PipelineSchemaInfo } from "../../../../lib/api";
+import { buildPipelinePortsMap } from "../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../lib/graphUtils";
+import type { PipelineSchemaInfo } from "../../../lib/api";
+import { getPipelineSchemas } from "../../../lib/api";
 import { useState } from "react";
-import { useApi } from "../../../../hooks/useApi";
-import { useCloudStatus } from "../../../../hooks/useCloudStatus";
-import { usePluginsContext } from "../../../../contexts/PluginsContext";
 
-import { usePipelineParams } from "../node/usePipelineParams";
+import { usePipelineParams } from "./usePipelineParams";
 import {
   useGraphPersistence,
   enrichNodes,
-  colorEdges,
   type EnrichNodesDeps,
 } from "./useGraphPersistence";
-import { useRerouteTypeSync } from "../value/useRerouteTypeSync";
+import { useRerouteTypeSync } from "./useRerouteTypeSync";
+
+// Stable setters: prevent empty→empty array reference churn that causes render loops
 
 type NodesSetter = React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>;
 type EdgesSetter = React.Dispatch<React.SetStateAction<Edge[]>>;
@@ -27,6 +26,7 @@ function useStableNodesSetter(rawSet: NodesSetter): NodesSetter {
       if (typeof update === "function") {
         rawSet(prev => {
           const next = update(prev);
+          // Return same ref when both empty to prevent render loop
           if (next !== prev && next.length === 0 && prev.length === 0)
             return prev;
           return next;
@@ -57,6 +57,8 @@ function useStableEdgesSetter(rawSet: EdgesSetter): EdgesSetter {
   );
 }
 
+// Types
+
 export interface GraphEditorCallbacks {
   onNodeParameterChange?: (nodeId: string, key: string, value: unknown) => void;
   onGraphChange?: () => void;
@@ -70,11 +72,6 @@ export interface GraphEditorCallbacks {
     sinkType: string,
     config: { enabled: boolean; name: string }
   ) => void;
-  onOutputSinkBulkChange?: (
-    sinks: Record<string, { enabled: boolean; name: string }>
-  ) => void;
-  onStartRecording?: () => void;
-  onStopRecording?: () => void;
 }
 
 export interface GraphEditorStreams {
@@ -95,26 +92,24 @@ export interface GraphEditorAvailability {
 export function useGraphState(
   callbacks: GraphEditorCallbacks,
   streams: GraphEditorStreams,
-  availability: GraphEditorAvailability,
-  resolveRootGraphRef: React.RefObject<
-    (
-      nodes: Node<FlowNodeData>[],
-      edges: Edge[]
-    ) => { nodes: Node<FlowNodeData>[]; edges: Edge[] }
-  >,
-  resetNavigationRef: React.RefObject<() => void>
+  availability: GraphEditorAvailability
 ) {
+  // Core state
   const [nodes, rawSetNodes, onNodesChange] = useNodesState<Node<FlowNodeData>>(
     []
   );
   const [edges, rawSetEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
+  // Wrap setters to prevent render loops
   const setNodes = useStableNodesSetter(rawSetNodes);
   const setEdges = useStableEdgesSetter(rawSetEdges);
 
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
 
-  const [schemaPipelineIds, setSchemaPipelineIds] = useState<string[]>([]);
+  // Pipeline schemas
+  const [availablePipelineIds, setAvailablePipelineIds] = useState<string[]>(
+    []
+  );
   const [portsMap, setPortsMap] = useState<
     Record<string, { inputs: string[]; outputs: string[] }>
   >({});
@@ -122,43 +117,20 @@ export function useGraphState(
     Record<string, PipelineSchemaInfo>
   >({});
 
-  const { getPipelineSchemas, isCloudMode, isReady } = useApi();
-  const { isConnected: isCloudConnected } = useCloudStatus();
-
-  const fetchAndSetSchemas = useCallback(() => {
-    if (isCloudMode && !isReady) return;
-    let mounted = true;
+  // Fetch pipeline schemas on mount
+  useEffect(() => {
     getPipelineSchemas()
       .then(schemas => {
-        if (!mounted) return;
-        setSchemaPipelineIds(Object.keys(schemas.pipelines));
+        setAvailablePipelineIds(Object.keys(schemas.pipelines));
         setPortsMap(buildPipelinePortsMap(schemas.pipelines));
         setPipelineSchemas(schemas.pipelines);
       })
       .catch(err => {
-        if (!mounted) return;
         console.error("Failed to fetch pipeline schemas:", err);
       });
-    return () => {
-      mounted = false;
-    };
-  }, [getPipelineSchemas, isCloudMode, isReady, isCloudConnected]);
+  }, []);
 
-  useEffect(() => {
-    fetchAndSetSchemas();
-  }, [fetchAndSetSchemas]);
-
-  // Merge schema pipeline IDs with locally installed plugin pipeline IDs.
-  // When connected to cloud, getPipelineSchemas proxies to the cloud server
-  // and won't include locally installed plugin pipelines (e.g. yolo_mask).
-  const { plugins } = usePluginsContext();
-  const availablePipelineIds = useMemo(() => {
-    const pluginPipelineIds = plugins.flatMap(p =>
-      p.pipelines.map(pp => pp.pipeline_id)
-    );
-    return [...new Set([...schemaPipelineIds, ...pluginPipelineIds])];
-  }, [schemaPipelineIds, plugins]);
-
+  // Refs
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
@@ -186,15 +158,7 @@ export function useGraphState(
   const onOutputSinkChangeRef = useRef(callbacks.onOutputSinkChange);
   onOutputSinkChangeRef.current = callbacks.onOutputSinkChange;
 
-  const onOutputSinkBulkChangeRef = useRef(callbacks.onOutputSinkBulkChange);
-  onOutputSinkBulkChangeRef.current = callbacks.onOutputSinkBulkChange;
-
-  const onStartRecordingRef = useRef(callbacks.onStartRecording);
-  onStartRecordingRef.current = callbacks.onStartRecording;
-
-  const onStopRecordingRef = useRef(callbacks.onStopRecording);
-  onStopRecordingRef.current = callbacks.onStopRecording;
-
+  // Edge deletion
   const handleEdgeDelete = useCallback(
     (edgeId: string) => {
       setEdges(eds => eds.filter(e => e.id !== edgeId));
@@ -202,6 +166,7 @@ export function useGraphState(
     [setEdges]
   );
 
+  // Pipeline params
   const params = usePipelineParams({
     setNodes,
     portsMap,
@@ -211,6 +176,7 @@ export function useGraphState(
     onNodeParameterChange: callbacks.onNodeParameterChange,
   });
 
+  // Enrichment deps
   const enrichDeps: EnrichNodesDeps = {
     availablePipelineIds,
     portsMap,
@@ -234,20 +200,19 @@ export function useGraphState(
     ndiOutputAvailable: availability.ndiOutputAvailable,
     syphonOutputAvailable: availability.syphonOutputAvailable,
     handleEdgeDelete,
-    isStreaming: streams.isStreaming,
-    onStartRecordingRef,
-    onStopRecordingRef,
   };
 
   const enrichDepsRef = useRef(enrichDeps);
   enrichDepsRef.current = enrichDeps;
 
+  // Enrich nodes on data changes
   useEffect(() => {
     if (availablePipelineIds.length === 0) return;
     setNodes(nds => {
-      if (nds.length === 0) return nds;
+      if (nds.length === 0) return nds; // nothing to enrich
       return enrichNodes(nds, enrichDeps);
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     availablePipelineIds,
     portsMap,
@@ -257,7 +222,6 @@ export function useGraphState(
     params.handleNodeParameterChange,
     streams.localStream,
     streams.remoteStream,
-    streams.isStreaming,
     availability.spoutAvailable,
     availability.ndiAvailable,
     availability.syphonAvailable,
@@ -266,21 +230,10 @@ export function useGraphState(
     availability.syphonOutputAvailable,
   ]);
 
-  // Re-color edges only when node types change (not positions/selections)
-  const nodeTypeFingerprint = useMemo(
-    () => nodes.map(n => `${n.id}:${n.data.nodeType}`).join(","),
-    [nodes]
-  );
-  const prevNodeTypesRef = useRef("");
-  useEffect(() => {
-    if (nodes.length === 0) return;
-    if (nodeTypeFingerprint === prevNodeTypesRef.current) return;
-    prevNodeTypesRef.current = nodeTypeFingerprint;
-    setEdges(eds => colorEdges(eds, nodes, handleEdgeDelete));
-  }, [nodes, nodeTypeFingerprint, setEdges, handleEdgeDelete]);
-
+  // Reroute type sync
   useRerouteTypeSync(edges, nodesRef, setNodes, setEdges);
 
+  // Persistence
   const persistence = useGraphPersistence({
     nodes,
     edges,
@@ -293,11 +246,10 @@ export function useGraphState(
     handleEdgeDelete,
     onGraphChange: callbacks.onGraphChange,
     onGraphClear: callbacks.onGraphClear,
-    resolveRootGraphRef,
-    resetNavigationRef,
   });
 
   return {
+    // Core state
     nodes,
     setNodes,
     onNodesChange,
@@ -306,9 +258,13 @@ export function useGraphState(
     onEdgesChange,
     selectedNodeIds,
     setSelectedNodeIds,
+
+    // Pipeline data
     availablePipelineIds,
     portsMap,
     pipelineSchemas,
+
+    // Params
     nodeParams: params.nodeParams,
     handlePipelineSelect: params.handlePipelineSelect,
     handleNodeParameterChange: params.handleNodeParameterChange,
@@ -318,9 +274,11 @@ export function useGraphState(
     isStreamingRef,
     onNodeParamChangeRef: params.onNodeParamChangeRef,
     onOutputSinkChangeRef,
-    onOutputSinkBulkChangeRef,
-    enrichDepsRef,
+
+    // Edge management
     handleEdgeDelete,
+
+    // Persistence
     status: persistence.status,
     fitViewTrigger: persistence.fitViewTrigger,
     handleSave: persistence.handleSave,
@@ -328,17 +286,7 @@ export function useGraphState(
     handleImport: persistence.handleImport,
     handleExport: persistence.handleExport,
     refreshGraph: persistence.refreshGraph,
-    refreshPipelines: fetchAndSetSchemas,
     getCurrentGraphConfig: persistence.getCurrentGraphConfig,
     getGraphNodePrompts: persistence.getGraphNodePrompts,
-    getGraphVaceSettings: persistence.getGraphVaceSettings,
-    getGraphLoRASettings: persistence.getGraphLoRASettings,
-    pendingImportWorkflow: persistence.pendingImportWorkflow,
-    pendingResolutionPlan: persistence.pendingResolutionPlan,
-    pendingImportResolving: persistence.pendingImportResolving,
-    confirmImport: persistence.confirmImport,
-    cancelImport: persistence.cancelImport,
-    reResolveImport: persistence.reResolveImport,
-    loadGraphFromParsed: persistence.loadGraphFromParsed,
   };
 }

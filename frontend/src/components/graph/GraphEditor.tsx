@@ -112,6 +112,7 @@ const edgeTypes = {
 
 export interface GraphEditorHandle {
   refreshGraph: () => void;
+  refreshPipelines: () => void;
   getCurrentGraphConfig: () => import("../../lib/api").GraphConfig;
   getGraphNodePrompts: () => Array<{ nodeId: string; text: string }>;
   getGraphVaceSettings: () => Array<{
@@ -231,6 +232,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       handleImport,
       handleExport,
       refreshGraph,
+      refreshPipelines,
       getCurrentGraphConfig,
       getGraphNodePrompts,
       getGraphVaceSettings,
@@ -275,6 +277,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       ref,
       () => ({
         refreshGraph,
+        refreshPipelines,
         getCurrentGraphConfig,
         getGraphNodePrompts,
         getGraphVaceSettings,
@@ -290,6 +293,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       }),
       [
         refreshGraph,
+        refreshPipelines,
         getCurrentGraphConfig,
         getGraphNodePrompts,
         getGraphVaceSettings,
