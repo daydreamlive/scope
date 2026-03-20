@@ -11,6 +11,7 @@ import {
   getIceServers,
   type PromptItem,
   type PromptTransition,
+  type GraphConfig,
 } from "../lib/api";
 import { toast } from "sonner";
 
@@ -36,6 +37,7 @@ interface InitialParameters {
   };
   produces_video?: boolean;
   produces_audio?: boolean;
+  graph?: GraphConfig;
 }
 
 interface UseUnifiedWebRTCOptions {
@@ -526,6 +528,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         }
       >;
       beat_cache_reset_rate?: string;
+      node_id?: string;
       [key: string]: unknown;
     }) => {
       if (
