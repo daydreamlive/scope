@@ -34,6 +34,7 @@ export interface WebRTCOfferRequest {
     vace_context_scale?: number;
     pipeline_ids?: string[];
     images?: string[];
+    graph?: GraphConfig;
   };
 }
 
@@ -45,8 +46,15 @@ export interface PipelineLoadParams {
 // Generic load params - accepts any key-value pairs based on pipeline config
 export type PipelineLoadParamsGeneric = Record<string, unknown>;
 
+export interface PipelineLoadItem {
+  node_id: string;
+  pipeline_id: string;
+  load_params?: PipelineLoadParamsGeneric | null;
+}
+
 export interface PipelineLoadRequest {
-  pipeline_ids: string[];
+  pipelines?: PipelineLoadItem[];
+  pipeline_ids?: string[];
   load_params?: PipelineLoadParamsGeneric | null;
 }
 
@@ -560,6 +568,7 @@ export interface PipelineSchemaProperty {
   $ref?: string;
   /** UI hints from backend (Field json_schema_extra) */
   ui?: SchemaFieldUI;
+  [k: string]: unknown;
 }
 
 export interface PipelineConfigSchema {
@@ -611,6 +620,9 @@ export interface PipelineSchemaInfo {
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
   plugin_name: string | null;
+  // Graph port declarations
+  inputs?: string[];
+  outputs?: string[];
 }
 
 export interface PipelineSchemasResponse {
@@ -887,6 +899,35 @@ export const deleteApiKey = async (
 
   return response.json();
 };
+
+// Graph Configuration types
+
+export interface GraphNode {
+  id: string;
+  type: "source" | "pipeline" | "sink";
+  pipeline_id?: string | null;
+  x?: number | null;
+  y?: number | null;
+  w?: number | null;
+  h?: number | null;
+  source_mode?: string | null;
+  source_name?: string | null;
+}
+
+export interface GraphEdge {
+  from: string;
+  from_port: string;
+  to_node: string;
+  to_port: string;
+  kind?: "stream" | "parameter";
+}
+
+export interface GraphConfig {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  /** Opaque frontend UI state (frontend-only nodes, edges, etc.). Stored and returned as-is by the backend. */
+  ui_state?: Record<string, unknown> | null;
+}
 
 export const downloadRecording = async (sessionId: string): Promise<void> => {
   if (!sessionId) {
