@@ -1,13 +1,11 @@
 """fal.ai deployment wrapper for the Livepeer runner.
 
-This wrapper keeps the existing Livepeer runner implementation in
-`scope.cloud.livepeer_app` unchanged and only provides:
+This wraps the Livepeer runner implementation in
+`scope.cloud.livepeer_app` unchanged and provides:
 - fal container/image configuration
 - runner subprocess lifecycle management
 - WebSocket proxying between fal `/ws` and local runner `/ws`
 """
-
-from __future__ import annotations
 
 import asyncio
 import importlib.util
@@ -39,49 +37,18 @@ RUNNER_APP_FILE_CANDIDATES = (
 )
 
 
-def _format_handshake_failure(exc: Exception) -> str:
-    """Build a readable diagnostic string for websocket handshake errors."""
-    response = getattr(exc, "response", None)
-    if response is None:
-        return f"{type(exc).__name__}: {exc}"
-
-    status_code = getattr(response, "status_code", "<unknown>")
-    reason_phrase = getattr(response, "reason_phrase", "")
-    headers = getattr(response, "headers", None)
-    body = getattr(response, "body", None)
-
-    header_text = "<unavailable>"
-    if headers is not None:
-        try:
-            header_text = ", ".join(f"{k}={v}" for k, v in headers.raw_items())
-        except Exception:
-            header_text = str(headers)
-
-    body_text = ""
-    if body:
-        try:
-            body_text = body.decode("utf-8", errors="replace")
-        except Exception:
-            body_text = repr(body)
-
-    return (
-        f"{type(exc).__name__}: status={status_code} reason={reason_phrase!r} "
-        f"headers=[{header_text}] body={body_text!r}"
-    )
-
-
 def _get_git_sha() -> str:
     """Get deploy tag from env var SCOPE_DEPLOY_TAG or derive from git SHA."""
     deploy_tag = os.environ.get("SCOPE_DEPLOY_TAG")
     if deploy_tag:
-        if not deploy_tag.endswith("-cloud"):
-            normalized_tag = f"{deploy_tag}-cloud"
-            print(
-                "SCOPE_DEPLOY_TAG did not include '-cloud' suffix; "
-                f"using cloud image tag: {normalized_tag}"
-            )
-            return normalized_tag
-        return deploy_tag
+        if deploy_tag.endswith("-cloud"):
+            return deploy_tag
+        normalized_tag = f"{deploy_tag}-cloud"
+        print(
+            "SCOPE_DEPLOY_TAG did not include '-cloud' suffix; "
+            f"using cloud image tag: {normalized_tag}"
+        )
+        return normalized_tag
 
     try:
         result = _subprocess.run(
@@ -192,7 +159,6 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
 
     image = custom_image
     machine_type = "GPU-H100"
-    # fal.App reads `app_auth`; `auth_mode` is ignored here.
     app_auth = "public"
     requirements = [
         "requests",
@@ -276,7 +242,7 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
 
     async def _proxy_ws(self, client_ws: WebSocket) -> None:
         """Proxy fal WebSocket traffic to the local Livepeer runner WebSocket."""
-        print("Livepeer fal ws client connected 1")
+        print("Livepeer fal websocket_handler invoked for /ws")
 
         import websockets
         from websockets.exceptions import (
@@ -286,7 +252,6 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         )
 
         await client_ws.accept()
-        print("Livepeer fal ws client connected 2")
         print(f"Connecting proxy to runner websocket at {RUNNER_LOCAL_WS_URL}")
 
         try:
@@ -329,15 +294,9 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         except (WebSocketDisconnect, ConnectionClosed):
             pass
         except InvalidStatus as exc:
-            print(
-                "Livepeer fal ws handshake rejected by runner: "
-                f"{_format_handshake_failure(exc)}"
-            )
+            print(f"Livepeer fal ws handshake rejected by runner: {exc}")
         except InvalidHandshake as exc:
-            print(
-                "Livepeer fal ws handshake failed before upgrade: "
-                f"{_format_handshake_failure(exc)}"
-            )
+            print(f"Livepeer fal ws handshake failed before upgrade: {exc}")
         except Exception as exc:
             print(f"Livepeer fal ws proxy error: {type(exc).__name__}: {exc}")
         finally:
@@ -348,5 +307,4 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
     @fal.endpoint("/ws", is_websocket=True)
     async def websocket_handler(self, client_ws: WebSocket):
         """WebSocket endpoint for Livepeer signaling and control traffic."""
-        print("Livepeer fal websocket_handler invoked for /ws")
         await self._proxy_ws(client_ws)

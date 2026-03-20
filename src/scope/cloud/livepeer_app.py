@@ -73,8 +73,7 @@ class Lv2vJobInfo(BaseModel):
     events_url: str | None = None
     publish_url: str | None = None
     subscribe_url: str | None = None
-    daydream_user_id: str | None = None
-
+    params: dict[str, Any] | None = None
 
 @dataclass
 class LivepeerSession:
@@ -424,8 +423,6 @@ async def _handle_control_message(
                 "request_id": request_id,
                 "error": "start_stream params must be an object",
             }
-        # Remove transport-only user marker if present so it never reaches pipelines.
-        params.pop("daydream_user_id", None)
 
         if session.frame_processor is not None:
             logger.info("start_stream ignored: stream already running")
@@ -652,8 +649,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         raw = await ws.receive_text()
         job_info = Lv2vJobInfo.model_validate_json(raw)
         logger.info("Received LV2V job info: manifest_id=%s", job_info.manifest_id)
-        requested_user_id = job_info.daydream_user_id
-        if not await validate_user_access(requested_user_id):
+        params = job_info.params or {}
+        user_id = params.get("daydream_user_id")
+        if not await validate_user_access(user_id):
             await ws.send_json(
                 {
                     "type": "error",
@@ -663,7 +661,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             )
             await ws.close(code=4003, reason="Access denied")
             return
-        session.user_id = requested_user_id
+        # Remove transport-only user marker if present so it never reaches pipelines.
+        params.pop("daydream_user_id", None)
+        session.user_id = user_id
 
         if not job_info.control_url:
             await ws.send_text(
