@@ -541,6 +541,7 @@ class FrameProcessor:
 
         try:
             audio, sample_rate = self._sink_processor.audio_output_queue.get_nowait()
+            # Pass through flush sentinels (audio=None, sample_rate=-1)
             return audio, sample_rate
         except queue.Empty:
             return None, None

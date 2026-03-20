@@ -23,6 +23,10 @@ OUTPUT_QUEUE_MAX_SIZE_FACTOR = 2
 
 SLEEP_TIME = 0.01
 
+# Sentinel sample_rate value used to signal the audio track to flush its buffer.
+# Sent as (None, AUDIO_FLUSH_SENTINEL) through the audio_output_queue.
+AUDIO_FLUSH_SENTINEL = -1
+
 # FPS calculation constants
 MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
 MAX_FPS = 60.0  # Maximum FPS cap
@@ -77,8 +81,10 @@ class PipelineProcessor:
 
         # Audio output queue: (audio_tensor, sample_rate) tuples.
         # Consumed by FrameProcessor.get_audio() on the sink processor.
+        # Flushed on prompt change, so only needs enough headroom for
+        # bursty production (pipeline thread outpacing real-time playback).
         self.audio_output_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
-            maxsize=30
+            maxsize=10
         )
 
         # Current parameters used by processing thread
@@ -225,6 +231,22 @@ class PipelineProcessor:
 
         logger.info(f"PipelineProcessor stopped for pipeline: {self.pipeline_id}")
 
+    def _flush_audio(self):
+        """Drain the audio output queue and send a flush sentinel.
+
+        Called when prompts change so the audio track discards buffered
+        audio from the previous prompt and plays the new speech immediately.
+        """
+        while not self.audio_output_queue.empty():
+            try:
+                self.audio_output_queue.get_nowait()
+            except queue.Empty:
+                break
+        try:
+            self.audio_output_queue.put_nowait((None, AUDIO_FLUSH_SENTINEL))
+        except queue.Full:
+            pass
+
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
         try:
@@ -318,6 +340,14 @@ class PipelineProcessor:
         try:
             new_parameters = self.parameters_queue.get_nowait()
             if new_parameters != self.parameters:
+                # Flush stale audio when prompts change so the new
+                # speech is heard immediately instead of after the old
+                # audio finishes playing.
+                if "prompts" in new_parameters and new_parameters.get(
+                    "prompts"
+                ) != self.parameters.get("prompts"):
+                    self._flush_audio()
+
                 # Clear stale transition when new prompts arrive without transition
                 if (
                     "prompts" in new_parameters
