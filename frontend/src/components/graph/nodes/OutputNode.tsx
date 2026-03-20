@@ -1,7 +1,8 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
-import { useNodeData } from "../hooks/useNodeData";
+import { useNodeData } from "../hooks/node/useNodeData";
+import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import {
   NodeCard,
   NodeHeader,
@@ -9,6 +10,7 @@ import {
   NodePillSelect,
   NodePillInput,
   NodePillToggle,
+  collapsedHandleStyle,
 } from "../ui";
 
 type OutputNodeType = Node<FlowNodeData, "output">;
@@ -31,6 +33,7 @@ const DEFAULT_NAMES: Record<string, string> = {
 
 export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   const { updateData } = useNodeData(id);
+  const { collapsed, toggleCollapse } = useNodeCollapse();
 
   const sinkType = (data.outputSinkType as string) || "spout";
   const enabled = (data.outputSinkEnabled as boolean) ?? false;
@@ -67,53 +70,59 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
 
   const handleY = HEADER_H + BODY_PAD + ROW_H / 2;
 
-  const dotColor = enabled ? "bg-red-400" : "bg-gray-500";
   const typeLabel =
     OUTPUT_TYPE_OPTIONS.find(o => o.value === sinkType)?.label ?? sinkType;
 
   return (
-    <NodeCard selected={selected}>
+    <NodeCard selected={selected} collapsed={collapsed}>
       <NodeHeader
         title={data.customTitle || `${typeLabel} Output`}
-        dotColor={dotColor}
         onTitleChange={newTitle => updateData({ customTitle: newTitle })}
+        collapsed={collapsed}
+        onCollapseToggle={toggleCollapse}
       />
-      <div className="px-2 py-1.5 flex flex-col gap-1.5">
-        <div className="px-2">
-          <NodeParamRow label="Type">
-            <NodePillSelect
-              value={sinkType}
-              onChange={handleTypeChange}
-              options={
-                filteredOptions.length > 0
-                  ? filteredOptions
-                  : OUTPUT_TYPE_OPTIONS
-              }
-            />
-          </NodeParamRow>
+      {!collapsed && (
+        <div className="px-2 py-1.5 flex flex-col gap-1.5">
+          <div className="px-2">
+            <NodeParamRow label="Type">
+              <NodePillSelect
+                value={sinkType}
+                onChange={handleTypeChange}
+                options={
+                  filteredOptions.length > 0
+                    ? filteredOptions
+                    : OUTPUT_TYPE_OPTIONS
+                }
+              />
+            </NodeParamRow>
+          </div>
+          <div className="px-2">
+            <NodeParamRow label="Enabled">
+              <NodePillToggle checked={enabled} onChange={handleToggle} />
+            </NodeParamRow>
+          </div>
+          <div className="px-2">
+            <NodeParamRow label="Name">
+              <NodePillInput
+                type="text"
+                value={senderName}
+                onChange={handleNameChange}
+                placeholder={DEFAULT_NAMES[sinkType] || "Scope"}
+              />
+            </NodeParamRow>
+          </div>
         </div>
-        <div className="px-2">
-          <NodeParamRow label="Enabled">
-            <NodePillToggle checked={enabled} onChange={handleToggle} />
-          </NodeParamRow>
-        </div>
-        <div className="px-2">
-          <NodeParamRow label="Name">
-            <NodePillInput
-              type="text"
-              value={senderName}
-              onChange={handleNameChange}
-              placeholder={DEFAULT_NAMES[sinkType] || "Scope"}
-            />
-          </NodeParamRow>
-        </div>
-      </div>
+      )}
       <Handle
         type="target"
         position={Position.Left}
         id="stream:video"
-        className="!w-2 !h-2 !border-0"
-        style={{ top: handleY, left: 8, backgroundColor: "#ffffff" }}
+        className="!w-2.5 !h-2.5 !border-0"
+        style={
+          collapsed
+            ? collapsedHandleStyle("left")
+            : { top: handleY, left: 0, backgroundColor: "#ffffff" }
+        }
       />
     </NodeCard>
   );

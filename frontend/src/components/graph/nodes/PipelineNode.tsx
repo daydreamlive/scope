@@ -3,8 +3,9 @@ import type { NodeProps, Node } from "@xyflow/react";
 import { RotateCcw, AlertTriangle, ArrowUp } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
-import { useNodeData } from "../hooks/useNodeData";
-import { useHandlePositions } from "../hooks/useHandlePositions";
+import { useNodeData } from "../hooks/node/useNodeData";
+import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
+import { useHandlePositions } from "../hooks/node/useHandlePositions";
 import {
   NodeCard,
   NodeHeader,
@@ -17,6 +18,7 @@ import {
   NodePillToggle,
   NodePillTextarea,
   NODE_TOKENS,
+  collapsedHandleStyle,
 } from "../ui";
 
 type PipelineNodeType = Node<FlowNodeData, "pipeline">;
@@ -51,6 +53,7 @@ export function PipelineNode({
   selected,
 }: NodeProps<PipelineNodeType>) {
   const { updateData } = useNodeData(id);
+  const { collapsed, toggleCollapse } = useNodeCollapse();
   const edges = useEdges();
   const pipelineIds = data.availablePipelineIds || [];
   const streamInputs = data.streamInputs ?? ["video"];
@@ -123,264 +126,269 @@ export function PipelineNode({
   ]);
 
   return (
-    <NodeCard selected={selected} autoMinHeight>
+    <NodeCard
+      selected={selected}
+      autoMinHeight={!collapsed}
+      collapsed={collapsed}
+    >
       <NodeHeader
         title={data.customTitle || pipelineName}
-        dotColor="bg-blue-400"
         onTitleChange={newTitle => updateData({ customTitle: newTitle })}
+        collapsed={collapsed}
+        onCollapseToggle={toggleCollapse}
       />
-      <NodeBody withGap>
-        {/* Pipeline selector */}
-        <NodeParamRow label="Pipeline">
-          <NodePillSearchableSelect
-            value={data.pipelineId || ""}
-            onChange={newValue => {
-              const newPipelineId = newValue || null;
-              onPipelineSelect?.(id, newPipelineId);
-            }}
-            options={selectOptions}
-            placeholder="Select pipeline..."
-          />
-        </NodeParamRow>
-
-        {/* Warning banner for unavailable pipeline */}
-        {!pipelineAvailable && data.pipelineId && (
-          <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20">
-            <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
-            <span className="text-[10px] text-amber-400">
-              Pipeline not installed
-            </span>
-          </div>
-        )}
-
-        {/* Stream inputs */}
-        {streamInputs.map(port => (
-          <div key={`in-${port}`} ref={setRowRef(`in:${port}`)}>
-            <NodeParamRow label="Input">
-              <NodePill>{port}</NodePill>
-            </NodeParamRow>
-          </div>
-        ))}
-
-        {/* Stream outputs */}
-        {streamOutputs.map(port => (
-          <div key={`out-${port}`} ref={setRowRef(`out:${port}`)}>
-            <NodeParamRow label="Output">
-              <NodePill>{port}</NodePill>
-            </NodeParamRow>
-          </div>
-        ))}
-
-        {/* Reset Cache button for pipelines that support cache management */}
-        {supportsCacheManagement && (
-          <NodeParamRow label="Reset Cache">
-            <button
-              type="button"
-              onClick={() => onParameterChange?.(id, "reset_cache", true)}
-              className={`${NODE_TOKENS.pill} flex items-center justify-center gap-1 w-[110px] cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
-              title="Clear longlive cache to regenerate fresh frames"
-            >
-              <RotateCcw className="h-3 w-3 text-[#fafafa]" />
-              <span className={NODE_TOKENS.primaryText}>Reset</span>
-            </button>
+      {!collapsed && (
+        <NodeBody withGap>
+          {/* Pipeline selector */}
+          <NodeParamRow label="Pipeline">
+            <NodePillSearchableSelect
+              value={data.pipelineId || ""}
+              onChange={newValue => {
+                const newPipelineId = newValue || null;
+                onPipelineSelect?.(id, newPipelineId);
+              }}
+              options={selectOptions}
+              placeholder="Select pipeline..."
+            />
           </NodeParamRow>
-        )}
 
-        {/* Primitive parameters (string, number, boolean) */}
-        {primitiveParams.map(param => {
-          const isConnected = isParamConnected(param.name);
-          const currentValue =
-            parameterValues[param.name] ?? param.defaultValue;
+          {/* Warning banner for unavailable pipeline */}
+          {!pipelineAvailable && data.pipelineId && (
+            <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20">
+              <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
+              <span className="text-[10px] text-amber-400">
+                Pipeline not installed
+              </span>
+            </div>
+          )}
 
-          return (
-            <div
-              key={`param-${param.name}`}
-              ref={setRowRef(`param:${param.name}`)}
-            >
-              <NodeParamRow label={param.label || param.name}>
-                {isConnected ? (
-                  <NodePill className="opacity-50">
-                    {param.type === "boolean"
-                      ? currentValue !== undefined
-                        ? String(Boolean(currentValue))
-                        : "—"
-                      : currentValue !== undefined
-                        ? param.type === "number"
-                          ? typeof currentValue === "number"
-                            ? Number.isInteger(currentValue)
-                              ? currentValue
-                              : currentValue.toFixed(3)
-                            : String(currentValue)
-                          : String(currentValue)
-                        : "—"}
-                  </NodePill>
-                ) : param.type === "string" ? (
-                  param.enum ? (
-                    <NodePillSelect
-                      value={String(currentValue ?? "")}
-                      onChange={val => onParameterChange?.(id, param.name, val)}
-                      options={param.enum.map(opt => ({
-                        value: String(opt),
-                        label: String(opt),
-                      }))}
-                    />
-                  ) : (
-                    <NodePillInput
-                      type="text"
-                      value={String(currentValue ?? "")}
-                      onChange={val => onParameterChange?.(id, param.name, val)}
-                    />
-                  )
-                ) : param.type === "number" ? (
-                  <NodePillInput
-                    type="number"
-                    value={Number(currentValue ?? param.defaultValue ?? 0)}
-                    onChange={val =>
-                      onParameterChange?.(id, param.name, Number(val))
-                    }
-                    min={param.min}
-                    max={param.max}
-                  />
-                ) : (
-                  <NodePillToggle
-                    checked={Boolean(
-                      currentValue ?? param.defaultValue ?? false
-                    )}
-                    onChange={val => onParameterChange?.(id, param.name, val)}
-                  />
-                )}
+          {/* Stream inputs */}
+          {streamInputs.map(port => (
+            <div key={`in-${port}`} ref={setRowRef(`in:${port}`)}>
+              <NodeParamRow label="Input">
+                <NodePill>{port}</NodePill>
               </NodeParamRow>
             </div>
-          );
-        })}
+          ))}
 
-        {/* List-number parameters as individual sliders */}
-        {listParams.map(param => {
-          const isConnected = isParamConnected(param.name);
-          const rawValue = parameterValues[param.name] ?? param.defaultValue;
-          const values: number[] = Array.isArray(rawValue)
-            ? rawValue
-            : Array.isArray(param.defaultValue)
-              ? param.defaultValue
-              : [];
-
-          return (
-            <div
-              key={`param-${param.name}`}
-              ref={setRowRef(`param:${param.name}`)}
-            >
-              {isConnected ? (
-                <div className="flex flex-col gap-1">
-                  <p className={`${NODE_TOKENS.labelText} text-[10px]`}>
-                    {param.label || param.name}
-                  </p>
-                  <NodePill className="opacity-50">
-                    {values.length > 0
-                      ? `[${values.map(v => (Number.isInteger(v) ? v : v.toFixed(2))).join(", ")}]`
-                      : "—"}
-                  </NodePill>
-                </div>
-              ) : (
-                <div className="flex flex-col gap-1">
-                  <p className={`${NODE_TOKENS.labelText} text-[10px]`}>
-                    {param.label || param.name}
-                  </p>
-                  {values.map((stepVal, idx) => (
-                    <NodeParamRow key={idx} label={`Step ${idx + 1}`}>
-                      <NodePillInput
-                        type="number"
-                        value={stepVal}
-                        onChange={val => {
-                          const updated = [...values];
-                          updated[idx] = Number(val);
-                          onParameterChange?.(id, param.name, updated);
-                        }}
-                        min={0}
-                        max={1000}
-                      />
-                    </NodeParamRow>
-                  ))}
-                </div>
-              )}
+          {/* Stream outputs */}
+          {streamOutputs.map(port => (
+            <div key={`out-${port}`} ref={setRowRef(`out:${port}`)}>
+              <NodeParamRow label="Output">
+                <NodePill>{port}</NodePill>
+              </NodeParamRow>
             </div>
-          );
-        })}
+          ))}
 
-        {/* VACE input */}
-        {supportsVace && (
-          <div ref={setRowRef("vace")}>
-            <NodeParamRow label="VACE">
-              <NodePill className={isVaceConnected ? "" : "opacity-40"}>
-                {isVaceConnected ? "Connected" : "Not connected"}
-              </NodePill>
+          {/* Reset Cache button for pipelines that support cache management */}
+          {supportsCacheManagement && (
+            <NodeParamRow label="Reset Cache">
+              <button
+                type="button"
+                onClick={() => onParameterChange?.(id, "reset_cache", true)}
+                className={`${NODE_TOKENS.pill} flex items-center justify-center gap-1 w-[110px] cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
+                title="Clear longlive cache to regenerate fresh frames"
+              >
+                <RotateCcw className="h-3 w-3 text-[#fafafa]" />
+                <span className={NODE_TOKENS.primaryText}>Reset</span>
+              </button>
             </NodeParamRow>
-          </div>
-        )}
+          )}
 
-        {/* Prompt textarea */}
-        {supportsPrompts && (
-          <div ref={setRowRef("prompt")}>
-            <div className="flex flex-col gap-1">
-              <p className={`${NODE_TOKENS.labelText} text-[10px] mb-0.5`}>
-                Prompt
-              </p>
-              {isPromptConnected ? (
-                <NodePill className="opacity-50 break-all">
-                  {promptText || "—"}
+          {/* Primitive parameters (string, number, boolean) */}
+          {primitiveParams.map(param => {
+            const isConnected = isParamConnected(param.name);
+            const currentValue =
+              parameterValues[param.name] ?? param.defaultValue;
+
+            return (
+              <div
+                key={`param-${param.name}`}
+                ref={setRowRef(`param:${param.name}`)}
+              >
+                <NodeParamRow label={param.label || param.name}>
+                  {isConnected ? (
+                    <NodePill className="opacity-50">
+                      {param.type === "boolean"
+                        ? currentValue !== undefined
+                          ? String(Boolean(currentValue))
+                          : "—"
+                        : currentValue !== undefined
+                          ? param.type === "number"
+                            ? typeof currentValue === "number"
+                              ? Number.isInteger(currentValue)
+                                ? currentValue
+                                : currentValue.toFixed(3)
+                              : String(currentValue)
+                            : String(currentValue)
+                          : "—"}
+                    </NodePill>
+                  ) : param.type === "string" ? (
+                    param.enum ? (
+                      <NodePillSelect
+                        value={String(currentValue ?? "")}
+                        onChange={val =>
+                          onParameterChange?.(id, param.name, val)
+                        }
+                        options={param.enum.map(opt => ({
+                          value: String(opt),
+                          label: String(opt),
+                        }))}
+                      />
+                    ) : (
+                      <NodePillInput
+                        type="text"
+                        value={String(currentValue ?? "")}
+                        onChange={val =>
+                          onParameterChange?.(id, param.name, val)
+                        }
+                      />
+                    )
+                  ) : param.type === "number" ? (
+                    <NodePillInput
+                      type="number"
+                      value={Number(currentValue ?? param.defaultValue ?? 0)}
+                      onChange={val =>
+                        onParameterChange?.(id, param.name, Number(val))
+                      }
+                      min={param.min}
+                      max={param.max}
+                    />
+                  ) : (
+                    <NodePillToggle
+                      checked={Boolean(
+                        currentValue ?? param.defaultValue ?? false
+                      )}
+                      onChange={val => onParameterChange?.(id, param.name, val)}
+                    />
+                  )}
+                </NodeParamRow>
+              </div>
+            );
+          })}
+
+          {/* List-number parameters as individual sliders */}
+          {listParams.map(param => {
+            const isConnected = isParamConnected(param.name);
+            const rawValue = parameterValues[param.name] ?? param.defaultValue;
+            const values: number[] = Array.isArray(rawValue)
+              ? rawValue
+              : Array.isArray(param.defaultValue)
+                ? param.defaultValue
+                : [];
+
+            return (
+              <div
+                key={`param-${param.name}`}
+                ref={setRowRef(`param:${param.name}`)}
+              >
+                {isConnected ? (
+                  <div className="flex flex-col gap-1">
+                    <p className={`${NODE_TOKENS.labelText} text-[10px]`}>
+                      {param.label || param.name}
+                    </p>
+                    <NodePill className="opacity-50">
+                      {values.length > 0
+                        ? `[${values.map(v => (Number.isInteger(v) ? v : v.toFixed(2))).join(", ")}]`
+                        : "—"}
+                    </NodePill>
+                  </div>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    <p className={`${NODE_TOKENS.labelText} text-[10px]`}>
+                      {param.label || param.name}
+                    </p>
+                    {values.map((stepVal, idx) => (
+                      <NodeParamRow key={idx} label={`Step ${idx + 1}`}>
+                        <NodePillInput
+                          type="number"
+                          value={stepVal}
+                          onChange={val => {
+                            const updated = [...values];
+                            updated[idx] = Number(val);
+                            onParameterChange?.(id, param.name, updated);
+                          }}
+                          min={0}
+                          max={1000}
+                        />
+                      </NodeParamRow>
+                    ))}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+
+          {/* VACE input */}
+          {supportsVace && (
+            <div ref={setRowRef("vace")}>
+              <NodeParamRow label="VACE">
+                <NodePill className={isVaceConnected ? "" : "opacity-40"}>
+                  {isVaceConnected ? "Connected" : "Not connected"}
                 </NodePill>
-              ) : (
-                <div className="flex flex-col gap-1">
-                  <NodePillTextarea
-                    value={promptText}
-                    onChange={text => onPromptChange?.(id, text)}
-                    onSubmit={() => onPromptSubmit?.(id)}
-                    placeholder="Enter prompt..."
-                  />
-                  <button
-                    type="button"
-                    onClick={() => onPromptSubmit?.(id)}
-                    className={`${NODE_TOKENS.pill} flex items-center justify-center gap-1 w-full cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
-                    title="Send prompt (Enter)"
-                  >
-                    <ArrowUp className="h-3 w-3 text-[#fafafa]" />
-                    <span className={NODE_TOKENS.primaryText}>Send</span>
-                  </button>
-                </div>
-              )}
+              </NodeParamRow>
             </div>
-          </div>
-        )}
-      </NodeBody>
+          )}
+
+          {/* Prompt textarea */}
+          {supportsPrompts && (
+            <div ref={setRowRef("prompt")}>
+              <div className="flex flex-col gap-1">
+                <p className={`${NODE_TOKENS.labelText} text-[10px] mb-0.5`}>
+                  Prompt
+                </p>
+                {isPromptConnected ? (
+                  <NodePill className="opacity-50 break-all">
+                    {promptText || "—"}
+                  </NodePill>
+                ) : (
+                  <div className="flex flex-col gap-1">
+                    <NodePillTextarea
+                      value={promptText}
+                      onChange={text => onPromptChange?.(id, text)}
+                      onSubmit={() => onPromptSubmit?.(id)}
+                      placeholder="Enter prompt..."
+                    />
+                    <button
+                      type="button"
+                      onClick={() => onPromptSubmit?.(id)}
+                      className={`${NODE_TOKENS.pill} flex items-center justify-center gap-1 w-full cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
+                      title="Send prompt (Enter)"
+                    >
+                      <ArrowUp className="h-3 w-3 text-[#fafafa]" />
+                      <span className={NODE_TOKENS.primaryText}>Send</span>
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </NodeBody>
+      )}
 
       {/* Stream input handles */}
-      {streamInputs.map(port => (
+      {streamInputs.map((port, idx) => (
         <Handle
           key={`target-${port}`}
           type="target"
           position={Position.Left}
           id={buildHandleId("stream", port)}
-          className="!w-2 !h-2 !border-0"
-          style={{
-            top: rowPositions[`in:${port}`] ?? 0,
-            left: 8,
-            backgroundColor: getPortColorHex(port),
-          }}
-        />
-      ))}
-
-      {/* Stream output handles */}
-      {streamOutputs.map(port => (
-        <Handle
-          key={`source-${port}`}
-          type="source"
-          position={Position.Right}
-          id={buildHandleId("stream", port)}
-          className="!w-2 !h-2 !border-0"
-          style={{
-            top: rowPositions[`out:${port}`] ?? 0,
-            right: 8,
-            backgroundColor: getPortColorHex(port),
-          }}
+          className={
+            collapsed && idx > 0
+              ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+              : "!w-2.5 !h-2.5 !border-0"
+          }
+          style={
+            collapsed
+              ? idx === 0
+                ? collapsedHandleStyle("left")
+                : { ...collapsedHandleStyle("left"), opacity: 0 }
+              : {
+                  top: rowPositions[`in:${port}`] ?? 0,
+                  left: 0,
+                  backgroundColor: getPortColorHex(port),
+                }
+          }
         />
       ))}
 
@@ -391,12 +399,20 @@ export function PipelineNode({
           type="target"
           position={Position.Left}
           id={buildHandleId("param", param.name)}
-          className="!w-2 !h-2 !border-0"
-          style={{
-            top: rowPositions[`param:${param.name}`] ?? 0,
-            left: 8,
-            backgroundColor: getParamTypeColor(param.type),
-          }}
+          className={
+            collapsed
+              ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+              : "!w-2.5 !h-2.5 !border-0"
+          }
+          style={
+            collapsed
+              ? { ...collapsedHandleStyle("left"), opacity: 0 }
+              : {
+                  top: rowPositions[`param:${param.name}`] ?? 0,
+                  left: 0,
+                  backgroundColor: getParamTypeColor(param.type),
+                }
+          }
         />
       ))}
 
@@ -407,12 +423,20 @@ export function PipelineNode({
           type="target"
           position={Position.Left}
           id={buildHandleId("param", param.name)}
-          className="!w-2 !h-2 !border-0"
-          style={{
-            top: rowPositions[`param:${param.name}`] ?? 0,
-            left: 8,
-            backgroundColor: getParamTypeColor(param.type),
-          }}
+          className={
+            collapsed
+              ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+              : "!w-2.5 !h-2.5 !border-0"
+          }
+          style={
+            collapsed
+              ? { ...collapsedHandleStyle("left"), opacity: 0 }
+              : {
+                  top: rowPositions[`param:${param.name}`] ?? 0,
+                  left: 0,
+                  backgroundColor: getParamTypeColor(param.type),
+                }
+          }
         />
       ))}
 
@@ -422,12 +446,20 @@ export function PipelineNode({
           type="target"
           position={Position.Left}
           id={buildHandleId("param", "__prompt")}
-          className="!w-2 !h-2 !border-0"
-          style={{
-            top: rowPositions["prompt"] ?? 0,
-            left: 8,
-            backgroundColor: PARAM_TYPE_COLORS.string,
-          }}
+          className={
+            collapsed
+              ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+              : "!w-2.5 !h-2.5 !border-0"
+          }
+          style={
+            collapsed
+              ? { ...collapsedHandleStyle("left"), opacity: 0 }
+              : {
+                  top: rowPositions["prompt"] ?? 0,
+                  left: 0,
+                  backgroundColor: PARAM_TYPE_COLORS.string,
+                }
+          }
         />
       )}
 
@@ -437,14 +469,48 @@ export function PipelineNode({
           type="target"
           position={Position.Left}
           id={buildHandleId("param", "__vace")}
-          className="!w-2 !h-2 !border-0"
-          style={{
-            top: rowPositions["vace"] ?? 0,
-            left: 8,
-            backgroundColor: "#a78bfa",
-          }}
+          className={
+            collapsed
+              ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+              : "!w-2.5 !h-2.5 !border-0"
+          }
+          style={
+            collapsed
+              ? { ...collapsedHandleStyle("left"), opacity: 0 }
+              : {
+                  top: rowPositions["vace"] ?? 0,
+                  left: 0,
+                  backgroundColor: "#a78bfa",
+                }
+          }
         />
       )}
+
+      {/* Stream output handles */}
+      {streamOutputs.map((port, idx) => (
+        <Handle
+          key={`source-${port}`}
+          type="source"
+          position={Position.Right}
+          id={buildHandleId("stream", port)}
+          className={
+            collapsed && idx > 0
+              ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+              : "!w-2.5 !h-2.5 !border-0"
+          }
+          style={
+            collapsed
+              ? idx === 0
+                ? collapsedHandleStyle("right")
+                : { ...collapsedHandleStyle("right"), opacity: 0 }
+              : {
+                  top: rowPositions[`out:${port}`] ?? 0,
+                  right: 0,
+                  backgroundColor: getPortColorHex(port),
+                }
+          }
+        />
+      ))}
     </NodeCard>
   );
 }

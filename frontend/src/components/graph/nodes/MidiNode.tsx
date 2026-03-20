@@ -3,7 +3,8 @@ import type { NodeProps, Node } from "@xyflow/react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
-import { useNodeData } from "../hooks/useNodeData";
+import { useNodeData } from "../hooks/node/useNodeData";
+import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import {
   NodeCard,
   NodeHeader,
@@ -11,6 +12,7 @@ import {
   NodeParamRow,
   NodePillSelect,
   NODE_TOKENS,
+  collapsedHandleStyle,
 } from "../ui";
 
 type MidiNodeType = Node<FlowNodeData, "midi">;
@@ -168,6 +170,7 @@ function MidiChannelRow({
 
 export function MidiNode({ id, data, selected }: NodeProps<MidiNodeType>) {
   const { updateData } = useNodeData(id);
+  const { collapsed, toggleCollapse } = useNodeCollapse();
   const channels: MidiChannelDef[] =
     data.midiChannels && data.midiChannels.length > 0
       ? data.midiChannels
@@ -363,52 +366,59 @@ export function MidiNode({ id, data, selected }: NodeProps<MidiNodeType>) {
   }));
 
   return (
-    <NodeCard selected={selected} autoMinHeight>
+    <NodeCard
+      selected={selected}
+      autoMinHeight={!collapsed}
+      collapsed={collapsed}
+    >
       <NodeHeader
         title={data.customTitle || "MIDI"}
-        dotColor="bg-cyan-500"
         onTitleChange={newTitle => updateData({ customTitle: newTitle })}
+        collapsed={collapsed}
+        onCollapseToggle={toggleCollapse}
       />
-      <NodeBody>
-        {/* Device selector */}
-        <NodeParamRow label="Device">
-          {deviceOptions.length > 0 ? (
-            <NodePillSelect
-              value={data.midiDeviceId || ""}
-              options={[{ value: "", label: "None" }, ...deviceOptions]}
-              onChange={v => updateData({ midiDeviceId: v || undefined })}
-            />
-          ) : (
-            <span className="text-[9px] text-[#666] italic">
-              No MIDI devices
-            </span>
-          )}
-        </NodeParamRow>
+      {!collapsed && (
+        <NodeBody>
+          {/* Device selector */}
+          <NodeParamRow label="Device">
+            {deviceOptions.length > 0 ? (
+              <NodePillSelect
+                value={data.midiDeviceId || ""}
+                options={[{ value: "", label: "None" }, ...deviceOptions]}
+                onChange={v => updateData({ midiDeviceId: v || undefined })}
+              />
+            ) : (
+              <span className="text-[9px] text-[#666] italic">
+                No MIDI devices
+              </span>
+            )}
+          </NodeParamRow>
 
-        {/* Channel rows */}
-        <div className="flex flex-col gap-0.5 py-0.5">
-          {channels.map((ch, i) => (
-            <MidiChannelRow
-              key={i}
-              ch={ch}
-              index={i}
-              onFieldChange={handleFieldChange}
-              onRemove={handleRemove}
-              canRemove={channels.length > 1}
-              onLearn={handleLearn}
-              isLearning={learningIndex === i}
-            />
-          ))}
-        </div>
+          {/* Channel rows */}
+          <div className="flex flex-col gap-0.5 py-0.5">
+            {channels.map((ch, i) => (
+              <MidiChannelRow
+                key={i}
+                ch={ch}
+                index={i}
+                onFieldChange={handleFieldChange}
+                onRemove={handleRemove}
+                canRemove={channels.length > 1}
+                onLearn={handleLearn}
+                isLearning={learningIndex === i}
+              />
+            ))}
+          </div>
 
-        {/* Add button */}
-        <button
-          className="w-full py-0.5 mt-0.5 rounded bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] text-[#888] hover:text-[#ccc] hover:border-[rgba(119,119,119,0.4)] text-[10px] transition-colors"
-          onClick={handleAdd}
-        >
-          + Add Channel
-        </button>
-      </NodeBody>
+          {/* Add button */}
+          <button
+            className="w-full py-0.5 mt-0.5 rounded bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] text-[#888] hover:text-[#ccc] hover:border-[rgba(119,119,119,0.4)] text-[10px] transition-colors"
+            onClick={handleAdd}
+          >
+            + Add Channel
+          </button>
+        </NodeBody>
+      )}
 
       {/* Output handles for each channel, vertically aligned to each row */}
       {channels.map((_, i) => {
@@ -418,14 +428,25 @@ export function MidiNode({ id, data, selected }: NodeProps<MidiNodeType>) {
           DEVICE_ROW_HEIGHT +
           ROW_HEIGHT * i +
           ROW_HEIGHT / 2;
+        const isFirst = i === 0;
         return (
           <Handle
             key={`handle-${i}`}
             type="source"
             position={Position.Right}
             id={buildHandleId("param", `midi_${i}`)}
-            className="!w-2 !h-2 !border-0"
-            style={{ top: yOffset, right: 8, backgroundColor: COLOR }}
+            className={
+              collapsed && !isFirst
+                ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+                : "!w-2.5 !h-2.5 !border-0"
+            }
+            style={
+              collapsed
+                ? isFirst
+                  ? collapsedHandleStyle("right")
+                  : { ...collapsedHandleStyle("right"), opacity: 0 }
+                : { top: yOffset, right: 0, backgroundColor: COLOR }
+            }
           />
         );
       })}

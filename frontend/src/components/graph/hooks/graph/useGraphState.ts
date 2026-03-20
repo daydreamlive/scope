@@ -1,21 +1,19 @@
 import { useCallback, useEffect, useRef } from "react";
 import { useNodesState, useEdgesState } from "@xyflow/react";
 import type { Edge, Node } from "@xyflow/react";
-import { buildPipelinePortsMap } from "../../../lib/graphUtils";
-import type { FlowNodeData } from "../../../lib/graphUtils";
-import type { PipelineSchemaInfo } from "../../../lib/api";
-import { getPipelineSchemas } from "../../../lib/api";
+import { buildPipelinePortsMap } from "../../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
+import type { PipelineSchemaInfo } from "../../../../lib/api";
+import { getPipelineSchemas } from "../../../../lib/api";
 import { useState } from "react";
 
-import { usePipelineParams } from "./usePipelineParams";
+import { usePipelineParams } from "../node/usePipelineParams";
 import {
   useGraphPersistence,
   enrichNodes,
   type EnrichNodesDeps,
 } from "./useGraphPersistence";
-import { useRerouteTypeSync } from "./useRerouteTypeSync";
-
-// Stable setters: prevent empty→empty array reference churn that causes render loops
+import { useRerouteTypeSync } from "../value/useRerouteTypeSync";
 
 type NodesSetter = React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>;
 type EdgesSetter = React.Dispatch<React.SetStateAction<Edge[]>>;
@@ -26,7 +24,6 @@ function useStableNodesSetter(rawSet: NodesSetter): NodesSetter {
       if (typeof update === "function") {
         rawSet(prev => {
           const next = update(prev);
-          // Return same ref when both empty to prevent render loop
           if (next !== prev && next.length === 0 && prev.length === 0)
             return prev;
           return next;
@@ -57,14 +54,12 @@ function useStableEdgesSetter(rawSet: EdgesSetter): EdgesSetter {
   );
 }
 
-// Types
-
 export interface GraphEditorCallbacks {
   onNodeParameterChange?: (nodeId: string, key: string, value: unknown) => void;
   onGraphChange?: () => void;
   onGraphClear?: () => void;
-  onVideoFileUpload?: (file: File) => Promise<boolean>;
-  onSourceModeChange?: (mode: string) => void;
+  onVideoFileUpload?: (file: File, nodeId?: string) => Promise<boolean>;
+  onSourceModeChange?: (mode: string, nodeId?: string) => void;
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
@@ -76,7 +71,10 @@ export interface GraphEditorCallbacks {
 
 export interface GraphEditorStreams {
   localStream?: MediaStream | null;
+  localStreams?: Record<string, MediaStream>;
   remoteStream?: MediaStream | null;
+  remoteStreams?: Record<string, MediaStream>;
+  sinkStats?: Record<string, { fps: number; bitrate: number }>;
   isStreaming: boolean;
 }
 
@@ -92,21 +90,25 @@ export interface GraphEditorAvailability {
 export function useGraphState(
   callbacks: GraphEditorCallbacks,
   streams: GraphEditorStreams,
-  availability: GraphEditorAvailability
+  availability: GraphEditorAvailability,
+  resolveRootGraphRef: React.RefObject<
+    (
+      nodes: Node<FlowNodeData>[],
+      edges: Edge[]
+    ) => { nodes: Node<FlowNodeData>[]; edges: Edge[] }
+  >,
+  resetNavigationRef: React.RefObject<() => void>
 ) {
-  // Core state
   const [nodes, rawSetNodes, onNodesChange] = useNodesState<Node<FlowNodeData>>(
     []
   );
   const [edges, rawSetEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
-  // Wrap setters to prevent render loops
   const setNodes = useStableNodesSetter(rawSetNodes);
   const setEdges = useStableEdgesSetter(rawSetEdges);
 
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
 
-  // Pipeline schemas
   const [availablePipelineIds, setAvailablePipelineIds] = useState<string[]>(
     []
   );
@@ -117,7 +119,6 @@ export function useGraphState(
     Record<string, PipelineSchemaInfo>
   >({});
 
-  // Fetch pipeline schemas on mount
   useEffect(() => {
     getPipelineSchemas()
       .then(schemas => {
@@ -130,7 +131,6 @@ export function useGraphState(
       });
   }, []);
 
-  // Refs
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
 
@@ -158,7 +158,6 @@ export function useGraphState(
   const onOutputSinkChangeRef = useRef(callbacks.onOutputSinkChange);
   onOutputSinkChangeRef.current = callbacks.onOutputSinkChange;
 
-  // Edge deletion
   const handleEdgeDelete = useCallback(
     (edgeId: string) => {
       setEdges(eds => eds.filter(e => e.id !== edgeId));
@@ -166,7 +165,6 @@ export function useGraphState(
     [setEdges]
   );
 
-  // Pipeline params
   const params = usePipelineParams({
     setNodes,
     portsMap,
@@ -176,7 +174,6 @@ export function useGraphState(
     onNodeParameterChange: callbacks.onNodeParameterChange,
   });
 
-  // Enrichment deps
   const enrichDeps: EnrichNodesDeps = {
     availablePipelineIds,
     portsMap,
@@ -187,7 +184,10 @@ export function useGraphState(
     handlePromptSubmit: params.handlePromptSubmit,
     nodeParamsRef: params.nodeParamsRef,
     localStream: streams.localStream,
+    localStreams: streams.localStreams,
     remoteStream: streams.remoteStream,
+    remoteStreams: streams.remoteStreams,
+    sinkStats: streams.sinkStats,
     onVideoFileUploadRef,
     onSourceModeChangeRef,
     onSpoutSourceChangeRef,
@@ -205,14 +205,12 @@ export function useGraphState(
   const enrichDepsRef = useRef(enrichDeps);
   enrichDepsRef.current = enrichDeps;
 
-  // Enrich nodes on data changes
   useEffect(() => {
     if (availablePipelineIds.length === 0) return;
     setNodes(nds => {
-      if (nds.length === 0) return nds; // nothing to enrich
+      if (nds.length === 0) return nds;
       return enrichNodes(nds, enrichDeps);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     availablePipelineIds,
     portsMap,
@@ -221,7 +219,10 @@ export function useGraphState(
     pipelineSchemas,
     params.handleNodeParameterChange,
     streams.localStream,
+    streams.localStreams,
     streams.remoteStream,
+    streams.remoteStreams,
+    streams.sinkStats,
     availability.spoutAvailable,
     availability.ndiAvailable,
     availability.syphonAvailable,
@@ -230,10 +231,8 @@ export function useGraphState(
     availability.syphonOutputAvailable,
   ]);
 
-  // Reroute type sync
   useRerouteTypeSync(edges, nodesRef, setNodes, setEdges);
 
-  // Persistence
   const persistence = useGraphPersistence({
     nodes,
     edges,
@@ -246,10 +245,11 @@ export function useGraphState(
     handleEdgeDelete,
     onGraphChange: callbacks.onGraphChange,
     onGraphClear: callbacks.onGraphClear,
+    resolveRootGraphRef,
+    resetNavigationRef,
   });
 
   return {
-    // Core state
     nodes,
     setNodes,
     onNodesChange,
@@ -258,13 +258,9 @@ export function useGraphState(
     onEdgesChange,
     selectedNodeIds,
     setSelectedNodeIds,
-
-    // Pipeline data
     availablePipelineIds,
     portsMap,
     pipelineSchemas,
-
-    // Params
     nodeParams: params.nodeParams,
     handlePipelineSelect: params.handlePipelineSelect,
     handleNodeParameterChange: params.handleNodeParameterChange,
@@ -274,11 +270,8 @@ export function useGraphState(
     isStreamingRef,
     onNodeParamChangeRef: params.onNodeParamChangeRef,
     onOutputSinkChangeRef,
-
-    // Edge management
+    enrichDepsRef,
     handleEdgeDelete,
-
-    // Persistence
     status: persistence.status,
     fitViewTrigger: persistence.fitViewTrigger,
     handleSave: persistence.handleSave,

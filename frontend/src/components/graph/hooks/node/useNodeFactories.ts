@@ -1,9 +1,7 @@
 import { useCallback, useMemo } from "react";
 import type { Node } from "@xyflow/react";
-import { generateNodeId } from "../../../lib/graphUtils";
-import type { FlowNodeData } from "../../../lib/graphUtils";
-import { toast } from "sonner";
-
+import { generateNodeId } from "../../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
 // Node defaults
 
 type NodeTypeKey =
@@ -25,7 +23,10 @@ type NodeTypeKey =
   | "image"
   | "vace"
   | "midi"
-  | "bool";
+  | "bool"
+  | "subgraph"
+  | "subgraph_input"
+  | "subgraph_output";
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -294,6 +295,31 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       ],
     },
   },
+  subgraph_input: {
+    type: "subgraph_input",
+    idPrefix: "sg_in",
+    defaultX: 50,
+    data: { label: "Subgraph Inputs", nodeType: "subgraph_input" },
+  },
+  subgraph_output: {
+    type: "subgraph_output",
+    idPrefix: "sg_out",
+    defaultX: 600,
+    data: { label: "Subgraph Outputs", nodeType: "subgraph_output" },
+  },
+  subgraph: {
+    type: "subgraph",
+    idPrefix: "subgraph",
+    defaultX: 300,
+    data: {
+      label: "Subgraph",
+      nodeType: "subgraph",
+      subgraphNodes: [],
+      subgraphEdges: [],
+      subgraphInputs: [],
+      subgraphOutputs: [],
+    },
+  },
 };
 
 interface UseNodeFactoriesArgs {
@@ -305,8 +331,7 @@ interface UseNodeFactoriesArgs {
   availablePipelineIds: string[];
   portsMap: Record<string, { inputs: string[]; outputs: string[] }>;
   handlePipelineSelect: (nodeId: string, newPipelineId: string | null) => void;
-  selectedNodeIds: string[];
-  setSelectedNodeIds: (ids: string[]) => void;
+  setSelectedNodeIds: React.Dispatch<React.SetStateAction<string[]>>;
   spoutOutputAvailable: boolean;
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
@@ -321,7 +346,6 @@ export function useNodeFactories({
   availablePipelineIds,
   portsMap,
   handlePipelineSelect,
-  selectedNodeIds,
   setSelectedNodeIds,
   spoutOutputAvailable,
   ndiOutputAvailable,
@@ -378,28 +402,11 @@ export function useNodeFactories({
         | "image"
         | "vace"
         | "midi"
-        | "bool",
+        | "bool"
+        | "subgraph",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;
-
-      // Enforce single source and single sink
-      if (type === "source") {
-        const hasSource = nodes.some(n => n.data.nodeType === "source");
-        if (hasSource) {
-          toast.warning("Only one Source node is allowed");
-          setPendingNodePosition(null);
-          return;
-        }
-      }
-      if (type === "sink") {
-        const hasSink = nodes.some(n => n.data.nodeType === "sink");
-        if (hasSink) {
-          toast.warning("Only one Sink node is allowed");
-          setPendingNodePosition(null);
-          return;
-        }
-      }
 
       if (type === "control") {
         if (subType === "float" || subType === "int" || subType === "string") {
@@ -449,14 +456,21 @@ export function useNodeFactories({
 
   const handleDeleteNodes = useCallback(
     (nodeIds: string[]) => {
-      const idSet = new Set(nodeIds);
+      // Never delete boundary nodes
+      const PROTECTED = new Set([
+        "__sg_boundary_input__",
+        "__sg_boundary_output__",
+      ]);
+      const idSet = new Set(nodeIds.filter(id => !PROTECTED.has(id)));
+      if (idSet.size === 0) return;
       setNodes(nds => nds.filter(n => !idSet.has(n.id)));
       setEdges(eds =>
         eds.filter(e => !idSet.has(e.source) && !idSet.has(e.target))
       );
-      setSelectedNodeIds(selectedNodeIds.filter(id => !idSet.has(id)));
+      // Use functional updater to avoid stale selectedNodeIds closure
+      setSelectedNodeIds(prev => prev.filter(id => !idSet.has(id)));
     },
-    [setNodes, setEdges, selectedNodeIds, setSelectedNodeIds]
+    [setNodes, setEdges, setSelectedNodeIds]
   );
 
   return {

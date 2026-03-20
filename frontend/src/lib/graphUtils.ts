@@ -32,6 +32,41 @@ export interface PortInfo {
   name: string;
 }
 
+/* ── Subgraph types ── */
+
+/** A port exposed on the boundary of a subgraph node. */
+export interface SubgraphPort {
+  /** Handle name on the subgraph node (e.g. "video_in", "noise_scale") */
+  name: string;
+  /** Whether this is a stream (video) or parameter connection */
+  portType: "stream" | "param";
+  /** For param ports: the data type */
+  paramType?: "string" | "number" | "boolean" | "list_number";
+  /** Which inner node this port maps to */
+  innerNodeId: string;
+  /** Which handle on that inner node */
+  innerHandleId: string;
+}
+
+/** Serialized node stored inside a subgraph (same shape as UIStateNode). */
+export interface SerializedSubgraphNode {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  width?: number;
+  height?: number;
+  data: Record<string, unknown>;
+}
+
+/** Serialized edge stored inside a subgraph. */
+export interface SerializedSubgraphEdge {
+  id: string;
+  source: string;
+  sourceHandle?: string | null;
+  target: string;
+  targetHandle?: string | null;
+}
+
 export interface FlowNodeData {
   label: string;
   /** User-editable display name; when set, overrides the default header title. */
@@ -54,7 +89,10 @@ export interface FlowNodeData {
     | "image"
     | "vace"
     | "midi"
-    | "bool";
+    | "bool"
+    | "subgraph"
+    | "subgraph_input"
+    | "subgraph_output";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -225,11 +263,29 @@ export interface FlowNodeData {
   /** For pipeline nodes: whether the selected pipeline supports VACE */
   supportsVace?: boolean;
 
-  /* ── Node lock / pin ── */
+  /* ── Subgraph node fields ── */
+  /** For subgraph nodes: serialized inner nodes */
+  subgraphNodes?: SerializedSubgraphNode[];
+  /** For subgraph nodes: serialized inner edges */
+  subgraphEdges?: SerializedSubgraphEdge[];
+  /** For subgraph nodes: exposed input ports */
+  subgraphInputs?: SubgraphPort[];
+  /** For subgraph nodes: exposed output ports */
+  subgraphOutputs?: SubgraphPort[];
+  /** Callback to enter / navigate into a subgraph */
+  onEnterSubgraph?: (nodeId: string) => void;
+  /** Callback to rename a port on a boundary node (inside a subgraph) */
+  onPortRename?: (oldName: string, newName: string, portType: string) => void;
+  /** Live port values for boundary / subgraph nodes (transient, not serialized). */
+  portValues?: Record<string, unknown>;
+
+  /* ── Node lock / pin / collapse ── */
   /** When true, parameter inputs on this node are disabled (read-only). */
   locked?: boolean;
   /** When true, the node cannot be dragged on the canvas. */
   pinned?: boolean;
+  /** When true, the node is visually collapsed to a compact pill. */
+  collapsed?: boolean;
 
   [key: string]: unknown;
 }
@@ -388,9 +444,29 @@ export function graphConfigToFlow(
   nodes: Node<FlowNodeData>[];
   edges: Edge[];
 } {
-  const sources = graph.nodes.filter(n => n.type === "source");
-  const pipelines = graph.nodes.filter(n => n.type === "pipeline");
-  const sinks = graph.nodes.filter(n => n.type === "sink");
+  // Collect subgraph node IDs from ui_state so we can skip their flattened
+  // inner nodes (which were expanded into the backend nodes/edges on export).
+  const subgraphNodeIds = new Set<string>();
+  if (graph.ui_state) {
+    const uiNodes = (graph.ui_state.nodes ?? []) as UIStateNode[];
+    for (const un of uiNodes) {
+      if (un.type === "subgraph") {
+        subgraphNodeIds.add(un.id);
+      }
+    }
+  }
+
+  /** True if `nodeId` is a flattened inner node owned by a known subgraph. */
+  const isSubgraphInnerNode = (nodeId: string): boolean => {
+    for (const sgId of subgraphNodeIds) {
+      if (nodeId.startsWith(sgId + ":")) return true;
+    }
+    return false;
+  };
+
+  const sources = graph.nodes.filter(n => n.type === "source" && !isSubgraphInnerNode(n.id));
+  const pipelines = graph.nodes.filter(n => n.type === "pipeline" && !isSubgraphInnerNode(n.id));
+  const sinks = graph.nodes.filter(n => n.type === "sink" && !isSubgraphInnerNode(n.id));
 
   const nodes: Node<FlowNodeData>[] = [];
 
@@ -481,7 +557,10 @@ export function graphConfigToFlow(
   });
 
   // Convert edges - add stream: prefix to handle IDs
-  const edges: Edge[] = graph.edges.map((e, i) => {
+  // Skip edges that reference flattened inner subgraph nodes
+  const edges: Edge[] = graph.edges
+    .filter(e => !isSubgraphInnerNode(e.from) && !isSubgraphInnerNode(e.to_node))
+    .map((e, i) => {
     const sourceHandle =
       e.kind === "parameter"
         ? buildHandleId("param", e.from_port)
@@ -543,9 +622,12 @@ export function graphConfigToFlow(
       });
     }
 
-    // Restore lock/pin flags for all nodes (including backend nodes)
+    // Restore lock/pin/collapsed flags for all nodes (including backend nodes)
     const savedFlags = graph.ui_state.node_flags as
-      | Record<string, { locked?: boolean; pinned?: boolean }>
+      | Record<
+          string,
+          { locked?: boolean; pinned?: boolean; collapsed?: boolean }
+        >
       | undefined;
     if (savedFlags) {
       for (const node of nodes) {
@@ -556,6 +638,7 @@ export function graphConfigToFlow(
             node.data.pinned = true;
             node.draggable = false;
           }
+          if (flags.collapsed) node.data.collapsed = true;
         }
       }
     }
@@ -580,12 +663,16 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "vace",
   "midi",
   "bool",
+  "subgraph",
+  "subgraph_input",
+  "subgraph_output",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
 const NON_SERIALIZABLE_KEYS = new Set<string>([
   "localStream",
   "remoteStream",
+  "sinkStats",
   "onVideoFileUpload",
   "onSourceModeChange",
   "onSpoutSourceChange",
@@ -593,6 +680,11 @@ const NON_SERIALIZABLE_KEYS = new Set<string>([
   "onSyphonSourceChange",
   "onPromptChange",
   "pipelinePortsMap",
+  "_savedWidth",
+  "_savedHeight",
+  "onEnterSubgraph",
+  "onPortRename",
+  "portValues",
 ]);
 
 /**
@@ -628,23 +720,167 @@ interface UIStateEdge {
 }
 
 /**
+ * Recursively flatten subgraph nodes so the backend sees only
+ * source / pipeline / sink nodes.  Inner backend nodes are hoisted
+ * to the top-level with a prefixed ID (`subgraphId:innerNodeId`).
+ * Edges that cross the subgraph boundary are remapped through the
+ * SubgraphPort mappings.
+ *
+ * Returns new top-level arrays (nodes & edges) with all subgraphs dissolved.
+ */
+export function flattenSubgraphs(
+  nodes: Node<FlowNodeData>[],
+  edges: Edge[],
+  prefix = ""
+): { nodes: Node<FlowNodeData>[]; edges: Edge[] } {
+  const flatNodes: Node<FlowNodeData>[] = [];
+  const flatEdges: Edge[] = [...edges];
+
+  // Maps from "subgraphNodeId + portName" → actual inner nodeId + handleId
+  // Used to remap edges that connect to a subgraph's external ports.
+  const inputPortMap = new Map<string, { nodeId: string; handleId: string }>();
+  const outputPortMap = new Map<string, { nodeId: string; handleId: string }>();
+
+  for (const node of nodes) {
+    if (node.data.nodeType !== "subgraph") {
+      flatNodes.push(node);
+      continue;
+    }
+
+    // This is a subgraph node – extract and flatten its contents
+    const sg = node;
+    const innerNodesRaw = sg.data.subgraphNodes ?? [];
+    const innerEdgesRaw = sg.data.subgraphEdges ?? [];
+    const sgInputs = sg.data.subgraphInputs ?? [];
+    const sgOutputs = sg.data.subgraphOutputs ?? [];
+    const sgPrefix = prefix ? `${prefix}${sg.id}:` : `${sg.id}:`;
+
+    // Build port maps for this subgraph
+    for (const port of sgInputs) {
+      inputPortMap.set(`${sg.id}::${port.name}`, {
+        nodeId: sgPrefix + port.innerNodeId,
+        handleId: port.innerHandleId,
+      });
+    }
+    for (const port of sgOutputs) {
+      outputPortMap.set(`${sg.id}::${port.name}`, {
+        nodeId: sgPrefix + port.innerNodeId,
+        handleId: port.innerHandleId,
+      });
+    }
+
+    // Reconstruct inner nodes as React Flow nodes for recursive flattening
+    const innerFlowNodes: Node<FlowNodeData>[] = innerNodesRaw.map(n => ({
+      id: sgPrefix + n.id,
+      type: n.type,
+      position: n.position,
+      width: n.width,
+      height: n.height,
+      data: { ...n.data, label: n.data.label ?? n.id } as FlowNodeData,
+    }));
+
+    // Remap inner edge node references
+    const innerFlowEdges: Edge[] = innerEdgesRaw.map(e => ({
+      ...e,
+      id: `${sgPrefix}${e.id}`,
+      source: sgPrefix + e.source,
+      target: sgPrefix + e.target,
+    }));
+
+    // Recursively flatten (handles nested subgraphs)
+    const { nodes: hoisted, edges: hoistedEdges } = flattenSubgraphs(
+      innerFlowNodes,
+      innerFlowEdges,
+      "" // prefix already applied
+    );
+
+    flatNodes.push(...hoisted);
+    flatEdges.push(...hoistedEdges);
+  }
+
+  // Now remap edges that reference subgraph ports
+  const remappedEdges = flatEdges.map(e => {
+    let { source, sourceHandle, target, targetHandle } = e;
+
+    // Check if the source is a subgraph output port
+    const sourceParsed = parseHandleId(sourceHandle);
+    if (sourceParsed) {
+      const key = `${source}::${sourceParsed.name}`;
+      const mapping = outputPortMap.get(key);
+      if (mapping) {
+        source = mapping.nodeId;
+        sourceHandle = mapping.handleId;
+      }
+    }
+
+    // Check if the target is a subgraph input port
+    const targetParsed = parseHandleId(targetHandle);
+    if (targetParsed) {
+      const key = `${target}::${targetParsed.name}`;
+      const mapping = inputPortMap.get(key);
+      if (mapping) {
+        target = mapping.nodeId;
+        targetHandle = mapping.handleId;
+      }
+    }
+
+    if (
+      source !== e.source ||
+      sourceHandle !== e.sourceHandle ||
+      target !== e.target ||
+      targetHandle !== e.targetHandle
+    ) {
+      return { ...e, source, sourceHandle, target, targetHandle };
+    }
+    return e;
+  });
+
+  // Filter out edges that still reference subgraph node IDs (shouldn't happen, but safety)
+  const subgraphIds = new Set(
+    nodes.filter(n => n.data.nodeType === "subgraph").map(n => n.id)
+  );
+  const cleanEdges = remappedEdges.filter(
+    e => !subgraphIds.has(e.source) && !subgraphIds.has(e.target)
+  );
+
+  return { nodes: flatNodes, edges: cleanEdges };
+}
+
+/**
  * Convert React Flow state back to backend GraphConfig JSON.
  */
 export function flowToGraphConfig(
   nodes: Node<FlowNodeData>[],
   edges: Edge[]
 ): GraphConfig {
+  // Flatten any subgraph nodes so the backend only sees source/pipeline/sink
+  const hasSubgraphs = nodes.some(n => n.data.nodeType === "subgraph");
+  const { nodes: flatNodes, edges: flatEdges } = hasSubgraphs
+    ? flattenSubgraphs(nodes, edges)
+    : { nodes, edges };
+
   // Separate backend nodes from frontend-only nodes
   const frontendNodeIds = new Set<string>();
 
-  const graphNodes: GraphNode[] = nodes
-    .filter(n => {
-      if (FRONTEND_ONLY_TYPES.has(n.data.nodeType)) {
-        frontendNodeIds.add(n.id);
-        return false;
-      }
-      return true;
-    })
+  // Collect frontend-only IDs from the flattened set
+  const backendFlatNodes = flatNodes.filter(n => {
+    if (FRONTEND_ONLY_TYPES.has(n.data.nodeType)) {
+      frontendNodeIds.add(n.id);
+      return false;
+    }
+    return true;
+  });
+
+  // Also include frontend-only nodes from the original (un-flattened) set.
+  // Subgraph nodes are removed by flattenSubgraphs (replaced by their inner
+  // nodes) but still need to be serialized into ui_state so they persist.
+  for (const n of nodes) {
+    if (FRONTEND_ONLY_TYPES.has(n.data.nodeType)) {
+      frontendNodeIds.add(n.id);
+    }
+  }
+
+  const graphNodes: GraphNode[] = backendFlatNodes
     .map(n => {
       // Read dimensions: node.width/height (set by NodeResizer) > measured > style
       const w =
@@ -684,7 +920,7 @@ export function flowToGraphConfig(
 
   // Filter edges to only include those where both source and target exist in graphNodes
   const graphNodeIds = new Set(graphNodes.map(n => n.id));
-  const graphEdges: GraphEdge[] = edges
+  const graphEdges: GraphEdge[] = flatEdges
     .filter(e => graphNodeIds.has(e.source) && graphNodeIds.has(e.target))
     .map(e => {
       const sourceParsed = parseHandleId(e.sourceHandle);
@@ -705,13 +941,17 @@ export function flowToGraphConfig(
   // Serialize frontend-only nodes and their edges into ui_state
   let ui_state: Record<string, unknown> | undefined;
 
-  // Collect lock/pin flags for ALL nodes (including backend nodes like source/pipeline/sink)
-  const nodeFlags: Record<string, { locked?: boolean; pinned?: boolean }> = {};
+  // Collect lock/pin/collapsed flags for ALL nodes (including backend nodes like source/pipeline/sink)
+  const nodeFlags: Record<
+    string,
+    { locked?: boolean; pinned?: boolean; collapsed?: boolean }
+  > = {};
   for (const n of nodes) {
-    if (n.data.locked || n.data.pinned) {
+    if (n.data.locked || n.data.pinned || n.data.collapsed) {
       nodeFlags[n.id] = {
         ...(n.data.locked ? { locked: true } : {}),
         ...(n.data.pinned ? { pinned: true } : {}),
+        ...(n.data.collapsed ? { collapsed: true } : {}),
       };
     }
   }

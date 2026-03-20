@@ -1,7 +1,7 @@
 import { type ReactNode, useState, useRef, useEffect } from "react";
 import { NodeResizer } from "@xyflow/react";
 import { NODE_TOKENS } from "./tokens";
-import { useNodeFlags } from "../hooks/useNodeFlags";
+import { useNodeFlags } from "../hooks/node/useNodeFlags";
 
 interface NodeCardProps {
   children: ReactNode;
@@ -13,6 +13,8 @@ interface NodeCardProps {
   minWidth?: number;
   // Override default min height (60px)
   minHeight?: number;
+  /** When true, render as a compact pill (no resizer, no min-width). */
+  collapsed?: boolean;
 }
 
 export function NodeCard({
@@ -22,6 +24,7 @@ export function NodeCard({
   autoMinHeight = false,
   minWidth = 240,
   minHeight: minHeightProp = 60,
+  collapsed = false,
 }: NodeCardProps) {
   const measureRef = useRef<HTMLDivElement>(null);
   const [minH, setMinH] = useState(60);
@@ -52,6 +55,22 @@ export function NodeCard({
     ? { pointerEvents: "none" }
     : undefined;
 
+  /* ── Collapsed pill ── */
+  if (collapsed) {
+    return (
+      <div
+        className={`group bg-[#181717] border border-[rgba(119,119,119,0.55)] rounded-full relative flex flex-col ${
+          selected ? NODE_TOKENS.cardSelected : ""
+        } ${className}`}
+      >
+        <div className="flex flex-col w-full" style={lockStyle}>
+          {children}
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Normal card ── */
   return (
     <div
       className={`group ${NODE_TOKENS.card} ${selected ? NODE_TOKENS.cardSelected : ""} ${className}`}

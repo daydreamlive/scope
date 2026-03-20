@@ -1,25 +1,36 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import type { ReactNode } from "react";
-import { Lock, LockOpen, Pin, PinOff } from "lucide-react";
+import {
+  Lock,
+  LockOpen,
+  Pin,
+  PinOff,
+  ChevronDown,
+  ChevronRight,
+} from "lucide-react";
 import { NODE_TOKENS } from "./tokens";
-import { useIsZoomedOut } from "../hooks/useIsZoomedOut";
-import { useNodeFlags, useNodeFlagToggle } from "../hooks/useNodeFlags";
+import { useIsZoomedOut } from "../hooks/node/useIsZoomedOut";
+import { useNodeFlags, useNodeFlagToggle } from "../hooks/node/useNodeFlags";
 
 interface NodeHeaderProps {
   title: string;
-  dotColor: string;
   className?: string;
   onTitleChange?: (newTitle: string) => void;
   // Optional right-side content (e.g. play button)
   rightContent?: ReactNode;
+  /** Whether the node is currently collapsed. */
+  collapsed?: boolean;
+  /** Callback to toggle collapse/expand. When omitted the chevron is not rendered. */
+  onCollapseToggle?: () => void;
 }
 
 export function NodeHeader({
   title,
-  dotColor,
   className = "",
   onTitleChange,
   rightContent,
+  collapsed = false,
+  onCollapseToggle,
 }: NodeHeaderProps) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(title);
@@ -71,13 +82,26 @@ export function NodeHeader({
 
   return (
     <div
-      className={`${NODE_TOKENS.header} ${rightContent ? "justify-between" : ""} ${className}`}
+      className={`${NODE_TOKENS.header} ${collapsed ? "!rounded-full !border-b-0 !pr-4" : ""} ${rightContent ? "justify-between" : ""} ${className}`}
       style={{ pointerEvents: "auto" }}
     >
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        <div
-          className={`w-[10px] h-[10px] rounded-full ${dotColor} shrink-0`}
-        />
+        {onCollapseToggle ? (
+          <button
+            type="button"
+            onClick={e => {
+              e.stopPropagation();
+              onCollapseToggle();
+            }}
+            className="shrink-0 text-[#666] hover:text-[#999] transition-colors"
+          >
+            {collapsed ? (
+              <ChevronRight className="h-3.5 w-3.5" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5" />
+            )}
+          </button>
+        ) : null}
         {zoomedOut ? (
           <div className="h-[10px] flex-1 rounded-full bg-[#fafafa]/10" />
         ) : editing ? (
@@ -100,7 +124,7 @@ export function NodeHeader({
         )}
       </div>
 
-      {!zoomedOut && (
+      {!zoomedOut && !collapsed && (
         <div className="flex items-center gap-0.5 shrink-0">
           {/* Lock/Pin icons */}
           <div

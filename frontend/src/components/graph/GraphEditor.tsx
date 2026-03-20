@@ -14,31 +14,6 @@ import {
 } from "@xyflow/react";
 import type { Edge, Node, ReactFlowInstance } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
-import {
-  Camera,
-  Workflow,
-  Monitor,
-  SlidersHorizontal,
-  Trash2,
-  Type,
-  Hash,
-  ToggleLeft,
-  Sigma,
-  StickyNote,
-  Send,
-  Gauge,
-  CircleDot,
-  Grid2x2,
-  ListOrdered,
-  GitBranch,
-  Image,
-  Sparkles,
-  Lock,
-  LockOpen,
-  Pin,
-  PinOff,
-  Music,
-} from "lucide-react";
 
 import { SourceNode } from "./nodes/SourceNode";
 import { PipelineNode } from "./nodes/PipelineNode";
@@ -57,10 +32,15 @@ import { ImageNode } from "./nodes/ImageNode";
 import { VaceNode } from "./nodes/VaceNode";
 import { MidiNode } from "./nodes/MidiNode";
 import { BoolNode } from "./nodes/BoolNode";
+import { SubgraphNode } from "./nodes/SubgraphNode";
+import { SubgraphInputNode } from "./nodes/SubgraphInputNode";
+import { SubgraphOutputNode } from "./nodes/SubgraphOutputNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
-import { NODE_TOKENS } from "./ui";
+import { BreadcrumbNav } from "./BreadcrumbNav";
+import { GraphToolbar } from "./GraphToolbar";
+import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import {
   AlertDialog,
@@ -73,12 +53,18 @@ import {
   AlertDialogTitle,
 } from "../ui/alert-dialog";
 
-import { useGraphState } from "./hooks/useGraphState";
-import { useConnectionLogic } from "./hooks/useConnectionLogic";
-import { useNodeFactories } from "./hooks/useNodeFactories";
-import { useValueForwarding } from "./hooks/useValueForwarding";
-import { useOutputSinkSync } from "./hooks/useOutputSinkSync";
-import { useKeyboardShortcuts } from "./hooks/useKeyboardShortcuts";
+import { useRightClickSelect } from "./hooks/ui/useRightClickSelect";
+import { useGraphState } from "./hooks/graph/useGraphState";
+import { useConnectionLogic } from "./hooks/connection/useConnectionLogic";
+import { useNodeFactories } from "./hooks/node/useNodeFactories";
+import { useValueForwarding } from "./hooks/value/useValueForwarding";
+import { useOutputSinkSync } from "./hooks/value/useOutputSinkSync";
+import { useKeyboardShortcuts } from "./hooks/graph/useKeyboardShortcuts";
+import { useGraphNavigation } from "./hooks/subgraph/useGraphNavigation";
+import { useParentValueBridge } from "./hooks/value/useParentValueBridge";
+import { useSubgraphEval } from "./hooks/subgraph/useSubgraphEval";
+import { useSubgraphCallbackSync } from "./hooks/subgraph/useSubgraphCallbackSync";
+import { useSubgraphOperations } from "./hooks/subgraph/useSubgraphOperations";
 
 const nodeTypes = {
   source: SourceNode,
@@ -98,6 +84,9 @@ const nodeTypes = {
   vace: VaceNode,
   midi: MidiNode,
   bool: BoolNode,
+  subgraph: SubgraphNode,
+  subgraph_input: SubgraphInputNode,
+  subgraph_output: SubgraphOutputNode,
 };
 
 const edgeTypes = {
@@ -118,11 +107,14 @@ interface GraphEditorProps {
   onGraphChange?: () => void;
   onGraphClear?: () => void;
   localStream?: MediaStream | null;
+  localStreams?: Record<string, MediaStream>;
   remoteStream?: MediaStream | null;
-  onVideoFileUpload?: (file: File) => Promise<boolean>;
+  remoteStreams?: Record<string, MediaStream>;
+  sinkStats?: Record<string, { fps: number; bitrate: number }>;
+  onVideoFileUpload?: (file: File, nodeId?: string) => Promise<boolean>;
   onStartStream?: () => void;
   onStopStream?: () => void;
-  onSourceModeChange?: (mode: string) => void;
+  onSourceModeChange?: (mode: string, nodeId?: string) => void;
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
   syphonAvailable?: boolean;
@@ -148,7 +140,10 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onGraphChange,
       onGraphClear,
       localStream,
+      localStreams,
       remoteStream,
+      remoteStreams,
+      sinkStats,
       onVideoFileUpload,
       onStartStream,
       onStopStream,
@@ -166,7 +161,13 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     },
     ref
   ) {
-    // Graph state
+    const resolveRootGraphRef = useRef<
+      (
+        nodes: Node<FlowNodeData>[],
+        edges: Edge[]
+      ) => { nodes: Node<FlowNodeData>[]; edges: Edge[] }
+    >((n, e) => ({ nodes: n, edges: e }));
+    const resetNavigationRef = useRef<() => void>(() => {});
     const {
       nodes,
       setNodes,
@@ -180,6 +181,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       selectedNodeIds,
       setSelectedNodeIds,
       handlePipelineSelect,
+      enrichDepsRef,
       handleEdgeDelete,
       resolveBackendId,
       isStreamingRef,
@@ -205,7 +207,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onSyphonSourceChange,
         onOutputSinkChange,
       },
-      { localStream, remoteStream, isStreaming },
+      { localStream, localStreams, remoteStream, remoteStreams, sinkStats, isStreaming },
       {
         spoutAvailable,
         ndiAvailable,
@@ -213,23 +215,16 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         spoutOutputAvailable,
         ndiOutputAvailable,
         syphonOutputAvailable,
-      }
+      },
+      resolveRootGraphRef,
+      resetNavigationRef
     );
 
-    // Expose imperative methods
     useImperativeHandle(
       ref,
       () => ({ refreshGraph, getCurrentGraphConfig, getGraphNodePrompts }),
       [refreshGraph, getCurrentGraphConfig, getGraphNodePrompts]
     );
-
-    // Context menu & add-node modal
-    const [contextMenu, setContextMenu] = useState<{
-      x: number;
-      y: number;
-      type: "pane" | "node";
-      nodeId?: string;
-    } | null>(null);
 
     const [showAddNodeModal, setShowAddNodeModal] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -243,124 +238,37 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       Edge
     > | null>(null);
 
-    // Right-click drag = box-select, click = context menu
-    const [selectionRect, setSelectionRect] = useState<{
-      x1: number;
-      y1: number;
-      x2: number;
-      y2: number;
-    } | null>(null);
+    const { selectionRect, contextMenu, setContextMenu, handleRightMouseDown } =
+      useRightClickSelect(
+        reactFlowInstanceRef,
+        setNodes,
+        setPendingNodePosition
+      );
 
-    const handleRightMouseDown = useCallback(
-      (e: React.MouseEvent) => {
-        if (e.button !== 2) return; // only right-click
+    const addSubgraphPortRef = useRef<
+      | ((
+          side: "input" | "output",
+          port: import("../../lib/graphUtils").SubgraphPort,
+          setNodes: (
+            updater: (nds: Node<FlowNodeData>[]) => Node<FlowNodeData>[]
+          ) => void
+        ) => string | null)
+      | null
+    >(null);
 
-        const startX = e.clientX;
-        const startY = e.clientY;
-        const startTarget = e.target as HTMLElement;
-        let isDrag = false;
-
-        // Close existing context menu
-        setContextMenu(null);
-
-        const handleMove = (me: MouseEvent) => {
-          const dx = me.clientX - startX;
-          const dy = me.clientY - startY;
-          if (!isDrag && Math.sqrt(dx * dx + dy * dy) > 5) {
-            isDrag = true;
-          }
-          if (isDrag) {
-            setSelectionRect({
-              x1: startX,
-              y1: startY,
-              x2: me.clientX,
-              y2: me.clientY,
-            });
-          }
-        };
-
-        const handleUp = (me: MouseEvent) => {
-          window.removeEventListener("mousemove", handleMove);
-          window.removeEventListener("mouseup", handleUp);
-
-          if (isDrag) {
-            // Box selection
-            const rf = reactFlowInstanceRef.current;
-            if (rf) {
-              const start = rf.screenToFlowPosition({ x: startX, y: startY });
-              const end = rf.screenToFlowPosition({
-                x: me.clientX,
-                y: me.clientY,
-              });
-
-              const minX = Math.min(start.x, end.x);
-              const maxX = Math.max(start.x, end.x);
-              const minY = Math.min(start.y, end.y);
-              const maxY = Math.max(start.y, end.y);
-
-              setNodes(nds =>
-                nds.map(n => {
-                  const w = n.measured?.width ?? n.width ?? 200;
-                  const h = n.measured?.height ?? n.height ?? 100;
-                  const overlaps =
-                    n.position.x < maxX &&
-                    n.position.x + w > minX &&
-                    n.position.y < maxY &&
-                    n.position.y + h > minY;
-                  return n.selected === overlaps
-                    ? n
-                    : { ...n, selected: overlaps };
-                })
-              );
-            }
-          } else {
-            // Show context menu
-            const nodeEl = startTarget.closest(".react-flow__node");
-            if (nodeEl) {
-              const nodeId = nodeEl.getAttribute("data-id");
-              if (nodeId) {
-                setContextMenu({
-                  x: startX,
-                  y: startY,
-                  type: "node",
-                  nodeId,
-                });
-              }
-            } else {
-              const rf = reactFlowInstanceRef.current;
-              if (rf) {
-                const position = rf.screenToFlowPosition({
-                  x: startX,
-                  y: startY,
-                });
-                setPendingNodePosition(position);
-                setContextMenu({
-                  x: startX,
-                  y: startY,
-                  type: "pane",
-                });
-              }
-            }
-          }
-
-          setSelectionRect(null);
-        };
-
-        window.addEventListener("mousemove", handleMove);
-        window.addEventListener("mouseup", handleUp);
-      },
-      [setNodes, setPendingNodePosition]
-    );
-
-    // Connection logic
     const {
       isValidConnection,
       onConnect,
       onReconnect,
       findConnectedPipelineParams,
-    } = useConnectionLogic(nodes, setNodes, setEdges, handleEdgeDelete);
+    } = useConnectionLogic(
+      nodes,
+      setNodes,
+      setEdges,
+      handleEdgeDelete,
+      addSubgraphPortRef
+    );
 
-    // Node factories
     const { handleNodeTypeSelect, handleDeleteNodes } = useNodeFactories({
       nodes,
       setNodes,
@@ -368,7 +276,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       availablePipelineIds,
       portsMap,
       handlePipelineSelect,
-      selectedNodeIds,
       setSelectedNodeIds,
       spoutOutputAvailable,
       ndiOutputAvailable,
@@ -377,7 +284,14 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setPendingNodePosition,
     });
 
-    // Value forwarding
+    const { createSubgraphFromSelection, unpackSubgraph } =
+      useSubgraphOperations({
+        nodes,
+        setNodes,
+        setEdges,
+        setSelectedNodeIds,
+      });
+
     useValueForwarding(
       nodes,
       edges,
@@ -388,10 +302,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setNodes
     );
 
-    // Output sink sync
     useOutputSinkSync(nodes, onOutputSinkChangeRef);
-
-    // Keyboard shortcuts
     useKeyboardShortcuts(
       reactFlowInstanceRef,
       setPendingNodePosition,
@@ -403,7 +314,108 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       handleSave
     );
 
-    // Auto-stop when source or sink node is removed while streaming
+    const {
+      depth: navDepth,
+      breadcrumbPath,
+      enterSubgraph,
+      navigateTo: navNavigateTo,
+      addSubgraphPort,
+      removeSubgraphPort,
+      renameSubgraphPort,
+      hasExternalConnection,
+      getRootGraph,
+      resetStack,
+      stackRef: navStackRef,
+    } = useGraphNavigation();
+
+    useParentValueBridge(navStackRef, navDepth, setNodes);
+    useSubgraphEval(nodes, edges, setNodes);
+    resolveRootGraphRef.current = getRootGraph;
+    resetNavigationRef.current = resetStack;
+    addSubgraphPortRef.current = addSubgraphPort;
+    const nodesRef = useRef(nodes);
+    const edgesRef = useRef(edges);
+    nodesRef.current = nodes;
+    edgesRef.current = edges;
+
+    const applyViewport = useCallback(
+      (viewport: ReturnType<typeof enterSubgraph>) => {
+        setTimeout(() => {
+          const rf = reactFlowInstanceRef.current;
+          if (!rf) return;
+          if (viewport) {
+            rf.setViewport(viewport, { duration: 300 });
+          } else {
+            rf.fitView({ padding: 0.1, duration: 300 });
+          }
+        }, 50);
+      },
+      []
+    );
+
+    const handleEnterSubgraph = useCallback(
+      (nodeId: string) => {
+        const rf = reactFlowInstanceRef.current;
+        const currentViewport = rf?.getViewport();
+        const targetViewport = enterSubgraph(
+          nodeId,
+          nodesRef.current,
+          edgesRef.current,
+          setNodes,
+          setEdges,
+          enrichDepsRef.current,
+          handleEdgeDelete,
+          currentViewport
+        );
+        applyViewport(targetViewport);
+      },
+      [
+        enterSubgraph,
+        setNodes,
+        setEdges,
+        enrichDepsRef,
+        handleEdgeDelete,
+        applyViewport,
+      ]
+    );
+
+    const handleBreadcrumbNavigate = useCallback(
+      (targetDepth: number) => {
+        const rf = reactFlowInstanceRef.current;
+        const currentViewport = rf?.getViewport();
+        const targetViewport = navNavigateTo(
+          targetDepth,
+          nodesRef.current,
+          edgesRef.current,
+          setNodes,
+          setEdges,
+          enrichDepsRef.current,
+          handleEdgeDelete,
+          currentViewport
+        );
+        applyViewport(targetViewport);
+      },
+      [
+        navNavigateTo,
+        setNodes,
+        setEdges,
+        enrichDepsRef,
+        handleEdgeDelete,
+        applyViewport,
+      ]
+    );
+
+    useSubgraphCallbackSync({
+      nodes,
+      edges,
+      setNodes,
+      setEdges,
+      handleEnterSubgraph,
+      renameSubgraphPort,
+      removeSubgraphPort,
+      hasExternalConnection,
+    });
+
     const prevHadSourceRef = useRef(false);
     const prevHadSinkRef = useRef(false);
 
@@ -423,17 +435,14 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       prevHadSinkRef.current = hasSink;
     }, [nodes, isStreaming, onStopStream]);
 
-    // Auto-fit view after graph import
     useEffect(() => {
       if (fitViewTrigger === 0) return;
-      // Delay to let React Flow measure nodes
       const timer = setTimeout(() => {
         reactFlowInstanceRef.current?.fitView({ padding: 0.1, duration: 300 });
       }, 50);
       return () => clearTimeout(timer);
     }, [fitViewTrigger]);
 
-    // Context menu suppression
     const suppressContextMenu = useCallback(
       (event: MouseEvent | React.MouseEvent<Element, MouseEvent>) => {
         event.preventDefault();
@@ -448,122 +457,26 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       []
     );
 
-    // File input ref
-    const fileInputRef = useRef<HTMLInputElement>(null);
-
-    // Render
     return (
       <div className="flex h-full w-full">
         <div className="flex flex-col flex-1">
-          <div className={NODE_TOKENS.toolbar}>
-            <button
-              onClick={isStreaming ? onStopStream : onStartStream}
-              disabled={isConnecting || isLoading}
-              className={`${NODE_TOKENS.toolbarButton} ${isConnecting || isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
-              title={isStreaming ? "Stop stream" : "Start stream"}
-            >
-              {isConnecting || isLoading ? (
-                <span className="inline-flex items-center gap-1">
-                  <svg
-                    className="animate-spin h-3 w-3"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                </span>
-              ) : isStreaming ? (
-                <svg
-                  className="h-3.5 w-3.5"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <rect x="4" y="4" width="16" height="16" rx="2" />
-                </svg>
-              ) : (
-                <svg
-                  className="h-3.5 w-3.5"
-                  viewBox="0 0 24 24"
-                  fill="currentColor"
-                >
-                  <polygon points="5,3 19,12 5,21" />
-                </svg>
-              )}
-            </button>
-            {isStreaming && (
-              <button
-                onClick={onStopStream}
-                className={NODE_TOKENS.toolbarButton}
-                title="Stop and clear"
-              >
-                <svg
-                  className="h-3.5 w-3.5"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M1 4v6h6" />
-                  <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
-                </svg>
-              </button>
-            )}
+          <GraphToolbar
+            isStreaming={isStreaming}
+            isConnecting={isConnecting}
+            isLoading={isLoading}
+            status={status}
+            onStartStream={onStartStream}
+            onStopStream={onStopStream}
+            onSave={handleSave}
+            onImport={handleImport}
+            onExport={handleExport}
+            onClear={() => setShowClearConfirm(true)}
+          />
 
-            <div className="flex-1" />
-
-            {status && (
-              <span className={NODE_TOKENS.toolbarStatus}>{status}</span>
-            )}
-
-            <button
-              onClick={handleSave}
-              className={NODE_TOKENS.toolbarButton}
-              title="Save graph (Ctrl+S)"
-            >
-              Save
-            </button>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json"
-              onChange={handleImport}
-              className="hidden"
-            />
-            <button
-              onClick={() => fileInputRef.current?.click()}
-              className={NODE_TOKENS.toolbarButton}
-            >
-              Import
-            </button>
-            <button
-              onClick={handleExport}
-              className={NODE_TOKENS.toolbarButton}
-            >
-              Export
-            </button>
-            <button
-              onClick={() => setShowClearConfirm(true)}
-              className={NODE_TOKENS.toolbarButton}
-              title="Clear graph"
-            >
-              Clear
-            </button>
-          </div>
+          <BreadcrumbNav
+            path={breadcrumbPath}
+            onNavigate={handleBreadcrumbNavigate}
+          />
 
           <div className="flex-1 relative" onMouseDown={handleRightMouseDown}>
             <ReactFlow
@@ -582,7 +495,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               onSelectionChange={({ nodes: selected }) =>
                 setSelectedNodeIds(prev => {
                   const next = selected.map(n => n.id);
-                  // Return same ref when identical to prevent render loop
                   if (
                     next.length === prev.length &&
                     next.every((id, i) => id === prev[i])
@@ -612,252 +524,24 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                 header={contextMenu.type === "pane" ? "Create" : undefined}
                 items={
                   contextMenu.type === "pane"
-                    ? [
-                        {
-                          label: "Source",
-                          icon: <Camera />,
-                          onClick: () => handleNodeTypeSelect("source"),
-                          keywords: ["input", "camera", "video"],
-                        },
-                        {
-                          label: "Pipeline",
-                          icon: <Workflow />,
-                          onClick: () => handleNodeTypeSelect("pipeline"),
-                          keywords: ["process", "effect", "filter"],
-                        },
-                        {
-                          label: "Sink",
-                          icon: <Monitor />,
-                          onClick: () => handleNodeTypeSelect("sink"),
-                          keywords: ["output", "display", "preview"],
-                        },
-                        {
-                          label: "Output",
-                          icon: <Send />,
-                          onClick: () => handleNodeTypeSelect("output"),
-                          keywords: ["spout", "ndi", "syphon", "send"],
-                        },
-                        {
-                          label: "Controls",
-                          icon: <SlidersHorizontal />,
-                          children: [
-                            {
-                              label: "FloatControl",
-                              icon: <Gauge />,
-                              onClick: () =>
-                                handleNodeTypeSelect("control", "float"),
-                              keywords: ["float", "animated", "sine"],
-                            },
-                            {
-                              label: "IntControl",
-                              icon: <Hash />,
-                              onClick: () =>
-                                handleNodeTypeSelect("control", "int"),
-                              keywords: ["integer", "animated"],
-                            },
-                            {
-                              label: "StringControl",
-                              icon: <Type />,
-                              onClick: () =>
-                                handleNodeTypeSelect("control", "string"),
-                              keywords: ["text", "cycle", "animated"],
-                            },
-                            {
-                              label: "MIDI",
-                              icon: <Music />,
-                              onClick: () => handleNodeTypeSelect("midi"),
-                              keywords: [
-                                "midi",
-                                "controller",
-                                "cc",
-                                "knob",
-                                "fader",
-                              ],
-                            },
-                          ],
-                        },
-                        {
-                          label: "UI",
-                          icon: <CircleDot />,
-                          children: [
-                            {
-                              label: "Slider",
-                              icon: <SlidersHorizontal />,
-                              onClick: () => handleNodeTypeSelect("slider"),
-                              keywords: ["range", "value"],
-                            },
-                            {
-                              label: "Knobs",
-                              icon: <CircleDot />,
-                              onClick: () => handleNodeTypeSelect("knobs"),
-                              keywords: ["dial", "rotary"],
-                            },
-                            {
-                              label: "XY Pad",
-                              icon: <Grid2x2 />,
-                              onClick: () => handleNodeTypeSelect("xypad"),
-                              keywords: ["pad", "2d", "touch"],
-                            },
-                            {
-                              label: "Tuple",
-                              icon: <ListOrdered />,
-                              onClick: () => handleNodeTypeSelect("tuple"),
-                              keywords: ["list", "numbers", "array"],
-                            },
-                          ],
-                        },
-                        {
-                          label: "Utility",
-                          icon: <Sigma />,
-                          children: [
-                            {
-                              label: "Math",
-                              icon: <Sigma />,
-                              onClick: () => handleNodeTypeSelect("math"),
-                              keywords: ["add", "multiply", "arithmetic"],
-                            },
-                            {
-                              label: "Note",
-                              icon: <StickyNote />,
-                              onClick: () => handleNodeTypeSelect("note"),
-                              keywords: ["comment", "annotation", "text"],
-                            },
-                            {
-                              label: "Bool",
-                              icon: <ToggleLeft />,
-                              onClick: () => handleNodeTypeSelect("bool"),
-                              keywords: [
-                                "boolean",
-                                "gate",
-                                "toggle",
-                                "switch",
-                                "on",
-                                "off",
-                              ],
-                            },
-                            {
-                              label: "Reroute",
-                              icon: <GitBranch />,
-                              onClick: () => handleNodeTypeSelect("reroute"),
-                              keywords: ["passthrough", "wire", "dot"],
-                            },
-                          ],
-                        },
-                        {
-                          label: "Media",
-                          icon: <Image />,
-                          onClick: () => handleNodeTypeSelect("image"),
-                          keywords: [
-                            "media",
-                            "image",
-                            "video",
-                            "picture",
-                            "photo",
-                            "reference",
-                            "film",
-                          ],
-                        },
-                        {
-                          label: "VACE",
-                          icon: <Sparkles />,
-                          onClick: () => handleNodeTypeSelect("vace"),
-                          keywords: [
-                            "vace",
-                            "conditioning",
-                            "reference",
-                            "frame",
-                          ],
-                        },
-                        {
-                          label: "Primitive",
-                          icon: <ToggleLeft />,
-                          onClick: () => handleNodeTypeSelect("primitive"),
-                          keywords: ["value", "string", "number", "boolean"],
-                        },
-                      ]
-                    : (() => {
-                        const clickedId = contextMenu.nodeId;
-                        const isInSelection =
-                          !!clickedId && selectedNodeIds.includes(clickedId);
-                        const targetIds =
-                          isInSelection && selectedNodeIds.length > 1
-                            ? selectedNodeIds
-                            : clickedId
-                              ? [clickedId]
-                              : [];
-                        const count = targetIds.length;
-                        const targetNodes = nodes.filter(n =>
-                          targetIds.includes(n.id)
-                        );
-                        const allLocked = targetNodes.every(
-                          n => !!n.data.locked
-                        );
-                        const allPinned = targetNodes.every(
-                          n => !!n.data.pinned
-                        );
-                        return [
-                          {
-                            label: allLocked
-                              ? count > 1
-                                ? `Unlock ${count} nodes`
-                                : "Unlock"
-                              : count > 1
-                                ? `Lock ${count} nodes`
-                                : "Lock",
-                            icon: allLocked ? <LockOpen /> : <Lock />,
-                            onClick: () => {
-                              const newLocked = !allLocked;
-                              setNodes(nds =>
-                                nds.map(n =>
-                                  targetIds.includes(n.id)
-                                    ? {
-                                        ...n,
-                                        data: {
-                                          ...n.data,
-                                          locked: newLocked,
-                                        },
-                                      }
-                                    : n
-                                )
-                              );
-                            },
-                          },
-                          {
-                            label: allPinned
-                              ? count > 1
-                                ? `Unpin ${count} nodes`
-                                : "Unpin"
-                              : count > 1
-                                ? `Pin ${count} nodes`
-                                : "Pin",
-                            icon: allPinned ? <PinOff /> : <Pin />,
-                            onClick: () => {
-                              const newPinned = !allPinned;
-                              setNodes(nds =>
-                                nds.map(n =>
-                                  targetIds.includes(n.id)
-                                    ? {
-                                        ...n,
-                                        draggable: !newPinned,
-                                        data: {
-                                          ...n.data,
-                                          pinned: newPinned,
-                                        },
-                                      }
-                                    : n
-                                )
-                              );
-                            },
-                          },
-                          {
-                            label:
-                              count > 1 ? `Delete ${count} nodes` : "Delete",
-                            icon: <Trash2 />,
-                            onClick: () => handleDeleteNodes(targetIds),
-                            danger: true,
-                          },
-                        ];
-                      })()
+                    ? buildPaneMenuItems({
+                        handleNodeTypeSelect,
+                        selectedNodeIds,
+                        nodes,
+                        edges,
+                        createSubgraphFromSelection,
+                      })
+                    : buildNodeMenuItems({
+                        contextNodeId: contextMenu.nodeId!,
+                        selectedNodeIds,
+                        nodes,
+                        edges,
+                        setNodes,
+                        handleDeleteNodes,
+                        handleEnterSubgraph,
+                        unpackSubgraph,
+                        createSubgraphFromSelection,
+                      })
                 }
               />
             )}
@@ -871,7 +555,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               onSelectNodeType={handleNodeTypeSelect}
             />
 
-            {/* Right-click drag selection rectangle */}
             {selectionRect && (
               <div
                 style={{
@@ -889,7 +572,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             )}
           </div>
 
-          {/* Clear confirmation dialog */}
           <AlertDialog
             open={showClearConfirm}
             onOpenChange={(open: boolean) => {

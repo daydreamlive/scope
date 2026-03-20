@@ -53,7 +53,6 @@ export function getEdgeColor(
       return "#f472b6"; // pink-400
     }
     if (sourceNode.data.nodeType === "xypad") {
-      // Color based on which handle (x = sky, y = green)
       if (parsed.name === "y") return "#4ade80";
       return "#38bdf8";
     }
@@ -74,6 +73,24 @@ export function getEdgeColor(
     if (sourceNode.data.nodeType === "bool") {
       return "#34d399"; // emerald-400
     }
+    if (sourceNode.data.nodeType === "subgraph") {
+      const port = sourceNode.data.subgraphOutputs?.find(
+        p => p.name === parsed.name
+      );
+      if (port?.paramType) {
+        return PARAM_TYPE_COLORS[port.paramType] || "#06b6d4";
+      }
+      return "#06b6d4"; // cyan-500
+    }
+    if (sourceNode.data.nodeType === "subgraph_input") {
+      const port = sourceNode.data.subgraphInputs?.find(
+        p => p.name === parsed.name
+      );
+      if (port?.paramType) {
+        return PARAM_TYPE_COLORS[port.paramType] || "#06b6d4";
+      }
+      return "#06b6d4";
+    }
     return "#9ca3af";
   }
 
@@ -88,22 +105,37 @@ export function getEdgeColor(
     return HANDLE_COLORS.sink;
   }
 
+  if (sourceNode.data.nodeType === "subgraph") {
+    return "#06b6d4";
+  }
+
+  if (sourceNode.data.nodeType === "subgraph_input") {
+    const port = sourceNode.data.subgraphInputs?.find(
+      p => p.name === parsed.name
+    );
+    if (port?.portType === "stream") return HANDLE_COLORS.video;
+    if (port?.paramType) return PARAM_TYPE_COLORS[port.paramType] || "#06b6d4";
+    return "#06b6d4";
+  }
+
   return HANDLE_COLORS.video;
 }
 
-/**
- * Build the full edge style object (stroke color + width) for a given edge.
- * Centralizes the logic that was previously duplicated in `colorEdges()`,
- * `onConnect()`, and `onReconnect()`.
- */
 export function buildEdgeStyle(
   sourceNode: Node<FlowNodeData> | undefined,
   sourceHandleId: string | null | undefined
 ): { stroke: string; strokeWidth: number } {
   const color = getEdgeColor(sourceNode, sourceHandleId);
   const parsed = parseHandleId(sourceHandleId);
+  const isStreamEdge = parsed?.kind === "stream";
   const isVideoEdge =
-    parsed?.kind === "stream" &&
-    (parsed.name === "video" || parsed.name === "video2");
-  return { stroke: color, strokeWidth: isVideoEdge ? 5 : 2 };
+    isStreamEdge && (parsed.name === "video" || parsed.name === "video2");
+  const isBoundaryStream =
+    isStreamEdge &&
+    (sourceNode?.data.nodeType === "subgraph_input" ||
+      sourceNode?.data.nodeType === "subgraph");
+  return {
+    stroke: color,
+    strokeWidth: isVideoEdge || isBoundaryStream ? 5 : 2,
+  };
 }

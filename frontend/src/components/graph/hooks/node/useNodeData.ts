@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useReactFlow } from "@xyflow/react";
 import type { Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
 
 // Updates node data, bailing out if no fields changed
 export function useNodeData(nodeId: string) {

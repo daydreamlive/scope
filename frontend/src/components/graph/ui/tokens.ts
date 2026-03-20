@@ -3,8 +3,8 @@ export const NODE_TOKENS = {
   cardSelected: "ring-2 ring-blue-400/50",
   header:
     "bg-[#181717] border-b border-[rgba(119,119,119,0.15)] flex items-center gap-2 px-2 py-1 h-[28px] rounded-t-xl",
-  body: "py-1.5 px-4",
-  bodyWithGap: "py-1.5 px-4 flex flex-col gap-1.5",
+  body: "py-1.5 px-2",
+  bodyWithGap: "py-1.5 px-2 flex flex-col gap-1.5",
   pill: "bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] rounded-full px-2 py-0.5",
   pillInput:
     "bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] rounded-full px-2 py-0.5 text-[#fafafa] text-[10px] appearance-none focus:outline-none focus:ring-1 focus:ring-blue-400/50 w-[110px]",

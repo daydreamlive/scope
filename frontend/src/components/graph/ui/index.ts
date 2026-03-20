@@ -11,3 +11,4 @@ export { NodePillInput } from "./NodePillInput";
 export { NodePillToggle } from "./NodePillToggle";
 export { NodePillTextarea } from "./NodePillTextarea";
 export { NodePillListInput } from "./NodePillListInput";
+export { collapsedHandleStyle } from "./collapsedHandleStyle";
