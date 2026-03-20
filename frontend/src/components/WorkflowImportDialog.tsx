@@ -412,6 +412,19 @@ export function WorkflowImportDialog({
     const timelinePrompts = workflowTimelineToPrompts(workflow.timeline);
     const promptState = workflowToPromptState(workflow);
 
+    // Persist the workflow's graph to localStorage so the graph editor can
+    // pick it up when refreshGraph() is called after import.
+    if (workflow.graph?.nodes && workflow.graph?.edges) {
+      try {
+        localStorage.setItem(
+          "scope:graph:backup",
+          JSON.stringify(workflow.graph)
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+
     onLoad(importedSettings, timelinePrompts, promptState);
     toast.success("Workflow loaded", {
       description: `"${workflow.metadata.name}" loaded into the interface`,

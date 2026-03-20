@@ -126,6 +126,7 @@ export function StreamPage() {
   const {
     isConnected: isBackendCloudConnected,
     isConnecting: isBackendCloudConnecting,
+    connectStage: cloudConnectStage,
     refresh: refreshCloudStatus,
   } = useCloudStatus();
 
@@ -208,6 +209,8 @@ export function StreamPage() {
       refreshPipelines(),
       refreshHardwareInfo(),
     ]);
+    // Also refresh the graph editor's pipeline list so nodes show correct availability
+    graphEditorRef.current?.refreshPipelines();
   }, [refreshPipelineSchemas, refreshPipelines, refreshHardwareInfo]);
 
   // Prompt state - use unified default prompts based on mode
@@ -378,7 +381,7 @@ export function StreamPage() {
     error: pipelineError,
     loadPipeline,
     pipelineInfo,
-    loadingStage: _pipelineLoadingStage, // eslint-disable-line @typescript-eslint/no-unused-vars
+    loadingStage: pipelineLoadingStage,
   } = usePipeline();
 
   // Tempo sync

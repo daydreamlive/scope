@@ -40,6 +40,16 @@ export function CloudConnectingStep({ onConnected }: CloudConnectingStepProps) {
     activateCloudRelay().then(() => refresh());
   }, [refresh]);
 
+  // Keep polling while this step is visible.
+  // The global CloudStatusProvider only polls when status.connecting is true,
+  // but if we catch the backend before it transitions to "connecting", polling
+  // never starts. Poll independently here to guarantee we detect connection.
+  useEffect(() => {
+    if (isConnected) return;
+    const timer = setInterval(refresh, 1_500);
+    return () => clearInterval(timer);
+  }, [isConnected, refresh]);
+
   // Rotate messages while waiting
   useEffect(() => {
     if (isConnected) return;

@@ -2970,7 +2970,7 @@ class OnboardingStatusResponse(BaseModel):
 
 
 class OnboardingStatusUpdate(BaseModel):
-    completed: bool
+    completed: bool | None = None
     inference_mode: str | None = None
 
 
@@ -3004,7 +3004,8 @@ async def update_onboarding_status(body: OnboardingStatusUpdate):
             existing = json.loads(_ONBOARDING_FILE.read_text())
         except Exception:
             pass
-    existing["completed"] = body.completed
+    if body.completed is not None:
+        existing["completed"] = body.completed
     if body.inference_mode is not None:
         existing["inference_mode"] = body.inference_mode
     _ONBOARDING_FILE.write_text(json.dumps(existing))

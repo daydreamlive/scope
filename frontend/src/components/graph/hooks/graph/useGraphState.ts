@@ -7,6 +7,7 @@ import type { PipelineSchemaInfo } from "../../../../lib/api";
 import { useState } from "react";
 import { useApi } from "../../../../hooks/useApi";
 import { useCloudStatus } from "../../../../hooks/useCloudStatus";
+import { usePluginsContext } from "../../../../contexts/PluginsContext";
 
 import { usePipelineParams } from "../node/usePipelineParams";
 import {
@@ -113,9 +114,7 @@ export function useGraphState(
 
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
 
-  const [availablePipelineIds, setAvailablePipelineIds] = useState<string[]>(
-    []
-  );
+  const [schemaPipelineIds, setSchemaPipelineIds] = useState<string[]>([]);
   const [portsMap, setPortsMap] = useState<
     Record<string, { inputs: string[]; outputs: string[] }>
   >({});
@@ -126,13 +125,13 @@ export function useGraphState(
   const { getPipelineSchemas, isCloudMode, isReady } = useApi();
   const { isConnected: isCloudConnected } = useCloudStatus();
 
-  useEffect(() => {
+  const fetchAndSetSchemas = useCallback(() => {
     if (isCloudMode && !isReady) return;
     let mounted = true;
     getPipelineSchemas()
       .then(schemas => {
         if (!mounted) return;
-        setAvailablePipelineIds(Object.keys(schemas.pipelines));
+        setSchemaPipelineIds(Object.keys(schemas.pipelines));
         setPortsMap(buildPipelinePortsMap(schemas.pipelines));
         setPipelineSchemas(schemas.pipelines);
       })
@@ -144,6 +143,21 @@ export function useGraphState(
       mounted = false;
     };
   }, [getPipelineSchemas, isCloudMode, isReady, isCloudConnected]);
+
+  useEffect(() => {
+    fetchAndSetSchemas();
+  }, [fetchAndSetSchemas]);
+
+  // Merge schema pipeline IDs with locally installed plugin pipeline IDs.
+  // When connected to cloud, getPipelineSchemas proxies to the cloud server
+  // and won't include locally installed plugin pipelines (e.g. yolo_mask).
+  const { plugins } = usePluginsContext();
+  const availablePipelineIds = useMemo(() => {
+    const pluginPipelineIds = plugins.flatMap(p =>
+      p.pipelines.map(pp => pp.pipeline_id)
+    );
+    return [...new Set([...schemaPipelineIds, ...pluginPipelineIds])];
+  }, [schemaPipelineIds, plugins]);
 
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
@@ -314,6 +328,7 @@ export function useGraphState(
     handleImport: persistence.handleImport,
     handleExport: persistence.handleExport,
     refreshGraph: persistence.refreshGraph,
+    refreshPipelines: fetchAndSetSchemas,
     getCurrentGraphConfig: persistence.getCurrentGraphConfig,
     getGraphNodePrompts: persistence.getGraphNodePrompts,
     getGraphVaceSettings: persistence.getGraphVaceSettings,
