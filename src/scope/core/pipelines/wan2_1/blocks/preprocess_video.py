@@ -126,7 +126,11 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
         if block_state.vace_input_masks is not None:
             masks = block_state.vace_input_masks
             if isinstance(masks, list):
-                masks = torch.stack(masks, dim=2) if masks[0].dim() == 4 else torch.stack(masks, dim=0)
+                masks = (
+                    torch.stack(masks, dim=2)
+                    if masks[0].dim() == 4
+                    else torch.stack(masks, dim=0)
+                )
             mask_frames = masks.shape[2]
             if mask_frames != target_num_frames:
                 indices = (
