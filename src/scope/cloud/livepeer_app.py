@@ -73,6 +73,7 @@ class Lv2vJobInfo(BaseModel):
     events_url: str | None = None
     publish_url: str | None = None
     subscribe_url: str | None = None
+    daydream_user_id: str | None = None
 
 
 @dataclass
@@ -91,6 +92,8 @@ class LivepeerSession:
     media_output_task: asyncio.Task | None = None
     media_stop_event: asyncio.Event = field(default_factory=asyncio.Event)
     stream_stop_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    user_id: str | None = None
+    connection_id: str | None = None
 
 
 async def _shutdown_task(
@@ -220,7 +223,9 @@ async def _media_output_loop(
             logger.warning("Media publisher close failed: %s", exc)
 
 
-async def _handle_api_request(payload: dict[str, Any]) -> dict[str, Any]:
+async def _handle_api_request(
+    payload: dict[str, Any], session: LivepeerSession
+) -> dict[str, Any]:
     """Proxy arbitrary API requests to embedded Scope FastAPI app."""
     method = str(payload.get("method", "GET")).upper()
     path = str(payload.get("path", ""))
@@ -252,6 +257,16 @@ async def _handle_api_request(payload: dict[str, Any]) -> dict[str, Any]:
                 "error": f"Plugin '{requested_package}' is not in the allowed list for cloud mode",
             }
 
+    # Pass through validated user_id for pipeline load requests.
+    if (
+        method == "POST"
+        and normalized_path == "/api/v1/pipeline/load"
+        and isinstance(body, dict)
+        and session.user_id
+    ):
+        body["user_id"] = session.user_id
+        body["connection_id"] = session.connection_id
+
     client = scope_client
     if client is None:
         return {
@@ -262,12 +277,28 @@ async def _handle_api_request(payload: dict[str, Any]) -> dict[str, Any]:
         }
     try:
         is_binary_upload = body and isinstance(body, dict) and "_base64_content" in body
+        is_cdn_upload = body and isinstance(body, dict) and "_cdn_url" in body
 
         if method == "GET":
             timeout = 120.0 if "/recordings/" in path else 30.0
             response = await client.get(path, timeout=timeout)
         elif method == "POST":
-            if is_binary_upload:
+            if is_cdn_upload:
+                cdn_url = body["_cdn_url"]
+                content_type = body.get("_content_type", "application/octet-stream")
+                cdn_result = await _download_content(
+                    cdn_url,
+                    request_id,
+                )
+                if cdn_result.error_response is not None:
+                    return cdn_result.error_response
+                response = await client.post(
+                    path,
+                    content=cdn_result.content,
+                    headers={"Content-Type": content_type},
+                    timeout=60.0,
+                )
+            elif is_binary_upload:
                 binary_content = base64.b64decode(body["_base64_content"])
                 content_type = body.get("_content_type", "application/octet-stream")
                 response = await client.post(
@@ -384,8 +415,18 @@ async def _handle_control_message(
         }
     if msg_type == "api":
         logger.info("Received API control message id=%s", request_id)
-        return await _handle_api_request(payload)
+        return await _handle_api_request(payload, session)
     if msg_type == "start_stream":
+        params = payload.get("params") or {}
+        if not isinstance(params, dict):
+            return {
+                "type": "error",
+                "request_id": request_id,
+                "error": "start_stream params must be an object",
+            }
+        # Remove transport-only user marker if present so it never reaches pipelines.
+        params.pop("daydream_user_id", None)
+
         if session.frame_processor is not None:
             logger.info("start_stream ignored: stream already running")
             return {
@@ -399,14 +440,6 @@ async def _handle_control_message(
                 "type": "error",
                 "request_id": request_id,
                 "error": "Pipeline manager is not initialized",
-            }
-
-        params = payload.get("params") or {}
-        if not isinstance(params, dict):
-            return {
-                "type": "error",
-                "request_id": request_id,
-                "error": "start_stream params must be an object",
             }
 
         status_info = await pipeline_manager.get_status_info_async()
@@ -606,10 +639,12 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
     stop_event = asyncio.Event()
     control_task: asyncio.Task | None = None
-    session = LivepeerSession(ws=ws)
 
     # Generate a unique connection ID for this WebSocket session
     connection_id = str(uuid.uuid4())[:8]  # Short ID for readability in logs
+
+    session = LivepeerSession(ws=ws, connection_id=connection_id)
+
     # Send ready message with connection_id
     await ws.send_json({"type": "ready", "connection_id": connection_id})
 
@@ -617,6 +652,18 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         raw = await ws.receive_text()
         job_info = Lv2vJobInfo.model_validate_json(raw)
         logger.info("Received LV2V job info: manifest_id=%s", job_info.manifest_id)
+        requested_user_id = job_info.daydream_user_id
+        if not await validate_user_access(requested_user_id):
+            await ws.send_json(
+                {
+                    "type": "error",
+                    "error": "Access denied",
+                    "code": "ACCESS_DENIED",
+                }
+            )
+            await ws.close(code=4003, reason="Access denied")
+            return
+        session.user_id = requested_user_id
 
         if not job_info.control_url:
             await ws.send_text(
@@ -628,9 +675,6 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 json.dumps({"error": "events_url is required but was not provided"})
             )
             return
-
-        session.publish_url = job_info.publish_url
-        session.subscribe_url = job_info.subscribe_url
 
         control_task = asyncio.create_task(
             _subscribe_control(
@@ -686,8 +730,42 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         if control_task is not None:
             await _shutdown_task(control_task, task_name="control_channel")
 
+
 def get_daydream_api_base() -> str:
     return os.getenv("DAYDREAM_API_BASE", "https://api.daydream.live")
+
+
+async def validate_user_access(user_id: str | None) -> bool:
+    """Validate that a user has access to cloud mode."""
+    import urllib.error
+    import urllib.request
+
+    if not user_id:
+        logger.warning("Access denied: no user ID provided")
+        return False
+
+    url = f"{get_daydream_api_base()}/v1/users/{user_id}"
+    logger.info("Validating user access for %s via %s", user_id, url)
+
+    def fetch_user():
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            return json.loads(response.read().decode())
+
+    try:
+        await asyncio.get_event_loop().run_in_executor(None, fetch_user)
+        return True
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            logger.warning("Access denied for user %s: user not found", user_id)
+            return False
+        logger.warning(
+            "Access denied for user %s: failed to fetch user (%s)", user_id, exc.code
+        )
+        return False
+    except Exception as exc:
+        logger.warning("Access denied for user %s: validation error: %s", user_id, exc)
+        return False
 
 
 async def _is_plugin_allowed(package: str) -> bool | None:
@@ -735,6 +813,57 @@ async def _is_plugin_allowed(package: str) -> bool | None:
         return None
 
     return False
+
+
+@dataclass(frozen=True, slots=True)
+class DownloadContentResult:
+    content: bytes | None = None
+    error_response: dict[str, Any] | None = None
+
+
+async def _download_content(
+    url: str,
+    request_id: str | None,
+) -> DownloadContentResult:
+    logger.info("Downloading content from: %s", url)
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(url, timeout=120.0, follow_redirects=True)
+    except Exception as exc:
+        logger.warning("Download failed for request id=%s: %s", request_id, exc)
+        return DownloadContentResult(
+            error_response={
+                "type": "api_response",
+                "request_id": request_id,
+                "status": 502,
+                "error": f"Download error: {exc}",
+            }
+        )
+    if resp.status_code != 200:
+        logger.warning(
+            "Download returned status=%s for request id=%s",
+            resp.status_code,
+            request_id,
+        )
+        return DownloadContentResult(
+            error_response={
+                "type": "api_response",
+                "request_id": request_id,
+                "status": 502,
+                "error": f"Download failed: {resp.status_code}",
+            }
+        )
+    if not resp.content:
+        logger.warning("Download returned empty content for request id=%s", request_id)
+        return DownloadContentResult(
+            error_response={
+                "type": "api_response",
+                "request_id": request_id,
+                "status": 502,
+                "error": "Download failed: empty response body",
+            }
+        )
+    return DownloadContentResult(content=resp.content)
 
 
 @click.command()

@@ -56,6 +56,7 @@ class LivepeerConnection:
         self._audio_callbacks: list[Callable[[AudioFrame], None]] = []
         self._last_close_code: int | None = None
         self._last_close_reason: str | None = None
+        self._user_id: str | None = None
 
         self._stats = {
             "connected_at": None,
@@ -91,8 +92,10 @@ class LivepeerConnection:
     ) -> None:
         """Create and connect a persistent Livepeer LV2V job."""
         # Keep connect signature compatible with cloud-style connect requests.
-        # Livepeer token-based auth ignores app_id/api_key/user_id for now.
-        _ = app_id, api_key, user_id
+        # Livepeer token-based auth ignores app_id/api_key, but user_id is forwarded
+        # via start_stream params for access checks in the runner.
+        _ = app_id, api_key
+        self._user_id = user_id
 
         if self.is_connected:
             return
@@ -119,7 +122,10 @@ class LivepeerConnection:
         client.add_audio_callback(self._on_audio_from_livepeer)
 
         try:
-            await client.connect()
+            connect_params: dict[str, Any] = {}
+            if self._user_id:
+                connect_params["daydream_user_id"] = self._user_id
+            await client.connect(initial_parameters=connect_params)
             self._client = client
             self._stats["connected_at"] = time.time()
             logger.info("Job connected")

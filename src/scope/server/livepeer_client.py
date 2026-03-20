@@ -27,6 +27,7 @@ from livepeer_gateway.media_publish import MediaPublish, MediaPublishConfig
 logger = logging.getLogger(__name__)
 LIVEPEER_ORCH_URL_ENV = "LIVEPEER_ORCH_URL"
 LIVEPEER_WS_URL_ENV = "LIVEPEER_WS_URL"
+SCOPE_CLOUD_APP_ID_ENV = "SCOPE_CLOUD_APP_ID"
 
 
 class LivepeerClient:
@@ -48,7 +49,12 @@ class LivepeerClient:
         self._orchestrator_url = self._normalize_orchestrator_url(
             os.getenv(LIVEPEER_ORCH_URL_ENV)
         )
-        self._ws_url = self._normalize_ws_url(os.getenv(LIVEPEER_WS_URL_ENV))
+        explicit_ws_url = self._normalize_ws_url(os.getenv(LIVEPEER_WS_URL_ENV))
+        app_id_ws_url = self._build_ws_url_from_cloud_app_id(
+            os.getenv(SCOPE_CLOUD_APP_ID_ENV)
+        )
+        # Keep explicit ws URL support; app id support is a convenient fallback.
+        self._ws_url = explicit_ws_url or app_id_ws_url
 
         self._job = None
         self._output_task: MediaPublish | None = None
@@ -94,6 +100,10 @@ class LivepeerClient:
         self._loop = asyncio.get_running_loop()
         self._shutdown_started = False
         params: dict[str, Any] = dict(initial_parameters or {})
+        logger.info(
+            "Livepeer ws_url target: %s",
+            self._ws_url or "Livepeer default",
+        )
         if self._ws_url and "ws_url" not in params:
             params["ws_url"] = self._ws_url
 
@@ -158,13 +168,43 @@ class LivepeerClient:
             _ = parsed.port
         except Exception:
             raise ValueError(
-                "Invalid ws_url. Expected a valid ws:// or wss:// URL."
+                "Invalid LIVEPEER_WS_URL. Expected a valid ws:// or wss:// URL."
+            ) from None
+        if parsed.scheme not in {"ws", "wss"}:
+            raise ValueError(
+                "Invalid LIVEPEER_WS_URL. Expected a valid ws:// or wss:// URL."
+            )
+        if not parsed.hostname:
+            raise ValueError(
+                "Invalid LIVEPEER_WS_URL. Expected a valid ws:// or wss:// URL."
+            )
+        return trimmed
+
+    @staticmethod
+    def _build_ws_url_from_cloud_app_id(value: str | None) -> str | None:
+        if value is None:
+            return None
+        try:
+            trimmed = value.strip()
+            if not trimmed:
+                raise ValueError
+            app_id = trimmed.strip("/")
+            if not app_id.endswith("/ws"):
+                raise ValueError
+            ws_url = f"wss://fal.run/{app_id}"
+            parsed = urlparse(ws_url)
+            # Accessing .port forces urllib to validate malformed/non-numeric ports.
+            _ = parsed.port
+        except Exception:
+            raise ValueError(
+                "Invalid SCOPE_CLOUD_APP_ID. Expected a non-empty app id ending in "
+                "`/ws` (for example `daydream/scope-app/ws`)."
             ) from None
         if parsed.scheme not in {"ws", "wss"}:
             raise ValueError("Invalid ws_url. Expected a valid ws:// or wss:// URL.")
         if not parsed.hostname:
             raise ValueError("Invalid ws_url. Expected a valid ws:// or wss:// URL.")
-        return trimmed
+        return ws_url
 
     async def start_media(self, initial_parameters: dict | None = None) -> None:
         """Start media I/O and notify runner about stream start parameters."""

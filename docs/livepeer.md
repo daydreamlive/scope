@@ -67,7 +67,8 @@ Set the following environment variables before starting the server:
 | `SCOPE_CLOUD_MODE`   | Set to `livepeer` to enable Livepeer relay mode. |
 | `LIVEPEER_TOKEN`     | Required. Base64-encoded JSON token used to start the LV2V job. |
 | `LIVEPEER_ORCH_URL`  | Optional explicit orchestrator URL. Accepted formats: `host[:port]` or `http(s)://host[:port]` (for example `orchestrator.example.com:8935`). If unset, token discovery is used. |
-| `LIVEPEER_WS_URL`    | Optional runner WebSocket URL passed in the start-job params as `ws_url` (for example `ws://runner.example.com:8001/ws`). Must be a valid `ws://` or `wss://` URL. |
+| `LIVEPEER_WS_URL`    | Optional explicit runner WebSocket URL passed as `ws_url` (for example `ws://127.0.0.1:8001/ws` or `wss://fal.run/<app-id>/ws`). |
+| `SCOPE_CLOUD_APP_ID` | Optional fal app id used to construct `ws_url` as `wss://fal.run/<app-id>`. Must include `/ws` suffix (for example `daydream/scope-livepeer-runner/ws`). Used when `LIVEPEER_WS_URL` is not set. |
 | `LIVEPEER_DEBUG`     | Set to any value to enable debug logging for the Livepeer Gateway SDK and local Livepeer modules. |
 
 ```bash
@@ -107,6 +108,42 @@ Options:
 --port   Port to bind to  (default: 8001)
 --reload Enable auto-reload for development
 ```
+
+## Running the runner on Fal
+
+The canonical Livepeer runner implementation remains `scope.cloud.livepeer_app`.
+For Fal deployment, use `scope.cloud.livepeer_fal_app` as a thin wrapper that:
+
+- starts `scope.cloud.livepeer_app` in the container
+- proxies Fal `/ws` traffic to the local runner `/ws`
+
+Deploy the Livepeer wrapper app:
+
+```bash
+fal deploy --env main --auth public src/scope/cloud/livepeer_fal_app.py
+```
+
+Then point Scope's Livepeer mode at the Fal-hosted runner URL:
+
+```bash
+SCOPE_CLOUD_MODE=livepeer \
+LIVEPEER_TOKEN=<base64-json-token> \
+SCOPE_CLOUD_APP_ID=<app-id>/ws \
+uv run daydream-scope
+```
+
+Equivalent explicit URL form:
+
+```bash
+SCOPE_CLOUD_MODE=livepeer \
+LIVEPEER_TOKEN=<base64-json-token> \
+LIVEPEER_WS_URL=wss://fal.run/<app-id>/ws \
+uv run daydream-scope
+```
+
+To switch away from explicit runner overrides, unset both `LIVEPEER_WS_URL` and `SCOPE_CLOUD_APP_ID`. In that case, the runner URL uses the default Livepeer flow.
+
+The Livepeer orchestrator must be able to reach whichever runner endpoint is resolved.
 
 ### WebSocket Protocol
 
