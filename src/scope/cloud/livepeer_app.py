@@ -42,6 +42,7 @@ scope_client: httpx.AsyncClient | None = None
 
 STREAM_TASK_SHUTDOWN_GRACE_S = 1.0
 STREAM_TASK_CANCEL_TIMEOUT_S = 1.0
+MEDIA_STATS_INTERVAL_S = 10.0
 REMOTE_VIDEO_CLOCK_RATE = 90_000
 REMOTE_VIDEO_TIME_BASE = fractions.Fraction(1, REMOTE_VIDEO_CLOCK_RATE)
 
@@ -94,8 +95,12 @@ class LivepeerSession:
     frame_processor: FrameProcessor | None = None
     media_input_task: asyncio.Task | None = None
     media_output_task: asyncio.Task | None = None
+    media_stats_task: asyncio.Task | None = None
     media_stop_event: asyncio.Event = field(default_factory=asyncio.Event)
     stream_stop_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    media_output: MediaOutput | None = None
+    media_publish: MediaPublish | None = None
+    fps: float = 30.0
     user_id: str | None = None
     connection_id: str | None = None
 
@@ -150,11 +155,16 @@ async def _stop_stream(session: LivepeerSession) -> None:
 
         media_input_task = session.media_input_task
         media_output_task = session.media_output_task
+        media_stats_task = session.media_stats_task
         session.media_input_task = None
         session.media_output_task = None
+        session.media_stats_task = None
+        session.media_output = None
+        session.media_publish = None
 
         await _shutdown_task(media_input_task, task_name="media_input")
         await _shutdown_task(media_output_task, task_name="media_output")
+        await _shutdown_task(media_stats_task, task_name="media_stats")
 
         if session.frame_processor is not None:
             session.frame_processor.stop()
@@ -172,23 +182,20 @@ async def _stop_stream(session: LivepeerSession) -> None:
         session.media_stop_event = asyncio.Event()
 
 
-async def _media_input_loop(
-    publish_url: str,
-    frame_processor: FrameProcessor,
-    stop_event: asyncio.Event,
-) -> None:
+async def _media_input_loop(session: LivepeerSession) -> None:
     """Receive decoded trickle frames and push into FrameProcessor."""
-    media_output = MediaOutput(publish_url)
+    media_output = MediaOutput(session.subscribe_url)
+    session.media_output = media_output
     try:
         async for decoded in media_output.frames():
-            if stop_event.is_set():
+            if session.media_stop_event.is_set():
                 break
             if getattr(decoded, "kind", None) != "video":
                 continue
             frame = getattr(decoded, "frame", None)
             if frame is None:
                 continue
-            frame_processor.put(frame)
+            session.frame_processor.put(frame)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -200,16 +207,20 @@ async def _media_input_loop(
             logger.warning("Media output close failed: %s", exc)
 
 
-async def _media_output_loop(
-    subscribe_url: str,
-    frame_processor: FrameProcessor,
-    stop_event: asyncio.Event,
-    fps: float = 30.0,
-) -> None:
+async def _media_output_loop(session: LivepeerSession) -> None:
     """Read processed frames from FrameProcessor and publish over trickle."""
-    publisher = MediaPublish(subscribe_url, config=MediaPublishConfig(fps=fps))
-    # Wall-clock origin for drift measurement (set on first frame).
-    start_time: float | None = None
+    fps = session.fps
+    publisher = MediaPublish(session.publish_url, config=MediaPublishConfig(fps=fps))
+    session.media_publish = publisher
+    frame_processor = session.frame_processor
+    stop_event = session.media_stop_event
+    last_output_time: float | None = None
+    # Trusted boundary anchor for direct elapsed-time alignment.
+    # We only establish/update this when the output queue drains, because a
+    # drained boundary is the one point where dequeue timing is trustworthy
+    # enough to compare against synthetic media time.
+    aligned_at: float | None = None
+    aligned_pts = 0
     # Publish-side PTS accumulator in the 90 kHz video clock domain.
     next_pts = 0
     try:
@@ -232,37 +243,51 @@ async def _media_output_loop(
                 target_fps = 30.0
             target_interval_s = 1.0 / target_fps
             video_frame = VideoFrame.from_ndarray(frame_tensor.numpy(), format="rgb24")
-            if start_time is None:
+            queue_size_after_get = frame_processor.get_output_queue_size()
+            should_realign = False
+            if last_output_time is None:
                 next_pts = 0
-                start_time = now_time
             else:
-                # TODO: if FrameProcessor exposed a per-frame ready timestamp,
-                # we could use it instead of dequeue time and remove the need
-                # for queue depth as a trust heuristic entirely.
-                queue_size_after_get = frame_processor.get_output_queue_size()
-
-                # Drift: positive = PTS ahead of wall-clock, negative = behind.
-                pts_elapsed_s = next_pts / REMOTE_VIDEO_CLOCK_RATE
-                wall_elapsed_s = now_time - start_time
-                drift_s = pts_elapsed_s - wall_elapsed_s
-
                 if queue_size_after_get > 0:
                     # Burst in progress: dequeue timing is contaminated by
-                    # queueing. Anchor to target cadence.
+                    # queueing, so keep assigning the nominal cadence.
                     chosen_interval_s = target_interval_s
                 else:
-                    # Queue drained (burst boundary or steady state).
-                    # Steer interval to zero out drift:
-                    #   PTS ahead (drift > 0) -> interval > target
-                    #   PTS behind (drift < 0) -> interval < target
-                    chosen_interval_s = target_interval_s + drift_s
-                    chosen_interval_s = max(target_interval_s * 0.5, chosen_interval_s)
+                    # Queue drained (burst boundary or steady state). Align the
+                    # current frame against the last trusted drained boundary.
+                    # This uses exact elapsed accounting:
+                    #   ideal_interval = wall_elapsed_since_boundary
+                    #                  - media_elapsed_since_boundary
+                    # and avoids reusing the startup backlog as a drift anchor.
+                    if aligned_at is None:
+                        chosen_interval_s = target_interval_s
+                    else:
+                        pts_elapsed_s = (
+                            next_pts - aligned_pts
+                        ) / REMOTE_VIDEO_CLOCK_RATE
+                        wall_elapsed_s = now_time - aligned_at
+                        ideal_interval_s = max(0.0, wall_elapsed_s - pts_elapsed_s)
+                        # Snap near-target intervals so tiny scheduler jitter
+                        # does not leak into media timestamps in steady state.
+                        if (
+                            abs(ideal_interval_s - target_interval_s)
+                            / target_interval_s
+                            <= 0.1
+                        ):
+                            chosen_interval_s = target_interval_s
+                        else:
+                            chosen_interval_s = ideal_interval_s
+                    should_realign = True
 
                 next_pts += max(
                     1, int(round(chosen_interval_s * REMOTE_VIDEO_CLOCK_RATE))
                 )
+                if should_realign:
+                    aligned_at = now_time
+                    aligned_pts = next_pts
             video_frame.pts = next_pts
             video_frame.time_base = REMOTE_VIDEO_TIME_BASE
+            last_output_time = now_time
             await publisher.write_frame(video_frame)
     except asyncio.CancelledError:
         raise
@@ -273,6 +298,23 @@ async def _media_output_loop(
             await publisher.close()
         except Exception as exc:
             logger.warning("Media publisher close failed: %s", exc)
+
+
+async def _media_stats_loop(session: LivepeerSession) -> None:
+    """Periodically log MediaPublish / MediaOutput statistics."""
+    try:
+        while not session.media_stop_event.is_set():
+            await asyncio.sleep(MEDIA_STATS_INTERVAL_S)
+            if session.media_stop_event.is_set():
+                break
+            pub = session.media_publish
+            out = session.media_output
+            if pub is not None:
+                logger.info(pub.get_stats())
+            if out is not None:
+                logger.info(out.get_stats())
+    except asyncio.CancelledError:
+        pass
 
 
 async def _handle_api_request(
@@ -595,21 +637,11 @@ async def _handle_control_message(
             initial_parameters={**params, "pipeline_ids": pipeline_ids},
         )
         session.frame_processor.start()
+        session.fps = float(params.get("fps", 30.0))
         session.media_stop_event.clear()
-        session.media_input_task = asyncio.create_task(
-            _media_input_loop(
-                session.subscribe_url, session.frame_processor, session.media_stop_event
-            )
-        )
-        fps = float(params.get("fps", 30.0))
-        session.media_output_task = asyncio.create_task(
-            _media_output_loop(
-                session.publish_url,
-                session.frame_processor,
-                session.media_stop_event,
-                fps=fps,
-            )
-        )
+        session.media_input_task = asyncio.create_task(_media_input_loop(session))
+        session.media_output_task = asyncio.create_task(_media_output_loop(session))
+        session.media_stats_task = asyncio.create_task(_media_stats_loop(session))
         logger.info("Started stream with pipeline_ids=%s", pipeline_ids)
         return {
             "type": "stream_started",
