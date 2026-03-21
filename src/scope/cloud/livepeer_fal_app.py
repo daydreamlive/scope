@@ -162,7 +162,6 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
     app_auth = "public"
     requirements = [
         "requests",
-        "uvicorn[standard]",
         "websockets",
     ]
 

@@ -68,6 +68,9 @@ dependencies = [
 kafka = [
     "aiokafka>=0.10.0",
 ]
+livepeer = [
+    "uvicorn[standard]>=0.35.0",
+]
 link = [
     "aalink>=0.1.1",
 ]
