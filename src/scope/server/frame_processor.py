@@ -101,10 +101,15 @@ class FrameProcessor:
         # Cloud mode: send frames to cloud instead of local processing
         self._cloud_mode = cloud_manager is not None
         self._cloud_output_queue: queue.Queue = queue.Queue(maxsize=8)
+        self._cloud_output_meta_queue: queue.Queue = queue.Queue(maxsize=8)
         self._cloud_audio_queue: queue.Queue = queue.Queue(maxsize=50)
         self._frames_to_cloud = 0
         self._frames_from_cloud = 0
         self._frames_dropped_from_cloud = 0
+        self._cloud_output_high_water_mark = 0
+        self._cloud_output_all_time_high_water_mark = 0
+        self._cloud_output_queue_age_ms_total = 0.0
+        self._cloud_output_queue_age_samples = 0
 
         # Output sinks keyed by type
         self.output_sinks: dict[str, dict] = {}
@@ -165,6 +170,10 @@ class FrameProcessor:
         self._frames_to_cloud = 0
         self._frames_from_cloud = 0
         self._frames_dropped_from_cloud = 0
+        self._cloud_output_high_water_mark = 0
+        self._cloud_output_all_time_high_water_mark = 0
+        self._cloud_output_queue_age_ms_total = 0.0
+        self._cloud_output_queue_age_samples = 0
         self._last_heartbeat_time = time.time()
         self._playback_ready_emitted = False
         self._stream_start_time = time.monotonic()
@@ -316,12 +325,15 @@ class FrameProcessor:
 
         # Log final frame stats
         if self._cloud_mode:
+            avg_queue_age_ms = self._get_cloud_output_queue_avg_age_ms()
             logger.info(
                 f"[FRAME-PROCESSOR] Stopped (cloud mode). "
                 f"Frames: in={self._frames_in}, to_cloud={self._frames_to_cloud}, "
                 f"from_cloud={self._frames_from_cloud}, "
                 f"dropped_from_cloud={self._frames_dropped_from_cloud}, "
-                f"out={self._frames_out}"
+                f"out={self._frames_out}, "
+                f"queue_hwm_all_time={self._cloud_output_all_time_high_water_mark}, "
+                f"queue_avg_age_ms={avg_queue_age_ms:.1f}"
             )
         else:
             logger.info(
@@ -373,6 +385,19 @@ class FrameProcessor:
                 "frames_out": self._frames_out,
                 "frames_dropped_from_cloud": (
                     self._frames_dropped_from_cloud if self._cloud_mode else None
+                ),
+                "cloud_output_queue_high_watermark": (
+                    self._cloud_output_high_water_mark if self._cloud_mode else None
+                ),
+                "cloud_output_queue_high_watermark_all_time": (
+                    self._cloud_output_all_time_high_water_mark
+                    if self._cloud_mode
+                    else None
+                ),
+                "cloud_output_queue_avg_age_ms": (
+                    round(self._get_cloud_output_queue_avg_age_ms(), 1)
+                    if self._cloud_mode and self._cloud_output_queue_age_samples > 0
+                    else None
                 ),
             },
             connection_info=self.connection_info,
@@ -458,6 +483,18 @@ class FrameProcessor:
             # Cloud mode: get frame from cloud output queue
             try:
                 frame_np = self._cloud_output_queue.get_nowait()
+                try:
+                    meta = self._cloud_output_meta_queue.get_nowait()
+                except queue.Empty:
+                    meta = None
+                if meta is not None:
+                    arrival_monotonic = meta.get("arrival_monotonic")
+                    if isinstance(arrival_monotonic, (int, float)):
+                        queue_age_ms = max(
+                            0.0, (time.monotonic() - float(arrival_monotonic)) * 1000.0
+                        )
+                        self._cloud_output_queue_age_ms_total += queue_age_ms
+                        self._cloud_output_queue_age_samples += 1
                 frame = torch.from_numpy(frame_np)
             except queue.Empty:
                 return None
@@ -558,15 +595,27 @@ class FrameProcessor:
 
         try:
             # Convert to numpy and queue for output
+            meta = {"arrival_monotonic": time.monotonic()}
             frame_np = frame.to_ndarray(format="rgb24")
             try:
                 self._cloud_output_queue.put_nowait(frame_np)
+                self._cloud_output_meta_queue.put_nowait(meta)
+                queue_size_after = self._cloud_output_queue.qsize()
+                if queue_size_after > self._cloud_output_high_water_mark:
+                    self._cloud_output_high_water_mark = queue_size_after
+                if queue_size_after > self._cloud_output_all_time_high_water_mark:
+                    self._cloud_output_all_time_high_water_mark = queue_size_after
             except queue.Full:
                 # Drop oldest frame to make room
                 self._frames_dropped_from_cloud += 1
                 try:
                     self._cloud_output_queue.get_nowait()
+                    try:
+                        self._cloud_output_meta_queue.get_nowait()
+                    except queue.Empty:
+                        pass
                     self._cloud_output_queue.put_nowait(frame_np)
+                    self._cloud_output_meta_queue.put_nowait(meta)
                 except queue.Empty:
                     pass
         except Exception as e:
@@ -640,12 +689,16 @@ class FrameProcessor:
             pipeline_fps = self.get_fps() if not self._cloud_mode else None
 
             if self._cloud_mode:
+                avg_queue_age_ms = self._get_cloud_output_queue_avg_age_ms()
+                interval_queue_hwm = self._cloud_output_high_water_mark
                 logger.info(
                     f"[FRAME-PROCESSOR] RELAY MODE | "
                     f"Frames: in={self._frames_in}, to_cloud={self._frames_to_cloud}, "
                     f"from_cloud={self._frames_from_cloud}, "
                     f"dropped_from_cloud={self._frames_dropped_from_cloud}, "
-                    f"out={self._frames_out} | "
+                    f"out={self._frames_out}, "
+                    f"queue_hwm={interval_queue_hwm}, "
+                    f"queue_avg_age_ms={avg_queue_age_ms:.1f} | "
                     f"Rate: {fps_in:.1f} fps in, {fps_out:.1f} fps out"
                 )
             else:
@@ -673,6 +726,17 @@ class FrameProcessor:
                 heartbeat_metadata["frames_dropped_from_cloud"] = (
                     self._frames_dropped_from_cloud
                 )
+                heartbeat_metadata["cloud_output_queue_high_watermark"] = (
+                    interval_queue_hwm
+                )
+                heartbeat_metadata["cloud_output_queue_high_watermark_all_time"] = (
+                    self._cloud_output_all_time_high_water_mark
+                )
+                heartbeat_metadata["cloud_output_queue_avg_age_ms"] = (
+                    round(self._get_cloud_output_queue_avg_age_ms(), 1)
+                    if self._cloud_output_queue_age_samples > 0
+                    else None
+                )
             else:
                 heartbeat_metadata["pipeline_fps"] = (
                     round(pipeline_fps, 1) if pipeline_fps else None
@@ -687,6 +751,8 @@ class FrameProcessor:
                 metadata=heartbeat_metadata,
                 connection_info=self.connection_info,
             )
+            if self._cloud_mode:
+                self._cloud_output_high_water_mark = self._cloud_output_queue.qsize()
 
     def get_frame_stats(self) -> dict:
         """Get current frame processing statistics."""
@@ -712,8 +778,24 @@ class FrameProcessor:
             stats["frames_to_cloud"] = self._frames_to_cloud
             stats["frames_from_cloud"] = self._frames_from_cloud
             stats["frames_dropped_from_cloud"] = self._frames_dropped_from_cloud
+            stats["cloud_output_queue_high_watermark"] = (
+                self._cloud_output_high_water_mark
+            )
+            stats["cloud_output_queue_high_watermark_all_time"] = (
+                self._cloud_output_all_time_high_water_mark
+            )
+            stats["cloud_output_queue_avg_age_ms"] = (
+                self._get_cloud_output_queue_avg_age_ms()
+            )
 
         return stats
+
+    def _get_cloud_output_queue_avg_age_ms(self) -> float:
+        if self._cloud_output_queue_age_samples <= 0:
+            return 0.0
+        return (
+            self._cloud_output_queue_age_ms_total / self._cloud_output_queue_age_samples
+        )
 
     def _get_pipeline_dimensions(self) -> tuple[int, int]:
         """Get current pipeline dimensions from pipeline manager."""
