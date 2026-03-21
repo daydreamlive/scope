@@ -228,11 +228,14 @@ async def _media_output_loop(
         logger.error("Media output loop started without complete session state")
         return
 
-    publisher = MediaPublish(publish_url, config=MediaPublishConfig(fps=fps))
+    # Queue size should be large enough to absorb bursts. Encoder will drop
+    # frames if it's draining slower than realtime, so large queues are OK
+    publisher = MediaPublish(publish_url, config=MediaPublishConfig(fps=fps, queue_size=30))
     session.media_publish = publisher
     next_pts = 0
     try:
         while not stop_event.is_set():
+            # TODO make this blocking; we busy-wait a LOT
             frame_tensor = frame_processor.get()
             if frame_tensor is None:
                 await asyncio.sleep(0.01)  # no frame yet, wait a bit
