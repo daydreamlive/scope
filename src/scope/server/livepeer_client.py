@@ -57,9 +57,10 @@ class LivepeerClient:
         self._ws_url = explicit_ws_url or app_id_ws_url
 
         self._job = None
-        self._output_task: MediaPublish | None = None
+        self._media_publisher: MediaPublish | None = None
+        self._media_output: MediaOutput | None = None
         self._control_writer: JSONLWriter | None = None
-        self._input_task: asyncio.Task | None = None
+        self._media_subscriber_task: asyncio.Task | None = None
         self._events_task: asyncio.Task | None = None
         self._ping_task: asyncio.Task | None = None
         self._pending_requests: dict[str, asyncio.Future] = {}
@@ -88,8 +89,8 @@ class LivepeerClient:
         return (
             self.is_connected
             and self._media_connected
-            and self._output_task is not None
-            and self._input_task is not None
+            and self._media_publisher is not None
+            and self._media_subscriber_task is not None
         )
 
     async def connect(self, initial_parameters: dict | None = None) -> None:
@@ -264,11 +265,13 @@ class LivepeerClient:
             raise RuntimeError("stream_started response missing in/out channels")
 
         publisher = MediaPublish(input_url, config=MediaPublishConfig(fps=self._fps))
+        media_output = MediaOutput(output_url)
         self._media_connected = True
-        subscriber = asyncio.create_task(self._receive_loop(MediaOutput(output_url)))
+        subscriber = asyncio.create_task(self._receive_loop(media_output))
 
-        self._output_task = publisher
-        self._input_task = subscriber
+        self._media_publisher = publisher
+        self._media_output = media_output
+        self._media_subscriber_task = subscriber
         logger.info("Media channels started")
 
     async def stop_media(self) -> None:
@@ -402,6 +405,11 @@ class LivepeerClient:
                     await self._send_control(ping_message)
                 except Exception as e:
                     logger.debug(f"Failed to send keepalive ping: {e}")
+                if self._media_connected:
+                    if self._media_publisher is not None:
+                        logger.info(self._media_publisher.get_stats())
+                    if self._media_output is not None:
+                        logger.info(self._media_output.get_stats())
         except asyncio.CancelledError:
             pass
 
@@ -464,14 +472,14 @@ class LivepeerClient:
 
         Returns False if no active job or publishing fails.
         """
-        if not self.media_connected or self._output_task is None:
+        if not self.media_connected or self._media_publisher is None:
             return False
 
         if isinstance(frame, np.ndarray):
             frame = VideoFrame.from_ndarray(frame, format="rgb24")
 
         try:
-            result = self._output_task.write_frame(frame)
+            result = self._media_publisher.write_frame(frame)
             if inspect.isawaitable(result):
                 if self._loop is None:
                     return False
@@ -541,32 +549,36 @@ class LivepeerClient:
             if current_task is None:
                 current_task = asyncio.current_task()
 
-            input_task = self._input_task
-            output_task = self._output_task
+            media_subscriber_task = self._media_subscriber_task
+            media_publisher = self._media_publisher
             control_writer = self._control_writer
             events_task = self._events_task
             ping_task = self._ping_task
             job = self._job
 
-            self._input_task = None
+            self._media_subscriber_task = None
             self._events_task = None
             self._ping_task = None
-            self._output_task = None
+            self._media_publisher = None
+            self._media_output = None
             self._job = None
             self._control_writer = None
             self._media_connected = False
             self._connected = False
 
-            if input_task is not None and input_task is not current_task:
-                input_task.cancel()
+            if (
+                media_subscriber_task is not None
+                and media_subscriber_task is not current_task
+            ):
+                media_subscriber_task.cancel()
                 try:
-                    await input_task
+                    await media_subscriber_task
                 except asyncio.CancelledError:
                     pass
 
-            if output_task is not None:
+            if media_publisher is not None:
                 try:
-                    await output_task.close()
+                    await media_publisher.close()
                 except Exception as e:
                     logger.warning(f"Error while closing media publisher: {e}")
 
