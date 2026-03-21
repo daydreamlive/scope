@@ -2,15 +2,27 @@
 
 Scope can route inference through the [Livepeer](https://livepeer.org) network instead of running locally.
 
+> **Dependency note:** Running either the Scope server in Livepeer cloud mode or the standalone runner requires the `livepeer` extra, which pulls in `uvicorn[standard]`:
+>
+> ```bash
+> uv sync --extra livepeer
+> ```
+
 ## Quick Start
 
-1. Start the Livepeer runner somewhere reachable by the orchestrator:
+1. Install the `livepeer` extra (if you haven't already):
+
+```bash
+uv sync --extra livepeer
+```
+
+2. Start the Livepeer runner somewhere reachable by the orchestrator:
 
 ```bash
 uv run python -m scope.cloud.livepeer_app --host 0.0.0.0 --port 8001
 ```
 
-2. Start Scope in Livepeer mode:
+3. Start Scope in Livepeer mode:
 
 ```bash
 SCOPE_CLOUD_MODE=livepeer \
@@ -19,7 +31,7 @@ LIVEPEER_WS_URL=ws://127.0.0.1:8001/ws \
 uv run daydream-scope
 ```
 
-3. Connect Scope to the remote backend from the UI, or by calling either:
+4. Connect Scope to the remote backend from the UI, or by calling either:
 
 - `POST /api/v1/cloud/connect`
 - `POST /api/v1/livepeer/connect`
@@ -28,7 +40,7 @@ Both endpoints accept the normal `CloudConnectRequest` body, but in Livepeer mod
 the request credentials are currently ignored and the server uses
 `LIVEPEER_TOKEN` from the environment instead.
 
-4. Start streaming from the Scope UI. Scope creates the Livepeer LV2V (live-video-
+5. Start streaming from the Scope UI. Scope creates the Livepeer LV2V (live-video-
 to-video) job on connect, then opens media channels when the stream starts.
 
 ## Architecture
@@ -87,6 +99,14 @@ Important behavior:
 ## Running the Runner (`livepeer_app.py`)
 
 The runner is a standalone FastAPI WebSocket server that sits on the other end of the trickle channels. It receives the LV2V job response forwarded by the orchestrator, subscribes to the control channel, processes frames in-process using Scope's `FrameProcessor`, and proxies API requests into the embedded Scope FastAPI app.
+
+Make sure the `livepeer` extra is installed first:
+
+```bash
+uv sync --extra livepeer
+```
+
+Then start the runner:
 
 ```bash
 uv run python -m scope.cloud.livepeer_app
