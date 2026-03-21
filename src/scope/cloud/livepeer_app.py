@@ -208,8 +208,10 @@ async def _media_output_loop(
 ) -> None:
     """Read processed frames from FrameProcessor and publish over trickle."""
     publisher = MediaPublish(subscribe_url, config=MediaPublishConfig(fps=fps))
-    # Wall-clock origin for drift measurement (set on first frame).
-    start_time: float | None = None
+    # Track when the previous processed frame became ready on the runner.
+    # We use monotonic wall-clock deltas here because pipeline tensors do not
+    # currently carry source pts/time_base through the processing graph.
+    last_output_time: float | None = None
     # Publish-side PTS accumulator in the 90 kHz video clock domain.
     next_pts = 0
     try:
@@ -218,6 +220,8 @@ async def _media_output_loop(
             if frame_tensor is None:
                 await asyncio.sleep(0.01)  # no frame yet, wait a bit
                 continue
+            # Measure the actual cadence at which processed frames become
+            # available on the remote side.
             now_time = time.monotonic()
             # Prefer the pipeline's native/measured FPS when available so the
             # emitted timestamps reflect real production cadence rather than the
@@ -232,37 +236,54 @@ async def _media_output_loop(
                 target_fps = 30.0
             target_interval_s = 1.0 / target_fps
             video_frame = VideoFrame.from_ndarray(frame_tensor.numpy(), format="rgb24")
-            if start_time is None:
+            # Seed the synthetic media timeline at zero on the first frame.
+            if last_output_time is None:
                 next_pts = 0
-                start_time = now_time
             else:
-                # TODO: if FrameProcessor exposed a per-frame ready timestamp,
-                # we could use it instead of dequeue time and remove the need
-                # for queue depth as a trust heuristic entirely.
+                # Observe the remote-side interval between successive processed
+                # frames becoming ready for publish.
+                observed_interval_s = max(0.0, now_time - last_output_time)
                 queue_size_after_get = frame_processor.get_output_queue_size()
-
-                # Drift: positive = PTS ahead of wall-clock, negative = behind.
-                pts_elapsed_s = next_pts / REMOTE_VIDEO_CLOCK_RATE
-                wall_elapsed_s = now_time - start_time
-                drift_s = pts_elapsed_s - wall_elapsed_s
-
-                if queue_size_after_get > 0:
-                    # Burst in progress: dequeue timing is contaminated by
-                    # queueing. Anchor to target cadence.
+                # Case 1: if the measured interval is invalid/non-positive,
+                # fall back to the target cadence instead of creating a
+                # duplicate or regressing timestamp.
+                if observed_interval_s <= 0:
                     chosen_interval_s = target_interval_s
+                # Case 2: if more frames are already waiting in the queue,
+                # anchor this frame to the remote measured throughput clock.
+                # Backlog means we are in a burst, so we should not let
+                # dequeue timing compress or stretch media time.
+                elif queue_size_after_get > 0:
+                    chosen_interval_s = target_interval_s
+                # Case 3: if the observed interval is already close to the
+                # target (within 10%), snap to the target so tiny scheduling
+                # jitter does not leak into media timestamps.
+                elif (
+                    abs(observed_interval_s - target_interval_s) / target_interval_s
+                    <= 0.1
+                ):
+                    chosen_interval_s = target_interval_s
+                # Case 4: if the queue is drained and the observed interval is
+                # larger than target, preserve that gap in the media timeline so
+                # downstream playout can see genuine underproduction.
+                elif observed_interval_s > target_interval_s:
+                    chosen_interval_s = observed_interval_s
+                # Case 5: if the observed interval is smaller than target,
+                # clamp upward to target so scheduler noise cannot produce
+                # implausibly short media deltas.
                 else:
-                    # Queue drained (burst boundary or steady state).
-                    # Steer interval to zero out drift:
-                    #   PTS ahead (drift > 0) -> interval > target
-                    #   PTS behind (drift < 0) -> interval < target
-                    chosen_interval_s = target_interval_s + drift_s
-                    chosen_interval_s = max(target_interval_s * 0.5, chosen_interval_s)
-
+                    chosen_interval_s = target_interval_s
+                # Advance the synthetic PTS timeline in 90 kHz units. `max(1, …)`
+                # guarantees strict monotonicity even if rounding gets tiny.
                 next_pts += max(
                     1, int(round(chosen_interval_s * REMOTE_VIDEO_CLOCK_RATE))
                 )
+            # Attach explicit timing so MediaPublish encodes against this
+            # synthetic timeline instead of inferring timestamps from its own
+            # enqueue-time wall clock.
             video_frame.pts = next_pts
             video_frame.time_base = REMOTE_VIDEO_TIME_BASE
+            last_output_time = now_time
             await publisher.write_frame(video_frame)
     except asyncio.CancelledError:
         raise
