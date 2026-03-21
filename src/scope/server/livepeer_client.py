@@ -74,8 +74,6 @@ class LivepeerClient:
 
         self._stats = {
             "connected_at": None,
-            "frames_sent": 0,
-            "frames_received": 0,
             "api_requests_sent": 0,
             "api_requests_successful": 0,
         }
@@ -131,8 +129,6 @@ class LivepeerClient:
         self._connected = True
         self._media_connected = False
         self._stats["connected_at"] = time.time()
-        self._stats["frames_sent"] = 0
-        self._stats["frames_received"] = 0
         self._stats["api_requests_sent"] = 0
         self._stats["api_requests_successful"] = 0
         self._events_task = asyncio.create_task(self._events_loop())
@@ -282,6 +278,8 @@ class LivepeerClient:
 
     async def _receive_loop(self, output: MediaOutput) -> None:
         """Consume output frames from Livepeer and notify callbacks."""
+        prev_video_ts: float | None = None
+        prev_dispatch_time: float | None = None
         unexpected_reason: str | None = None
         try:
             async for decoded in output.frames():
@@ -304,7 +302,23 @@ class LivepeerClient:
                 if decoded_kind != "video":
                     continue
 
-                self._stats["frames_received"] += 1
+                # Hack: Sleep here to pace output (pts based)
+                time_base = getattr(frame, "time_base", None)
+                video_ts = (
+                    frame.pts * float(time_base)
+                    if time_base is not None and frame.pts is not None
+                    else None
+                )
+                now_monotonic = time.monotonic()
+                if prev_video_ts is not None and video_ts is not None:
+                    seconds_delta = video_ts - prev_video_ts
+                    if seconds_delta > 0 and prev_dispatch_time is not None:
+                        elapsed = now_monotonic - prev_dispatch_time
+                        wait = seconds_delta - elapsed
+                        if wait > 0:
+                            await asyncio.sleep(wait)
+                prev_video_ts = video_ts
+                prev_dispatch_time = time.monotonic()
                 for callback in list(self._callbacks):
                     try:
                         callback(frame)
@@ -484,7 +498,6 @@ class LivepeerClient:
                 if self._loop is None:
                     return False
                 asyncio.run_coroutine_threadsafe(result, self._loop)
-            self._stats["frames_sent"] += 1
             return True
         except Exception as e:
             logger.debug(f"Failed to send frame: {e}")
