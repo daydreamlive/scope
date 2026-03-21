@@ -662,6 +662,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
             await ws.close(code=4003, reason="Access denied")
             return
         # Remove transport-only user marker if present so it never reaches pipelines.
+        # TODO move this into the top level request
         params.pop("daydream_user_id", None)
         session.user_id = user_id
 
@@ -684,6 +685,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 stop_event,
             )
         )
+
+        # Complete the handshake with the orchestrator
+        await ws.send_json({"type": "started"})
 
         # Keep the WebSocket open and route orchestrator responses used by control handlers.
         while True:

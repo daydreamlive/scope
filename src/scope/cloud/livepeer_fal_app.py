@@ -183,7 +183,7 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             print(f"GPU check failed: {exc}")
             raise
 
-        env_whitelist = [
+        env_allowlist = [
             "PATH",
             "HOME",
             "USER",
@@ -201,7 +201,7 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             "LIVEPEER_DEBUG",
             "UV_CACHE_DIR",
         ]
-        runner_env = {k: os.environ[k] for k in env_whitelist if k in os.environ}
+        runner_env = {k: os.environ[k] for k in env_allowlist if k in os.environ}
         runner_env.setdefault("UV_CACHE_DIR", "/tmp/uv-cache")
         runner_env.setdefault("DAYDREAM_SCOPE_MODELS_DIR", "/data/models")
         runner_env.setdefault("PYTHONUNBUFFERED", "1")
@@ -239,8 +239,10 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             f"Timed out waiting for Livepeer runner on {RUNNER_LOCAL_HTTP_URL}"
         )
 
-    async def _proxy_ws(self, client_ws: WebSocket) -> None:
-        """Proxy fal WebSocket traffic to the local Livepeer runner WebSocket."""
+
+    @fal.endpoint("/ws", is_websocket=True)
+    async def websocket_handler(self, client_ws: WebSocket) -> None:
+        """WebSocket endpoint for Livepeer signaling and control traffic."""
         print("Livepeer fal websocket_handler invoked for /ws")
 
         import websockets
@@ -302,8 +304,3 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             with suppress(Exception):
                 await client_ws.close()
             print("Livepeer fal ws client disconnected")
-
-    @fal.endpoint("/ws", is_websocket=True)
-    async def websocket_handler(self, client_ws: WebSocket):
-        """WebSocket endpoint for Livepeer signaling and control traffic."""
-        await self._proxy_ws(client_ws)
