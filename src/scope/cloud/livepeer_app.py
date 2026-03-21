@@ -42,6 +42,7 @@ scope_client: httpx.AsyncClient | None = None
 
 STREAM_TASK_SHUTDOWN_GRACE_S = 1.0
 STREAM_TASK_CANCEL_TIMEOUT_S = 1.0
+MEDIA_STATS_INTERVAL_S = 10.0
 REMOTE_VIDEO_CLOCK_RATE = 90_000
 REMOTE_VIDEO_TIME_BASE = fractions.Fraction(1, REMOTE_VIDEO_CLOCK_RATE)
 
@@ -94,8 +95,11 @@ class LivepeerSession:
     frame_processor: FrameProcessor | None = None
     media_input_task: asyncio.Task | None = None
     media_output_task: asyncio.Task | None = None
+    media_stats_task: asyncio.Task | None = None
     media_stop_event: asyncio.Event = field(default_factory=asyncio.Event)
     stream_stop_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    media_output: MediaOutput | None = None
+    media_publish: MediaPublish | None = None
     user_id: str | None = None
     connection_id: str | None = None
 
@@ -150,11 +154,16 @@ async def _stop_stream(session: LivepeerSession) -> None:
 
         media_input_task = session.media_input_task
         media_output_task = session.media_output_task
+        media_stats_task = session.media_stats_task
         session.media_input_task = None
         session.media_output_task = None
+        session.media_stats_task = None
+        session.media_output = None
+        session.media_publish = None
 
         await _shutdown_task(media_input_task, task_name="media_input")
         await _shutdown_task(media_output_task, task_name="media_output")
+        await _shutdown_task(media_stats_task, task_name="media_stats")
 
         if session.frame_processor is not None:
             session.frame_processor.stop()
@@ -173,12 +182,18 @@ async def _stop_stream(session: LivepeerSession) -> None:
 
 
 async def _media_input_loop(
-    publish_url: str,
-    frame_processor: FrameProcessor,
-    stop_event: asyncio.Event,
+    session: LivepeerSession,
 ) -> None:
     """Receive decoded trickle frames and push into FrameProcessor."""
-    media_output = MediaOutput(publish_url)
+    subscribe_url = session.subscribe_url
+    frame_processor = session.frame_processor
+    stop_event = session.media_stop_event
+    if subscribe_url is None or frame_processor is None:
+        logger.error("Media input loop started without complete session state")
+        return
+
+    media_output = MediaOutput(subscribe_url)
+    session.media_output = media_output
     try:
         async for decoded in media_output.frames():
             if stop_event.is_set():
@@ -198,16 +213,24 @@ async def _media_input_loop(
             await media_output.close()
         except Exception as exc:
             logger.warning("Media output close failed: %s", exc)
+        if session.media_output is media_output:
+            session.media_output = None
 
 
 async def _media_output_loop(
-    subscribe_url: str,
-    frame_processor: FrameProcessor,
-    stop_event: asyncio.Event,
+    session: LivepeerSession,
     fps: float = 30.0,
 ) -> None:
     """Read processed frames from FrameProcessor and publish over trickle."""
-    publisher = MediaPublish(subscribe_url, config=MediaPublishConfig(fps=fps))
+    publish_url = session.publish_url
+    frame_processor = session.frame_processor
+    stop_event = session.media_stop_event
+    if publish_url is None or frame_processor is None:
+        logger.error("Media output loop started without complete session state")
+        return
+
+    publisher = MediaPublish(publish_url, config=MediaPublishConfig(fps=fps))
+    session.media_publish = publisher
     # Track when the previous processed frame became ready on the runner.
     # We use monotonic wall-clock deltas here because pipeline tensors do not
     # currently carry source pts/time_base through the processing graph.
@@ -294,6 +317,25 @@ async def _media_output_loop(
             await publisher.close()
         except Exception as exc:
             logger.warning("Media publisher close failed: %s", exc)
+        if session.media_publish is publisher:
+            session.media_publish = None
+
+
+async def _media_stats_loop(session: LivepeerSession) -> None:
+    """Periodically log MediaPublish / MediaOutput statistics."""
+    try:
+        while not session.media_stop_event.is_set():
+            await asyncio.sleep(MEDIA_STATS_INTERVAL_S)
+            if session.media_stop_event.is_set():
+                break
+            pub = session.media_publish
+            out = session.media_output
+            if pub is not None:
+                logger.info(pub.get_stats())
+            if out is not None:
+                logger.info(out.get_stats())
+    except asyncio.CancelledError:
+        pass
 
 
 async def _handle_api_request(
@@ -617,20 +659,15 @@ async def _handle_control_message(
         )
         session.frame_processor.start()
         session.media_stop_event.clear()
-        session.media_input_task = asyncio.create_task(
-            _media_input_loop(
-                session.subscribe_url, session.frame_processor, session.media_stop_event
-            )
-        )
+        session.media_input_task = asyncio.create_task(_media_input_loop(session))
         fps = float(params.get("fps", 30.0))
         session.media_output_task = asyncio.create_task(
             _media_output_loop(
-                session.publish_url,
-                session.frame_processor,
-                session.media_stop_event,
+                session,
                 fps=fps,
             )
         )
+        session.media_stats_task = asyncio.create_task(_media_stats_loop(session))
         logger.info("Started stream with pipeline_ids=%s", pipeline_ids)
         return {
             "type": "stream_started",
