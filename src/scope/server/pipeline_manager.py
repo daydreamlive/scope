@@ -219,10 +219,12 @@ class PipelineManager:
                 load_event = self._load_events.get(key)
                 if load_event:
                     # Release lock while waiting
+                    params = load_params or {}
+                    compile_enabled = params.get("compile_vae", False)
+                    wait_timeout = 1800 if compile_enabled else 300
                     self._lock.release()
                     try:
-                        # Wait up to 5 minutes for load to complete
-                        load_event.wait(timeout=300)
+                        load_event.wait(timeout=wait_timeout)
                     finally:
                         self._lock.acquire()
 
@@ -897,12 +899,15 @@ class PipelineManager:
             )
 
             quantization = None
+            compile_vae = False
             if load_params:
                 quantization = load_params.get("quantization", None)
+                compile_vae = load_params.get("compile_vae", False)
 
             pipeline = StreamDiffusionV2Pipeline(
                 config,
                 quantization=quantization,
+                compile_vae=compile_vae,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
                 stage_callback=stage_callback,
@@ -988,12 +993,15 @@ class PipelineManager:
             )
 
             quantization = None
+            compile_vae = False
             if load_params:
                 quantization = load_params.get("quantization", None)
+                compile_vae = load_params.get("compile_vae", False)
 
             pipeline = LongLivePipeline(
                 config,
                 quantization=quantization,
+                compile_vae=compile_vae,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
                 stage_callback=stage_callback,
@@ -1062,8 +1070,10 @@ class PipelineManager:
             )
 
             quantization = None
+            compile_vae = False
             if load_params:
                 quantization = load_params.get("quantization", None)
+                compile_vae = load_params.get("compile_vae", False)
 
             pipeline = KreaRealtimeVideoPipeline(
                 config,
@@ -1073,6 +1083,7 @@ class PipelineManager:
                     x in torch.cuda.get_device_name(0).lower()
                     for x in ("h100", "hopper")
                 ),
+                compile_vae=compile_vae,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
                 stage_callback=stage_callback,
@@ -1126,12 +1137,15 @@ class PipelineManager:
             )
 
             quantization = None
+            compile_vae = False
             if load_params:
                 quantization = load_params.get("quantization", None)
+                compile_vae = load_params.get("compile_vae", False)
 
             pipeline = RewardForcingPipeline(
                 config,
                 quantization=quantization,
+                compile_vae=compile_vae,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
                 stage_callback=stage_callback,
@@ -1182,12 +1196,15 @@ class PipelineManager:
             )
 
             quantization = None
+            compile_vae = False
             if load_params:
                 quantization = load_params.get("quantization", None)
+                compile_vae = load_params.get("compile_vae", False)
 
             pipeline = MemFlowPipeline(
                 config,
                 quantization=quantization,
+                compile_vae=compile_vae,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
                 stage_callback=stage_callback,
