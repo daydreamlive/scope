@@ -196,9 +196,15 @@ class LivepeerConnection:
                 pass
             self._connect_task = None
 
-        await self.stop_webrtc()
         if self._client is not None:
-            await self._client.disconnect()
+            try:
+                await asyncio.wait_for(self._client.disconnect(), timeout=15.0)
+            except TimeoutError:
+                logger.warning(
+                    "Livepeer client disconnect timed out after 15s, forcing cleanup"
+                )
+            except Exception as e:
+                logger.warning(f"Error during Livepeer client disconnect: {e}")
             self._client = None
         self._configured = False
         self._connecting = False

@@ -13,6 +13,7 @@ import os
 import time
 import uuid
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
@@ -28,6 +29,16 @@ logger = logging.getLogger(__name__)
 LIVEPEER_ORCH_URL_ENV = "LIVEPEER_ORCH_URL"
 LIVEPEER_WS_URL_ENV = "LIVEPEER_WS_URL"
 SCOPE_CLOUD_APP_ID_ENV = "SCOPE_CLOUD_APP_ID"
+STOP_STREAM_SEND_TIMEOUT_S = 1.0
+SHUTDOWN_TIMEOUT_S = 5.0
+TASK_DRAIN_TIMEOUT_S = 0.25
+
+
+@dataclass(slots=True)
+class _MediaHandles:
+    subscriber_task: asyncio.Task | None
+    publisher: MediaPublish | None
+    output: MediaOutput | None
 
 
 class LivepeerClient:
@@ -270,11 +281,41 @@ class LivepeerClient:
         self._media_subscriber_task = subscriber
         logger.info("Media channels started")
 
-    async def stop_media(self) -> None:
-        """Stop media I/O and notify runner about stream stop."""
-        if not self.is_connected and not self.media_connected:
-            return
-        await self._shutdown()
+    async def stop_media(self, current_task: asyncio.Task | None = None) -> None:
+        """Stop media I/O while keeping signaling channels alive."""
+        if current_task is None:
+            current_task = asyncio.current_task()
+
+        async with self._shutdown_lock:
+            if self._shutdown_started:
+                return
+            if not self.is_connected and not self.media_connected:
+                return
+            if self._media_is_stopped():
+                return
+
+            # Snapshot and clear state before any awaits so concurrent callers
+            # see the media as stopped immediately.
+            media_handles = self._take_media_handles()
+            control_writer = self._control_writer
+
+        if control_writer is not None:
+            try:
+                await asyncio.wait_for(
+                    self._send_control_message(control_writer, {"type": "stop_stream"}),
+                    timeout=STOP_STREAM_SEND_TIMEOUT_S,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Timed out sending stop_stream control message after %.1fs",
+                    STOP_STREAM_SEND_TIMEOUT_S,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send stop_stream control message: {e}")
+
+        await self._teardown_media_handles(media_handles, current_task=current_task)
+
+        logger.info("Media channels stopped")
 
     async def _receive_loop(self, output: MediaOutput) -> None:
         """Consume output frames from Livepeer and notify callbacks."""
@@ -336,13 +377,14 @@ class LivepeerClient:
                 await output.close()
             except Exception as e:
                 logger.warning(f"Error while closing media output: {e}")
+            # Avoid clearing a newer media output when stop/start races with this loop.
+            if self._media_output is output:
+                self._media_output = None
             if self._media_connected and not self._shutdown_started:
                 if unexpected_reason is None:
                     unexpected_reason = "Livepeer output loop stopped unexpectedly"
-                await self._shutdown(
-                    unexpected_reason=unexpected_reason,
-                    current_task=asyncio.current_task(),
-                )
+                logger.warning("%s; stopping media only", unexpected_reason)
+                await self.stop_media(current_task=asyncio.current_task())
             logger.info("Output loop stopped")
 
     async def _events_loop(self) -> None:
@@ -554,86 +596,119 @@ class LivepeerClient:
         current_task: asyncio.Task | None = None,
     ) -> None:
         """Tear down media, control, and job resources."""
+        if current_task is None:
+            current_task = asyncio.current_task()
+
         async with self._shutdown_lock:
             if self._shutdown_started:
                 return
 
             self._shutdown_started = True
-            if current_task is None:
-                current_task = asyncio.current_task()
-
-            media_subscriber_task = self._media_subscriber_task
-            media_publisher = self._media_publisher
+            media_handles = self._take_media_handles()
             control_writer = self._control_writer
             events_task = self._events_task
             ping_task = self._ping_task
             job = self._job
 
-            self._media_subscriber_task = None
             self._events_task = None
             self._ping_task = None
-            self._media_publisher = None
-            self._media_output = None
             self._job = None
             self._control_writer = None
-            self._media_connected = False
             self._connected = False
 
-            if (
-                media_subscriber_task is not None
-                and media_subscriber_task is not current_task
-            ):
-                media_subscriber_task.cancel()
-                try:
-                    await media_subscriber_task
-                except asyncio.CancelledError:
-                    pass
+        await self._teardown_media_handles(media_handles, current_task=current_task)
+        await self._drain_or_cancel_task("events loop", events_task, current_task)
+        await self._drain_or_cancel_task("ping loop", ping_task, current_task)
 
-            if media_publisher is not None:
-                try:
-                    await media_publisher.close()
-                except Exception as e:
-                    logger.warning(f"Error while closing media publisher: {e}")
+        self._fail_pending_requests(unexpected_reason or "Livepeer connection closed")
 
-            if control_writer is not None:
-                try:
-                    await self._send_control_message(
-                        control_writer, {"type": "stop_stream"}
-                    )
-                except Exception as e:
-                    logger.warning(f"Failed to send stop_stream control message: {e}")
+        if control_writer is not None:
+            await self._close_resource("control writer", control_writer.close())
 
-            if events_task is not None and events_task is not current_task:
-                events_task.cancel()
-                try:
-                    await events_task
-                except asyncio.CancelledError:
-                    pass
+        if job is not None:
+            await self._close_resource("job", job.close())
 
-            if ping_task is not None and ping_task is not current_task:
-                ping_task.cancel()
-                try:
-                    await ping_task
-                except asyncio.CancelledError:
-                    pass
+        logger.info("Disconnected")
 
-            self._fail_pending_requests(
-                unexpected_reason or "Livepeer connection closed"
+    def _media_is_stopped(self) -> bool:
+        return (
+            not self._media_connected
+            and self._media_subscriber_task is None
+            and self._media_publisher is None
+            and self._media_output is None
+        )
+
+    def _take_media_handles(self) -> _MediaHandles:
+        handles = _MediaHandles(
+            subscriber_task=self._media_subscriber_task,
+            publisher=self._media_publisher,
+            output=self._media_output,
+        )
+        self._media_subscriber_task = None
+        self._media_publisher = None
+        self._media_output = None
+        self._media_connected = False
+        return handles
+
+    async def _teardown_media_handles(
+        self,
+        handles: _MediaHandles,
+        *,
+        current_task: asyncio.Task | None,
+    ) -> None:
+        """Close media resources and let the subscriber exit before cancelling it."""
+        output = handles.output
+        subscriber_task = handles.subscriber_task
+
+        if output is not None and subscriber_task is not current_task:
+            await self._close_resource("media output", output.close())
+
+        await self._drain_or_cancel_task(
+            "media subscriber", subscriber_task, current_task
+        )
+
+        if handles.publisher is not None:
+            await self._close_resource("media publisher", handles.publisher.close())
+
+    async def _drain_or_cancel_task(
+        self,
+        name: str,
+        task: asyncio.Task | None,
+        current_task: asyncio.Task | None,
+    ) -> None:
+        """Let a task finish briefly before falling back to cancellation."""
+        if task is None or task is current_task:
+            return
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=TASK_DRAIN_TIMEOUT_S)
+            return
+        except asyncio.CancelledError:
+            if task.done():
+                return
+            raise
+        except TimeoutError:
+            task.cancel()
+        except Exception as e:
+            logger.warning("Error while draining %s task: %s", name, e)
+            return
+
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=SHUTDOWN_TIMEOUT_S)
+        except (asyncio.CancelledError, TimeoutError):
+            pass
+        except Exception as e:
+            logger.warning("Error while cancelling %s task: %s", name, e)
+
+    async def _close_resource(self, name: str, coro) -> None:
+        """Await a close coroutine with a timeout."""
+        try:
+            await asyncio.wait_for(coro, timeout=SHUTDOWN_TIMEOUT_S)
+        except TimeoutError:
+            logger.warning(
+                "Timed out closing %s after %.1fs, proceeding", name, SHUTDOWN_TIMEOUT_S
             )
-
-            if control_writer is not None:
-                try:
-                    await control_writer.close()
-                except Exception as e:
-                    logger.warning(f"Error while closing control writer: {e}")
-
-            if job is not None:
-                try:
-                    await job.close()
-                except Exception as e:
-                    logger.warning(f"Error while closing job: {e}")
-
-            logger.info("Disconnected")
+        except Exception as e:
+            logger.warning("Error while closing %s: %s", name, e)
 
     async def _send_control_message(
         self, control_writer: JSONLWriter | None, message: dict[str, Any]
