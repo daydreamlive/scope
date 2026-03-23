@@ -1,8 +1,13 @@
 import { Handle, Position, useEdges } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { RotateCcw, AlertTriangle, ArrowUp } from "lucide-react";
+import { RotateCcw, AlertTriangle, ArrowUp, Info } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import type { PipelineId } from "../../../types";
+import {
+  getResolutionScaleFactor,
+  adjustResolutionForPipeline,
+} from "../../../lib/utils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { useHandlePositions } from "../hooks/node/useHandlePositions";
@@ -117,6 +122,29 @@ export function PipelineNode({
   const isLoraConnected = edges.some(
     e => e.target === id && e.targetHandle === buildHandleId("param", "__loras")
   );
+
+  // Resolution validation warning
+  const pipelineIdStr = data.pipelineId as PipelineId | undefined;
+  const scaleFactor = pipelineIdStr
+    ? getResolutionScaleFactor(pipelineIdStr)
+    : null;
+  const resolutionWarning = (() => {
+    if (!scaleFactor || !pipelineIdStr) return null;
+    const heightParam = parameterInputs.find(p => p.name === "height");
+    const widthParam = parameterInputs.find(p => p.name === "width");
+    if (!heightParam && !widthParam) return null;
+    const h = Number(parameterValues.height ?? heightParam?.defaultValue ?? 0);
+    const w = Number(parameterValues.width ?? widthParam?.defaultValue ?? 0);
+    if (h === 0 || w === 0) return null;
+    if (h % scaleFactor !== 0 || w % scaleFactor !== 0) {
+      const { resolution: adj } = adjustResolutionForPipeline(pipelineIdStr, {
+        height: h,
+        width: w,
+      });
+      return `Resolution will be adjusted to ${adj.width}\u00d7${adj.height} when starting the stream (must be divisible by ${scaleFactor})`;
+    }
+    return null;
+  })();
 
   const listParams = parameterInputs.filter(p => p.type === "list_number");
   const primitiveParams = parameterInputs.filter(
@@ -364,6 +392,16 @@ export function PipelineNode({
               </div>
             );
           })}
+
+          {/* Resolution adjustment warning */}
+          {resolutionWarning && (
+            <div className="flex items-start gap-1.5 px-1">
+              <Info className="h-3 w-3 mt-0.5 shrink-0 text-amber-500" />
+              <span className="text-[10px] text-amber-500">
+                {resolutionWarning}
+              </span>
+            </div>
+          )}
 
           {/* LoRA input */}
           {supportsLoRA && (
