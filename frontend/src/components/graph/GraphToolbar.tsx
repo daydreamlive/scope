@@ -7,7 +7,6 @@ interface GraphToolbarProps {
   isConnecting: boolean;
   isLoading: boolean;
   status: string;
-  resolution?: { width: number; height: number } | null;
   onStartStream?: () => void;
   onStopStream?: () => void;
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
@@ -20,7 +19,6 @@ export function GraphToolbar({
   isConnecting,
   isLoading,
   status,
-  resolution,
   onStartStream,
   onStopStream,
   onImport,
@@ -65,12 +63,6 @@ export function GraphToolbar({
           <Play className="h-3.5 w-3.5" />
         )}
       </button>
-
-      {resolution && (
-        <span className={NODE_TOKENS.toolbarStatus}>
-          {resolution.width}&times;{resolution.height}
-        </span>
-      )}
 
       <div className="flex-1" />
 

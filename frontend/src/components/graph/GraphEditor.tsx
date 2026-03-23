@@ -164,7 +164,6 @@ interface GraphEditorProps {
   syphonOutputAvailable?: boolean;
   onStartRecording?: () => void;
   onStopRecording?: () => void;
-  resolution?: { width: number; height: number } | null;
 }
 
 export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
@@ -196,7 +195,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       syphonOutputAvailable = false,
       onStartRecording,
       onStopRecording,
-      resolution,
     },
     ref
   ) {
@@ -714,7 +712,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             isConnecting={isConnecting}
             isLoading={isLoading}
             status={status}
-            resolution={resolution}
             onStartStream={onStartStream}
             onStopStream={onStopStream}
             onImport={handleImport}

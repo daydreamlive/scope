@@ -481,9 +481,16 @@ export function extractParameterPorts(
 
     const ui = schemaProp.ui;
     const label = ui?.label || key;
-    const enumValues = Array.isArray(schemaProp.enum)
+    const baseEnumValues = Array.isArray(schemaProp.enum)
       ? schemaProp.enum
       : refEnumValues;
+    // For nullable enums (anyOf with { type: "null" }), prepend null so the UI
+    // can render a "None" option.
+    const isNullable = anyOf?.some(
+      v => (v as Record<string, unknown>).type === "null"
+    );
+    const enumValues =
+      baseEnumValues && isNullable ? [null, ...baseEnumValues] : baseEnumValues;
 
     params.push({
       name: key,

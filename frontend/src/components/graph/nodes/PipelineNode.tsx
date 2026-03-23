@@ -257,13 +257,21 @@ export function PipelineNode({
                   ) : param.type === "string" ? (
                     param.enum ? (
                       <NodePillSelect
-                        value={String(currentValue ?? "")}
+                        value={
+                          currentValue === null || currentValue === undefined
+                            ? "__none__"
+                            : String(currentValue)
+                        }
                         onChange={val =>
-                          onParameterChange?.(id, param.name, val)
+                          onParameterChange?.(
+                            id,
+                            param.name,
+                            val === "__none__" ? null : val
+                          )
                         }
                         options={param.enum.map(opt => ({
-                          value: String(opt),
-                          label: String(opt),
+                          value: opt === null ? "__none__" : String(opt),
+                          label: opt === null ? "None" : String(opt),
                         }))}
                         disabled={disabled}
                       />

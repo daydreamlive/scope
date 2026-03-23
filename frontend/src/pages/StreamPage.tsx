@@ -1671,6 +1671,17 @@ export function StreamPage() {
     }
   }, [settings.beatCacheResetRate, isStreaming, sendParameterUpdateWebRTC]);
 
+  // Send input_source config to backend when it changes during streaming.
+  // This enables live switching between source types (e.g. Syphon → File)
+  // without restarting the stream.
+  useEffect(() => {
+    if (isStreaming && settings.inputSource) {
+      sendParameterUpdateWebRTC({
+        input_source: settings.inputSource,
+      });
+    }
+  }, [settings.inputSource, isStreaming, sendParameterUpdateWebRTC]);
+
   // Beat-synced prompt cycling: rotate through the queued prompt items on beat
   // boundaries. Each prompt item is applied individually at full weight in sequence.
   // The promptItems list in the UI stays unchanged; only the backend receives the
@@ -2690,7 +2701,7 @@ export function StreamPage() {
             onStartStream={() => handleStartStream()}
             onStopStream={stopStream}
             onSourceModeChange={mode =>
-              switchMode(
+              handleModeChange(
                 mode as "video" | "camera" | "spout" | "ndi" | "syphon"
               )
             }
@@ -2707,14 +2718,6 @@ export function StreamPage() {
             syphonOutputAvailable={syphonOutputAvailable}
             onStartRecording={handleStartRecording}
             onStopRecording={handleStopRecording}
-            resolution={
-              settings.resolution || {
-                height: getDefaults(settings.pipelineId, settings.inputMode)
-                  .height,
-                width: getDefaults(settings.pipelineId, settings.inputMode)
-                  .width,
-              }
-            }
           />
         </div>
 
