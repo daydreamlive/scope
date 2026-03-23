@@ -7,6 +7,7 @@ import type { PipelineSchemaInfo } from "../../../../lib/api";
 import { useState } from "react";
 import { useApi } from "../../../../hooks/useApi";
 import { useCloudStatus } from "../../../../hooks/useCloudStatus";
+import type { HardwareInfoResponse } from "../../../../lib/api";
 
 import { usePipelineParams } from "../node/usePipelineParams";
 import {
@@ -123,8 +124,12 @@ export function useGraphState(
     Record<string, PipelineSchemaInfo>
   >({});
 
-  const { getPipelineSchemas, isCloudMode, isReady } = useApi();
+  const { getPipelineSchemas, getHardwareInfo, isCloudMode, isReady } =
+    useApi();
   const { isConnected: isCloudConnected } = useCloudStatus();
+  const [hardwareInfo, setHardwareInfo] = useState<HardwareInfoResponse | null>(
+    null
+  );
 
   useEffect(() => {
     if (isCloudMode && !isReady) return;
@@ -140,10 +145,25 @@ export function useGraphState(
         if (!mounted) return;
         console.error("Failed to fetch pipeline schemas:", err);
       });
+    getHardwareInfo()
+      .then(info => {
+        if (!mounted) return;
+        setHardwareInfo(info);
+      })
+      .catch(err => {
+        if (!mounted) return;
+        console.error("Failed to fetch hardware info:", err);
+      });
     return () => {
       mounted = false;
     };
-  }, [getPipelineSchemas, isCloudMode, isReady, isCloudConnected]);
+  }, [
+    getPipelineSchemas,
+    getHardwareInfo,
+    isCloudMode,
+    isReady,
+    isCloudConnected,
+  ]);
 
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;
@@ -195,6 +215,7 @@ export function useGraphState(
     isStreamingRef,
     nodesRef,
     onNodeParameterChange: callbacks.onNodeParameterChange,
+    hardwareInfo,
   });
 
   const enrichDeps: EnrichNodesDeps = {

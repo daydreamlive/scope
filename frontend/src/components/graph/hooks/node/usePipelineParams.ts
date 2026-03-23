@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 import { extractParameterPorts } from "../../../../lib/graphUtils";
-import type { PipelineSchemaInfo } from "../../../../lib/api";
+import type {
+  PipelineSchemaInfo,
+  HardwareInfoResponse,
+} from "../../../../lib/api";
 import { getDefaultPromptForMode } from "../../../../data/pipelines";
 import type { InputMode } from "../../../../types";
 
@@ -13,6 +16,7 @@ interface UsePipelineParamsArgs {
   isStreamingRef: React.RefObject<boolean>;
   nodesRef: React.RefObject<Node<FlowNodeData>[]>;
   onNodeParameterChange?: (nodeId: string, key: string, value: unknown) => void;
+  hardwareInfo: HardwareInfoResponse | null;
 }
 
 export function usePipelineParams({
@@ -22,6 +26,7 @@ export function usePipelineParams({
   isStreamingRef,
   nodesRef,
   onNodeParameterChange,
+  hardwareInfo,
 }: UsePipelineParamsArgs) {
   const [nodeParams, setNodeParams] = useState<
     Record<string, Record<string, unknown>>
@@ -43,14 +48,34 @@ export function usePipelineParams({
       const schema = newPipelineId ? pipelineSchemas[newPipelineId] : null;
       const supportsPrompts = schema?.supports_prompts ?? false;
 
-      // Pre-fill prompt default
-      if (supportsPrompts && schema) {
-        const defaultMode = (schema.default_mode ?? "text") as InputMode;
-        const defaultPrompt = getDefaultPromptForMode(defaultMode);
-        setNodeParams(prev => ({
-          ...prev,
-          [nodeId]: { ...(prev[nodeId] || {}), __prompt: defaultPrompt },
-        }));
+      // Pre-fill prompt default and recommended quantization
+      {
+        const paramOverrides: Record<string, unknown> = {};
+
+        if (supportsPrompts && schema) {
+          const defaultMode = (schema.default_mode ?? "text") as InputMode;
+          paramOverrides.__prompt = getDefaultPromptForMode(defaultMode);
+        }
+
+        // Set recommended quantization based on VRAM (same logic as perform mode)
+        const vramThreshold =
+          schema?.recommended_quantization_vram_threshold ?? null;
+        if (
+          vramThreshold !== null &&
+          vramThreshold !== undefined &&
+          hardwareInfo?.vram_gb !== null &&
+          hardwareInfo?.vram_gb !== undefined
+        ) {
+          paramOverrides.quantization =
+            hardwareInfo.vram_gb > vramThreshold ? null : "fp8_e4m3fn";
+        }
+
+        if (Object.keys(paramOverrides).length > 0) {
+          setNodeParams(prev => ({
+            ...prev,
+            [nodeId]: { ...(prev[nodeId] || {}), ...paramOverrides },
+          }));
+        }
       }
 
       setNodes(nds =>
@@ -86,7 +111,7 @@ export function usePipelineParams({
         })
       );
     },
-    [setNodes, portsMap, pipelineSchemas]
+    [setNodes, portsMap, pipelineSchemas, hardwareInfo]
   );
 
   const handleNodeParameterChange = useCallback(
