@@ -1944,6 +1944,56 @@ export function StreamPage() {
               }
             }
           }
+
+          // Adjust resolution in graph node params BEFORE anything reads them.
+          // This ensures all downstream code (loadItems, initialParameters, etc.)
+          // sees the corrected values and the UI reflects them immediately.
+          if (graphConfigForStream?.ui_state) {
+            const nParams = graphConfigForStream.ui_state.node_params as
+              | Record<string, Record<string, unknown>>
+              | undefined;
+            if (nParams && graphNodes) {
+              for (const node of graphNodes) {
+                if (node.type !== "pipeline" || !node.pipeline_id) continue;
+                const bag = nParams[node.id];
+                if (!bag) continue;
+                const h =
+                  typeof bag.height === "number"
+                    ? Math.round(bag.height)
+                    : undefined;
+                const w =
+                  typeof bag.width === "number"
+                    ? Math.round(bag.width)
+                    : undefined;
+                if (h != null && w != null) {
+                  const { resolution: adj, wasAdjusted } =
+                    adjustResolutionForPipeline(
+                      node.pipeline_id as PipelineId,
+                      { height: h, width: w }
+                    );
+                  // Always write back rounded integers
+                  bag.height = wasAdjusted ? adj.height : h;
+                  bag.width = wasAdjusted ? adj.width : w;
+                  if (wasAdjusted) {
+                    console.log(
+                      `[GraphMode] Adjusted ${node.pipeline_id} resolution: ${w}×${h} → ${bag.width}×${bag.height}`
+                    );
+                  }
+                  // Update the graph editor UI so the user sees corrected values
+                  graphEditorRef.current?.updateNodeParam(
+                    node.id,
+                    "height",
+                    bag.height
+                  );
+                  graphEditorRef.current?.updateNodeParam(
+                    node.id,
+                    "width",
+                    bag.width
+                  );
+                }
+              }
+            }
+          }
         } catch (err) {
           console.warn("Failed to extract pipeline IDs from graph:", err);
         }
@@ -2077,12 +2127,21 @@ export function StreamPage() {
           loadParams = { ...loadParams, ...vaceParams };
         }
 
-        // Merge schema-driven primitive fields (e.g. new_param) so backend receives them
+        // Merge schema-driven primitive fields (e.g. new_param) so backend receives them.
+        // Exclude height/width — they are handled by the dedicated resolution logic
+        // above and must not be overridden by stale schemaFieldOverrides values.
         if (
           settings.schemaFieldOverrides &&
           Object.keys(settings.schemaFieldOverrides).length > 0
         ) {
-          loadParams = { ...loadParams, ...settings.schemaFieldOverrides };
+          const {
+            height: _h,
+            width: _w,
+            ...schemaRest
+          } = settings.schemaFieldOverrides;
+          if (Object.keys(schemaRest).length > 0) {
+            loadParams = { ...loadParams, ...schemaRest };
+          }
         }
 
         // Include per-processor schema overrides as flat params
@@ -2164,7 +2223,7 @@ export function StreamPage() {
                 nodeLoadParams.height = Math.round(nodeBag.height);
               if (typeof nodeBag?.width === "number")
                 nodeLoadParams.width = Math.round(nodeBag.width);
-              // Adjust resolution to be divisible by required scale factor
+              // Ensure resolution is divisible by pipeline's required scale factor
               if (
                 typeof nodeLoadParams.height === "number" &&
                 typeof nodeLoadParams.width === "number"
@@ -2178,17 +2237,6 @@ export function StreamPage() {
                   nodeLoadParams.height = adjRes.height;
                   nodeLoadParams.width = adjRes.width;
                 }
-                // Always update the graph node UI with integer values
-                graphEditorRef.current?.updateNodeParam(
-                  n.id,
-                  "height",
-                  nodeLoadParams.height
-                );
-                graphEditorRef.current?.updateNodeParam(
-                  n.id,
-                  "width",
-                  nodeLoadParams.width
-                );
               }
               if (pipeSchema?.supportsQuantization) {
                 const nodeQuant = nodeBag?.quantization;
@@ -2241,6 +2289,14 @@ export function StreamPage() {
             pipeline_id: pid,
             load_params: loadParams,
           }));
+
+      // Log the resolution values being sent to loadPipeline for debugging
+      for (const item of loadItems) {
+        const lp = item.load_params as Record<string, unknown> | undefined;
+        console.log(
+          `[GraphMode] Loading pipeline ${item.pipeline_id} (node ${item.node_id}) with resolution: ${lp?.width}×${lp?.height}`
+        );
+      }
 
       const loadSuccess = await loadPipeline(loadItems);
       if (!loadSuccess) {
@@ -2453,12 +2509,20 @@ export function StreamPage() {
       // Include recording toggle state
       initialParameters.recording = isRecording;
 
-      // Include runtime schema field overrides so they reach __call__ on first frame
+      // Include runtime schema field overrides so they reach __call__ on first frame.
+      // Exclude height/width — they are load-time params baked into the pipeline
+      // during initialization and must not leak into runtime parameters (which
+      // would override the adjusted resolution on every __call__).
       if (
         settings.schemaFieldOverrides &&
         Object.keys(settings.schemaFieldOverrides).length > 0
       ) {
-        Object.assign(initialParameters, settings.schemaFieldOverrides);
+        const {
+          height: _sh,
+          width: _sw,
+          ...schemaRest
+        } = settings.schemaFieldOverrides;
+        Object.assign(initialParameters, schemaRest);
       }
 
       // Override initialParameters with graph node params for the main pipeline.
