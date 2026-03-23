@@ -313,6 +313,7 @@ export function useGraphState(
     handleClear: persistence.handleClear,
     handleImport: persistence.handleImport,
     handleExport: persistence.handleExport,
+    buildCurrentWorkflow: persistence.buildCurrentWorkflow,
     refreshGraph: persistence.refreshGraph,
     getCurrentGraphConfig: persistence.getCurrentGraphConfig,
     getGraphNodePrompts: persistence.getGraphNodePrompts,

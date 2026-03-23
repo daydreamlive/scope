@@ -608,25 +608,41 @@ export function useGraphPersistence({
     }
   }, [pendingImportWorkflow, refreshPipelines, refreshLoRAs, refreshPlugins]);
 
-  const handleExport = useCallback(() => {
-    const root = resolveRootGraphRef.current(nodes, edges);
-    const graphConfig = attachNodeParams(
-      flowToGraphConfig(root.nodes, root.edges),
-      nodeParamsRef.current
-    );
+  const buildCurrentWorkflow = useCallback(
+    (name?: string) => {
+      const root = resolveRootGraphRef.current(nodes, edges);
+      const graphConfig = attachNodeParams(
+        flowToGraphConfig(root.nodes, root.edges),
+        nodeParamsRef.current
+      );
 
-    const pluginInfoMap = new Map<string, PluginInfo>(
-      plugins.map(p => [p.name, p])
-    );
+      const pluginInfoMap = new Map<string, PluginInfo>(
+        plugins.map(p => [p.name, p])
+      );
 
-    const workflow = buildGraphWorkflow({
-      name: `Graph Export ${new Date().toISOString().split("T")[0]}`,
-      graphConfig,
-      pipelineInfoMap: pipelineInfoMap ?? {},
-      pluginInfoMap,
-      scopeVersion: scopeVersion ?? "unknown",
+      return buildGraphWorkflow({
+        name: name ?? `Graph Export ${new Date().toISOString().split("T")[0]}`,
+        graphConfig,
+        pipelineInfoMap: pipelineInfoMap ?? {},
+        pluginInfoMap,
+        scopeVersion: scopeVersion ?? "unknown",
+        loraFiles,
+      });
+    },
+    [
+      nodes,
+      edges,
+      nodeParamsRef,
+      resolveRootGraphRef,
+      pipelineInfoMap,
+      plugins,
+      scopeVersion,
       loraFiles,
-    });
+    ]
+  );
+
+  const handleExport = useCallback(() => {
+    const workflow = buildCurrentWorkflow();
 
     const dataStr = JSON.stringify(workflow, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
@@ -642,16 +658,7 @@ export function useGraphPersistence({
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
     setStatus("Graph exported");
-  }, [
-    nodes,
-    edges,
-    nodeParamsRef,
-    resolveRootGraphRef,
-    pipelineInfoMap,
-    plugins,
-    scopeVersion,
-    loraFiles,
-  ]);
+  }, [buildCurrentWorkflow]);
 
   const getCurrentGraphConfig = useCallback(() => {
     const root = resolveRootGraphRef.current(
@@ -799,6 +806,7 @@ export function useGraphPersistence({
     handleClear,
     handleImport,
     handleExport,
+    buildCurrentWorkflow,
     refreshGraph: loadGraph,
     getCurrentGraphConfig,
     getGraphNodePrompts,

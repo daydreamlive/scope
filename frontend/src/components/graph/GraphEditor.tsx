@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { toast } from "sonner";
 import {
   ReactFlow,
   Controls,
@@ -54,6 +55,15 @@ import { BlueprintBrowserModal } from "./BlueprintBrowserModal";
 import { BreadcrumbNav } from "./BreadcrumbNav";
 import { GraphToolbar } from "./GraphToolbar";
 import { GraphWorkflowImportDialog } from "./GraphWorkflowImportDialog";
+import { GraphWorkflowExportDialog } from "./GraphWorkflowExportDialog";
+import { ExportDialog } from "../ExportDialog";
+import {
+  isAuthenticated as checkIsAuthenticated,
+  getDaydreamAPIKey,
+  redirectToSignIn,
+} from "../../lib/auth";
+import { createDaydreamImportSession } from "../../lib/daydreamExport";
+import { openExternalUrl } from "../../lib/openExternal";
 import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import {
@@ -227,7 +237,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       handleClear,
       handleSave,
       handleImport,
-      handleExport,
+      buildCurrentWorkflow,
       refreshGraph,
       getCurrentGraphConfig,
       getGraphNodePrompts,
@@ -299,6 +309,73 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     const [showAddNodeModal, setShowAddNodeModal] = useState(false);
     const [showBlueprintModal, setShowBlueprintModal] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const [showExportDialog, setShowExportDialog] = useState(false);
+    const [showWorkflowExport, setShowWorkflowExport] = useState(false);
+    const [isDaydreamAuthenticated, setIsDaydreamAuthenticated] = useState(
+      checkIsAuthenticated()
+    );
+    const [isExportingToDaydream, setIsExportingToDaydream] = useState(false);
+
+    useEffect(() => {
+      const handleAuthChange = () => {
+        setIsDaydreamAuthenticated(checkIsAuthenticated());
+      };
+      window.addEventListener("daydream-auth-change", handleAuthChange);
+      return () => {
+        window.removeEventListener("daydream-auth-change", handleAuthChange);
+      };
+    }, []);
+
+    const handleExportToDaydream = useCallback(async () => {
+      if (!isDaydreamAuthenticated) {
+        redirectToSignIn();
+        return;
+      }
+
+      const apiKey = getDaydreamAPIKey();
+      if (!apiKey) {
+        toast.error("Not authenticated with Daydream");
+        return;
+      }
+
+      const isElectron = Boolean(
+        (window as unknown as { scope?: { openExternal?: unknown } }).scope
+          ?.openExternal
+      );
+      const pendingTab = isElectron
+        ? null
+        : window.open("about:blank", "_blank");
+
+      setIsExportingToDaydream(true);
+      try {
+        const workflow = buildCurrentWorkflow("Untitled Workflow");
+
+        const result = await createDaydreamImportSession(
+          apiKey,
+          workflow,
+          workflow.metadata.name
+        );
+
+        if (pendingTab) {
+          pendingTab.location.href = result.createUrl;
+        } else {
+          openExternalUrl(result.createUrl);
+        }
+        toast.success("Opening daydream.live...", {
+          description:
+            "Your workflow has been sent to daydream.live for publishing.",
+        });
+        setShowExportDialog(false);
+      } catch (err) {
+        pendingTab?.close();
+        console.error("Export to daydream.live failed:", err);
+        toast.error("Export failed", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+      } finally {
+        setIsExportingToDaydream(false);
+      }
+    }, [isDaydreamAuthenticated, buildCurrentWorkflow]);
     const [pendingNodePosition, setPendingNodePosition] = useState<{
       x: number;
       y: number;
@@ -715,7 +792,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             onStartStream={onStartStream}
             onStopStream={onStopStream}
             onImport={handleImport}
-            onExport={handleExport}
+            onExport={() => setShowExportDialog(true)}
             onClear={() => setShowClearConfirm(true)}
           />
 
@@ -880,6 +957,26 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             onConfirm={confirmImport}
             onCancel={cancelImport}
             onReResolve={reResolveImport}
+          />
+
+          <ExportDialog
+            open={showExportDialog}
+            onClose={() => setShowExportDialog(false)}
+            onSaveGeneration={() => {}}
+            onSaveTimeline={() => {
+              setShowExportDialog(false);
+              setShowWorkflowExport(true);
+            }}
+            onExportToDaydream={handleExportToDaydream}
+            isRecording={false}
+            isAuthenticated={isDaydreamAuthenticated}
+            isExportingToDaydream={isExportingToDaydream}
+          />
+
+          <GraphWorkflowExportDialog
+            open={showWorkflowExport}
+            onClose={() => setShowWorkflowExport(false)}
+            buildWorkflow={buildCurrentWorkflow}
           />
         </div>
       </div>
