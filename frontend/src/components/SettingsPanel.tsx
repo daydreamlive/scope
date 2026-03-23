@@ -639,6 +639,22 @@ export function SettingsPanel({
               const isPreprocessor =
                 info.usage?.includes("preprocessor") ?? false;
               if (!isPreprocessor) return false;
+              // Show preprocessors that are compatible with any mode the current
+              // pipeline supports, not just the currently-active inputMode.
+              // This ensures preprocessors remain visible for pipelines like
+              // LongLive/Krea/MemFlow/RewardForcing whose defaultMode is "text"
+              // even though their video preprocessors require "video" mode.
+              // Incompatible preprocessors are already cleared in handleModeChange
+              // when the user actually switches inputMode, so we don't need to
+              // hide them here too.
+              const pipelineModes = currentPipeline?.supportedModes ?? [];
+              if (pipelineModes.length > 0) {
+                return (
+                  info.supportedModes?.some(m => pipelineModes.includes(m)) ??
+                  false
+                );
+              }
+              // Fallback: filter by current inputMode if pipeline modes are unknown
               if (inputMode) {
                 return info.supportedModes?.includes(inputMode) ?? false;
               }
