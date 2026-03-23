@@ -68,6 +68,9 @@ export function usePipelineParams({
         ) {
           paramOverrides.quantization =
             hardwareInfo.vram_gb > vramThreshold ? null : "fp8_e4m3fn";
+        } else {
+          // No recommendation from pipeline: reset quantization to null
+          paramOverrides.quantization = null;
         }
 
         if (Object.keys(paramOverrides).length > 0) {
