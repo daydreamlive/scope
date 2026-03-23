@@ -2134,11 +2134,11 @@ export function StreamPage() {
           settings.schemaFieldOverrides &&
           Object.keys(settings.schemaFieldOverrides).length > 0
         ) {
-          const {
-            height: _h,
-            width: _w,
-            ...schemaRest
-          } = settings.schemaFieldOverrides;
+          const schemaRest = Object.fromEntries(
+            Object.entries(settings.schemaFieldOverrides).filter(
+              ([k]) => k !== "height" && k !== "width"
+            )
+          );
           if (Object.keys(schemaRest).length > 0) {
             loadParams = { ...loadParams, ...schemaRest };
           }
@@ -2517,12 +2517,12 @@ export function StreamPage() {
         settings.schemaFieldOverrides &&
         Object.keys(settings.schemaFieldOverrides).length > 0
       ) {
-        const {
-          height: _sh,
-          width: _sw,
-          ...schemaRest
-        } = settings.schemaFieldOverrides;
-        Object.assign(initialParameters, schemaRest);
+        const schemaRuntime = Object.fromEntries(
+          Object.entries(settings.schemaFieldOverrides).filter(
+            ([k]) => k !== "height" && k !== "width"
+          )
+        );
+        Object.assign(initialParameters, schemaRuntime);
       }
 
       // Override initialParameters with graph node params for the main pipeline.
