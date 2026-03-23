@@ -1,9 +1,10 @@
 import { useCallback } from "react";
 import { addEdge, reconnectEdge } from "@xyflow/react";
 import type { Connection, Edge, Node } from "@xyflow/react";
-import { parseHandleId } from "../../../lib/graphUtils";
-import type { FlowNodeData } from "../../../lib/graphUtils";
-import { buildEdgeStyle, PARAM_TYPE_COLORS } from "../constants";
+import { parseHandleId } from "../../../../lib/graphUtils";
+import type { FlowNodeData, SubgraphPort } from "../../../../lib/graphUtils";
+import { buildEdgeStyle, PARAM_TYPE_COLORS } from "../../constants";
+import { validateConnection } from "../../utils/connectionValidation";
 import type { ResolvedType } from "./typeResolution";
 import {
   resolveSourceType,
@@ -11,12 +12,25 @@ import {
   resolveDownstreamType,
   collectUpstreamChain,
 } from "./typeResolution";
+import {
+  BOUNDARY_INPUT_ID,
+  BOUNDARY_OUTPUT_ID,
+} from "../subgraph/useGraphNavigation";
+
+export type AddSubgraphPortFn = (
+  side: "input" | "output",
+  port: SubgraphPort,
+  setNodes: (
+    updater: (nds: Node<FlowNodeData>[]) => Node<FlowNodeData>[]
+  ) => void
+) => string | null;
 
 export function useConnectionLogic(
   nodes: Node<FlowNodeData>[],
   setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>,
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
-  handleEdgeDelete: (edgeId: string) => void
+  handleEdgeDelete: (edgeId: string) => void,
+  addSubgraphPortRef?: React.RefObject<AddSubgraphPortFn | null>
 ) {
   const findConnectedPipelineParams = useCallback(
     (
@@ -33,7 +47,11 @@ export function useConnectionLogic(
         if (targetParsed?.kind !== "param") continue;
 
         const targetNode = nodes.find(n => n.id === edge.target);
-        if (targetNode?.data.nodeType !== "pipeline") continue;
+        if (
+          targetNode?.data.nodeType !== "pipeline" &&
+          targetNode?.data.nodeType !== "subgraph"
+        )
+          continue;
 
         connected.push({
           nodeId: edge.target,
@@ -47,179 +65,11 @@ export function useConnectionLogic(
   );
 
   const isValidConnection = useCallback(
-    (edgeOrConnection: Edge | Connection): boolean => {
-      let connection: Connection;
-      if ("source" in edgeOrConnection && "target" in edgeOrConnection) {
-        connection = edgeOrConnection as Connection;
-      } else {
-        const edge = edgeOrConnection as Edge;
-        connection = {
-          source: edge.source,
-          target: edge.target,
-          sourceHandle: edge.sourceHandle ?? null,
-          targetHandle: edge.targetHandle ?? null,
-        };
-      }
-
-      if (
-        !connection.source ||
-        !connection.target ||
-        !connection.sourceHandle ||
-        !connection.targetHandle
-      ) {
-        return true;
-      }
-
-      const sourceParsed = parseHandleId(connection.sourceHandle);
-      const targetParsed = parseHandleId(connection.targetHandle);
-
-      if (!sourceParsed || !targetParsed) {
-        return true;
-      }
-
-      if (sourceParsed.kind === "stream" && targetParsed.kind === "stream") {
-        return true;
-      }
-
-      if (sourceParsed.kind === "param" && targetParsed.kind === "param") {
-        const sourceNode = nodes.find(n => n.id === connection.source);
-        const targetNode = nodes.find(n => n.id === connection.target);
-
-        if (!sourceNode || !targetNode) return false;
-
-        // Primitives adapt
-        if (sourceNode.data.nodeType === "primitive") return true;
-
-        if (sourceNode.data.nodeType === "reroute") {
-          if (!sourceNode.data.valueType) return true;
-          if (targetNode.data.nodeType === "reroute") {
-            return (
-              !targetNode.data.valueType ||
-              targetNode.data.valueType === sourceNode.data.valueType
-            );
-          }
-        }
-
-        if (targetNode.data.nodeType === "reroute") {
-          if (!targetNode.data.valueType) return true;
-          const srcType = resolveSourceType(sourceNode, nodes, []);
-          if (!srcType) return true;
-          return srcType === targetNode.data.valueType;
-        }
-
-        // Get source type
-        const sourceType = resolveSourceType(sourceNode, nodes, []);
-
-        if (!sourceType) return false;
-
-        // VACE: only VACE → pipeline.__vace
-        if (targetParsed.name === "__vace") {
-          return sourceType === "vace";
-        }
-        if (sourceType === "vace") {
-          // VACE only connects to __vace
-          return targetParsed.name === "__vace";
-        }
-
-        // VACE inputs: images OR video (mutual exclusion)
-        if (targetNode.data.nodeType === "vace") {
-          if (targetParsed.name === "video") {
-            // Video: only video_path, reject if images connected
-            if (sourceType !== "video_path") return false;
-            const hasImages = !!(
-              targetNode.data.vaceRefImage ||
-              targetNode.data.vaceFirstFrame ||
-              targetNode.data.vaceLastFrame
-            );
-            return !hasImages;
-          }
-          // Images: only string, reject if video connected
-          if (
-            targetParsed.name === "ref_image" ||
-            targetParsed.name === "first_frame" ||
-            targetParsed.name === "last_frame"
-          ) {
-            if (sourceType !== "string") return false;
-            const hasVideo = !!targetNode.data.vaceVideo;
-            return !hasVideo;
-          }
-          return false;
-        }
-
-        if (targetParsed.name === "__prompt") {
-          return sourceType === "string";
-        }
-
-        // Math: numbers only
-        if (targetNode.data.nodeType === "math") {
-          return (
-            sourceType === "number" &&
-            (targetParsed.name === "a" || targetParsed.name === "b")
-          );
-        }
-
-        // Bool: accepts number input
-        if (targetNode.data.nodeType === "bool") {
-          return sourceType === "number" && targetParsed.name === "input";
-        }
-
-        // StringControl switch mode
-        if (
-          targetNode.data.nodeType === "control" &&
-          targetNode.data.controlType === "string" &&
-          targetNode.data.controlMode === "switch"
-        ) {
-          if (targetParsed.name.startsWith("item_")) {
-            return sourceType === "number";
-          }
-          if (targetParsed.name.startsWith("str_")) {
-            return sourceType === "string";
-          }
-          return false;
-        }
-
-        // UI nodes: specific types
-        if (
-          targetNode.data.nodeType === "slider" ||
-          targetNode.data.nodeType === "knobs" ||
-          targetNode.data.nodeType === "xypad"
-        ) {
-          return sourceType === "number";
-        }
-        if (targetNode.data.nodeType === "tuple") {
-          if (targetParsed.name === "value") {
-            return sourceType === "list_number" || sourceType === "number";
-          }
-          if (targetParsed.name.startsWith("row_")) {
-            return sourceType === "number";
-          }
-          return false;
-        }
-
-        const targetParam = targetNode.data.parameterInputs?.find(
-          p => p.name === targetParsed.name
-        );
-        if (!targetParam) return false;
-
-        if (targetParam.type === "list_number" && sourceType === "number") {
-          return true;
-        }
-        if (
-          targetParam.type === "list_number" &&
-          sourceType === "list_number"
-        ) {
-          return true;
-        }
-
-        return sourceType === targetParam.type;
-      }
-
-      return false;
-    },
+    (edgeOrConnection: Edge | Connection): boolean =>
+      validateConnection(edgeOrConnection, nodes),
     [nodes]
   );
 
-  // Adapt primitive/reroute types to match connections
   const adaptNodeTypes = useCallback(
     (connection: Connection, currentEdges: Edge[]): Map<string, string> => {
       const changed = new Map<string, string>();
@@ -231,7 +81,6 @@ export function useConnectionLogic(
       const targetParsed = parseHandleId(connection.targetHandle);
       if (!targetParsed || targetParsed.kind !== "param") return changed;
 
-      // Include pending connection
       const edgesWithNew: Edge[] = [
         ...currentEdges,
         {
@@ -243,7 +92,6 @@ export function useConnectionLogic(
         },
       ];
 
-      // Primitive → typed target
       if (sourceNode.data.nodeType === "primitive") {
         let expectedType = resolveTargetType(targetNode, targetParsed.name);
         if (!expectedType && targetNode.data.nodeType === "reroute") {
@@ -290,7 +138,6 @@ export function useConnectionLogic(
         }
       }
 
-      // Something → Reroute (concrete producers only)
       if (targetNode.data.nodeType === "reroute") {
         const isConcreteSource =
           sourceNode.data.nodeType !== "primitive" &&
@@ -301,7 +148,13 @@ export function useConnectionLogic(
         if (isConcreteSource) {
           const srcType = changed.has(sourceNode.id)
             ? (changed.get(sourceNode.id) as ResolvedType)
-            : resolveSourceType(sourceNode, nodes, edgesWithNew);
+            : resolveSourceType(
+                sourceNode,
+                nodes,
+                edgesWithNew,
+                new Set(),
+                connection.sourceHandle
+              );
           if (
             srcType &&
             srcType !== "list_number" &&
@@ -326,7 +179,6 @@ export function useConnectionLogic(
         }
       }
 
-      // Reroute → typed target (backward propagation)
       if (sourceNode.data.nodeType === "reroute") {
         let expectedType = resolveTargetType(targetNode, targetParsed.name);
         if (!expectedType && targetNode.data.nodeType === "reroute") {
@@ -417,26 +269,113 @@ export function useConnectionLogic(
         return;
       }
 
-      // Remove old edge, adapt types, add new edge, refresh colors
+      const srcParsed = parseHandleId(connection.sourceHandle);
+      const tgtParsed = parseHandleId(connection.targetHandle);
+
+      const isAddSource =
+        connection.source === BOUNDARY_INPUT_ID &&
+        srcParsed?.name === "__add__";
+      const isAddTarget =
+        connection.target === BOUNDARY_OUTPUT_ID &&
+        tgtParsed?.name === "__add__";
+
+      let effectiveConnection = connection;
+
+      if ((isAddSource || isAddTarget) && addSubgraphPortRef?.current) {
+        const otherNode = isAddSource
+          ? nodes.find(n => n.id === connection.target)
+          : nodes.find(n => n.id === connection.source);
+        const otherHandle = isAddSource
+          ? connection.targetHandle
+          : connection.sourceHandle;
+        const otherParsed = parseHandleId(otherHandle);
+
+        if (!otherNode || !otherParsed) return;
+
+        const isStream = otherParsed.kind === "stream";
+        const portType: "stream" | "param" = isStream ? "stream" : "param";
+        let paramType: SubgraphPort["paramType"] = undefined;
+
+        if (!isStream) {
+          if (isAddSource) {
+            const targetParam = otherNode.data.parameterInputs?.find(
+              p => p.name === otherParsed.name
+            );
+            if (targetParam) {
+              paramType = targetParam.type as SubgraphPort["paramType"];
+            }
+          } else {
+            const srcType = resolveSourceType(
+              otherNode,
+              nodes,
+              [],
+              new Set(),
+              otherHandle
+            );
+            if (srcType) {
+              paramType = srcType as SubgraphPort["paramType"];
+            }
+          }
+        }
+
+        const side = isAddSource ? "input" : "output";
+        const boundaryId =
+          side === "input" ? BOUNDARY_INPUT_ID : BOUNDARY_OUTPUT_ID;
+        const boundaryNode = nodes.find(n => n.id === boundaryId);
+        const existingPorts: SubgraphPort[] =
+          (side === "input"
+            ? boundaryNode?.data.subgraphInputs
+            : boundaryNode?.data.subgraphOutputs) ?? [];
+        const existingNames = new Set(existingPorts.map(p => p.name));
+        let portName = otherParsed.name;
+        if (existingNames.has(portName)) {
+          let suffix = 2;
+          while (existingNames.has(`${otherParsed.name}_${suffix}`)) suffix++;
+          portName = `${otherParsed.name}_${suffix}`;
+        }
+
+        const newPort: SubgraphPort = {
+          name: portName,
+          portType,
+          paramType: paramType || undefined,
+          innerNodeId: isAddSource
+            ? (connection.target ?? "")
+            : (connection.source ?? ""),
+          innerHandleId: isAddSource
+            ? (connection.targetHandle ?? "")
+            : (connection.sourceHandle ?? ""),
+        };
+
+        const newHandleId = addSubgraphPortRef.current(side, newPort, setNodes);
+        if (!newHandleId) return;
+
+        if (isAddSource) {
+          effectiveConnection = {
+            ...connection,
+            sourceHandle: newHandleId,
+          };
+        } else {
+          effectiveConnection = {
+            ...connection,
+            targetHandle: newHandleId,
+          };
+        }
+      }
+
+      const conn = effectiveConnection;
+
       setEdges(eds => {
-        // Remove existing edge to same target handle
         const filtered = eds.filter(
           e =>
-            !(
-              e.target === connection.target &&
-              e.targetHandle === connection.targetHandle
-            )
+            !(e.target === conn.target && e.targetHandle === conn.targetHandle)
         );
 
-        // Adapt node types
-        const changedTypes = adaptNodeTypes(connection, filtered);
-
-        // Determine edge style
-        const sourceNode = nodes.find(n => n.id === connection.source);
-        const sourceChanged = changedTypes.get(connection.source ?? "");
+        const changedTypes = adaptNodeTypes(conn, filtered);
+        const sourceNode = nodes.find(n => n.id === conn.source);
+        const sourceChanged = changedTypes.get(conn.source ?? "");
         let style: { stroke: string; strokeWidth: number };
         if (sourceChanged) {
-          const parsed = parseHandleId(connection.sourceHandle);
+          const parsed = parseHandleId(conn.sourceHandle);
           const isVideoEdge =
             parsed?.kind === "stream" &&
             (parsed.name === "video" || parsed.name === "video2");
@@ -445,13 +384,12 @@ export function useConnectionLogic(
             strokeWidth: isVideoEdge ? 5 : 2,
           };
         } else {
-          style = buildEdgeStyle(sourceNode, connection.sourceHandle);
+          style = buildEdgeStyle(sourceNode, conn.sourceHandle);
         }
 
-        // Add new edge
         let updated = addEdge(
           {
-            ...connection,
+            ...conn,
             type: "default",
             reconnectable: "target" as const,
             style,
@@ -461,7 +399,6 @@ export function useConnectionLogic(
           filtered
         );
 
-        // Refresh edge colors for changed types
         if (changedTypes.size > 0) {
           updated = updated.map(e => {
             const newType = changedTypes.get(e.source);
@@ -479,7 +416,15 @@ export function useConnectionLogic(
         return updated;
       });
     },
-    [setEdges, nodes, handleEdgeDelete, isValidConnection, adaptNodeTypes]
+    [
+      setEdges,
+      nodes,
+      handleEdgeDelete,
+      isValidConnection,
+      adaptNodeTypes,
+      addSubgraphPortRef,
+      setNodes,
+    ]
   );
 
   const onReconnect = useCallback(

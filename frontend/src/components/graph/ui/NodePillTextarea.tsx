@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, useLayoutEffect } from "react";
 import { NODE_TOKENS } from "./tokens";
 
 interface NodePillTextareaProps {
@@ -19,10 +19,20 @@ export function NodePillTextarea({
   className = "",
 }: NodePillTextareaProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const cursorRef = useRef<number | null>(null);
 
   const handleChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    cursorRef.current = e.target.selectionStart;
     onChange(e.target.value);
   };
+
+  useLayoutEffect(() => {
+    const el = textareaRef.current;
+    if (el && cursorRef.current !== null && document.activeElement === el) {
+      el.selectionStart = cursorRef.current;
+      el.selectionEnd = cursorRef.current;
+    }
+  }, [value]);
 
   const handleWheel = (e: React.WheelEvent) => {
     e.stopPropagation();
@@ -46,7 +56,7 @@ export function NodePillTextarea({
       disabled={disabled}
       placeholder={placeholder}
       rows={3}
-      className={`${NODE_TOKENS.pillInput} !rounded-md w-full min-w-[110px] resize-y min-h-[60px] text-left py-1.5 leading-relaxed nowheel ${className}`}
+      className={`${NODE_TOKENS.pillInput} !rounded-md w-full min-w-[110px] resize-y min-h-[60px] max-h-full overflow-y-auto text-left py-1.5 leading-relaxed nowheel nodrag ${className}`}
     />
   );
 }

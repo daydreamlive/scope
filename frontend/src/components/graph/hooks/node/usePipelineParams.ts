@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../../lib/graphUtils";
-import { extractParameterPorts } from "../../../lib/graphUtils";
-import type { PipelineSchemaInfo } from "../../../lib/api";
-import { getDefaultPromptForMode } from "../../../data/pipelines";
-import type { InputMode } from "../../../types";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
+import { extractParameterPorts } from "../../../../lib/graphUtils";
+import type { PipelineSchemaInfo } from "../../../../lib/api";
+import { getDefaultPromptForMode } from "../../../../data/pipelines";
+import type { InputMode } from "../../../../types";
 
 interface UsePipelineParamsArgs {
   setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>;
@@ -62,6 +62,7 @@ export function usePipelineParams({
           const supportsCacheManagement =
             schema?.supports_cache_management ?? false;
           const supportsVace = schema?.supports_vace ?? false;
+          const supportsLoRA = schema?.supports_lora ?? false;
           const newStyle = { ...n.style };
           delete newStyle.height;
           return {
@@ -79,6 +80,7 @@ export function usePipelineParams({
               supportsPrompts,
               supportsCacheManagement,
               supportsVace,
+              supportsLoRA,
             },
           };
         })
@@ -100,10 +102,6 @@ export function usePipelineParams({
 
   // Prompt handling
 
-  const promptDebounceTimers = useRef<
-    Record<string, ReturnType<typeof setTimeout>>
-  >({});
-
   const sendPromptToBackend = useCallback(
     (nodeId: string) => {
       if (!isStreamingRef.current) return;
@@ -115,29 +113,15 @@ export function usePipelineParams({
     [resolveBackendId, isStreamingRef]
   );
 
-  const handlePromptChange = useCallback(
-    (nodeId: string, text: string) => {
-      setNodeParams(prev => ({
-        ...prev,
-        [nodeId]: { ...(prev[nodeId] || {}), __prompt: text },
-      }));
-      if (promptDebounceTimers.current[nodeId]) {
-        clearTimeout(promptDebounceTimers.current[nodeId]);
-      }
-      promptDebounceTimers.current[nodeId] = setTimeout(() => {
-        sendPromptToBackend(nodeId);
-        delete promptDebounceTimers.current[nodeId];
-      }, 500);
-    },
-    [sendPromptToBackend]
-  );
+  const handlePromptChange = useCallback((nodeId: string, text: string) => {
+    setNodeParams(prev => ({
+      ...prev,
+      [nodeId]: { ...(prev[nodeId] || {}), __prompt: text },
+    }));
+  }, []);
 
   const handlePromptSubmit = useCallback(
     (nodeId: string) => {
-      if (promptDebounceTimers.current[nodeId]) {
-        clearTimeout(promptDebounceTimers.current[nodeId]);
-        delete promptDebounceTimers.current[nodeId];
-      }
       sendPromptToBackend(nodeId);
     },
     [sendPromptToBackend]

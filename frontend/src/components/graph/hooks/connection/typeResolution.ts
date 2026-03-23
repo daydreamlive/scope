@@ -1,7 +1,7 @@
 // Type resolution utilities for param connections
 import type { Edge, Node } from "@xyflow/react";
-import { parseHandleId } from "../../../lib/graphUtils";
-import type { FlowNodeData } from "../../../lib/graphUtils";
+import { parseHandleId } from "../../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
 
 export type ResolvedType =
   | "string"
@@ -10,6 +10,7 @@ export type ResolvedType =
   | "list_number"
   | "video_path"
   | "vace"
+  | "lora"
   | undefined;
 
 // Source types
@@ -17,7 +18,8 @@ export function resolveSourceType(
   node: Node<FlowNodeData>,
   nodes: Node<FlowNodeData>[],
   edges: Edge[],
-  visited = new Set<string>()
+  visited = new Set<string>(),
+  sourceHandleId?: string | null
 ): ResolvedType {
   if (visited.has(node.id)) return undefined;
   visited.add(node.id);
@@ -34,17 +36,40 @@ export function resolveSourceType(
     return node.data.mediaType === "video" ? "video_path" : "string";
   }
   if (nt === "vace") return "vace";
+  if (nt === "lora") return "lora";
   if (nt === "midi") return "number";
   if (nt === "bool") return "boolean";
+  if (nt === "trigger") return "boolean";
   if (nt === "reroute") {
     // Walk upstream
     for (const e of edges) {
       if (e.target !== node.id) continue;
       const upstream = nodes.find(n => n.id === e.source);
-      if (upstream) return resolveSourceType(upstream, nodes, edges, visited);
+      if (upstream)
+        return resolveSourceType(
+          upstream,
+          nodes,
+          edges,
+          visited,
+          e.sourceHandle
+        );
     }
     // Fallback to valueType
     return node.data.valueType;
+  }
+  if (nt === "subgraph" || nt === "subgraph_input") {
+    if (sourceHandleId) {
+      const parsed = parseHandleId(sourceHandleId);
+      if (parsed) {
+        const ports =
+          nt === "subgraph"
+            ? node.data.subgraphOutputs
+            : node.data.subgraphInputs;
+        const port = ports?.find(p => p.name === parsed.name);
+        if (port?.paramType) return port.paramType as ResolvedType;
+      }
+    }
+    return "number";
   }
   return undefined;
 }
@@ -80,9 +105,6 @@ export function resolveTargetType(
       targetParamName === "last_frame"
     ) {
       return "string";
-    }
-    if (targetParamName === "video") {
-      return "video_path";
     }
     return undefined;
   }

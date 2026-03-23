@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { NODE_TOKENS } from "./tokens";
 
 interface NodePillSearchableSelectProps {
@@ -20,32 +21,43 @@ export function NodePillSearchableSelect({
 }: NodePillSearchableSelectProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [searchText, setSearchText] = useState("");
-  const containerRef = useRef<HTMLDivElement>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const dropdownRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollableRef = useRef<HTMLDivElement>(null);
+  const [dropdownPos, setDropdownPos] = useState<{
+    top: number;
+    left: number;
+  }>({ top: 0, left: 0 });
+
+  const updatePosition = useCallback(() => {
+    if (!buttonRef.current) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+  }, []);
 
   useEffect(() => {
+    if (!isOpen) return;
+    updatePosition();
+    setTimeout(() => inputRef.current?.focus(), 0);
+
     const handleClickOutside = (event: MouseEvent) => {
+      const target = event.target as Node;
       if (
-        containerRef.current &&
-        !containerRef.current.contains(event.target as Node)
-      ) {
-        setIsOpen(false);
-        setSearchText("");
-      }
+        buttonRef.current?.contains(target) ||
+        dropdownRef.current?.contains(target)
+      )
+        return;
+      setIsOpen(false);
+      setSearchText("");
     };
 
-    if (isOpen) {
-      document.addEventListener("mousedown", handleClickOutside);
-      setTimeout(() => inputRef.current?.focus(), 0);
-    }
-
+    document.addEventListener("mousedown", handleClickOutside);
     return () => {
       document.removeEventListener("mousedown", handleClickOutside);
     };
-  }, [isOpen]);
+  }, [isOpen, updatePosition]);
 
-  // Prevent graph zoom when scrolling dropdown
   useEffect(() => {
     const scrollable = scrollableRef.current;
     if (!scrollable) return;
@@ -79,8 +91,9 @@ export function NodePillSearchableSelect({
   };
 
   return (
-    <div ref={containerRef} className={`relative ${className}`}>
+    <div className={`relative ${className}`}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
@@ -90,54 +103,58 @@ export function NodePillSearchableSelect({
         <span className="ml-1 shrink-0">▼</span>
       </button>
 
-      {isOpen && (
-        <div
-          className="absolute z-50 mt-1 w-[200px] bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] rounded-lg shadow-lg max-h-[240px] overflow-hidden flex flex-col nowheel"
-          onMouseDown={e => e.stopPropagation()}
-          onWheel={e => e.stopPropagation()}
-        >
-          <input
-            ref={inputRef}
-            type="text"
-            value={searchText}
-            onChange={e => setSearchText(e.target.value)}
-            placeholder={placeholder}
-            className="px-2 py-1 text-[10px] bg-[#2a2a2a] border-b border-[rgba(119,119,119,0.15)] text-[#fafafa] focus:outline-none focus:ring-1 focus:ring-blue-400/50"
+      {isOpen &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            className="fixed z-[9999] w-[200px] bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] rounded-lg shadow-lg max-h-[240px] overflow-hidden flex flex-col nowheel"
+            style={{ top: dropdownPos.top, left: dropdownPos.left }}
             onMouseDown={e => e.stopPropagation()}
             onWheel={e => e.stopPropagation()}
-          />
-          <div
-            ref={scrollableRef}
-            className="overflow-y-auto overflow-x-hidden max-h-[200px] nowheel [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-black/50 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-black/70"
-            style={{
-              scrollbarWidth: "thin",
-              scrollbarColor: "rgba(0,0,0,0.5) transparent",
-            }}
           >
-            {filteredOptions.length === 0 ? (
-              <div className="px-2 py-1 text-[10px] text-[#8c8c8d] text-center">
-                No matches
-              </div>
-            ) : (
-              filteredOptions.map(opt => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => handleSelect(opt.value)}
-                  className={`w-full px-2 py-1 text-[10px] text-left hover:bg-[#2a2a2a] transition-colors truncate ${
-                    opt.value === value
-                      ? "bg-[#2a2a2a] text-blue-400"
-                      : "text-[#fafafa]"
-                  }`}
-                  onMouseDown={e => e.stopPropagation()}
-                >
-                  {opt.label}
-                </button>
-              ))
-            )}
-          </div>
-        </div>
-      )}
+            <input
+              ref={inputRef}
+              type="text"
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              placeholder={placeholder}
+              className="px-2 py-1 text-[10px] bg-[#2a2a2a] border-b border-[rgba(119,119,119,0.15)] text-[#fafafa] focus:outline-none focus:ring-1 focus:ring-blue-400/50"
+              onMouseDown={e => e.stopPropagation()}
+              onWheel={e => e.stopPropagation()}
+            />
+            <div
+              ref={scrollableRef}
+              className="overflow-y-auto overflow-x-hidden max-h-[200px] nowheel [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-black/50 [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-black/70"
+              style={{
+                scrollbarWidth: "thin",
+                scrollbarColor: "rgba(0,0,0,0.5) transparent",
+              }}
+            >
+              {filteredOptions.length === 0 ? (
+                <div className="px-2 py-1 text-[10px] text-[#8c8c8d] text-center">
+                  No matches
+                </div>
+              ) : (
+                filteredOptions.map(opt => (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => handleSelect(opt.value)}
+                    className={`w-full px-2 py-1 text-[10px] text-left hover:bg-[#2a2a2a] transition-colors truncate ${
+                      opt.value === value
+                        ? "bg-[#2a2a2a] text-blue-400"
+                        : "text-[#fafafa]"
+                    }`}
+                    onMouseDown={e => e.stopPropagation()}
+                  >
+                    {opt.label}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

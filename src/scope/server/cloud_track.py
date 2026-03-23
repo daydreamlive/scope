@@ -212,12 +212,12 @@ class CloudTrack(MediaStreamTrack):
 
     def update_parameters(self, params: dict) -> None:
         """Update pipeline parameters on cloud."""
-        # Handle Spout settings via FrameProcessor
+        # Send to cloud first
+        self.cloud_manager.send_parameters(params)
+
+        # Handle local concerns (Spout/NDI settings) via FrameProcessor
         if self.frame_processor:
             self.frame_processor.update_parameters(params)
-
-        # Also send to cloud
-        self.cloud_manager.send_parameters(params)
 
     def pause(self, paused: bool) -> None:
         """Pause/unpause the relay."""

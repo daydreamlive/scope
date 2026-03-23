@@ -27,9 +27,10 @@ export function CustomEdge({
   return (
     <>
       <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
-      {/* Clickable delete-dot anchored to the midpoint of the edge */}
-      <g transform={`translate(${labelX}, ${labelY})`}>
-        {/* Invisible larger hit area for easier clicking */}
+      <g
+        className="edge-delete-dot"
+        transform={`translate(${labelX}, ${labelY})`}
+      >
         <circle
           r={12}
           fill="transparent"
@@ -41,7 +42,6 @@ export function CustomEdge({
             }
           }}
         />
-        {/* Visible dot */}
         <circle
           r={5}
           fill={edgeColor}

@@ -15,7 +15,10 @@ import { PromptInputWithTimeline } from "../components/PromptInputWithTimeline";
 import { DownloadDialog } from "../components/DownloadDialog";
 import { WorkflowExportDialog } from "../components/WorkflowExportDialog";
 import { WorkflowImportDialog } from "../components/WorkflowImportDialog";
-import type { WorkflowPromptState } from "../lib/workflowSettings";
+import {
+  buildScopeWorkflow,
+  type WorkflowPromptState,
+} from "../lib/workflowSettings";
 import { GraphEditor } from "../components/graph/GraphEditor";
 import type { GraphEditorHandle } from "../components/graph/GraphEditor";
 import type { TimelinePrompt } from "../components/PromptTimeline";
@@ -52,22 +55,30 @@ import type {
 import type {
   PromptItem,
   PromptTransition,
-  PluginInfo,
   GraphConfig,
   PipelineLoadItem,
+  PluginInfo,
 } from "../lib/api";
 import {
   getInputSourceResolution,
   fetchDaydreamWorkflow,
   getDmxStatus,
 } from "../lib/api";
+import type { ScopeWorkflow } from "../lib/workflowApi";
+import { linearGraphFromSettings, stripUIFields } from "../lib/graphUtils";
+import { resolveLoRAPath } from "../lib/workflowSettings";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { usePluginsContext } from "../contexts/PluginsContext";
 import { useServerInfoContext } from "../contexts/ServerInfoContext";
-import type { ScopeWorkflow } from "../lib/workflowApi";
-import { linearGraphFromSettings, stripUIFields } from "../lib/graphUtils";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
+import {
+  isAuthenticated as checkIsAuthenticated,
+  getDaydreamAPIKey,
+  redirectToSignIn,
+} from "../lib/auth";
+import { createDaydreamImportSession } from "../lib/daydreamExport";
+import { openExternalUrl } from "../lib/openExternal";
 
 interface OscCommand {
   key: string;
@@ -122,6 +133,10 @@ export function StreamPage() {
     isConnecting: isBackendCloudConnecting,
     connectStage: cloudConnectStage,
   } = useCloudStatus();
+
+  const { loraFiles } = useLoRAsContext();
+  const { plugins } = usePluginsContext();
+  const { version: scopeVersion } = useServerInfoContext();
 
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
@@ -309,6 +324,102 @@ export function StreamPage() {
   const [showWorkflowImport, setShowWorkflowImport] = useState(false);
   const [preloadedWorkflow, setPreloadedWorkflow] =
     useState<ScopeWorkflow | null>(null);
+
+  // Daydream export state
+  const [isExportingToDaydream, setIsExportingToDaydream] = useState(false);
+  const [isDaydreamAuthenticated, setIsDaydreamAuthenticated] = useState(
+    checkIsAuthenticated()
+  );
+
+  useEffect(() => {
+    const handleAuthChange = () => {
+      setIsDaydreamAuthenticated(checkIsAuthenticated());
+    };
+    window.addEventListener("daydream-auth-change", handleAuthChange);
+    return () => {
+      window.removeEventListener("daydream-auth-change", handleAuthChange);
+    };
+  }, []);
+
+  const handleExportToDaydream = useCallback(async () => {
+    if (!isDaydreamAuthenticated) {
+      redirectToSignIn();
+      return;
+    }
+
+    const apiKey = getDaydreamAPIKey();
+    if (!apiKey) {
+      toast.error("Not authenticated with Daydream");
+      return;
+    }
+
+    const isElectron = Boolean(
+      (window as unknown as { scope?: { openExternal?: unknown } }).scope
+        ?.openExternal
+    );
+    // Open a blank tab synchronously while user-activation is still live,
+    // so popup blockers don't interfere. Electron uses IPC and doesn't need this.
+    const pendingTab = isElectron ? null : window.open("about:blank", "_blank");
+
+    setIsExportingToDaydream(true);
+    try {
+      const pluginInfoMap = new Map<string, PluginInfo>(
+        plugins.map(p => [p.name, p])
+      );
+
+      const workflow = buildScopeWorkflow({
+        name: "Untitled Workflow",
+        settings,
+        timelinePrompts,
+        promptState: {
+          promptItems,
+          interpolationMethod,
+          transitionSteps,
+          temporalInterpolationMethod,
+        },
+        pipelineInfoMap: pipelines ?? {},
+        loraFiles,
+        pluginInfoMap,
+        scopeVersion: scopeVersion ?? "unknown",
+      });
+
+      const result = await createDaydreamImportSession(
+        apiKey,
+        workflow,
+        workflow.metadata.name
+      );
+
+      if (pendingTab) {
+        pendingTab.location.href = result.createUrl;
+      } else {
+        openExternalUrl(result.createUrl);
+      }
+      toast.success("Opening daydream.live...", {
+        description:
+          "Your workflow has been sent to daydream.live for publishing.",
+      });
+    } catch (err) {
+      pendingTab?.close();
+      console.error("Export to daydream.live failed:", err);
+      toast.error("Export failed", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setIsExportingToDaydream(false);
+    }
+  }, [
+    isDaydreamAuthenticated,
+    plugins,
+    settings,
+    timelinePrompts,
+    promptItems,
+    interpolationMethod,
+    transitionSteps,
+    temporalInterpolationMethod,
+    pipelines,
+    loraFiles,
+    scopeVersion,
+  ]);
 
   // Handle install-workflow deep links from Electron
   useEffect(() => {
@@ -1131,6 +1242,17 @@ export function StreamPage() {
     }
   };
 
+  const handleOutputSinkBulkChange = (
+    sinks: Record<string, { enabled: boolean; name: string }>
+  ) => {
+    updateSettings({ outputSinks: sinks });
+    if (isStreaming) {
+      sendParameterUpdate({
+        output_sinks: sinks,
+      });
+    }
+  };
+
   // Handle Spout input name change from InputAndControlsPanel
   const handleSpoutSourceChange = (name: string) => {
     updateSettings({
@@ -1777,7 +1899,16 @@ export function StreamPage() {
             if (graphPipelineIds.length > 0) {
               pipelineIds.length = 0;
               pipelineIds.push(...graphPipelineIds);
-              pipelineIdToUse = graphPipelineIds[0];
+              // Find the main pipeline (first non-preprocessor, non-postprocessor)
+              const mainPid = graphPipelineIds.find(pid => {
+                const schema = pipelines?.[pid];
+                const usage = schema?.usage ?? [];
+                return (
+                  !usage.includes("preprocessor") &&
+                  !usage.includes("postprocessor")
+                );
+              });
+              pipelineIdToUse = mainPid ?? graphPipelineIds[0];
             }
 
             // Extract source mode from the graph's source node and normalize
@@ -1971,23 +2102,78 @@ export function StreamPage() {
       // Build a linear graph for perform mode so backend uses the unified graph path.
       // In graph/nonLinearGraph mode, graphConfigForStream is already set above.
       if (!graphMode && !nonLinearGraph) {
+        // Resolve which pipelines should receive input as vace_input_frames
+        // (mirrors the backend's _setup_pipelines_sync fallback logic)
+        const vaceInputVideoIds = new Set<string>();
+        if (
+          vaceEnabled &&
+          (settings.vaceUseInputVideo ?? false) &&
+          currentMode === "video"
+        ) {
+          const allIds = [
+            ...(settings.preprocessorIds ?? []),
+            pipelineIdToUse,
+            ...(settings.postprocessorIds ?? []),
+          ];
+          for (const pid of allIds) {
+            if (pipelines?.[pid]?.supportsVACE) {
+              vaceInputVideoIds.add(pid);
+            }
+          }
+        }
+
         graphConfigForStream = linearGraphFromSettings(
           pipelineIdToUse,
           settings.preprocessorIds ?? [],
-          settings.postprocessorIds ?? []
+          settings.postprocessorIds ?? [],
+          vaceInputVideoIds.size > 0 ? vaceInputVideoIds : undefined
         );
       }
 
       // Build PipelineLoadItem[] from graph nodes (always available at this
       // point — perform mode builds a linear graph above).
+      // Per-node load_params ensures each pipeline gets vace_enabled when it supports VACE
+      // and LoRA adapters when configured via LoRA nodes.
+      const loraSettings = graphEditorRef.current?.getGraphLoRASettings() ?? [];
+      const loraByNode = new Map(loraSettings.map(s => [s.pipelineNodeId, s]));
+
       const loadItems: PipelineLoadItem[] = graphConfigForStream
         ? graphConfigForStream.nodes
             .filter(n => n.type === "pipeline" && n.pipeline_id)
-            .map(n => ({
-              node_id: n.id,
-              pipeline_id: n.pipeline_id as string,
-              load_params: loadParams,
-            }))
+            .map(n => {
+              const pid = n.pipeline_id as string;
+              const pipeSchema = pipelines?.[pid];
+              const nodeLoadParams = { ...(loadParams ?? {}) };
+              const nParams = graphConfigForStream?.ui_state?.node_params as
+                | Record<string, Record<string, unknown>>
+                | undefined;
+              const nodeBag = nParams?.[n.id];
+              if (typeof nodeBag?.height === "number")
+                nodeLoadParams.height = nodeBag.height;
+              if (typeof nodeBag?.width === "number")
+                nodeLoadParams.width = nodeBag.width;
+              if (pipeSchema?.supportsVACE) {
+                nodeLoadParams.vace_enabled = true;
+                const nodeVaceScale = nodeBag?.vace_context_scale;
+                nodeLoadParams.vace_context_scale =
+                  typeof nodeVaceScale === "number"
+                    ? nodeVaceScale
+                    : (settings.vaceContextScale ?? 1.0);
+              }
+              const loraConfig = loraByNode.get(n.id);
+              if (loraConfig && loraConfig.loras.length > 0) {
+                nodeLoadParams.loras = loraConfig.loras.map(l => ({
+                  ...l,
+                  path: resolveLoRAPath(l.path, loraFiles),
+                }));
+                nodeLoadParams.lora_merge_mode = loraConfig.lora_merge_mode;
+              }
+              return {
+                node_id: n.id,
+                pipeline_id: pid,
+                load_params: nodeLoadParams,
+              };
+            })
         : pipelineIds.map(pid => ({
             node_id: pid,
             pipeline_id: pid,
@@ -2097,7 +2283,53 @@ export function StreamPage() {
       initialParameters.produces_audio = latestInfo?.produces_audio ?? false;
 
       // VACE-specific parameters
-      if (currentPipeline?.supportsVACE) {
+      if (graphMode || nonLinearGraph) {
+        // In graph mode, extract VACE settings from VaceNode connections.
+        // The VaceNode's compound output (__vace) carries context_scale,
+        // ref_images, and frame references to the connected pipeline node.
+        const vaceSettings =
+          graphEditorRef.current?.getGraphVaceSettings() ?? [];
+        if (vaceSettings.length > 0) {
+          // Use the first VaceNode's settings for global initialParameters
+          // (backend broadcasts initial_parameters to all processors)
+          const first = vaceSettings[0];
+          initialParameters.vace_enabled = true;
+          initialParameters.vace_context_scale = first.vace_context_scale;
+          initialParameters.vace_use_input_video = first.vace_use_input_video;
+          if (first.vace_ref_images?.length) {
+            initialParameters.vace_ref_images = first.vace_ref_images;
+          }
+          if (first.first_frame_image) {
+            initialParameters.first_frame_image = first.first_frame_image;
+          }
+          if (first.last_frame_image) {
+            initialParameters.last_frame_image = first.last_frame_image;
+          }
+        } else {
+          // No VaceNode in graph; check if any pipeline supports VACE and
+          // use perform-mode settings as fallback
+          const anyVace = pipelineIds.some(
+            pid => pipelines?.[pid]?.supportsVACE
+          );
+          if (anyVace) {
+            initialParameters.vace_enabled = vaceEnabled;
+            initialParameters.vace_context_scale =
+              settings.vaceContextScale ?? 1.0;
+            if (currentMode === "video") {
+              initialParameters.vace_use_input_video =
+                settings.vaceUseInputVideo ?? false;
+            }
+            const vaceParams = getVaceParams(
+              settings.refImages,
+              settings.vaceContextScale
+            );
+            if ("vace_ref_images" in vaceParams) {
+              initialParameters.vace_ref_images = vaceParams.vace_ref_images;
+            }
+          }
+        }
+      } else if (currentPipeline?.supportsVACE) {
+        // Perform mode: use settings panel values
         const vaceParams = getVaceParams(
           settings.refImages,
           settings.vaceContextScale
@@ -2105,10 +2337,7 @@ export function StreamPage() {
         if ("vace_ref_images" in vaceParams) {
           initialParameters.vace_ref_images = vaceParams.vace_ref_images;
         }
-        // Always send vace_context_scale when VACE is supported,
-        // not just when ref images are present (it also applies to input video VACE)
         initialParameters.vace_context_scale = settings.vaceContextScale ?? 1.0;
-        // Add vace_use_input_video parameter
         if (currentMode === "video") {
           initialParameters.vace_use_input_video =
             settings.vaceUseInputVideo ?? false;
@@ -2118,7 +2347,6 @@ export function StreamPage() {
         currentPipeline?.supportsImages &&
         settings.refImages?.length
       ) {
-        // Non-VACE pipelines that support images
         initialParameters.images = settings.refImages;
       }
 
@@ -2171,6 +2399,41 @@ export function StreamPage() {
         Object.assign(initialParameters, settings.schemaFieldOverrides);
       }
 
+      // Override initialParameters with graph node params for the main pipeline.
+      // When a workflow is imported into graph mode, per-node params (denoising
+      // steps, noise scale, etc.) are stored in ui_state.node_params but not
+      // reflected in settings.*. Apply them so the backend receives the correct
+      // values at stream start.
+      if ((graphMode || nonLinearGraph) && graphConfigForStream?.ui_state) {
+        const nodeParams = graphConfigForStream.ui_state.node_params as
+          | Record<string, Record<string, unknown>>
+          | undefined;
+        if (nodeParams) {
+          const mainNode = graphConfigForStream.nodes.find(
+            n => n.type === "pipeline" && n.pipeline_id === pipelineIdToUse
+          );
+          const mainNodeParams = mainNode ? nodeParams[mainNode.id] : undefined;
+          if (mainNodeParams) {
+            const RUNTIME_PARAMS = [
+              "denoising_step_list",
+              "noise_scale",
+              "noise_controller",
+              "manage_cache",
+              "kv_cache_attention_bias",
+              "vace_enabled",
+              "vace_context_scale",
+              "vace_use_input_video",
+            ] as const;
+            for (const key of RUNTIME_PARAMS) {
+              if (mainNodeParams[key] !== undefined) {
+                (initialParameters as Record<string, unknown>)[key] =
+                  mainNodeParams[key];
+              }
+            }
+          }
+        }
+      }
+
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 
@@ -2205,6 +2468,32 @@ export function StreamPage() {
       });
     }
   };
+
+  const handleStartRecording = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await api.startRecording(sessionId);
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      toast.error("Failed to start recording");
+    }
+  }, [sessionId, api]);
+
+  const handleStopRecording = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await api.downloadRecording(sessionId);
+    } catch (error) {
+      console.error("Error downloading recording:", error);
+      toast.error("Failed to save recording");
+    }
+    try {
+      await api.stopRecording(sessionId);
+    } catch (error) {
+      console.error("Error stopping recording:", error);
+      toast.error("Failed to stop recording");
+    }
+  }, [sessionId, api]);
 
   // Handle workflow import: load settings, timeline, and prompt state
   const handleWorkflowLoad = useCallback(
@@ -2246,6 +2535,10 @@ export function StreamPage() {
     },
     [updateSettings, skipNextModeReset, settings.inputMode]
   );
+
+  const handleWorkflowLoadToGraph = useCallback((workflow: ScopeWorkflow) => {
+    graphEditorRef.current?.loadWorkflow(workflow);
+  }, []);
 
   return (
     <MIDIProvider
@@ -2326,7 +2619,19 @@ export function StreamPage() {
                     sourceMode === "video" || sourceMode === "camera"
                       ? "video"
                       : "video"; // server-side sources still use "video" inputMode
-                  updateSettings({ inputMode });
+
+                  // Also sync resolution to match the new input mode so
+                  // perform mode shows the correct video-mode defaults.
+                  const pid = (firstPipeline?.pipeline_id ??
+                    settings.pipelineId) as PipelineId;
+                  const modeDefaults = getDefaults(pid, inputMode);
+                  const resolution = customVideoResolution
+                    ? capResolution(customVideoResolution, pid, inputMode)
+                    : {
+                        height: modeDefaults.height,
+                        width: modeDefaults.width,
+                      };
+                  updateSettings({ inputMode, resolution });
 
                   // Sync to useVideoSource
                   if (
@@ -2370,6 +2675,7 @@ export function StreamPage() {
         >
           <GraphEditor
             ref={graphEditorRef}
+            visible={graphMode}
             isStreaming={isStreaming}
             isConnecting={isConnecting || isCloudConnecting}
             isLoading={isPipelineLoading || isDownloading}
@@ -2395,9 +2701,20 @@ export function StreamPage() {
             onNdiSourceChange={handleNdiSourceChange}
             onSyphonSourceChange={handleSyphonSourceChange}
             onOutputSinkChange={handleOutputSinkChange}
+            onOutputSinkBulkChange={handleOutputSinkBulkChange}
             spoutOutputAvailable={spoutAvailable}
             ndiOutputAvailable={ndiOutputAvailable}
             syphonOutputAvailable={syphonOutputAvailable}
+            onStartRecording={handleStartRecording}
+            onStopRecording={handleStopRecording}
+            resolution={
+              settings.resolution || {
+                height: getDefaults(settings.pipelineId, settings.inputMode)
+                  .height,
+                width: getDefaults(settings.pipelineId, settings.inputMode)
+                  .width,
+              }
+            }
           />
         </div>
 
@@ -2732,6 +3049,9 @@ export function StreamPage() {
                   onRecordingToggle={() => setIsRecording(prev => !prev)}
                   onWorkflowExport={() => setShowWorkflowExport(true)}
                   onWorkflowImport={() => setShowWorkflowImport(true)}
+                  onExportToDaydream={handleExportToDaydream}
+                  isAuthenticated={isDaydreamAuthenticated}
+                  isExportingToDaydream={isExportingToDaydream}
                 />
               </div>
             </div>
@@ -2892,6 +3212,7 @@ export function StreamPage() {
             setPreloadedWorkflow(null);
           }}
           onLoad={handleWorkflowLoad}
+          onLoadToGraph={graphMode ? handleWorkflowLoadToGraph : undefined}
           initialWorkflow={preloadedWorkflow}
         />
       </div>

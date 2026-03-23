@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { useStore, useNodeId, useReactFlow } from "@xyflow/react";
 import type { Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
 
 interface NodeFlags {
   locked: boolean;

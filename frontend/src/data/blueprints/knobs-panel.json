@@ -1,0 +1,33 @@
+{
+  "name": "Knobs Panel",
+  "description": "Four knobs pre-configured for common pipeline parameters — Guidance, Steps, Strength, and Denoise — ready to wire",
+  "category": "UI",
+  "color": "#38bdf8",
+  "thumbnail": null,
+  "nodes": [
+    {
+      "id": "knobs",
+      "type": "knobs",
+      "position": { "x": 0, "y": 0 },
+      "width": 280,
+      "data": {
+        "label": "Knobs",
+        "nodeType": "knobs",
+        "customTitle": "Param Panel",
+        "knobs": [
+          { "label": "Guidance", "min": 1, "max": 20, "value": 7.5 },
+          { "label": "Steps", "min": 1, "max": 50, "value": 4 },
+          { "label": "Strength", "min": 0, "max": 1, "value": 0.8 },
+          { "label": "Denoise", "min": 0, "max": 1000, "value": 500 }
+        ],
+        "parameterOutputs": [
+          { "name": "knob_0", "type": "number", "defaultValue": 7.5 },
+          { "name": "knob_1", "type": "number", "defaultValue": 4 },
+          { "name": "knob_2", "type": "number", "defaultValue": 0.8 },
+          { "name": "knob_3", "type": "number", "defaultValue": 500 }
+        ]
+      }
+    }
+  ],
+  "edges": []
+}

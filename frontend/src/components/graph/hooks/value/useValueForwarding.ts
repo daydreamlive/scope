@@ -1,9 +1,9 @@
 import { useEffect, useRef } from "react";
 import type { Edge, Node } from "@xyflow/react";
-import type { FlowNodeData } from "../../../lib/graphUtils";
-import { parseHandleId } from "../../../lib/graphUtils";
+import type { FlowNodeData, SubgraphPort } from "../../../../lib/graphUtils";
+import { parseHandleId } from "../../../../lib/graphUtils";
+import { getAnyValueFromNode } from "../../utils/getValueFromNode";
 
-// Shallow compare (arrays element-wise)
 function valuesEqual(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (Array.isArray(a) && Array.isArray(b)) {
@@ -13,7 +13,6 @@ function valuesEqual(a: unknown, b: unknown): boolean {
     }
     return true;
   }
-  // Knob objects
   if (a && b && typeof a === "object" && typeof b === "object") {
     const ka = Object.keys(a as Record<string, unknown>);
     const kb = Object.keys(b as Record<string, unknown>);
@@ -32,7 +31,6 @@ function valuesEqual(a: unknown, b: unknown): boolean {
   return false;
 }
 
-// Node types that produce outputs
 const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "primitive",
   "control",
@@ -46,17 +44,75 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "vace",
   "midi",
   "bool",
+  "trigger",
+  "subgraph_input",
+  "subgraph",
 ]);
 
-// Node types that receive inputs
 const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
+  "primitive",
   "slider",
   "knobs",
   "xypad",
   "tuple",
   "reroute",
   "vace",
+  "pipeline",
+  "record",
 ]);
+
+function resolveSubgraphTarget(
+  sgNode: Node<FlowNodeData>,
+  portName: string,
+  allNodes: Node<FlowNodeData>[],
+  prefix: string
+): { backendId: string; paramName: string } | null {
+  const ports: SubgraphPort[] = sgNode.data.subgraphInputs ?? [];
+  const port = ports.find(p => p.name === portName);
+  if (!port) return null;
+
+  const sgPrefix = prefix ? `${prefix}${sgNode.id}:` : `${sgNode.id}:`;
+  const innerHandleParsed = parseHandleId(port.innerHandleId);
+  if (!innerHandleParsed) return null;
+  const innerParamName = innerHandleParsed.name;
+
+  const innerNodes = sgNode.data.subgraphNodes ?? [];
+  const innerNodeData = innerNodes.find(n => n.id === port.innerNodeId);
+
+  if (!innerNodeData) {
+    return {
+      backendId: sgPrefix + port.innerNodeId,
+      paramName: innerParamName,
+    };
+  }
+
+  const innerType =
+    innerNodeData.type || (innerNodeData.data.nodeType as string);
+
+  if (innerType === "subgraph") {
+    const nestedSgNode: Node<FlowNodeData> = {
+      id: port.innerNodeId,
+      type: "subgraph",
+      position: { x: 0, y: 0 },
+      data: innerNodeData.data as FlowNodeData,
+    };
+    return resolveSubgraphTarget(
+      nestedSgNode,
+      innerParamName,
+      allNodes,
+      sgPrefix
+    );
+  }
+
+  if (innerType === "pipeline") {
+    return {
+      backendId: sgPrefix + port.innerNodeId,
+      paramName: innerParamName,
+    };
+  }
+
+  return null;
+}
 
 export function useValueForwarding(
   nodes: Node<FlowNodeData>[],
@@ -75,9 +131,27 @@ export function useValueForwarding(
 ) {
   const lastForwardTimeRef = useRef<Record<string, number>>({});
 
-  // Output forwarding
+  // Track previous node data to skip backend sends when only positions changed
+  const prevNodeDataRef = useRef<Map<string, FlowNodeData>>(new Map());
+
   useEffect(() => {
     if (!isStreamingRef.current || !onNodeParamChangeRef.current) return;
+
+    // Check if any producer node data actually changed (not just positions)
+    let anyDataChanged = false;
+    const prevData = prevNodeDataRef.current;
+    const nextData = new Map<string, FlowNodeData>();
+    for (const node of nodes) {
+      if (!PRODUCER_TYPES.has(node.data.nodeType)) continue;
+      nextData.set(node.id, node.data);
+      if (prevData.get(node.id) !== node.data) {
+        anyDataChanged = true;
+      }
+    }
+    // Also detect removed nodes
+    if (nextData.size !== prevData.size) anyDataChanged = true;
+    prevNodeDataRef.current = nextData;
+    if (!anyDataChanged) return;
 
     const throttleMs = 100;
 
@@ -87,7 +161,6 @@ export function useValueForwarding(
       const connected = findConnectedPipelineParams(node.id, edges, nodes);
       if (connected.length === 0) continue;
 
-      // Collect values
       const valuesToForward: Array<{
         handleName: string | null;
         value: unknown;
@@ -142,11 +215,21 @@ export function useValueForwarding(
             });
           }
         }
-      } else if (node.data.nodeType === "bool") {
+      } else if (
+        node.data.nodeType === "bool" ||
+        node.data.nodeType === "trigger"
+      ) {
         valuesToForward.push({ handleName: "value", value: node.data.value });
+      } else if (
+        node.data.nodeType === "subgraph_input" ||
+        node.data.nodeType === "subgraph"
+      ) {
+        const pv = (node.data.portValues ?? {}) as Record<string, unknown>;
+        for (const [key, val] of Object.entries(pv)) {
+          valuesToForward.push({ handleName: key, value: val });
+        }
       }
 
-      // Throttle animated
       const isAnimated =
         node.data.nodeType === "control" || node.data.nodeType === "math";
       if (isAnimated) {
@@ -156,7 +239,6 @@ export function useValueForwarding(
         lastForwardTimeRef.current[node.id] = now;
       }
 
-      // Forward to pipelines
       for (const edge of edges) {
         if (edge.source !== node.id) continue;
         const sourceParsed = parseHandleId(edge.sourceHandle);
@@ -164,20 +246,34 @@ export function useValueForwarding(
         if (!sourceParsed || sourceParsed.kind !== "param") continue;
         if (!targetParsed || targetParsed.kind !== "param") continue;
 
-        // Find target
         const targetNode = nodes.find(n => n.id === edge.target);
         if (!targetNode) continue;
 
-        // Pipelines only
-        if (targetNode.data.nodeType !== "pipeline") continue;
+        let resolvedBackendId: string | null = null;
+        let resolvedParamName: string | null = null;
 
-        // VACE: expand to individual params
+        if (targetNode.data.nodeType === "subgraph") {
+          const result = resolveSubgraphTarget(
+            targetNode,
+            targetParsed.name,
+            nodes,
+            ""
+          );
+          if (result) {
+            resolvedBackendId = result.backendId;
+            resolvedParamName = result.paramName;
+          } else continue;
+        } else if (targetNode.data.nodeType === "pipeline") {
+          resolvedBackendId = resolveBackendId(edge.target);
+          resolvedParamName = targetParsed.name;
+        } else continue;
+
         if (
           node.data.nodeType === "vace" &&
           sourceParsed.name === "__vace" &&
           targetParsed.name === "__vace"
         ) {
-          const backendId = resolveBackendId(edge.target);
+          const backendId = resolvedBackendId;
           const ctxScale =
             typeof node.data.vaceContextScale === "number"
               ? node.data.vaceContextScale
@@ -188,68 +284,47 @@ export function useValueForwarding(
             ctxScale
           );
 
-          const vaceVideo = (node.data.vaceVideo as string) || "";
-          if (vaceVideo) {
-            // Video mode
+          onNodeParamChangeRef.current(
+            backendId,
+            "vace_use_input_video",
+            false
+          );
+          const refImg = (node.data.vaceRefImage as string) || "";
+          if (refImg)
+            onNodeParamChangeRef.current(backendId, "vace_ref_images", [
+              refImg,
+            ]);
+          const firstFrame = (node.data.vaceFirstFrame as string) || "";
+          if (firstFrame)
             onNodeParamChangeRef.current(
               backendId,
-              "vace_use_input_video",
-              true
+              "first_frame_image",
+              firstFrame
             );
+          const lastFrame = (node.data.vaceLastFrame as string) || "";
+          if (lastFrame)
             onNodeParamChangeRef.current(
               backendId,
-              "vace_video_path",
-              vaceVideo
+              "last_frame_image",
+              lastFrame
             );
-          } else {
-            // Image mode
-            onNodeParamChangeRef.current(
-              backendId,
-              "vace_use_input_video",
-              false
-            );
-            const refImg = (node.data.vaceRefImage as string) || "";
-            if (refImg) {
-              onNodeParamChangeRef.current(backendId, "vace_ref_images", [
-                refImg,
-              ]);
-            }
-            const firstFrame = (node.data.vaceFirstFrame as string) || "";
-            if (firstFrame) {
-              onNodeParamChangeRef.current(
-                backendId,
-                "first_frame_image",
-                firstFrame
-              );
-            }
-            const lastFrame = (node.data.vaceLastFrame as string) || "";
-            if (lastFrame) {
-              onNodeParamChangeRef.current(
-                backendId,
-                "last_frame_image",
-                lastFrame
-              );
-            }
-          }
           continue;
         }
 
-        // Match value
         const entry = valuesToForward.find(v => {
-          if (v.handleName === null) return true; // value/control/math: single output
+          if (v.handleName === null) return true; // single-output node
           return v.handleName === sourceParsed.name;
         });
         if (!entry || entry.value === undefined) continue;
 
-        const backendId = resolveBackendId(edge.target);
-        if (targetParsed.name === "__prompt") {
-          onNodeParamChangeRef.current(backendId, "prompts", [
+        if (resolvedParamName === "__prompt") {
+          onNodeParamChangeRef.current(resolvedBackendId, "prompts", [
             { text: String(entry.value), weight: 100 },
           ]);
         } else {
           onNodeParamChangeRef.current(
-            backendId,
-            targetParsed.name,
+            resolvedBackendId,
+            resolvedParamName,
             entry.value
           );
         }
@@ -264,8 +339,6 @@ export function useValueForwarding(
     onNodeParamChangeRef,
   ]);
 
-  // Defer input consumption to rAF to avoid exceeding React's max update depth
-  const inputRafRef = useRef<number>(0);
   const nodesRef = useRef(nodes);
   const edgesRef = useRef(edges);
   nodesRef.current = nodes;
@@ -274,12 +347,11 @@ export function useValueForwarding(
   useEffect(() => {
     if (!setNodes) return;
 
-    cancelAnimationFrame(inputRafRef.current);
-    inputRafRef.current = requestAnimationFrame(() => {
+    let handle = 0;
+    const tick = () => {
       const currentNodes = nodesRef.current;
       const currentEdges = edgesRef.current;
 
-      // Build updates map
       const updates = new Map<string, Record<string, unknown>>();
 
       for (const edge of currentEdges) {
@@ -290,54 +362,23 @@ export function useValueForwarding(
         const targetParsed = parseHandleId(edge.targetHandle);
         if (!targetParsed || targetParsed.kind !== "param") continue;
 
-        // Find source
         const sourceNode = currentNodes.find(n => n.id === edge.source);
         if (!sourceNode) continue;
 
-        let sourceValue: unknown;
         const sourceParsed = parseHandleId(edge.sourceHandle);
         if (!sourceParsed || sourceParsed.kind !== "param") continue;
 
-        if (
-          sourceNode.data.nodeType === "primitive" ||
-          sourceNode.data.nodeType === "reroute"
-        ) {
-          sourceValue = sourceNode.data.value;
-        } else if (
-          sourceNode.data.nodeType === "control" ||
-          sourceNode.data.nodeType === "math"
-        ) {
-          sourceValue = sourceNode.data.currentValue;
-        } else if (sourceNode.data.nodeType === "slider") {
-          sourceValue = sourceNode.data.value;
-        } else if (sourceNode.data.nodeType === "knobs") {
-          const idx = parseInt(sourceParsed.name.replace("knob_", ""), 10);
-          const knobs = sourceNode.data.knobs;
-          if (knobs && !isNaN(idx) && idx < knobs.length) {
-            sourceValue = knobs[idx].value;
-          }
-        } else if (sourceNode.data.nodeType === "xypad") {
-          if (sourceParsed.name === "x") sourceValue = sourceNode.data.padX;
-          else if (sourceParsed.name === "y")
-            sourceValue = sourceNode.data.padY;
-        } else if (sourceNode.data.nodeType === "tuple") {
-          sourceValue = sourceNode.data.tupleValues;
-        } else if (sourceNode.data.nodeType === "midi") {
-          const idx = parseInt(sourceParsed.name.replace("midi_", ""), 10);
-          const midiChannels = sourceNode.data.midiChannels;
-          if (midiChannels && !isNaN(idx) && idx < midiChannels.length) {
-            sourceValue = midiChannels[idx].value;
-          }
-        } else if (sourceNode.data.nodeType === "bool") {
-          sourceValue = sourceNode.data.value;
-        }
+        const sourceValue = getAnyValueFromNode(sourceNode, edge.sourceHandle);
+        if (sourceValue === undefined || sourceValue === null) continue;
 
-        if (sourceValue === undefined) continue;
-
-        // Determine field
         const nodeUpdates = updates.get(edge.target) ?? {};
 
         if (
+          targetNode.data.nodeType === "primitive" &&
+          targetParsed.name === "value"
+        ) {
+          nodeUpdates["value"] = sourceValue;
+        } else if (
           targetNode.data.nodeType === "slider" &&
           targetParsed.name === "value"
         ) {
@@ -407,11 +448,28 @@ export function useValueForwarding(
             nodeUpdates["vaceFirstFrame"] = String(sourceValue);
           } else if (targetParsed.name === "last_frame") {
             nodeUpdates["vaceLastFrame"] = String(sourceValue);
-          } else if (targetParsed.name === "video") {
-            nodeUpdates["vaceVideo"] = String(sourceValue);
           }
         } else if (targetNode.data.nodeType === "reroute") {
           nodeUpdates["value"] = sourceValue;
+        } else if (
+          targetNode.data.nodeType === "record" &&
+          targetParsed.name === "trigger"
+        ) {
+          nodeUpdates["triggerValue"] = Boolean(sourceValue);
+        } else if (targetNode.data.nodeType === "pipeline") {
+          // Update parameterValues so the greyed-out pill shows live values
+          const prevParams = (nodeUpdates["parameterValues"] as Record<
+            string,
+            unknown
+          >) ?? {
+            ...((targetNode.data.parameterValues as Record<string, unknown>) ??
+              {}),
+          };
+          prevParams[targetParsed.name] = sourceValue;
+          nodeUpdates["parameterValues"] = prevParams;
+          if (targetParsed.name === "__prompt") {
+            nodeUpdates["promptText"] = String(sourceValue);
+          }
         }
 
         if (Object.keys(nodeUpdates).length > 0) {
@@ -419,12 +477,10 @@ export function useValueForwarding(
         }
       }
 
-      // Clear VACE fields for disconnected handles
       const vaceHandleFields: Record<string, string> = {
         ref_image: "vaceRefImage",
         first_frame: "vaceFirstFrame",
         last_frame: "vaceLastFrame",
-        video: "vaceVideo",
       };
       for (const node of currentNodes) {
         if (node.data.nodeType !== "vace") continue;
@@ -443,31 +499,33 @@ export function useValueForwarding(
         }
       }
 
-      if (updates.size === 0) return;
+      if (updates.size > 0) {
+        setNodes(nds => {
+          let anyNodeChanged = false;
+          const result = nds.map(n => {
+            const upd = updates.get(n.id);
+            if (!upd) return n;
 
-      // Apply updates (return original if unchanged)
-      setNodes(nds => {
-        let anyNodeChanged = false;
-        const result = nds.map(n => {
-          const upd = updates.get(n.id);
-          if (!upd) return n;
-
-          let changed = false;
-          for (const [key, val] of Object.entries(upd)) {
-            if (!valuesEqual(n.data[key], val)) {
-              changed = true;
-              break;
+            let changed = false;
+            for (const [key, val] of Object.entries(upd)) {
+              if (!valuesEqual(n.data[key], val)) {
+                changed = true;
+                break;
+              }
             }
-          }
-          if (!changed) return n;
+            if (!changed) return n;
 
-          anyNodeChanged = true;
-          return { ...n, data: { ...n.data, ...upd } };
+            anyNodeChanged = true;
+            return { ...n, data: { ...n.data, ...upd } };
+          });
+          return anyNodeChanged ? result : nds;
         });
-        return anyNodeChanged ? result : nds;
-      });
-    });
+      }
 
-    return () => cancelAnimationFrame(inputRafRef.current);
-  }, [nodes, edges, setNodes]);
+      handle = requestAnimationFrame(tick);
+    };
+    handle = requestAnimationFrame(tick);
+
+    return () => cancelAnimationFrame(handle);
+  }, [setNodes]);
 }

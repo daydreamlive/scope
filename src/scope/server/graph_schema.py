@@ -118,7 +118,7 @@ class GraphConfig(BaseModel):
 
         Checks:
         - No duplicate node IDs
-        - At least one source and one sink node
+        - At least one sink node (source nodes are optional)
         - Pipeline nodes have a pipeline_id
         - All edge references point to existing nodes
         """
@@ -132,9 +132,7 @@ class GraphConfig(BaseModel):
                 errors.append(f"Duplicate node ID: '{nid}'")
             seen.add(nid)
 
-        # At least one source and one sink
-        if not self.get_source_node_ids():
-            errors.append("Graph must have at least one source node")
+        # At least one sink
         if not self.get_sink_node_ids():
             errors.append("Graph must have at least one sink node")
 

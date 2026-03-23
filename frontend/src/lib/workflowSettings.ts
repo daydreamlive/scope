@@ -14,12 +14,14 @@ import type {
 } from "../types";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import type { PromptItem, LoRAFileInfo, PluginInfo } from "./api";
+import type { GraphConfig } from "./api";
 import type {
   WorkflowPipeline,
   WorkflowPipelineSource,
   WorkflowLoRA,
   WorkflowTimeline,
   WorkflowTimelineEntry,
+  WorkflowPrompt,
   ScopeWorkflow,
 } from "./workflowApi";
 
@@ -99,20 +101,36 @@ const KNOWN_PARAMS = new Set([
 // ---------------------------------------------------------------------------
 
 /** Extract just the filename from a full file path. */
-function extractFilename(path: string): string {
+export function extractFilename(path: string): string {
   const parts = path.split(/[/\\]/);
   return parts[parts.length - 1] || path;
 }
 
 /** Resolve a LoRA filename to the full path from the available files list. */
-function resolveLoRAPath(
+export function resolveLoRAPath(
   filename: string,
   availableLoRAs: LoRAFileInfo[]
 ): string {
-  const match = availableLoRAs.find(
-    f => extractFilename(f.path).toLowerCase() === filename.toLowerCase()
+  // Already a known full path
+  const exact = availableLoRAs.find(f => f.path === filename);
+  if (exact) return exact.path;
+
+  // Match by basename (with extension)
+  const basename = extractFilename(filename).toLowerCase();
+  const byBasename = availableLoRAs.find(
+    f => extractFilename(f.path).toLowerCase() === basename
   );
-  return match?.path ?? filename;
+  if (byBasename) return byBasename.path;
+
+  // Match by stem (without extension) — handles f.name which is the stem
+  const byStem = availableLoRAs.find(
+    f =>
+      f.name.toLowerCase() === basename ||
+      f.name.toLowerCase() === filename.toLowerCase()
+  );
+  if (byStem) return byStem.path;
+
+  return filename;
 }
 
 /** Determine the pipeline source (builtin vs plugin). */
@@ -207,6 +225,58 @@ function buildMainPipelineParams(
   }
 
   return params;
+}
+
+/**
+ * Extract LoRA configurations from ui_state LoRA nodes and their edges
+ * to pipeline nodes. Returns a map of pipelineNodeId -> LoRA entries.
+ */
+function extractLoRAsFromUiState(
+  uiState: Record<string, unknown> | undefined
+): Map<string, Array<{ path: string; scale: number; mergeMode?: string }>> {
+  const result = new Map<
+    string,
+    Array<{ path: string; scale: number; mergeMode?: string }>
+  >();
+  if (!uiState) return result;
+
+  const uiNodes = (uiState.nodes ?? []) as Array<{
+    id: string;
+    data?: { nodeType?: string; loras?: unknown; loraMergeMode?: string };
+  }>;
+  const uiEdges = (uiState.edges ?? []) as Array<{
+    source: string;
+    target: string;
+    sourceHandle?: string;
+    targetHandle?: string;
+  }>;
+
+  const loraNodes = new Map(
+    uiNodes.filter(n => n.data?.nodeType === "lora").map(n => [n.id, n])
+  );
+
+  for (const edge of uiEdges) {
+    if (
+      !edge.sourceHandle?.includes("__loras") ||
+      !edge.targetHandle?.includes("__loras")
+    )
+      continue;
+
+    const loraNode = loraNodes.get(edge.source);
+    if (!loraNode?.data?.loras) continue;
+
+    const entries = loraNode.data.loras as Array<{
+      path: string;
+      scale: number;
+      mergeMode?: string;
+    }>;
+    const validEntries = entries.filter(l => l.path);
+    if (validEntries.length > 0) {
+      result.set(edge.target, validEntries);
+    }
+  }
+
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -310,6 +380,106 @@ export function buildScopeWorkflow(
   };
 
   return workflow;
+}
+
+// ---------------------------------------------------------------------------
+// Export: GraphConfig -> ScopeWorkflow (with embedded graph)
+// ---------------------------------------------------------------------------
+
+export interface BuildGraphWorkflowInput {
+  name: string;
+  graphConfig: GraphConfig;
+  pipelineInfoMap: Record<string, PipelineInfo>;
+  pluginInfoMap: Map<string, PluginInfo>;
+  scopeVersion: string;
+  loraFiles?: LoRAFileInfo[];
+}
+
+/**
+ * Build a ScopeWorkflow from a graph-mode GraphConfig.
+ *
+ * The resulting workflow embeds the full graph topology in the `graph` field
+ * so graph mode can fully restore it. It also populates the `pipelines`
+ * array so perform mode (and the backend resolution API) can consume the
+ * same file without needing the graph.
+ */
+export function buildGraphWorkflow(
+  input: BuildGraphWorkflowInput
+): ScopeWorkflow {
+  const {
+    name,
+    graphConfig,
+    pipelineInfoMap,
+    pluginInfoMap,
+    scopeVersion,
+    loraFiles = [],
+  } = input;
+
+  const uiState = graphConfig.ui_state as Record<string, unknown> | undefined;
+  const nodeParams = uiState?.node_params as
+    | Record<string, Record<string, unknown>>
+    | undefined;
+
+  // Build a map: pipelineNodeId -> LoRA entries from LoRA nodes in ui_state
+  const lorasByPipeline = extractLoRAsFromUiState(uiState);
+
+  const pipelineNodes = graphConfig.nodes.filter(n => n.type === "pipeline");
+
+  const pipelines: WorkflowPipeline[] = pipelineNodes.map(node => {
+    const pipelineId = node.pipeline_id ?? "";
+    const bag = nodeParams?.[node.id] ?? {};
+
+    const params: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(bag)) {
+      if (key === "__prompt") continue;
+      params[key] = value;
+    }
+
+    const loraEntries = lorasByPipeline.get(node.id);
+    const loras: WorkflowLoRA[] = loraEntries
+      ? buildWorkflowLoRAs(
+          loraEntries.map(l => ({
+            id: `lora-${loraEntries.indexOf(l)}`,
+            path: l.path,
+            scale: l.scale,
+            mergeMode: l.mergeMode as LoraMergeStrategy | undefined,
+          })),
+          loraFiles,
+          "permanent_merge"
+        )
+      : [];
+
+    return {
+      pipeline_id: pipelineId,
+      pipeline_version: pipelineInfoMap[pipelineId]?.version ?? null,
+      source: buildPipelineSource(pipelineId, pipelineInfoMap, pluginInfoMap),
+      loras,
+      params,
+    };
+  });
+
+  // Extract prompts: use __prompt from the first pipeline node that has one
+  const prompts: WorkflowPrompt[] = [];
+  for (const node of pipelineNodes) {
+    const text = nodeParams?.[node.id]?.__prompt as string | undefined;
+    if (text) {
+      prompts.push({ text, weight: 1.0 });
+      break;
+    }
+  }
+
+  return {
+    format: "scope-workflow",
+    format_version: "1.0",
+    metadata: {
+      name,
+      created_at: new Date().toISOString(),
+      scope_version: scopeVersion,
+    },
+    pipelines,
+    prompts: prompts.length > 0 ? prompts : undefined,
+    graph: graphConfig,
+  };
 }
 
 // ---------------------------------------------------------------------------

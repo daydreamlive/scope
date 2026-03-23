@@ -1,0 +1,83 @@
+{
+  "name": "Timed Prompt Cycler",
+  "description": "A StringControl in animated step mode automatically cycles through 4 prompt slots on a timer — a Slider controls the cycle speed",
+  "category": "Controls",
+  "color": "#fbbf24",
+  "thumbnail": null,
+  "nodes": [
+    {
+      "id": "speed_slider",
+      "type": "slider",
+      "position": { "x": 0, "y": 0 },
+      "width": 240,
+      "data": {
+        "label": "Cycle Speed",
+        "nodeType": "slider",
+        "sliderMin": 0.05,
+        "sliderMax": 2,
+        "sliderStep": 0.05,
+        "value": 0.3,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0.3 }
+        ]
+      }
+    },
+    {
+      "id": "cycler",
+      "type": "control",
+      "position": { "x": 0, "y": 230 },
+      "width": 280,
+      "data": {
+        "label": "Prompt Cycler",
+        "nodeType": "control",
+        "controlType": "string",
+        "controlPattern": "step",
+        "controlSpeed": 0.3,
+        "controlMin": 0,
+        "controlMax": 1,
+        "controlItems": [
+          "a lion in the jungle",
+          "an astronaut on the moon",
+          "a dragon breathing fire",
+          "a city at sunset"
+        ],
+        "controlMode": "animated",
+        "isPlaying": false,
+        "parameterOutputs": [
+          { "name": "value", "type": "string", "defaultValue": "" }
+        ]
+      }
+    },
+    {
+      "id": "output",
+      "type": "primitive",
+      "position": { "x": 400, "y": 300 },
+      "width": 280,
+      "data": {
+        "label": "Current Prompt",
+        "nodeType": "primitive",
+        "valueType": "string",
+        "value": "",
+        "parameterOutputs": [
+          { "name": "value", "type": "string", "defaultValue": "" }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_speed",
+      "source": "speed_slider",
+      "sourceHandle": "param:value",
+      "target": "cycler",
+      "targetHandle": "param:speed"
+    },
+    {
+      "id": "e_output",
+      "source": "cycler",
+      "sourceHandle": "param:value",
+      "target": "output",
+      "targetHandle": "param:value"
+    }
+  ]
+}

@@ -1,8 +1,16 @@
 import { useCallback, useMemo } from "react";
 import type { Node } from "@xyflow/react";
-import { generateNodeId } from "../../../lib/graphUtils";
-import type { FlowNodeData } from "../../../lib/graphUtils";
+import { generateNodeId } from "../../../../lib/graphUtils";
+import type { FlowNodeData } from "../../../../lib/graphUtils";
+import {
+  deserializeNodes,
+  deserializeEdges,
+} from "../../utils/subgraphSerialization";
+import { buildEdgeStyle } from "../../constants";
+import type { Blueprint } from "../../../../data/blueprints/types";
 import { toast } from "sonner";
+import type { EnrichNodesDeps } from "../graph/useGraphPersistence";
+import { enrichNodes } from "../graph/useGraphPersistence";
 
 // Node defaults
 
@@ -24,8 +32,14 @@ type NodeTypeKey =
   | "output"
   | "image"
   | "vace"
+  | "lora"
   | "midi"
-  | "bool";
+  | "bool"
+  | "trigger"
+  | "subgraph"
+  | "subgraph_input"
+  | "subgraph_output"
+  | "record";
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -262,6 +276,19 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       parameterOutputs: [{ name: "__vace", type: "string", defaultValue: "" }],
     },
   },
+  lora: {
+    type: "lora",
+    idPrefix: "lora",
+    defaultX: 50,
+    style: { width: 220 },
+    data: {
+      label: "LoRA",
+      nodeType: "lora",
+      loras: [],
+      loraMergeMode: "permanent_merge",
+      parameterOutputs: [{ name: "__loras", type: "string", defaultValue: "" }],
+    },
+  },
   midi: {
     type: "midi",
     idPrefix: "midi",
@@ -294,6 +321,57 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       ],
     },
   },
+  trigger: {
+    type: "trigger",
+    idPrefix: "trigger",
+    defaultX: 50,
+    data: {
+      label: "Trigger",
+      nodeType: "trigger",
+      value: false,
+      parameterOutputs: [
+        { name: "value", type: "boolean", defaultValue: false },
+      ],
+    },
+  },
+  subgraph_input: {
+    type: "subgraph_input",
+    idPrefix: "sg_in",
+    defaultX: 50,
+    data: { label: "Subgraph Inputs", nodeType: "subgraph_input" },
+  },
+  subgraph_output: {
+    type: "subgraph_output",
+    idPrefix: "sg_out",
+    defaultX: 600,
+    data: { label: "Subgraph Outputs", nodeType: "subgraph_output" },
+  },
+  subgraph: {
+    type: "subgraph",
+    idPrefix: "subgraph",
+    defaultX: 300,
+    data: {
+      label: "Subgraph",
+      nodeType: "subgraph",
+      subgraphNodes: [],
+      subgraphEdges: [],
+      subgraphInputs: [],
+      subgraphOutputs: [],
+    },
+  },
+  record: {
+    type: "record",
+    idPrefix: "record",
+    defaultX: 900,
+    style: { width: 180, height: 100 },
+    data: {
+      label: "Record",
+      nodeType: "record",
+      parameterInputs: [
+        { name: "trigger", type: "boolean", defaultValue: false },
+      ],
+    },
+  },
 };
 
 interface UseNodeFactoriesArgs {
@@ -305,13 +383,14 @@ interface UseNodeFactoriesArgs {
   availablePipelineIds: string[];
   portsMap: Record<string, { inputs: string[]; outputs: string[] }>;
   handlePipelineSelect: (nodeId: string, newPipelineId: string | null) => void;
-  selectedNodeIds: string[];
-  setSelectedNodeIds: (ids: string[]) => void;
+  setSelectedNodeIds: React.Dispatch<React.SetStateAction<string[]>>;
   spoutOutputAvailable: boolean;
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
   pendingNodePosition: { x: number; y: number } | null;
   setPendingNodePosition: (pos: { x: number; y: number } | null) => void;
+  handleEdgeDelete: (edgeId: string) => void;
+  enrichDepsRef: React.RefObject<EnrichNodesDeps>;
 }
 
 export function useNodeFactories({
@@ -321,13 +400,14 @@ export function useNodeFactories({
   availablePipelineIds,
   portsMap,
   handlePipelineSelect,
-  selectedNodeIds,
   setSelectedNodeIds,
   spoutOutputAvailable,
   ndiOutputAvailable,
   syphonOutputAvailable,
   pendingNodePosition,
   setPendingNodePosition,
+  handleEdgeDelete,
+  enrichDepsRef,
 }: UseNodeFactoriesArgs) {
   const existingIds = useMemo(() => new Set(nodes.map(n => n.id)), [nodes]);
 
@@ -354,9 +434,9 @@ export function useNodeFactories({
           ...extraData,
         } as FlowNodeData,
       };
-      setNodes(nds => [...nds, newNode]);
+      setNodes(nds => enrichNodes([...nds, newNode], enrichDepsRef.current));
     },
-    [existingIds, nodes.length, setNodes]
+    [existingIds, nodes.length, setNodes, enrichDepsRef]
   );
 
   const handleNodeTypeSelect = useCallback(
@@ -377,8 +457,12 @@ export function useNodeFactories({
         | "reroute"
         | "image"
         | "vace"
+        | "lora"
         | "midi"
-        | "bool",
+        | "bool"
+        | "trigger"
+        | "subgraph"
+        | "record",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;
@@ -396,6 +480,14 @@ export function useNodeFactories({
         const hasSink = nodes.some(n => n.data.nodeType === "sink");
         if (hasSink) {
           toast.warning("Only one Sink node is allowed");
+          setPendingNodePosition(null);
+          return;
+        }
+      }
+      if (type === "record") {
+        const hasRecord = nodes.some(n => n.data.nodeType === "record");
+        if (hasRecord) {
+          toast.warning("Only one Record node is allowed");
           setPendingNodePosition(null);
           return;
         }
@@ -449,18 +541,95 @@ export function useNodeFactories({
 
   const handleDeleteNodes = useCallback(
     (nodeIds: string[]) => {
-      const idSet = new Set(nodeIds);
+      // Never delete boundary nodes
+      const PROTECTED = new Set([
+        "__sg_boundary_input__",
+        "__sg_boundary_output__",
+      ]);
+      const idSet = new Set(nodeIds.filter(id => !PROTECTED.has(id)));
+      if (idSet.size === 0) return;
       setNodes(nds => nds.filter(n => !idSet.has(n.id)));
       setEdges(eds =>
         eds.filter(e => !idSet.has(e.source) && !idSet.has(e.target))
       );
-      setSelectedNodeIds(selectedNodeIds.filter(id => !idSet.has(id)));
+      // Use functional updater to avoid stale selectedNodeIds closure
+      setSelectedNodeIds(prev => prev.filter(id => !idSet.has(id)));
     },
-    [setNodes, setEdges, selectedNodeIds, setSelectedNodeIds]
+    [setNodes, setEdges, setSelectedNodeIds]
+  );
+
+  const insertBlueprint = useCallback(
+    (blueprint: Blueprint, insertPos?: { x: number; y: number }) => {
+      const rawNodes = deserializeNodes(blueprint.nodes);
+      const rawEdges = deserializeEdges(blueprint.edges);
+
+      if (rawNodes.length === 0) return;
+
+      const currentIds = new Set(nodes.map(n => n.id));
+      const idMap = new Map<string, string>();
+
+      for (const node of rawNodes) {
+        const prefix = (node.data.nodeType as string) || node.type || "node";
+        const newId = generateNodeId(prefix, currentIds);
+        idMap.set(node.id, newId);
+        currentIds.add(newId);
+      }
+
+      // Compute bounding box origin to offset nodes relative to insert position
+      const minX = Math.min(...rawNodes.map(n => n.position.x));
+      const minY = Math.min(...rawNodes.map(n => n.position.y));
+      const targetPos = insertPos ?? { x: 200, y: 200 };
+
+      const newNodes: Node<FlowNodeData>[] = rawNodes.map(node => ({
+        ...node,
+        id: idMap.get(node.id)!,
+        position: {
+          x: node.position.x - minX + targetPos.x,
+          y: node.position.y - minY + targetPos.y,
+        },
+        selected: true,
+      }));
+
+      // Build a lookup map of newId → newNode so we can compute edge styles
+      const newNodeMap = new Map(newNodes.map(n => [n.id, n]));
+
+      const newEdges = rawEdges.map((edge, idx) => {
+        const newSource = idMap.get(edge.source) ?? edge.source;
+        const sourceNode = newNodeMap.get(newSource);
+        const style = buildEdgeStyle(sourceNode, edge.sourceHandle);
+        return {
+          ...edge,
+          id: `blueprint_${Date.now()}_${idx}`,
+          source: newSource,
+          target: idMap.get(edge.target) ?? edge.target,
+          type: "default" as const,
+          reconnectable: "target" as const,
+          animated: false,
+          style,
+          data: { onDelete: handleEdgeDelete },
+        };
+      });
+
+      setNodes(nds =>
+        enrichNodes(
+          [
+            ...nds.map(n => (n.selected ? { ...n, selected: false } : n)),
+            ...newNodes,
+          ],
+          enrichDepsRef.current
+        )
+      );
+
+      if (newEdges.length > 0) {
+        setEdges(eds => [...eds, ...newEdges]);
+      }
+    },
+    [nodes, setNodes, setEdges, handleEdgeDelete, enrichDepsRef]
   );
 
   return {
     handleNodeTypeSelect,
     handleDeleteNodes,
+    insertBlueprint,
   };
 }

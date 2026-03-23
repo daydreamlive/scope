@@ -27,8 +27,12 @@ interface AddNodeModalProps {
       | "reroute"
       | "image"
       | "vace"
+      | "lora"
       | "midi"
-      | "bool",
+      | "bool"
+      | "trigger"
+      | "subgraph"
+      | "record",
     subType?: string
   ) => void;
 }
@@ -50,8 +54,12 @@ interface NodeCatalogItem {
     | "reroute"
     | "image"
     | "vace"
+    | "lora"
     | "midi"
-    | "bool";
+    | "bool"
+    | "trigger"
+    | "subgraph"
+    | "record";
   subType?: string;
   name: string;
   description: string;
@@ -59,10 +67,7 @@ interface NodeCatalogItem {
   category: string;
 }
 
-// Ordered by color so visually similar nodes are grouped together:
-// green → blue → sky-blue → purple → pink → red → orange → yellow → gray
 const NODE_CATALOG: NodeCatalogItem[] = [
-  // Green
   {
     type: "source",
     name: "Source",
@@ -70,7 +75,6 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#4ade80",
     category: "I/O",
   },
-  // Blue
   {
     type: "pipeline",
     name: "Pipeline",
@@ -78,7 +82,6 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#60a5fa",
     category: "I/O",
   },
-  // Sky-blue
   {
     type: "control",
     subType: "float",
@@ -161,6 +164,14 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#fb923c",
     category: "I/O",
   },
+  // Red
+  {
+    type: "record",
+    name: "Record",
+    description: "Record the output stream to MP4",
+    color: "#ef4444",
+    category: "I/O",
+  },
   {
     type: "tuple",
     name: "Tuple",
@@ -194,6 +205,15 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     color: "#a78bfa",
     category: "I/O",
   },
+  // Pink
+  {
+    type: "lora",
+    name: "LoRA",
+    description:
+      "Configure LoRA adapters (file, scale, merge mode) and connect to a pipeline node",
+    color: "#f472b6",
+    category: "I/O",
+  },
   // Gray
   {
     type: "primitive",
@@ -211,10 +231,25 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     category: "Utility",
   },
   {
+    type: "trigger",
+    name: "Trigger",
+    description: "Momentary pulse button — fires a boolean bang on click",
+    color: "#f97316",
+    category: "Utility",
+  },
+  {
     type: "reroute",
     name: "Reroute",
     description: "Pass-through dot to organize long connection lines",
     color: "#9ca3af",
+    category: "Utility",
+  },
+  // Cyan – Subgraph
+  {
+    type: "subgraph",
+    name: "Subgraph",
+    description: "Container node that groups nodes into a reusable sub-graph",
+    color: "#06b6d4",
     category: "Utility",
   },
 ];

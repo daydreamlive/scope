@@ -3,7 +3,8 @@ import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { getInputSourceSources, type DiscoveredSource } from "../../../lib/api";
-import { useNodeData } from "../hooks/useNodeData";
+import { useNodeData } from "../hooks/node/useNodeData";
+import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import {
   NodeCard,
   NodeHeader,
@@ -11,6 +12,7 @@ import {
   NodePillSelect,
   NodePillInput,
   NodePillSearchableSelect,
+  collapsedHandleStyle,
 } from "../ui";
 
 type SourceNodeType = Node<FlowNodeData, "source">;
@@ -29,6 +31,7 @@ const SOURCE_MODE_OPTIONS = [
 
 export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const { updateData } = useNodeData(id);
+  const { collapsed, toggleCollapse } = useNodeCollapse();
   const sourceMode = data.sourceMode || "video";
   const sourceName = data.sourceName || "";
   const localStream = data.localStream as MediaStream | null | undefined;
@@ -172,172 +175,181 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   }));
 
   return (
-    <NodeCard selected={selected}>
+    <NodeCard selected={selected} collapsed={collapsed}>
       <NodeHeader
         title={data.customTitle || "Source"}
-        dotColor="bg-green-400"
         onTitleChange={newTitle => updateData({ customTitle: newTitle })}
+        collapsed={collapsed}
+        onCollapseToggle={toggleCollapse}
       />
-      <div className="px-2 py-1.5 flex flex-col gap-1.5 flex-1 min-h-0">
-        <div className="px-2">
-          <NodeParamRow label="Source">
-            <NodePillSelect
-              value={sourceMode}
-              onChange={handleSourceModeChange}
-              options={filteredSourceModeOptions}
-            />
-          </NodeParamRow>
-        </div>
-
-        {sourceMode === "spout" && (
+      {!collapsed && (
+        <div className="px-2 py-1.5 flex flex-col gap-1.5 flex-1 min-h-0">
           <div className="px-2">
-            <NodeParamRow label="Sender">
-              <NodePillInput
-                type="text"
-                value={sourceName}
-                onChange={handleSpoutNameChange}
-                placeholder="TDSyphonSpoutOut"
-                disabled={!spoutAvailable}
+            <NodeParamRow label="Source">
+              <NodePillSelect
+                value={sourceMode}
+                onChange={handleSourceModeChange}
+                options={filteredSourceModeOptions}
               />
             </NodeParamRow>
           </div>
-        )}
 
-        {sourceMode === "ndi" && (
-          <div className="px-2 flex flex-col gap-1.5">
-            <NodeParamRow label="Source">
-              <div className="flex items-center gap-1">
-                <NodePillSearchableSelect
+          {sourceMode === "spout" && (
+            <div className="px-2">
+              <NodeParamRow label="Sender">
+                <NodePillInput
+                  type="text"
                   value={sourceName}
-                  onChange={handleNdiSourceChange}
-                  options={ndiOptions}
-                  placeholder={
-                    isDiscoveringNdi
-                      ? "Discovering..."
-                      : ndiOptions.length === 0
-                        ? "No sources"
-                        : "Select source"
-                  }
-                  disabled={isDiscoveringNdi || !ndiAvailable}
-                  className="flex-1"
+                  onChange={handleSpoutNameChange}
+                  placeholder="TDSyphonSpoutOut"
+                  disabled={!spoutAvailable}
                 />
-                <button
-                  type="button"
-                  onClick={discoverNdiSources}
-                  disabled={isDiscoveringNdi || !ndiAvailable}
-                  className="w-5 h-5 flex items-center justify-center text-[#fafafa] hover:text-blue-400 transition-colors disabled:opacity-50"
-                  title="Refresh NDI sources"
-                >
-                  <svg
-                    className={`h-3 w-3 ${isDiscoveringNdi ? "animate-spin" : ""}`}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
-                  </svg>
-                </button>
-              </div>
-            </NodeParamRow>
-          </div>
-        )}
-
-        {sourceMode === "syphon" && (
-          <div className="px-2 flex flex-col gap-1.5">
-            <NodeParamRow label="Source">
-              <div className="flex items-center gap-1">
-                <NodePillSearchableSelect
-                  value={sourceName}
-                  onChange={handleSyphonSourceChange}
-                  options={syphonOptions}
-                  placeholder={
-                    isDiscoveringSyphon
-                      ? "Discovering..."
-                      : syphonOptions.length === 0
-                        ? "No sources"
-                        : "Select source"
-                  }
-                  disabled={isDiscoveringSyphon || !syphonAvailable}
-                  className="flex-1"
-                />
-                <button
-                  type="button"
-                  onClick={discoverSyphonSources}
-                  disabled={isDiscoveringSyphon || !syphonAvailable}
-                  className="w-5 h-5 flex items-center justify-center text-[#fafafa] hover:text-blue-400 transition-colors disabled:opacity-50"
-                  title="Refresh Syphon sources"
-                >
-                  <svg
-                    className={`h-3 w-3 ${isDiscoveringSyphon ? "animate-spin" : ""}`}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
-                  </svg>
-                </button>
-              </div>
-            </NodeParamRow>
-          </div>
-        )}
-
-        {showPreview && (
-          <div className="relative rounded-md overflow-hidden bg-black/50 flex-1 min-h-[60px]">
-            {localStream ? (
-              <video
-                ref={videoRef}
-                className="w-full h-full object-cover"
-                autoPlay
-                muted
-                playsInline
-              />
-            ) : (
-              <div className="flex items-center justify-center h-full text-[10px] text-[#8c8c8d]">
-                {sourceMode === "camera" ? "Camera preview" : "No video loaded"}
-              </div>
-            )}
-            {showFilePicker && (
-              <>
-                <button
-                  type="button"
-                  onClick={handleFileClick}
-                  className="absolute bottom-1 right-1 bg-[#2a2a2a]/80 hover:bg-[#2a2a2a] text-[#fafafa] text-[9px] px-2 py-0.5 rounded border border-[rgba(119,119,119,0.35)] transition-colors"
-                >
-                  Choose file
-                </button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept="video/*"
-                  className="hidden"
-                  onChange={handleFileChange}
-                />
-              </>
-            )}
-          </div>
-        )}
-
-        {!showPreview &&
-          sourceMode !== "spout" &&
-          sourceMode !== "ndi" &&
-          sourceMode !== "syphon" && (
-            <div className="flex items-center justify-center rounded-md bg-black/30 text-[10px] text-[#8c8c8d] flex-1 min-h-[40px]">
-              Waiting for input...
+              </NodeParamRow>
             </div>
           )}
-      </div>
+
+          {sourceMode === "ndi" && (
+            <div className="px-2 flex flex-col gap-1.5">
+              <NodeParamRow label="Source">
+                <div className="flex items-center gap-1">
+                  <NodePillSearchableSelect
+                    value={sourceName}
+                    onChange={handleNdiSourceChange}
+                    options={ndiOptions}
+                    placeholder={
+                      isDiscoveringNdi
+                        ? "Discovering..."
+                        : ndiOptions.length === 0
+                          ? "No sources"
+                          : "Select source"
+                    }
+                    disabled={isDiscoveringNdi || !ndiAvailable}
+                    className="flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={discoverNdiSources}
+                    disabled={isDiscoveringNdi || !ndiAvailable}
+                    className="w-5 h-5 flex items-center justify-center text-[#fafafa] hover:text-blue-400 transition-colors disabled:opacity-50"
+                    title="Refresh NDI sources"
+                  >
+                    <svg
+                      className={`h-3 w-3 ${isDiscoveringNdi ? "animate-spin" : ""}`}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+                    </svg>
+                  </button>
+                </div>
+              </NodeParamRow>
+            </div>
+          )}
+
+          {sourceMode === "syphon" && (
+            <div className="px-2 flex flex-col gap-1.5">
+              <NodeParamRow label="Source">
+                <div className="flex items-center gap-1">
+                  <NodePillSearchableSelect
+                    value={sourceName}
+                    onChange={handleSyphonSourceChange}
+                    options={syphonOptions}
+                    placeholder={
+                      isDiscoveringSyphon
+                        ? "Discovering..."
+                        : syphonOptions.length === 0
+                          ? "No sources"
+                          : "Select source"
+                    }
+                    disabled={isDiscoveringSyphon || !syphonAvailable}
+                    className="flex-1"
+                  />
+                  <button
+                    type="button"
+                    onClick={discoverSyphonSources}
+                    disabled={isDiscoveringSyphon || !syphonAvailable}
+                    className="w-5 h-5 flex items-center justify-center text-[#fafafa] hover:text-blue-400 transition-colors disabled:opacity-50"
+                    title="Refresh Syphon sources"
+                  >
+                    <svg
+                      className={`h-3 w-3 ${isDiscoveringSyphon ? "animate-spin" : ""}`}
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+                    </svg>
+                  </button>
+                </div>
+              </NodeParamRow>
+            </div>
+          )}
+
+          {showPreview && (
+            <div className="relative rounded-md overflow-hidden bg-black/50 flex-1 min-h-[60px]">
+              {localStream ? (
+                <video
+                  ref={videoRef}
+                  className="w-full h-full object-cover"
+                  autoPlay
+                  muted
+                  playsInline
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-[10px] text-[#8c8c8d]">
+                  {sourceMode === "camera"
+                    ? "Camera preview"
+                    : "No video loaded"}
+                </div>
+              )}
+              {showFilePicker && (
+                <>
+                  <button
+                    type="button"
+                    onClick={handleFileClick}
+                    className="absolute bottom-1 right-1 bg-[#2a2a2a]/80 hover:bg-[#2a2a2a] text-[#fafafa] text-[9px] px-2 py-0.5 rounded border border-[rgba(119,119,119,0.35)] transition-colors"
+                  >
+                    Choose file
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="video/*"
+                    className="hidden"
+                    onChange={handleFileChange}
+                  />
+                </>
+              )}
+            </div>
+          )}
+
+          {!showPreview &&
+            sourceMode !== "spout" &&
+            sourceMode !== "ndi" &&
+            sourceMode !== "syphon" && (
+              <div className="flex items-center justify-center rounded-md bg-black/30 text-[10px] text-[#8c8c8d] flex-1 min-h-[40px]">
+                Waiting for input...
+              </div>
+            )}
+        </div>
+      )}
       <Handle
         type="source"
         position={Position.Right}
         id="stream:video"
-        className="!w-2 !h-2 !border-0"
-        style={{ top: handleY, right: 8, backgroundColor: "#ffffff" }}
+        className="!w-2.5 !h-2.5 !border-0"
+        style={
+          collapsed
+            ? collapsedHandleStyle("right")
+            : { top: handleY, right: 0, backgroundColor: "#ffffff" }
+        }
       />
     </NodeCard>
   );
