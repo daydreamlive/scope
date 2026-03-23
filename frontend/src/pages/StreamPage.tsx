@@ -177,6 +177,7 @@ export function StreamPage() {
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
+    hardwareInfo,
     skipNextModeReset,
   } = useStreamState();
 
@@ -2163,8 +2164,36 @@ export function StreamPage() {
                 nodeLoadParams.height = nodeBag.height;
               if (typeof nodeBag?.width === "number")
                 nodeLoadParams.width = nodeBag.width;
+              if (pipeSchema?.supportsQuantization) {
+                const nodeQuant = nodeBag?.quantization;
+                if (typeof nodeQuant === "string") {
+                  nodeLoadParams.quantization = nodeQuant;
+                } else {
+                  // Compute VRAM-based default for this pipeline
+                  const vramThreshold =
+                    pipeSchema.recommendedQuantizationVramThreshold;
+                  if (
+                    vramThreshold != null &&
+                    hardwareInfo?.vram_gb != null
+                  ) {
+                    nodeLoadParams.quantization =
+                      hardwareInfo.vram_gb > vramThreshold
+                        ? null
+                        : "fp8_e4m3fn";
+                  } else {
+                    nodeLoadParams.quantization =
+                      settings.quantization ?? null;
+                  }
+                }
+              }
               if (pipeSchema?.supportsVACE) {
-                nodeLoadParams.vace_enabled = true;
+                const hasVaceEdge = graphConfigForStream!.edges.some(
+                  e =>
+                    e.to_node === n.id &&
+                    (e.to_port === "vace_input_frames" ||
+                      e.to_port === "vace_input_masks"),
+                );
+                nodeLoadParams.vace_enabled = hasVaceEdge;
                 const nodeVaceScale = nodeBag?.vace_context_scale;
                 nodeLoadParams.vace_context_scale =
                   typeof nodeVaceScale === "number"
