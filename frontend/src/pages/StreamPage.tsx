@@ -2161,9 +2161,9 @@ export function StreamPage() {
                 | undefined;
               const nodeBag = nParams?.[n.id];
               if (typeof nodeBag?.height === "number")
-                nodeLoadParams.height = nodeBag.height;
+                nodeLoadParams.height = Math.round(nodeBag.height);
               if (typeof nodeBag?.width === "number")
-                nodeLoadParams.width = nodeBag.width;
+                nodeLoadParams.width = Math.round(nodeBag.width);
               // Adjust resolution to be divisible by required scale factor
               if (
                 typeof nodeLoadParams.height === "number" &&
@@ -2177,18 +2177,18 @@ export function StreamPage() {
                 if (wasAdjusted) {
                   nodeLoadParams.height = adjRes.height;
                   nodeLoadParams.width = adjRes.width;
-                  // Update the graph node UI to reflect adjusted values
-                  graphEditorRef.current?.updateNodeParam(
-                    n.id,
-                    "height",
-                    adjRes.height
-                  );
-                  graphEditorRef.current?.updateNodeParam(
-                    n.id,
-                    "width",
-                    adjRes.width
-                  );
                 }
+                // Always update the graph node UI with integer values
+                graphEditorRef.current?.updateNodeParam(
+                  n.id,
+                  "height",
+                  nodeLoadParams.height
+                );
+                graphEditorRef.current?.updateNodeParam(
+                  n.id,
+                  "width",
+                  nodeLoadParams.width
+                );
               }
               if (pipeSchema?.supportsQuantization) {
                 const nodeQuant = nodeBag?.quantization;
