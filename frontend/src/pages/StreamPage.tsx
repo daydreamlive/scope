@@ -2164,6 +2164,21 @@ export function StreamPage() {
                 nodeLoadParams.height = nodeBag.height;
               if (typeof nodeBag?.width === "number")
                 nodeLoadParams.width = nodeBag.width;
+              // Adjust resolution to be divisible by required scale factor
+              if (
+                typeof nodeLoadParams.height === "number" &&
+                typeof nodeLoadParams.width === "number"
+              ) {
+                const { resolution: adjRes, wasAdjusted } =
+                  adjustResolutionForPipeline(pid as PipelineId, {
+                    height: nodeLoadParams.height as number,
+                    width: nodeLoadParams.width as number,
+                  });
+                if (wasAdjusted) {
+                  nodeLoadParams.height = adjRes.height;
+                  nodeLoadParams.width = adjRes.width;
+                }
+              }
               if (pipeSchema?.supportsQuantization) {
                 const nodeQuant = nodeBag?.quantization;
                 if (typeof nodeQuant === "string") {
@@ -2172,17 +2187,13 @@ export function StreamPage() {
                   // Compute VRAM-based default for this pipeline
                   const vramThreshold =
                     pipeSchema.recommendedQuantizationVramThreshold;
-                  if (
-                    vramThreshold != null &&
-                    hardwareInfo?.vram_gb != null
-                  ) {
+                  if (vramThreshold != null && hardwareInfo?.vram_gb != null) {
                     nodeLoadParams.quantization =
                       hardwareInfo.vram_gb > vramThreshold
                         ? null
                         : "fp8_e4m3fn";
                   } else {
-                    nodeLoadParams.quantization =
-                      settings.quantization ?? null;
+                    nodeLoadParams.quantization = settings.quantization ?? null;
                   }
                 }
               }
@@ -2191,7 +2202,7 @@ export function StreamPage() {
                   e =>
                     e.to_node === n.id &&
                     (e.to_port === "vace_input_frames" ||
-                      e.to_port === "vace_input_masks"),
+                      e.to_port === "vace_input_masks")
                 );
                 nodeLoadParams.vace_enabled = hasVaceEdge;
                 const nodeVaceScale = nodeBag?.vace_context_scale;
