@@ -165,10 +165,36 @@ class CloudConnectionManager:
             await self._cleanup_session()
             raise RuntimeError(f"Failed to connect to cloud WebSocket: {e}") from e
 
-        # Wait for "ready" message
+        # Wait for "ready" message, updating status with elapsed time every second
+        # so users can see progress during potentially long cold starts.
+        ready_timeout = 180.0
+        start_time = time.time()
         self._connect_stage = "Starting cloud server..."
+
+        async def _wait_for_ready() -> aiohttp.WSMessage:
+            """Wait for the ready message, updating connect_stage with elapsed time."""
+            elapsed_update_interval = 1.0  # update UI every second
+            deadline = start_time + ready_timeout
+            while True:
+                remaining = deadline - time.time()
+                if remaining <= 0:
+                    raise TimeoutError()
+                try:
+                    msg = await asyncio.wait_for(
+                        self.ws.receive(),
+                        timeout=min(elapsed_update_interval, remaining),
+                    )
+                    return msg
+                except TimeoutError:
+                    # Check if overall deadline exceeded
+                    elapsed = int(time.time() - start_time)
+                    if time.time() >= deadline:
+                        raise
+                    # Update stage with elapsed time for user feedback
+                    self._connect_stage = f"Starting cloud server... ({elapsed}s)"
+
         try:
-            msg = await asyncio.wait_for(self.ws.receive(), timeout=180.0)
+            msg = await _wait_for_ready()
             if msg.type == aiohttp.WSMsgType.TEXT:
                 data = json.loads(msg.data)
                 if data.get("type") != "ready":
@@ -233,6 +259,10 @@ class CloudConnectionManager:
         Unlike connect(), this returns immediately and runs the connection
         in an asyncio task. Check get_status() for connection progress.
 
+        Automatically retries on transient failures (e.g. cold-start timeouts)
+        with a short delay between attempts so the user doesn't have to manually
+        retry when the cloud runner is still warming up.
+
         Args:
             app_id: The cloud app ID
             api_key: The cloud API key
@@ -249,18 +279,59 @@ class CloudConnectionManager:
         self._connecting = True
         self._connect_error = None
 
+        max_attempts = 5
+        # Progressive retry delays: 5s, 10s, 15s, 20s between attempts
+        retry_delays = [5.0, 10.0, 15.0, 20.0]
+
         async def _do_connect():
-            try:
-                await self.connect(app_id, api_key, user_id)
-                self._connecting = False
-            except Exception as e:
-                self._connecting = False
-                self._connect_error = str(e)
-                self._connect_stage = None
-                logger.error(f"Background cloud connection failed: {e}")
-                self._publish_cloud_error(
-                    str(e), type(e).__name__, error_type="cloud_connection_failed"
-                )
+            last_error: Exception | None = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    if attempt > 1:
+                        delay = retry_delays[min(attempt - 2, len(retry_delays) - 1)]
+                        logger.info(
+                            f"Retrying cloud connection (attempt {attempt}/{max_attempts}) "
+                            f"in {delay:.0f}s..."
+                        )
+                        self._connect_stage = (
+                            f"Retrying connection (attempt {attempt}/{max_attempts})..."
+                        )
+                        await asyncio.sleep(delay)
+                    await self.connect(app_id, api_key, user_id)
+                    self._connecting = False
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    last_error = e
+                    logger.warning(
+                        f"Cloud connection attempt {attempt}/{max_attempts} failed: {e}"
+                    )
+                    if attempt < max_attempts:
+                        # Only retry on transient errors (timeouts, network issues)
+                        # Don't retry on auth/config errors
+                        error_str = str(e).lower()
+                        is_transient = any(
+                            kw in error_str
+                            for kw in ("timeout", "connection", "network", "refused", "reset")
+                        )
+                        if not is_transient:
+                            logger.info(
+                                f"Non-transient error, not retrying: {e}"
+                            )
+                            break
+
+            # All attempts exhausted
+            self._connecting = False
+            error_msg = str(last_error) if last_error else "Unknown error"
+            self._connect_error = error_msg
+            self._connect_stage = None
+            logger.error(f"Background cloud connection failed: {last_error}")
+            self._publish_cloud_error(
+                error_msg,
+                type(last_error).__name__ if last_error else "UnknownError",
+                error_type="cloud_connection_failed",
+            )
 
         self._connect_task = asyncio.create_task(_do_connect())
 
