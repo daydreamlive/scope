@@ -2177,6 +2177,17 @@ export function StreamPage() {
                 if (wasAdjusted) {
                   nodeLoadParams.height = adjRes.height;
                   nodeLoadParams.width = adjRes.width;
+                  // Update the graph node UI to reflect adjusted values
+                  graphEditorRef.current?.updateNodeParam(
+                    n.id,
+                    "height",
+                    adjRes.height
+                  );
+                  graphEditorRef.current?.updateNodeParam(
+                    n.id,
+                    "width",
+                    adjRes.width
+                  );
                 }
               }
               if (pipeSchema?.supportsQuantization) {
