@@ -128,11 +128,14 @@ export function resetAutoHeightNodes(
   return nodes.map(n => {
     if (FIXED_SIZE_NODE_TYPES.has(n.data.nodeType as string)) return n;
     if (n.height == null && n.style?.height == null) return n;
-    const { height: _h, measured: _m, ...rest } = n;
-    const { height: _sh, ...restStyle } = (n.style ?? {}) as Record<
-      string,
-      unknown
-    >;
+    const rest = Object.fromEntries(
+      Object.entries(n).filter(([k]) => k !== "height" && k !== "measured")
+    );
+    const restStyle = Object.fromEntries(
+      Object.entries((n.style ?? {}) as Record<string, unknown>).filter(
+        ([k]) => k !== "height"
+      )
+    );
     return {
       ...rest,
       style: Object.keys(restStyle).length > 0 ? restStyle : undefined,
