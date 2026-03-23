@@ -126,14 +126,14 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
             order=7,
             component="noise",
             modes=["video"],
-            is_load_param=True,
+            is_load_param=False,
         ),
     )
     noise_controller: bool = Field(
         default=True,
         description="Enable dynamic noise control during generation (video mode only)",
         json_schema_extra=ui_field_config(
-            order=7, component="noise", modes=["video"], is_load_param=True
+            order=7, component="noise", modes=["video"], is_load_param=False
         ),
     )
     quantization: Quantization | None = Field(

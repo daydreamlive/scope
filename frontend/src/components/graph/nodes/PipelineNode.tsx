@@ -229,7 +229,7 @@ export function PipelineNode({
             const isConnected = isParamConnected(param.name);
             const currentValue =
               parameterValues[param.name] ?? param.defaultValue;
-            const isLoadParam = param.isLoadParam !== false;
+            const isLoadParam = param.isLoadParam === true;
             const disabled = isStreaming && isLoadParam;
 
             return (
@@ -319,7 +319,7 @@ export function PipelineNode({
               : Array.isArray(param.defaultValue)
                 ? param.defaultValue
                 : [];
-            const isLoadParam = param.isLoadParam !== false;
+            const isLoadParam = param.isLoadParam === true;
             const disabled = isStreaming && isLoadParam;
 
             return (
