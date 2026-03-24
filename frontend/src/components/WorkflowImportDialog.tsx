@@ -1,5 +1,13 @@
-import { useState, useCallback, useEffect, useRef } from "react";
-import { AlertTriangle, Download, Upload, Loader2 } from "lucide-react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+import {
+  AlertTriangle,
+  Download,
+  Upload,
+  Loader2,
+  ExternalLink,
+  Save,
+  KeyRound,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import {
@@ -22,10 +30,12 @@ import {
 } from "./ui/alert-dialog";
 import { toast } from "sonner";
 import type { ScopeWorkflow, WorkflowResolutionPlan } from "../lib/workflowApi";
-import { resolveWorkflow } from "../lib/api";
+import { resolveWorkflow, getApiKeys, setApiKey } from "../lib/api";
+import type { ApiKeyInfo } from "../lib/api";
 import {
   statusIcon,
   kindLabel,
+  findLoRAProvenance,
   LoRAProvenanceLabel,
 } from "./workflowDialogHelpers";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
@@ -129,7 +139,7 @@ export function WorkflowImportDialog({
   const confirmPluginInstall = useCallback(
     (installSpec: string) =>
       showConfirm(
-        "Install Plugin",
+        "Install Node",
         `This will install the package "${installSpec}" via pip. Only proceed if you trust the workflow source.`
       ),
     [showConfirm]
@@ -142,6 +152,80 @@ export function WorkflowImportDialog({
   );
   const { reset: resetPlugins, initialize: initializePlugins } = plugins;
 
+  // -- API key warning state -------------------------------------------------
+  const [apiKeys, setApiKeys] = useState<ApiKeyInfo[]>([]);
+  const [keyInputValues, setKeyInputValues] = useState<Record<string, string>>(
+    {}
+  );
+  const [savingKeyIds, setSavingKeyIds] = useState<Set<string>>(new Set());
+
+  const fetchApiKeys = useCallback(async () => {
+    try {
+      const response = await getApiKeys();
+      setApiKeys(response.keys);
+    } catch {
+      // Non-critical — warning just won't show
+    }
+  }, []);
+
+  // Fetch API keys when entering review step
+  useEffect(() => {
+    if (step === "review") {
+      fetchApiKeys();
+    }
+  }, [step, fetchApiKeys]);
+
+  // Services that need a key: missing LoRAs hosted on a service without a key
+  const missingKeyServices = useMemo(() => {
+    if (!plan || !workflow || apiKeys.length === 0) return [];
+    const neededSources = new Set<string>();
+    for (const item of plan.items) {
+      if (
+        item.kind !== "lora" ||
+        item.status !== "missing" ||
+        !item.can_auto_resolve
+      )
+        continue;
+      const prov = findLoRAProvenance(workflow, item.name);
+      if (prov?.source === "huggingface" || prov?.source === "civitai") {
+        neededSources.add(prov.source);
+      }
+    }
+    return apiKeys.filter(k => neededSources.has(k.id) && !k.is_set);
+  }, [plan, workflow, apiKeys]);
+
+  const handleSaveApiKey = useCallback(
+    async (keyInfo: ApiKeyInfo) => {
+      const value = keyInputValues[keyInfo.id];
+      if (!value?.trim()) return;
+
+      setSavingKeyIds(prev => new Set(prev).add(keyInfo.id));
+      try {
+        const response = await setApiKey(keyInfo.id, value.trim());
+        if (response.success) {
+          toast.success(`${keyInfo.name} API key saved`);
+          setKeyInputValues(prev => {
+            const next = { ...prev };
+            delete next[keyInfo.id];
+            return next;
+          });
+          await fetchApiKeys();
+        }
+      } catch (err) {
+        toast.error(
+          err instanceof Error ? err.message : "Failed to save API key"
+        );
+      } finally {
+        setSavingKeyIds(prev => {
+          const next = new Set(prev);
+          next.delete(keyInfo.id);
+          return next;
+        });
+      }
+    },
+    [keyInputValues, fetchApiKeys]
+  );
+
   // Reset all state when dialog closes
   const handleClose = useCallback(() => {
     setStep("select");
@@ -149,6 +233,9 @@ export function WorkflowImportDialog({
     setPlan(null);
     resetLoras();
     resetPlugins();
+    setApiKeys([]);
+    setKeyInputValues({});
+    setSavingKeyIds(new Set());
     setValidating(false);
     onClose();
   }, [onClose, resetLoras, resetPlugins]);
@@ -339,6 +426,19 @@ export function WorkflowImportDialog({
     const timelinePrompts = workflowTimelineToPrompts(workflow.timeline);
     const promptState = workflowToPromptState(workflow);
 
+    // Persist the workflow's graph to localStorage so the graph editor can
+    // pick it up when refreshGraph() is called after import.
+    if (workflow.graph?.nodes && workflow.graph?.edges) {
+      try {
+        localStorage.setItem(
+          "scope:graph:backup",
+          JSON.stringify(workflow.graph)
+        );
+      } catch {
+        /* ignore */
+      }
+    }
+
     onLoad(importedSettings, timelinePrompts, promptState);
     toast.success("Workflow loaded", {
       description: `"${workflow.metadata.name}" loaded into the interface`,
@@ -429,6 +529,67 @@ export function WorkflowImportDialog({
                 {new Date(workflow.metadata.created_at).toLocaleDateString()}
               </p>
             </div>
+
+            {/* API key warning */}
+            {missingKeyServices.length > 0 && (
+              <div className="rounded-md border border-amber-500/50 bg-amber-500/10 p-3 space-y-2.5">
+                <div className="flex items-start gap-2">
+                  <KeyRound className="h-4 w-4 text-amber-500 mt-0.5 shrink-0" />
+                  <p className="text-xs text-amber-500">
+                    {missingKeyServices.length === 1
+                      ? `A ${missingKeyServices[0].name} API key is required to download some LoRAs in this workflow.`
+                      : "API keys are required to download some LoRAs in this workflow."}
+                  </p>
+                </div>
+                {missingKeyServices.map(keyInfo => (
+                  <div key={keyInfo.id} className="flex items-center gap-2">
+                    <span className="text-xs font-medium text-foreground shrink-0 w-24">
+                      {keyInfo.name}
+                    </span>
+                    <input
+                      type="password"
+                      placeholder="Paste API key..."
+                      value={keyInputValues[keyInfo.id] ?? ""}
+                      onChange={e =>
+                        setKeyInputValues(prev => ({
+                          ...prev,
+                          [keyInfo.id]: e.target.value,
+                        }))
+                      }
+                      className="flex-1 min-w-0 h-7 rounded-md border border-input bg-background px-2 text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    />
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-7 px-2 text-xs gap-1"
+                      disabled={
+                        !keyInputValues[keyInfo.id]?.trim() ||
+                        savingKeyIds.has(keyInfo.id)
+                      }
+                      onClick={() => handleSaveApiKey(keyInfo)}
+                    >
+                      {savingKeyIds.has(keyInfo.id) ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Save className="h-3 w-3" />
+                      )}
+                      Save
+                    </Button>
+                    {keyInfo.key_url && (
+                      <a
+                        href={keyInfo.key_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-amber-500 hover:text-amber-400 shrink-0 flex items-center gap-0.5"
+                      >
+                        Get key
+                        <ExternalLink className="h-3 w-3" />
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
 
             {/* Resolution items */}
             <div className="space-y-2">
@@ -526,7 +687,7 @@ export function WorkflowImportDialog({
                   <Download className="h-4 w-4 mr-2" />
                   {plugins.someInstalling
                     ? "Installing..."
-                    : `Install All Missing Plugins (${installablePlugins.filter(p => plugins.installs[p.name] !== "done").length})`}
+                    : `Install All Missing Nodes (${installablePlugins.filter(p => plugins.installs[p.name] !== "done").length})`}
                 </Button>
               )}
 

@@ -2957,6 +2957,64 @@ async def get_cloud_stats(
     return cloud_manager.get_status()
 
 
+# ---------------------------------------------------------------------------
+# Onboarding
+# ---------------------------------------------------------------------------
+
+_ONBOARDING_FILE = Path("~/.daydream-scope/onboarding.json").expanduser()
+
+
+class OnboardingStatusResponse(BaseModel):
+    completed: bool
+    inference_mode: str | None = None
+
+
+class OnboardingStatusUpdate(BaseModel):
+    completed: bool | None = None
+    inference_mode: str | None = None
+
+
+@app.get("/api/v1/onboarding/status", response_model=OnboardingStatusResponse)
+async def get_onboarding_status():
+    """Read onboarding completion state from ~/.daydream-scope/onboarding.json."""
+    if _ONBOARDING_FILE.exists():
+        try:
+            import json
+
+            data = json.loads(_ONBOARDING_FILE.read_text())
+            return OnboardingStatusResponse(
+                completed=data.get("completed", False),
+                inference_mode=data.get("inference_mode"),
+            )
+        except Exception:
+            pass
+    return OnboardingStatusResponse(completed=False)
+
+
+@app.put("/api/v1/onboarding/status", response_model=OnboardingStatusResponse)
+async def update_onboarding_status(body: OnboardingStatusUpdate):
+    """Write onboarding completion state to ~/.daydream-scope/onboarding.json."""
+    import json
+
+    _ONBOARDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+    # Merge with existing data so we don't lose fields when partially updating
+    existing: dict = {}
+    if _ONBOARDING_FILE.exists():
+        try:
+            existing = json.loads(_ONBOARDING_FILE.read_text())
+        except Exception:
+            pass
+    if body.completed is not None:
+        existing["completed"] = body.completed
+    if body.inference_mode is not None:
+        existing["inference_mode"] = body.inference_mode
+    _ONBOARDING_FILE.write_text(json.dumps(existing))
+    return OnboardingStatusResponse(
+        completed=existing.get("completed", False),
+        inference_mode=existing.get("inference_mode"),
+    )
+
+
 @app.get("/{path:path}")
 async def serve_frontend(request: Request, path: str):
     """Serve the frontend for all non-API routes (fallback for client-side routing)."""

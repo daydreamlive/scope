@@ -111,8 +111,8 @@ export function PluginsTab({
         <div className="rounded-lg bg-muted/50 p-4 flex items-start gap-2">
           <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
           <p className="text-sm text-muted-foreground">
-            With remote inference enabled, plugins can only be installed from
-            the Discover tab.
+            With remote inference enabled, nodes can only be installed from
+            the Nodes tab.
           </p>
         </div>
       )}
@@ -123,9 +123,9 @@ export function PluginsTab({
           <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0 mt-0.5" />
           <p className="text-sm text-yellow-500">
             {failedPlugins.length === 1
-              ? "1 plugin failed to load."
-              : `${failedPlugins.length} plugins failed to load.`}{" "}
-            Contact the plugin developer for a fix, then reinstall.
+              ? "1 node failed to load."
+              : `${failedPlugins.length} nodes failed to load.`}{" "}
+            Contact the node developer for a fix, then reinstall.
           </p>
         </div>
       )}
@@ -133,12 +133,12 @@ export function PluginsTab({
       {/* Installed Plugins Section */}
       <div className="rounded-lg bg-muted/50 p-4 space-y-3">
         <h3 className="text-sm font-medium text-foreground">
-          Installed Plugins
+          Installed Nodes
         </h3>
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading plugins...</p>
+          <p className="text-sm text-muted-foreground">Loading nodes...</p>
         ) : plugins.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No plugins installed</p>
+          <p className="text-sm text-muted-foreground">No nodes installed</p>
         ) : (
           <div className="space-y-3">
             {plugins.map(plugin => {
@@ -208,7 +208,7 @@ export function PluginsTab({
                         variant="ghost"
                         size="icon"
                         disabled={disabled || isInstalling}
-                        title="Reload plugin (restarts server)"
+                        title="Reload node (restarts server)"
                       >
                         <RefreshCw className="h-4 w-4" />
                       </Button>

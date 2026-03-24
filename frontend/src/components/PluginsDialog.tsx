@@ -3,6 +3,7 @@ import { Dialog, DialogContent } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { PluginsTab } from "./settings/PluginsTab";
 import { DiscoverTab } from "./settings/DiscoverTab";
+import { WorkflowsTab } from "./settings/WorkflowsTab";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
 import { usePluginsContext } from "@/contexts/PluginsContext";
 import type { InstalledPlugin } from "@/types/settings";
@@ -20,6 +21,8 @@ interface PluginsDialogProps {
   initialPluginPath?: string;
   disabled?: boolean;
   cloudConnected?: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onLoadWorkflow?: (workflowData: Record<string, any>) => void;
 }
 
 const isLocalPath = (spec: string): boolean => {
@@ -41,6 +44,7 @@ export function PluginsDialog({
   initialPluginPath = "",
   disabled = false,
   cloudConnected = false,
+  onLoadWorkflow,
 }: PluginsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
   const {
@@ -94,7 +98,7 @@ export function PluginsDialog({
   const handleInstallPlugin = async (packageSpec: string) => {
     setIsInstalling(true);
     isModifyingPluginsRef.current = true;
-    const toastId = toast.loading("Installing plugin...");
+    const toastId = toast.loading("Installing node...");
     try {
       const response = await installPlugin({
         package: packageSpec,
@@ -119,7 +123,7 @@ export function PluginsDialog({
     } catch (error) {
       console.error("Failed to install plugin:", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to install plugin",
+        error instanceof Error ? error.message : "Failed to install node",
         { id: toastId }
       );
     } finally {
@@ -157,7 +161,7 @@ export function PluginsDialog({
     } catch (error) {
       console.error("Failed to update plugin:", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to update plugin",
+        error instanceof Error ? error.message : "Failed to update node",
         { id: toastId }
       );
     } finally {
@@ -188,7 +192,7 @@ export function PluginsDialog({
     } catch (error) {
       console.error("Failed to uninstall plugin:", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to uninstall plugin",
+        error instanceof Error ? error.message : "Failed to uninstall node",
         { id: toastId }
       );
     } finally {
@@ -207,7 +211,7 @@ export function PluginsDialog({
       await refetchPipelines();
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to reload plugin"
+        error instanceof Error ? error.message : "Failed to reload node"
       );
     } finally {
       isModifyingPluginsRef.current = false;
@@ -234,7 +238,13 @@ export function PluginsDialog({
               value="discover"
               className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
             >
-              Discover
+              Nodes
+            </TabsTrigger>
+            <TabsTrigger
+              value="workflows"
+              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+            >
+              Workflows
             </TabsTrigger>
           </TabsList>
           <div className="w-px bg-border self-stretch" />
@@ -265,6 +275,14 @@ export function PluginsDialog({
                 isInstalling={isInstalling}
                 disabled={disabled}
                 cloudConnected={cloudConnected}
+              />
+            </TabsContent>
+            <TabsContent value="workflows" className="mt-0">
+              <WorkflowsTab
+                onLoad={data => {
+                  onLoadWorkflow?.(data);
+                  onClose();
+                }}
               />
             </TabsContent>
           </div>

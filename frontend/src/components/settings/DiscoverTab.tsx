@@ -122,7 +122,7 @@ export function DiscoverTab({
         <Input
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search plugins..."
+          placeholder="Search nodes..."
           className="pl-9"
         />
       </div>
@@ -146,8 +146,8 @@ export function DiscoverTab({
       ) : plugins.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8">
           {debouncedSearch
-            ? "No plugins found matching your search."
-            : "No plugins available."}
+            ? "No nodes found matching your search."
+            : "No nodes available."}
         </p>
       ) : (
         <div className="space-y-3">

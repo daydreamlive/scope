@@ -23,6 +23,9 @@ interface HeaderProps {
   // Graph mode toggle
   graphMode?: boolean;
   onGraphModeToggle?: () => void;
+  // Workflow loading from Workflows tab
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onLoadWorkflow?: (workflowData: Record<string, any>) => void;
 }
 
 export function Header({
@@ -33,6 +36,7 @@ export function Header({
   onSettingsTabOpened,
   graphMode = false,
   onGraphModeToggle,
+  onLoadWorkflow,
 }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
@@ -217,6 +221,7 @@ export function Header({
             <Plug className="h-5 w-5" />
           </Button>
           <Button
+            data-tour="settings-button"
             variant="ghost"
             size="icon"
             onClick={() => setSettingsOpen(true)}
@@ -234,6 +239,7 @@ export function Header({
         initialPluginPath={initialPluginPath}
         disabled={cloudDisabled || isConnecting}
         cloudConnected={isConnected}
+        onLoadWorkflow={onLoadWorkflow}
       />
 
       <SettingsDialog
