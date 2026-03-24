@@ -19,15 +19,15 @@ const MODES: {
     mode: "cloud",
     icon: Cloud,
     title: "Use Daydream Cloud",
-    description: "No GPU required. Start creating instantly.",
-    detail: "Requires credit purchase after 10min",
+    description: "Use cloud GPU provided by Daydream",
+    detail: "Requires Pro account after free trial",
   },
   {
     mode: "local",
     icon: Monitor,
     title: "Run Locally",
-    description: "Free forever. Requires a compatible GPU.",
-    detail: "Most workflows require at least 24GB of VRAM.",
+    description: "Use a local GPU",
+    detail: "Most workflows require at least 24GB of VRAM",
   },
 ];
 

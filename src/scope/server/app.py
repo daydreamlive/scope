@@ -2967,11 +2967,17 @@ _ONBOARDING_FILE = Path("~/.daydream-scope/onboarding.json").expanduser()
 class OnboardingStatusResponse(BaseModel):
     completed: bool
     inference_mode: str | None = None
+    onboarding_style: str | None = None
+    referral_source: str | None = None
+    use_case: str | None = None
 
 
 class OnboardingStatusUpdate(BaseModel):
     completed: bool | None = None
     inference_mode: str | None = None
+    onboarding_style: str | None = None
+    referral_source: str | None = None
+    use_case: str | None = None
 
 
 @app.get("/api/v1/onboarding/status", response_model=OnboardingStatusResponse)
@@ -2985,6 +2991,9 @@ async def get_onboarding_status():
             return OnboardingStatusResponse(
                 completed=data.get("completed", False),
                 inference_mode=data.get("inference_mode"),
+                onboarding_style=data.get("onboarding_style"),
+                referral_source=data.get("referral_source"),
+                use_case=data.get("use_case"),
             )
         except Exception:
             pass
@@ -3008,10 +3017,19 @@ async def update_onboarding_status(body: OnboardingStatusUpdate):
         existing["completed"] = body.completed
     if body.inference_mode is not None:
         existing["inference_mode"] = body.inference_mode
+    if body.onboarding_style is not None:
+        existing["onboarding_style"] = body.onboarding_style
+    if body.referral_source is not None:
+        existing["referral_source"] = body.referral_source
+    if body.use_case is not None:
+        existing["use_case"] = body.use_case
     _ONBOARDING_FILE.write_text(json.dumps(existing))
     return OnboardingStatusResponse(
         completed=existing.get("completed", False),
         inference_mode=existing.get("inference_mode"),
+        onboarding_style=existing.get("onboarding_style"),
+        referral_source=existing.get("referral_source"),
+        use_case=existing.get("use_case"),
     )
 
 

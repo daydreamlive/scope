@@ -44,6 +44,7 @@ export function Header({
     "general" | "account" | "api-keys" | "loras" | "osc"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
+  const [pluginsInitialTab, setPluginsInitialTab] = useState<string | undefined>(undefined);
 
   // Use shared cloud status hook - single source of truth
   const { isConnected, isConnecting, lastCloseCode, lastCloseReason } =
@@ -141,6 +142,7 @@ export function Header({
   const handlePluginsClose = () => {
     setPluginsOpen(false);
     setInitialPluginPath("");
+    setPluginsInitialTab(undefined);
   };
 
   return (
@@ -193,7 +195,7 @@ export function Header({
                 ? "Cloud connected"
                 : isConnecting
                   ? "Connecting to cloud..."
-                  : "Enable remote inference"
+                  : "Connect to cloud"
             }
           >
             {isConnected ? (
@@ -208,27 +210,40 @@ export function Header({
                 ? "Connected"
                 : isConnecting
                   ? "Connecting..."
-                  : "Enable Remote Inference"}
+                  : "Connect to Cloud"}
             </span>
           </Button>
           <Button
             variant="ghost"
-            size="icon"
-            onClick={() => setPluginsOpen(true)}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 w-8"
-            title="Plugins"
+            size="sm"
+            onClick={() => { setPluginsInitialTab("discover"); setPluginsOpen(true); }}
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
+            title="Nodes"
           >
-            <Plug className="h-5 w-5" />
+            <Plug className="h-4 w-4" />
+            <span className="text-xs font-medium">Nodes</span>
+          </Button>
+          <Button
+            data-tour="workflows-button"
+            variant="ghost"
+            size="sm"
+            onClick={() => { setPluginsInitialTab("workflows"); setPluginsOpen(true); }}
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
+            title="Workflows"
+          >
+            <Workflow className="h-4 w-4" />
+            <span className="text-xs font-medium">Workflows</span>
           </Button>
           <Button
             data-tour="settings-button"
             variant="ghost"
-            size="icon"
+            size="sm"
             onClick={() => setSettingsOpen(true)}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 w-8"
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
             title="Settings"
           >
-            <Settings className="h-5 w-5" />
+            <Settings className="h-4 w-4" />
+            <span className="text-xs font-medium">Settings</span>
           </Button>
         </div>
       </div>
@@ -237,6 +252,7 @@ export function Header({
         open={pluginsOpen}
         onClose={handlePluginsClose}
         initialPluginPath={initialPluginPath}
+        initialTab={pluginsInitialTab}
         disabled={cloudDisabled || isConnecting}
         cloudConnected={isConnected}
         onLoadWorkflow={onLoadWorkflow}

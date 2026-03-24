@@ -24,55 +24,43 @@ export interface TourStepDef {
   linkText?: string;
 }
 
-export const TOUR_STEPS: TourStepDef[] = [
+/** Tour steps shown after simple-mode onboarding. */
+export const SIMPLE_TOUR_STEPS: TourStepDef[] = [
   {
     anchor: "play-button",
-    title: "Start Generating",
-    description: "Hit play to start real-time AI video generation.",
+    title: "Click Play to start generation",
+    description: "",
     position: "bottom",
     showSkip: false,
   },
   {
-    anchor: "add-node",
-    fallbackAnchor: "play-button",
-    title: "Inputs & Outputs",
+    anchor: "workflows-button",
+    title: "Explore Workflows",
     description:
-      "Source and Output nodes send video between Scope and other apps via Syphon, NDI, or Spout.",
+      "When you're ready to explore, browse our library of community-built Workflows or submit your own.",
     position: "bottom",
-    showSkip: true,
-  },
-  {
-    anchor: "add-node",
-    title: "Node Registry",
-    description:
-      "Browse and add nodes to build your own workflows. You'll find MIDI controllers, math operations, image inputs, and more.",
-    position: "bottom",
-    showSkip: true,
-  },
-  {
-    anchor: "settings-button",
-    title: "OSC & MIDI Control",
-    description:
-      "Map MIDI controllers or OSC messages to any parameter for live control. MIDI nodes are also available in the node registry.",
-    position: "bottom",
-    showSkip: true,
-  },
-  {
-    anchor: "settings-button",
-    title: "LoRA Styles",
-    description:
-      "Install LoRAs to change the visual style of your generations. Find them in Settings \u2192 LoRAs.",
-    position: "bottom",
-    showSkip: true,
-  },
-  {
-    anchor: null,
-    title: "Explore More",
-    description: "Find more workflows, plugins, and LoRAs at",
-    position: "center",
     showSkip: false,
     showDone: true,
-    linkUrl: "https://daydream.live",
-    linkText: "daydream.live",
+  },
+];
+
+/** Tour steps shown after teaching-mode onboarding. */
+export const TEACHING_TOUR_STEPS: TourStepDef[] = [
+  {
+    anchor: "play-button",
+    title: "Follow the Note Cards",
+    description:
+      "Before you click Play to start generation, please follow the instructions on the note cards below, starting from the left.",
+    position: "bottom",
+    showSkip: false,
+  },
+  {
+    anchor: "workflows-button",
+    title: "Explore Workflows",
+    description:
+      "When you're ready to explore, browse our library of community-built Workflows or submit your own.",
+    position: "bottom",
+    showSkip: false,
+    showDone: true,
   },
 ];

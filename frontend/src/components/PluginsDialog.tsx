@@ -19,6 +19,8 @@ interface PluginsDialogProps {
   open: boolean;
   onClose: () => void;
   initialPluginPath?: string;
+  /** Open directly to a specific tab (e.g. "workflows"). */
+  initialTab?: string;
   disabled?: boolean;
   cloudConnected?: boolean;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -42,6 +44,7 @@ export function PluginsDialog({
   open,
   onClose,
   initialPluginPath = "",
+  initialTab,
   disabled = false,
   cloudConnected = false,
   onLoadWorkflow,
@@ -79,6 +82,12 @@ export function PluginsDialog({
       setPluginInstallPath(initialPluginPath);
     }
   }, [open, initialPluginPath]);
+
+  useEffect(() => {
+    if (open && initialTab) {
+      setActiveTab(initialTab);
+    }
+  }, [open, initialTab]);
 
   useEffect(() => {
     if (open) {

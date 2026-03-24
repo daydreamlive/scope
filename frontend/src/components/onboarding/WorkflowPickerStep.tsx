@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Play } from "lucide-react";
 import { Button } from "../ui/button";
-import { STARTER_WORKFLOWS, type StarterWorkflow } from "./starterWorkflows";
+import { STARTER_WORKFLOWS, getWorkflowsForStyle, type StarterWorkflow } from "./starterWorkflows";
+import { useOnboarding } from "../../contexts/OnboardingContext";
 
 // Re-export for consumers that imported from here previously
 export { STARTER_WORKFLOWS, type StarterWorkflow };
@@ -25,9 +26,11 @@ export function WorkflowPickerStep({
   onStartFromScratch,
   onImportWorkflow,
 }: WorkflowPickerStepProps) {
+  const { state } = useOnboarding();
+  const workflows = getWorkflowsForStyle(state.onboardingStyle);
   const [selected, setSelected] = useState<string | null>(null);
 
-  const selectedWorkflow = STARTER_WORKFLOWS.find(wf => wf.id === selected);
+  const selectedWorkflow = workflows.find(wf => wf.id === selected);
 
   return (
     <div className="flex flex-col items-center gap-6 w-full max-w-3xl mx-auto">
@@ -42,7 +45,7 @@ export function WorkflowPickerStep({
 
       {/* Workflow cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
-        {STARTER_WORKFLOWS.map(wf => {
+        {workflows.map(wf => {
           const isSelected = selected === wf.id;
 
           return (
