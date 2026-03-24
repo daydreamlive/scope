@@ -2,6 +2,7 @@ import type { Edge, Node } from "@xyflow/react";
 import { extractParameterPorts } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import type { GraphConfig, PipelineSchemaInfo } from "../../../lib/api";
+import type { WebRTCStats } from "../../../hooks/useWebRTCStats";
 import { buildEdgeStyle } from "../constants";
 
 export interface EnrichNodesDeps {
@@ -18,11 +19,16 @@ export interface EnrichNodesDeps {
   handlePromptSubmit: (nodeId: string) => void;
   nodeParamsRef: React.RefObject<Record<string, Record<string, unknown>>>;
   localStream?: MediaStream | null;
+  localStreams?: Record<string, MediaStream>;
   remoteStream?: MediaStream | null;
+  remoteStreams?: Record<string, MediaStream>;
+  sinkStats?: Record<string, WebRTCStats>;
   onVideoFileUploadRef: React.RefObject<
-    ((file: File) => Promise<boolean>) | undefined
+    ((file: File, nodeId?: string) => Promise<boolean>) | undefined
   >;
-  onSourceModeChangeRef: React.RefObject<((mode: string) => void) | undefined>;
+  onSourceModeChangeRef: React.RefObject<
+    ((mode: string, nodeId?: string) => void) | undefined
+  >;
   onSpoutSourceChangeRef: React.RefObject<((name: string) => void) | undefined>;
   onNdiSourceChangeRef: React.RefObject<
     ((identifier: string) => void) | undefined
@@ -118,15 +124,17 @@ export function enrichNodes(
       };
     }
     if (n.data.nodeType === "source") {
+      const nodeStream = deps.localStreams?.[n.id] ?? deps.localStream;
       return {
         ...n,
         data: {
           ...n.data,
-          localStream: deps.localStream,
+          localStream: nodeStream,
           onVideoFileUpload: (file: File) =>
-            deps.onVideoFileUploadRef.current?.(file) ?? Promise.resolve(false),
+            deps.onVideoFileUploadRef.current?.(file, n.id) ??
+            Promise.resolve(false),
           onSourceModeChange: (mode: string) =>
-            deps.onSourceModeChangeRef.current?.(mode),
+            deps.onSourceModeChangeRef.current?.(mode, n.id),
           spoutAvailable: deps.spoutAvailable,
           ndiAvailable: deps.ndiAvailable,
           syphonAvailable: deps.syphonAvailable,
@@ -140,7 +148,16 @@ export function enrichNodes(
       };
     }
     if (n.data.nodeType === "sink") {
-      return { ...n, data: { ...n.data, remoteStream: deps.remoteStream } };
+      const nodeStream = deps.remoteStreams?.[n.id] ?? deps.remoteStream;
+      const nodeStats = deps.sinkStats?.[n.id];
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          remoteStream: nodeStream,
+          sinkStats: nodeStats,
+        },
+      };
     }
     if (n.data.nodeType === "record") {
       return {

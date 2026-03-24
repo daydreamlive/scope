@@ -30,7 +30,7 @@ from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
-from .tracks import VideoProcessingTrack
+from .tracks import SinkOutputTrack, SourceInputHandler, VideoProcessingTrack
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
@@ -81,6 +81,9 @@ class Session:
         self.connection_info = connection_info
         self.notification_sender = None
         self.tempo_sync = None
+        # Multi-sink/source support
+        self.additional_tracks: list[SinkOutputTrack] = []
+        self.input_handlers: list[SourceInputHandler] = []
 
     async def close(self):
         """Close this session and cleanup resources."""
@@ -89,6 +92,14 @@ class Session:
                 self.tempo_sync.unregister_notification_session(
                     self.notification_sender
                 )
+
+            # Stop additional sink tracks
+            for track in self.additional_tracks:
+                track.stop()
+
+            # Stop additional input handlers
+            for handler in self.input_handlers:
+                await handler.stop()
 
             # Stop tracks first
             if self.video_track is not None:
@@ -260,6 +271,21 @@ class WebRTCManager:
             pipeline_ids = initial_parameters.get("pipeline_ids", [])
             produces_video = PipelineRegistry.chain_produces_video(pipeline_ids)
 
+            # Parse graph from initial parameters to find sink/source node IDs
+            sink_node_ids: list[str] = []
+            webrtc_source_node_ids: list[str] = []
+            graph_data = initial_parameters.get("graph")
+            if graph_data and isinstance(graph_data, dict):
+                for node in graph_data.get("nodes", []):
+                    if node.get("type") == "sink":
+                        sink_node_ids.append(node["id"])
+                    elif node.get("type") == "source":
+                        sm = node.get("source_mode", "video")
+                        if sm not in ("spout", "ndi", "syphon"):
+                            webrtc_source_node_ids.append(node["id"])
+
+            primary_sink_node_id = sink_node_ids[0] if sink_node_ids else None
+
             # Create FrameProcessor (owned by session, shared between tracks)
             frame_processor = FrameProcessor(
                 pipeline_manager=pipeline_manager,
@@ -276,8 +302,10 @@ class WebRTCManager:
 
             video_track = None
             relay = None
+            relayed_track = None
             audio_track = None
             audio_relay = None
+            extra_sink_tracks: list[SinkOutputTrack] = []
 
             if produces_video:
                 video_track = VideoProcessingTrack(
@@ -289,6 +317,7 @@ class WebRTCManager:
                     connection_id=request.connection_id,
                     connection_info=request.connection_info,
                     frame_processor=frame_processor,
+                    sink_node_id=primary_sink_node_id,
                 )
                 session.video_track = video_track
 
@@ -298,6 +327,28 @@ class WebRTCManager:
 
                 # Add the relayed video track to WebRTC connection
                 pc.addTrack(relayed_track)
+
+                # Create additional SinkOutputTracks for extra sinks (beyond
+                # the first). Track objects are created now but NOT added to
+                # the peer connection yet — they are attached after
+                # setRemoteDescription to avoid aiortc matching them against
+                # the wrong SDP m-lines (e.g. sendonly source transceivers).
+                if len(sink_node_ids) > 1:
+                    for sink_id in sink_node_ids[1:]:
+                        extra_track = SinkOutputTrack(
+                            primary_track=video_track,
+                            sink_node_id=sink_id,
+                        )
+                        session.additional_tracks.append(extra_track)
+                        extra_sink_tracks.append(extra_track)
+
+                # Eagerly initialize frame processor when graph has sources or
+                # multiple sinks, so SourceInputHandler / SinkOutputTrack can
+                # reference it immediately.
+                if webrtc_source_node_ids or len(sink_node_ids) > 1:
+                    video_track.initialize_output_processing()
+                if webrtc_source_node_ids:
+                    video_track._has_external_input = True
 
                 # Store relay for cleanup
                 session.relay = relay
@@ -361,11 +412,28 @@ class WebRTCManager:
 
             logger.info(f"Created new session: {session}")
 
+            video_track_index = [0]
+
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
                 logger.info(f"Track received: {track.kind} for session {session.id}")
                 if track.kind == "video" and video_track is not None:
-                    video_track.initialize_input_processing(track)
+                    if webrtc_source_node_ids:
+                        idx = video_track_index[0]
+                        video_track_index[0] += 1
+                        if idx < len(webrtc_source_node_ids):
+                            handler = SourceInputHandler(
+                                frame_processor=video_track.frame_processor,
+                                source_node_id=webrtc_source_node_ids[idx],
+                            )
+                            handler.start(track)
+                            session.input_handlers.append(handler)
+                            logger.info(
+                                f"Added input handler for source node "
+                                f"{webrtc_source_node_ids[idx]}"
+                            )
+                    else:
+                        video_track.initialize_input_processing(track)
 
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
@@ -463,6 +531,41 @@ class WebRTCManager:
             # create an audio transceiver for it during setRemoteDescription.
             offer_sdp = RTCSessionDescription(sdp=request.sdp, type=request.type)
             await pc.setRemoteDescription(offer_sdp)
+
+            # Attach extra sink tracks to the video transceivers that
+            # aiortc created from the browser's recvonly m-lines.  We must
+            # do this AFTER setRemoteDescription so that the transceivers
+            # already exist and are not incorrectly matched against the
+            # browser's sendonly source m-lines during offer processing.
+            if produces_video and extra_sink_tracks and relay is not None:
+                # After setRemoteDescription, transceivers for browser's
+                # sendonly m-lines (extra sources) have direction "recvonly"
+                # while those for browser's recvonly m-lines (extra sinks)
+                # have direction "sendonly" or "inactive".  Select the
+                # latter — video transceivers with no sender track that are
+                # not recvonly.
+                available_video_transceivers = [
+                    t
+                    for t in pc.getTransceivers()
+                    if t.kind == "video"
+                    and t.sender.track is None
+                    and t.direction != "recvonly"
+                ]
+                for i, extra_track in enumerate(extra_sink_tracks):
+                    if i < len(available_video_transceivers):
+                        t = available_video_transceivers[i]
+                        t.sender.replaceTrack(relay.subscribe(extra_track))
+                        t.direction = "sendonly"
+                        logger.info(
+                            f"Extra sink track for {extra_track.sink_node_id} "
+                            f"attached to transceiver (mid={t.mid})"
+                        )
+                    else:
+                        logger.warning(
+                            f"No available transceiver for extra sink "
+                            f"{extra_track.sink_node_id}, adding track directly"
+                        )
+                        pc.addTrack(relay.subscribe(extra_track))
 
             # Attach our audio track to the transceiver that aiortc created
             # from the browser's recvonly audio m-line. We find it by kind,

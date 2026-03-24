@@ -16,6 +16,9 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   const { updateData } = useNodeData(id);
   const { collapsed, toggleCollapse } = useNodeCollapse();
   const remoteStream = data.remoteStream as MediaStream | null | undefined;
+  const sinkStats = data.sinkStats as
+    | { fps: number; bitrate: number }
+    | undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoSize, setVideoSize] = useState<{
     width: number;
@@ -62,11 +65,18 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
                 No output stream
               </div>
             )}
-            {videoSize && (
-              <span className="absolute bottom-1 right-1 text-[9px] text-[#8c8c8d] bg-black/60 px-1 rounded">
-                {videoSize.width}&times;{videoSize.height}
-              </span>
-            )}
+            <div className="absolute bottom-1 right-1 flex gap-1">
+              {sinkStats && sinkStats.fps > 0 && (
+                <span className="text-[9px] text-[#8c8c8d] bg-black/60 px-1 rounded">
+                  {sinkStats.fps.toFixed(1)} fps
+                </span>
+              )}
+              {videoSize && (
+                <span className="text-[9px] text-[#8c8c8d] bg-black/60 px-1 rounded">
+                  {videoSize.width}&times;{videoSize.height}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       )}

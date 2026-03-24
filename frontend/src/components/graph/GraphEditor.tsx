@@ -153,11 +153,14 @@ interface GraphEditorProps {
   onGraphChange?: () => void;
   onGraphClear?: () => void;
   localStream?: MediaStream | null;
+  localStreams?: Record<string, MediaStream>;
   remoteStream?: MediaStream | null;
-  onVideoFileUpload?: (file: File) => Promise<boolean>;
+  remoteStreams?: Record<string, MediaStream>;
+  sinkStats?: Record<string, import("../../hooks/useWebRTCStats").WebRTCStats>;
+  onVideoFileUpload?: (file: File, nodeId?: string) => Promise<boolean>;
   onStartStream?: () => void;
   onStopStream?: () => void;
-  onSourceModeChange?: (mode: string) => void;
+  onSourceModeChange?: (mode: string, nodeId?: string) => void;
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
   syphonAvailable?: boolean;
@@ -189,7 +192,10 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onGraphChange,
       onGraphClear,
       localStream,
+      localStreams,
       remoteStream,
+      remoteStreams,
+      sinkStats,
       onVideoFileUpload,
       onStartStream,
       onStopStream,
@@ -268,7 +274,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onStartRecording,
         onStopRecording,
       },
-      { localStream, remoteStream, isStreaming },
+      { localStream, localStreams, remoteStream, remoteStreams, sinkStats, isStreaming },
       {
         spoutAvailable,
         ndiAvailable,

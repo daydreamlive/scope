@@ -61,8 +61,8 @@ export interface GraphEditorCallbacks {
   onNodeParameterChange?: (nodeId: string, key: string, value: unknown) => void;
   onGraphChange?: () => void;
   onGraphClear?: () => void;
-  onVideoFileUpload?: (file: File) => Promise<boolean>;
-  onSourceModeChange?: (mode: string) => void;
+  onVideoFileUpload?: (file: File, nodeId?: string) => Promise<boolean>;
+  onSourceModeChange?: (mode: string, nodeId?: string) => void;
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
@@ -79,7 +79,10 @@ export interface GraphEditorCallbacks {
 
 export interface GraphEditorStreams {
   localStream?: MediaStream | null;
+  localStreams?: Record<string, MediaStream>;
   remoteStream?: MediaStream | null;
+  remoteStreams?: Record<string, MediaStream>;
+  sinkStats?: Record<string, import("../../../../hooks/useWebRTCStats").WebRTCStats>;
   isStreaming: boolean;
 }
 
@@ -228,7 +231,10 @@ export function useGraphState(
     handlePromptSubmit: params.handlePromptSubmit,
     nodeParamsRef: params.nodeParamsRef,
     localStream: streams.localStream,
+    localStreams: streams.localStreams,
     remoteStream: streams.remoteStream,
+    remoteStreams: streams.remoteStreams,
+    sinkStats: streams.sinkStats,
     onVideoFileUploadRef,
     onSourceModeChangeRef,
     onSpoutSourceChangeRef,
@@ -263,7 +269,10 @@ export function useGraphState(
     pipelineSchemas,
     params.handleNodeParameterChange,
     streams.localStream,
+    streams.localStreams,
     streams.remoteStream,
+    streams.remoteStreams,
+    streams.sinkStats,
     streams.isStreaming,
     availability.spoutAvailable,
     availability.ndiAvailable,

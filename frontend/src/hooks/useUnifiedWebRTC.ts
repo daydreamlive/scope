@@ -69,6 +69,9 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   const { adapter, isCloudMode } = useCloudContext();
 
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
+  const [remoteStreams, setRemoteStreams] = useState<
+    Record<string, MediaStream>
+  >({});
   const [connectionState, setConnectionState] =
     useState<RTCPeerConnectionState>("new");
   const [isConnecting, setIsConnecting] = useState(false);
@@ -79,6 +82,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   const currentStreamRef = useRef<MediaStream | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidate[]>([]);
+  const sinkNodeIdsRef = useRef<string[]>([]);
 
   // Helper to get ICE servers
   const fetchIceServers = useCallback(async (): Promise<RTCConfiguration> => {
@@ -137,7 +141,12 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   );
 
   const startStream = useCallback(
-    async (initialParameters?: InitialParameters, stream?: MediaStream) => {
+    async (
+      initialParameters?: InitialParameters,
+      stream?: MediaStream,
+      sinkNodeIds?: string[],
+      sourceNodeStreams?: Record<string, MediaStream>
+    ) => {
       if (isConnecting || peerConnectionRef.current) return;
 
       setIsConnecting(true);
@@ -182,6 +191,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
               setIsStreaming(false);
               setIsConnecting(false);
               setRemoteStream(null);
+              setRemoteStreams({});
 
               if (data.error_message) {
                 toast.error("Stream Error", {
@@ -228,9 +238,45 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           console.error("[UnifiedWebRTC] Data channel error:", error);
         };
 
-        // Add video track for sending to server
+        // Force VP8-only for aiortc compatibility
+        const codecs = RTCRtpReceiver.getCapabilities("video")?.codecs || [];
+        const vp8Codecs = codecs.filter(
+          c => c.mimeType.toLowerCase() === "video/vp8"
+        );
+
+        // Add video track(s) for sending to server
         let transceiver: RTCRtpTransceiver | undefined;
-        if (stream) {
+        const sourceEntries = sourceNodeStreams
+          ? Object.entries(sourceNodeStreams)
+          : [];
+
+        if (sourceEntries.length > 0) {
+          // Multi-source: add each source node's stream as a separate track
+          for (let i = 0; i < sourceEntries.length; i++) {
+            const [nodeId, nodeStream] = sourceEntries[i];
+            const videoTrack = nodeStream.getVideoTracks()[0];
+            if (!videoTrack) continue;
+
+            if (i === 0) {
+              console.log(
+                `[UnifiedWebRTC] Adding primary video track for source ${nodeId}`
+              );
+              const sender = pc.addTrack(videoTrack, nodeStream);
+              transceiver = pc.getTransceivers().find(t => t.sender === sender);
+            } else {
+              console.log(
+                `[UnifiedWebRTC] Adding extra video track for source ${nodeId}`
+              );
+              const t = pc.addTransceiver(videoTrack, {
+                direction: "sendonly",
+                streams: [nodeStream],
+              });
+              if (vp8Codecs.length > 0) {
+                t.setCodecPreferences(vp8Codecs);
+              }
+            }
+          }
+        } else if (stream) {
           stream.getTracks().forEach(track => {
             if (track.kind === "video") {
               console.log("[UnifiedWebRTC] Adding video track for sending");
@@ -250,31 +296,75 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         // based on the pipeline's produces_audio flag.
         pc.addTransceiver("audio", { direction: "recvonly" });
 
-        // Force VP8-only for aiortc compatibility
-        if (transceiver) {
-          const codecs = RTCRtpReceiver.getCapabilities("video")?.codecs || [];
-          const vp8Codecs = codecs.filter(
-            c => c.mimeType.toLowerCase() === "video/vp8"
-          );
-          if (vp8Codecs.length > 0) {
-            transceiver.setCodecPreferences(vp8Codecs);
-            console.log("[UnifiedWebRTC] Forced VP8-only codec");
+        if (transceiver && vp8Codecs.length > 0) {
+          transceiver.setCodecPreferences(vp8Codecs);
+          console.log("[UnifiedWebRTC] Forced VP8-only codec");
+        }
+
+        // Add extra recvonly transceivers for additional sink nodes
+        sinkNodeIdsRef.current = sinkNodeIds ?? [];
+        if (sinkNodeIds && sinkNodeIds.length > 1) {
+          for (let i = 1; i < sinkNodeIds.length; i++) {
+            const t = pc.addTransceiver("video", { direction: "recvonly" });
+            if (vp8Codecs.length > 0) {
+              t.setCodecPreferences(vp8Codecs);
+            }
+            console.log(
+              `[UnifiedWebRTC] Added recvonly transceiver for sink ${sinkNodeIds[i]}`
+            );
           }
         }
 
-        // Event handlers
-        // Collect all incoming tracks (video + audio) into a single MediaStream.
-        // The backend sends video and audio as separate tracks; we merge them
-        // into one MediaStream for the <video> element.
-        const combinedStream = new MediaStream();
+        // Track received video tracks and map them to sink node IDs.
+        // Video tracks arrive in the same order we added transceivers.
+        // Audio tracks are collected into the primary stream.
+        let fallbackVideoTrackIndex = 0;
+        const combinedAudioTracks: MediaStreamTrack[] = [];
         pc.ontrack = (evt: RTCTrackEvent) => {
           console.log(
             `[UnifiedWebRTC] Track received: ${evt.track.kind} (id: ${evt.track.id})`
           );
-          combinedStream.addTrack(evt.track);
-          // Create a new MediaStream wrapper so React detects the state change
-          // (same object reference would not trigger a re-render)
-          setRemoteStream(new MediaStream(combinedStream.getTracks()));
+
+          if (evt.track.kind === "audio") {
+            combinedAudioTracks.push(evt.track);
+            setRemoteStream(prev => {
+              const videoTracks = prev ? prev.getVideoTracks() : [];
+              return new MediaStream([...videoTracks, ...combinedAudioTracks]);
+            });
+            return;
+          }
+
+          const ids = sinkNodeIdsRef.current;
+          const streamForTrack = new MediaStream([
+            evt.track,
+            ...combinedAudioTracks,
+          ]);
+
+          if (ids.length > 1) {
+            // Map track to sink by arrival order (matches server-side addTrack order)
+            let sinkId: string | undefined;
+            if (fallbackVideoTrackIndex < ids.length) {
+              sinkId = ids[fallbackVideoTrackIndex];
+              fallbackVideoTrackIndex += 1;
+            }
+
+            if (sinkId) {
+              console.log(
+                `[UnifiedWebRTC] Setting remote stream for sink ${sinkId}`
+              );
+              if (sinkId === ids[0]) {
+                setRemoteStream(streamForTrack);
+              }
+              setRemoteStreams(prev => ({
+                ...prev,
+                [sinkId]: streamForTrack,
+              }));
+              return;
+            }
+          }
+
+          console.log("[UnifiedWebRTC] Setting remote stream");
+          setRemoteStream(streamForTrack);
         };
 
         pc.onconnectionstatechange = () => {
@@ -567,8 +657,10 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
     currentStreamRef.current = null;
     sessionIdRef.current = null;
     queuedCandidatesRef.current = [];
+    sinkNodeIdsRef.current = [];
 
     setRemoteStream(null);
+    setRemoteStreams({});
     setConnectionState("new");
     setIsStreaming(false);
   }, []);
@@ -584,10 +676,12 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
 
   return {
     remoteStream,
+    remoteStreams,
     connectionState,
     isConnecting,
     isStreaming,
     peerConnectionRef,
+    sinkNodeIdsRef,
     sessionId: sessionIdRef.current,
     startStream,
     stopStream,
