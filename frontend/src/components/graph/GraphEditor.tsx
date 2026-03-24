@@ -141,6 +141,7 @@ export interface GraphEditorHandle {
     workflow: import("../../lib/workflowApi").ScopeWorkflow
   ) => void;
   updateNodeParam: (nodeId: string, key: string, value: unknown) => void;
+  clearGraph: () => void;
 }
 
 interface GraphEditorProps {
@@ -298,6 +299,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           );
         },
         updateNodeParam: handleNodeParameterChange,
+        clearGraph: handleClear,
       }),
       [
         refreshGraph,
@@ -307,6 +309,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         getGraphLoRASettings,
         loadGraphFromParsed,
         handleNodeParameterChange,
+        handleClear,
       ]
     );
 

@@ -283,6 +283,11 @@ export function StreamPage() {
     setNonLinearGraph(false);
   }, []);
 
+  // Clear graph from SettingsPanel (triggers the full graph clear via ref)
+  const handleClearGraphFromSettings = useCallback(() => {
+    graphEditorRef.current?.clearGraph();
+  }, []);
+
   // Video display state
   const [videoScaleMode, setVideoScaleMode] = useState<"fit" | "native">("fit");
 
@@ -3266,6 +3271,7 @@ export function StreamPage() {
                 }}
                 isCloudMode={isCloudMode}
                 nonLinearGraph={nonLinearGraph}
+                onClearGraph={handleClearGraphFromSettings}
                 onOpenLoRAsSettings={() => setOpenSettingsTab("loras")}
               />
             </div>
