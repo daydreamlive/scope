@@ -32,8 +32,14 @@ class GraphRun:
 
     # When put(frame) is called, put to each of these queues (source fan-out)
     source_queues: list[queue.Queue]
-    # The processor whose output_queue we read from for get()
+    # Per-source-node queues: source_node_id -> list of queues fed by that source
+    source_queues_by_node: dict[str, list[queue.Queue]]
+    # The processor whose output_queue we read from for get() (first sink, backward compat)
     sink_processor: PipelineProcessor | None
+    # Per-sink-node output queues: sink_node_id -> output queue to read from
+    sink_queues_by_node: dict[str, queue.Queue]
+    # Per-sink-node feeder processors: sink_node_id -> PipelineProcessor that feeds it
+    sink_processors_by_node: dict[str, PipelineProcessor]
     # All pipeline processors (for start/stop/update_parameters)
     processors: list[PipelineProcessor]
     # Pipeline IDs in graph order (for logging/events)
@@ -150,24 +156,66 @@ def build_graph(
     _resize_graph_queues(graph, node_processors)
 
     # 3e) Derive source_queues from processor input_queues (post-resize).
+    # Also build per-source-node queue mappings for multi-source support.
     source_queues: list[queue.Queue] = []
+    source_queues_by_node: dict[str, list[queue.Queue]] = {}
     for node_id in graph.get_source_node_ids():
+        per_node: list[queue.Queue] = []
         for e in graph.stream_edges_from(node_id):
             consumer = node_processors.get(e.to_node)
             if consumer is not None:
                 q = consumer.input_queues.get(e.to_port)
-                if q is not None and q not in source_queues:
-                    source_queues.append(q)
+                if q is not None:
+                    if q not in source_queues:
+                        source_queues.append(q)
+                    if q not in per_node:
+                        per_node.append(q)
+        if per_node:
+            source_queues_by_node[node_id] = per_node
 
-    # 4) Identify sink: find the pipeline node that feeds into a sink node
-    sink_node_id: str | None = None
+    # 4) Identify sinks: find the pipeline nodes that feed into sink nodes.
+    # Each sink gets a **dedicated** output queue appended to its feeder
+    # processor's output_queues list. The processor's fan-out loop
+    # (pipeline_processor.py line ~550) puts frames into every queue in the
+    # list, so each sink receives its own independent copy of the frame.
+    sink_queues_by_node: dict[str, queue.Queue] = {}
+    sink_processors_by_node: dict[str, PipelineProcessor] = {}
     for sink_id in graph.get_sink_node_ids():
         for e in graph.edges_to(sink_id):
             if e.kind == "stream":
+                feeder_proc = node_processors.get(e.from_node)
+                if feeder_proc is not None:
+                    sink_processors_by_node[sink_id] = feeder_proc
+                    # Create a dedicated queue for this sink node
+                    sink_q = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
+                    sink_queues_by_node[sink_id] = sink_q
+                    # Append it to the feeder's output_queues so the fan-out
+                    # loop distributes frames to it automatically.
+                    port = e.from_port
+                    if port in feeder_proc.output_queues:
+                        feeder_proc.output_queues[port].append(sink_q)
+                    else:
+                        feeder_proc.output_queues[port] = [sink_q]
+                    logger.info(
+                        "Sink %s: dedicated queue on %s port '%s' "
+                        "(total queues: %d)",
+                        sink_id,
+                        e.from_node,
+                        port,
+                        len(feeder_proc.output_queues[port]),
+                    )
+                break
+
+    # Backward compat: first sink determines the primary sink_processor
+    sink_node_id: str | None = None
+    sink_node_ids = list(sink_queues_by_node.keys())
+    if sink_node_ids:
+        first_sink_id = sink_node_ids[0]
+        for e in graph.edges_to(first_sink_id):
+            if e.kind == "stream":
                 sink_node_id = e.from_node
                 break
-        if sink_node_id:
-            break
+
     if sink_node_id is None:
         # No explicit sink node: treat last pipeline node as sink (linear)
         pipeline_node_ids = graph.get_pipeline_node_ids()
@@ -185,7 +233,8 @@ def build_graph(
 
     # 4b) Resize sink's default output queues (initially 8) to match
     # inter-pipeline queue size so output batches don't get dropped.
-    if sink_processor is not None:
+    # Skip if per-sink dedicated queues were already created above.
+    if sink_processor is not None and not sink_queues_by_node:
         for port, qlist in list(sink_processor.output_queues.items()):
             if qlist and qlist[0].maxsize < DEFAULT_INPUT_QUEUE_MAXSIZE:
                 sink_processor.output_queues[port] = [
@@ -197,7 +246,10 @@ def build_graph(
 
     return GraphRun(
         source_queues=source_queues,
+        source_queues_by_node=source_queues_by_node,
         sink_processor=sink_processor,
+        sink_queues_by_node=sink_queues_by_node,
+        sink_processors_by_node=sink_processors_by_node,
         processors=list(node_processors.values()),
         pipeline_ids=pipeline_ids,
         sink_node_id=sink_node_id,

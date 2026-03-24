@@ -188,6 +188,8 @@ export interface FlowNodeData {
   onSyphonSourceChange?: (identifier: string) => void;
   /** For sink nodes: remote output stream */
   remoteStream?: MediaStream | null;
+  /** For sink nodes: per-sink WebRTC stats (FPS, bitrate) */
+  sinkStats?: { fps: number; bitrate: number };
   /** For pipeline nodes: whether the selected pipeline supports prompts */
   supportsPrompts?: boolean;
   /** For pipeline nodes: whether the selected pipeline supports cache management (shows Reset Cache button) */
@@ -768,6 +770,7 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
 const NON_SERIALIZABLE_KEYS = new Set<string>([
   "localStream",
   "remoteStream",
+  "sinkStats",
   "onVideoFileUpload",
   "onSourceModeChange",
   "onSpoutSourceChange",
