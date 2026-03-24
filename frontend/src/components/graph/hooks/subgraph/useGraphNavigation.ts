@@ -401,13 +401,13 @@ export function useGraphNavigation(): UseGraphNavigationReturn {
             next = {
               ...next,
               sourceHandle: newHandleId,
-              id: e.id.replace(oldName, newName),
+              id: `${next.source}-${newHandleId}-${next.target}-${next.targetHandle ?? ""}`,
             };
           if (e.target === boundaryId && e.targetHandle === oldHandleId)
             next = {
               ...next,
               targetHandle: newHandleId,
-              id: e.id.replace(oldName, newName),
+              id: `${next.source}-${next.sourceHandle ?? ""}-${next.target}-${newHandleId}`,
             };
           return next;
         })

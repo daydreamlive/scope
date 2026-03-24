@@ -41,17 +41,17 @@ export function resolveSourceType(
   if (nt === "bool") return "boolean";
   if (nt === "trigger") return "boolean";
   if (nt === "reroute") {
-    // Walk upstream
-    for (const e of edges) {
-      if (e.target !== node.id) continue;
-      const upstream = nodes.find(n => n.id === e.source);
+    // Walk upstream — reroutes have at most one input; use the first incoming edge.
+    const incomingEdge = edges.find(e => e.target === node.id);
+    if (incomingEdge) {
+      const upstream = nodes.find(n => n.id === incomingEdge.source);
       if (upstream)
         return resolveSourceType(
           upstream,
           nodes,
           edges,
           visited,
-          e.sourceHandle
+          incomingEdge.sourceHandle
         );
     }
     // Fallback to valueType
@@ -171,10 +171,15 @@ export function collectUpstreamChain(
 
   const rerouteIds = [node.id];
 
-  // Find the upstream edge feeding into this reroute
-  for (const e of edges) {
-    if (e.target !== nodeId) continue;
-    const upstream = collectUpstreamChain(e.source, nodes, edges, visited);
+  // Find the upstream edge feeding into this reroute (at most one input).
+  const incomingEdge = edges.find(e => e.target === nodeId);
+  if (incomingEdge) {
+    const upstream = collectUpstreamChain(
+      incomingEdge.source,
+      nodes,
+      edges,
+      visited
+    );
     return {
       rerouteIds: [...rerouteIds, ...upstream.rerouteIds],
       rootSourceId: upstream.rootSourceId,
