@@ -12,6 +12,9 @@
 interface OnboardingStatus {
   completed: boolean;
   inference_mode: string | null;
+  onboarding_style?: "teaching" | "simple" | null;
+  referral_source?: string | null;
+  use_case?: string | null;
 }
 
 /** Fetch onboarding status from the backend. */
@@ -46,6 +49,23 @@ export async function setInferenceMode(mode: "local" | "cloud"): Promise<void> {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ inference_mode: mode }),
+    });
+  } catch {
+    // no-op
+  }
+}
+
+/** Persist survey answers collected during cloud connecting. */
+export async function persistSurveyAnswers(answers: {
+  onboarding_style: "teaching" | "simple";
+  referral_source: string | null;
+  use_case: string | null;
+}): Promise<void> {
+  try {
+    await fetch("/api/v1/onboarding/status", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(answers),
     });
   } catch {
     // no-op

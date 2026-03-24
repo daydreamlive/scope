@@ -74,6 +74,7 @@ import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 import { useOnboarding } from "../contexts/OnboardingContext";
 import { OnboardingOverlay } from "../components/onboarding/OnboardingOverlay";
+import { WorkspaceTour } from "../components/onboarding/WorkspaceTour";
 import {
   isAuthenticated as checkIsAuthenticated,
   getDaydreamAPIKey,
@@ -3386,6 +3387,15 @@ export function StreamPage() {
             }}
             onActivateGraphMode={() => setGraphMode(true)}
             onOpenImportDialog={() => setShowWorkflowImport(true)}
+          />
+        )}
+
+        {/* Post-onboarding tooltip tour (play → workflows) */}
+        {!showOnboardingOverlay && onboardingState.phase === "idle" && (
+          <WorkspaceTour
+            onboardingStyle={onboardingState.onboardingStyle}
+            isStreaming={isStreaming}
+            dialogOpen={showWorkflowImport}
           />
         )}
 

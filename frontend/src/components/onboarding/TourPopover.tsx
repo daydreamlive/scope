@@ -70,7 +70,8 @@ function getPopoverStyle(
 
 function getArrowStyle(
   anchorRect: Rect | null,
-  position: TourStepDef["position"]
+  position: TourStepDef["position"],
+  popoverStyle: React.CSSProperties
 ): React.CSSProperties | null {
   if (!anchorRect || position === "center") return null;
 
@@ -80,12 +81,21 @@ function getArrowStyle(
     height: 0,
   };
 
+  // For top/bottom positions, compute horizontal offset so the arrow points
+  // at the anchor center even when the popover was clamped to the viewport.
+  const anchorCenterX = anchorRect.left + anchorRect.width / 2;
+  const popoverLeft = typeof popoverStyle.left === "number" ? popoverStyle.left : 0;
+  const arrowLeft = Math.max(
+    ARROW_SIZE + 8,
+    Math.min(anchorCenterX - popoverLeft, POPOVER_WIDTH - ARROW_SIZE - 8)
+  );
+
   switch (position) {
     case "bottom":
       return {
         ...base,
         top: -ARROW_SIZE,
-        left: "50%",
+        left: arrowLeft,
         transform: "translateX(-50%)",
         borderLeft: `${ARROW_SIZE}px solid transparent`,
         borderRight: `${ARROW_SIZE}px solid transparent`,
@@ -95,7 +105,7 @@ function getArrowStyle(
       return {
         ...base,
         bottom: -ARROW_SIZE,
-        left: "50%",
+        left: arrowLeft,
         transform: "translateX(-50%)",
         borderLeft: `${ARROW_SIZE}px solid transparent`,
         borderRight: `${ARROW_SIZE}px solid transparent`,
@@ -229,7 +239,7 @@ export function TourPopover({
   }, [updatePosition]);
 
   const popoverStyle = getPopoverStyle(anchorRect, step.position);
-  const arrowStyle = getArrowStyle(anchorRect, step.position);
+  const arrowStyle = getArrowStyle(anchorRect, step.position, popoverStyle);
 
   return createPortal(
     <>
