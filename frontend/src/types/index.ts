@@ -9,6 +9,7 @@ interface ScopeAPI {
   onDeepLinkAction?: (
     callback: (data: DeepLinkActionData) => void
   ) => () => void;
+  getEnvTelemetryDisabled?: () => boolean;
 }
 
 declare global {

@@ -1,3 +1,5 @@
+import { identifyUser as telemetryIdentify, track as telemetryTrack } from "./telemetry";
+
 /**
  * Check if running in Electron desktop app
  */
@@ -66,6 +68,7 @@ interface DaydreamAuthData {
   apiKey: string;
   userId: string | null;
   displayName: string | null;
+  email: string | null;
   cohortParticipant: boolean;
   isAdmin: boolean;
 }
@@ -93,6 +96,7 @@ function setAuthData(data: DaydreamAuthData): void {
 
 interface UserProfile {
   displayName: string | null;
+  email: string | null;
   cohortParticipant: boolean;
   isAdmin: boolean;
 }
@@ -110,6 +114,7 @@ async function fetchUserProfile(apiKey: string): Promise<UserProfile> {
   const profile = await response.json();
   return {
     displayName: profile.email || profile.name || profile.username || null,
+    email: profile.email || null,
     cohortParticipant: profile.cohortParticipant === true,
     isAdmin: profile.isAdmin === true,
   };
@@ -145,6 +150,13 @@ export function getDaydreamUserDisplayName(): string | null {
 }
 
 /**
+ * Get the stored Daydream user email from localStorage
+ */
+export function getDaydreamUserEmail(): string | null {
+  return getAuthData()?.email ?? null;
+}
+
+/**
  * Save the Daydream auth credentials and profile to localStorage
  */
 export async function saveDaydreamAuth(
@@ -153,11 +165,16 @@ export async function saveDaydreamAuth(
 ): Promise<void> {
   try {
     const profile = await fetchUserProfile(apiKey);
-    setAuthData({
+    const authData = {
       apiKey,
       userId,
       ...profile,
-    });
+    };
+    setAuthData(authData);
+    if (userId) {
+      telemetryIdentify(userId, authData.displayName, authData.email);
+      telemetryTrack("user_logged_in", { source: "scope" });
+    }
   } catch (e) {
     // If profile fetch fails, save auth with defaults
     console.error("Failed to fetch user profile during auth:", e);
@@ -165,6 +182,7 @@ export async function saveDaydreamAuth(
       apiKey,
       userId,
       displayName: null,
+      email: null,
       cohortParticipant: false,
       isAdmin: false,
     });
@@ -229,6 +247,7 @@ export async function initEnvKeyAuth(): Promise<boolean> {
     apiKey: envKey,
     userId: profile.id || profile.userId || profile.user_id || null,
     displayName: profile.email || profile.name || profile.username || null,
+    email: profile.email || null,
     cohortParticipant: profile.cohortParticipant === true,
     isAdmin: profile.isAdmin === true,
   });

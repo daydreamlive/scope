@@ -12,6 +12,7 @@ import {
   setInferenceMode as persistInferenceMode,
 } from "../lib/onboardingStorage";
 import { trackEvent } from "../lib/analytics";
+import { isDisclosed as checkTelemetryDisclosed } from "../lib/telemetry";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,6 +24,7 @@ export type OnboardingPhase =
   | "inference" // step 1: local vs cloud
   | "cloud_auth" // step 2a: sign in (only if cloud chosen)
   | "cloud_connecting" // step 2b: waiting for cloud relay connection
+  | "telemetry_disclosure" // telemetry opt-in disclosure (local mode only)
   | "workflow" // step 3: starter workflow picker
   | "downloading" // step 3b: workflow downloading
   | "completed"; // persist and transition to idle
@@ -51,6 +53,7 @@ type OnboardingAction =
   | { type: "START_FROM_SCRATCH" }
   | { type: "IMPORT_WORKFLOW_READY" }
   | { type: "COMPLETE" }
+  | { type: "TELEMETRY_DISCLOSED" }
   | { type: "LOADED"; completed: boolean; onboardingStyle?: "teaching" | "simple" | null };
 
 // ---------------------------------------------------------------------------
@@ -75,8 +78,16 @@ function reducer(
       return {
         ...state,
         inferenceMode: action.mode,
-        phase: action.mode === "cloud" ? "cloud_auth" : "workflow",
+        phase:
+          action.mode === "cloud"
+            ? "cloud_auth"
+            : checkTelemetryDisclosed()
+              ? "workflow"
+              : "telemetry_disclosure",
       };
+
+    case "TELEMETRY_DISCLOSED":
+      return { ...state, phase: "workflow" };
 
     case "COMPLETE_AUTH":
       trackEvent("onboarding_auth_completed");
@@ -142,7 +153,11 @@ function reducer(
           return { ...state, phase: "cloud_auth", inferenceMode: "cloud" };
         }
         if (resumeMode === "local") {
-          return { ...state, phase: "workflow", inferenceMode: "local" };
+          return {
+            ...state,
+            phase: checkTelemetryDisclosed() ? "workflow" : "telemetry_disclosure",
+            inferenceMode: "local",
+          };
         }
       }
       return { ...state, phase: "inference" };
@@ -173,6 +188,7 @@ interface OnboardingContextValue {
   workflowReady: () => void;
   startFromScratch: () => void;
   importWorkflowReady: () => void;
+  telemetryDisclosed: () => void;
 }
 
 const OnboardingContext = createContext<OnboardingContextValue | null>(null);
@@ -245,6 +261,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     () => dispatch({ type: "IMPORT_WORKFLOW_READY" }),
     []
   );
+  const telemetryDisclosed = useCallback(
+    () => dispatch({ type: "TELEMETRY_DISCLOSED" }),
+    []
+  );
 
   const isOnboarding = state.phase !== "idle";
   const isOverlayVisible = [
@@ -252,6 +272,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     "inference",
     "cloud_auth",
     "cloud_connecting",
+    "telemetry_disclosure",
     "workflow",
     "downloading",
   ].includes(state.phase);
@@ -272,6 +293,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         workflowReady,
         startFromScratch,
         importWorkflowReady,
+        telemetryDisclosed,
       }}
     >
       {children}

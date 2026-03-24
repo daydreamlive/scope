@@ -52,7 +52,7 @@ export function VideoOutput({
   const internalContainerRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
-  const overlayTimeoutRef = useRef<number | null>(null);
+  const overlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Audio state: start muted to comply with browser autoplay policy.
   // User can click the speaker icon to unmute once the stream is playing.

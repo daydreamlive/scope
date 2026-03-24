@@ -1,6 +1,7 @@
 import { useRef } from "react";
 import { Play, Square } from "lucide-react";
 import { NODE_TOKENS } from "./ui";
+import { trackEvent } from "../../lib/analytics";
 
 interface GraphToolbarProps {
   isStreaming: boolean;
@@ -76,6 +77,7 @@ export function GraphToolbar({
         onChange={e => {
           if (isStreaming) onStopStream?.();
           onImport(e);
+          trackEvent("workflow_imported", { surface: "graph_mode" });
         }}
         className="hidden"
       />
@@ -85,7 +87,7 @@ export function GraphToolbar({
       >
         Import
       </button>
-      <button onClick={onExport} className={NODE_TOKENS.toolbarButton}>
+      <button onClick={() => { onExport(); trackEvent("workflow_exported", { surface: "graph_mode" }); }} className={NODE_TOKENS.toolbarButton}>
         Export
       </button>
       <button

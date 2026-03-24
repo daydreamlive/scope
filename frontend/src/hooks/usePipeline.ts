@@ -30,7 +30,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
   const [error, setError] = useState<string | null>(null);
 
   const pollTimeoutRef = useRef<number | null>(null);
-  const loadTimeoutRef = useRef<number | null>(null);
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPollingRef = useRef(false);
   const shownErrorRef = useRef<string | null>(null); // Track which error we've shown
 

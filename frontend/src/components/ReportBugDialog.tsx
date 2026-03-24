@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Bug, Copy, ExternalLink, Check } from "lucide-react";
 import { Button } from "./ui/button";
 import {
@@ -9,6 +9,7 @@ import {
   DialogTitle,
 } from "./ui/dialog";
 import { fetchCurrentLogs } from "../lib/api";
+import { trackEvent } from "../lib/analytics";
 
 interface ReportBugDialogProps {
   open: boolean;
@@ -19,6 +20,13 @@ export function ReportBugDialog({ open, onClose }: ReportBugDialogProps) {
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [copySuccess, setCopySuccess] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Track when dialog opens
+  useEffect(() => {
+    if (open) {
+      trackEvent("error_dialog_shown", { error_category: "bug_report", surface: "app_chrome" });
+    }
+  }, [open]);
 
   const handleCopyLogs = async () => {
     try {

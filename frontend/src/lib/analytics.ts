@@ -15,3 +15,56 @@ export function trackEvent(
   }
   // TODO: integrate PostHog — posthog.capture(name, properties)
 }
+
+/**
+ * Creates a debounced tracker that coalesces rapid-fire events (e.g. slider
+ * drags, search keystrokes) into a single event after a quiet period.
+ *
+ * @param delayMs - Debounce window in milliseconds (default 2000)
+ * @returns A function `(name, properties, key?)` where `key` scopes the timer
+ *          (defaults to `name`). Only the last call within the window fires.
+ */
+export function createDebouncedTracker(delayMs = 2000) {
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  return (
+    name: string,
+    properties?: Record<string, unknown>,
+    key?: string
+  ) => {
+    const k = key ?? name;
+    const prev = timers.get(k);
+    if (prev) clearTimeout(prev);
+    timers.set(
+      k,
+      setTimeout(() => {
+        trackEvent(name, properties);
+        timers.delete(k);
+      }, delayMs)
+    );
+  };
+}
+
+/**
+ * Fire-and-forget beacon for events that must survive page unload
+ * (e.g. `app_closed`). Falls back to `trackEvent` when the Beacon API
+ * is unavailable.
+ */
+export function trackBeacon(
+  name: string,
+  properties?: Record<string, unknown>
+): void {
+  if (import.meta.env.DEV) {
+    console.debug("[analytics:beacon]", name, properties ?? {});
+  }
+  // Attempt sendBeacon; fall back to synchronous track
+  try {
+    const payload = JSON.stringify({ event: name, properties: properties ?? {} });
+    const sent = navigator.sendBeacon?.(
+      "/api/telemetry",
+      new Blob([payload], { type: "application/json" })
+    );
+    if (!sent) trackEvent(name, properties);
+  } catch {
+    trackEvent(name, properties);
+  }
+}

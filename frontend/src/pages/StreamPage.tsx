@@ -82,6 +82,7 @@ import {
 } from "../lib/auth";
 import { createDaydreamImportSession } from "../lib/daydreamExport";
 import { openExternalUrl } from "../lib/openExternal";
+import { trackEvent } from "../lib/analytics";
 
 interface OscCommand {
   key: string;
@@ -654,6 +655,18 @@ export function StreamPage() {
     peerConnectionRef,
     isStreaming,
   });
+
+  // Periodic fps_reported event every 60s during active generation
+  useEffect(() => {
+    if (!isStreaming) return;
+    const interval = setInterval(() => {
+      trackEvent("fps_reported", {
+        fps: webrtcStats.fps,
+        surface: graphMode ? "graph_mode" : "performance_mode",
+      });
+    }, 60_000);
+    return () => clearInterval(interval);
+  }, [isStreaming, webrtcStats.fps, graphMode]);
 
   // Video container ref for controller input pointer lock
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -1894,6 +1907,9 @@ export function StreamPage() {
   ): Promise<boolean> => {
     if (isStreaming) {
       stopStream();
+      trackEvent("generation_stopped", {
+        surface: graphMode ? "graph_mode" : "performance_mode",
+      });
       return true;
     }
 
@@ -2597,6 +2613,10 @@ export function StreamPage() {
       // Pipeline is loaded, now start WebRTC stream
       startStream(initialParameters, streamToSend);
 
+      trackEvent("generation_started", {
+        surface: graphMode ? "graph_mode" : "performance_mode",
+      });
+
       return true; // Stream started successfully
     } catch (error) {
       console.error("Error during stream start:", error);
@@ -2823,7 +2843,13 @@ export function StreamPage() {
               }
             }
             // Graph → Perform: just switch mode (modes are independent)
-            setGraphMode(prev => !prev);
+            setGraphMode(prev => {
+              const newMode = !prev;
+              trackEvent("mode_switched", {
+                to_mode: newMode ? "graph_mode" : "performance_mode",
+              });
+              return newMode;
+            });
           }}
           onLoadWorkflow={data => {
             setPreloadedWorkflow(data as ScopeWorkflow);
