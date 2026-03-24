@@ -110,6 +110,10 @@ function reducer(
       return { ...state, phase: "downloading" };
 
     case "DOWNLOAD_FAILED":
+      trackEvent("onboarding_workflow_download_failed", {
+        workflowId: state.selectedWorkflowId,
+        failure_count: state.downloadFailures + 1,
+      });
       return {
         ...state,
         phase: "workflow",

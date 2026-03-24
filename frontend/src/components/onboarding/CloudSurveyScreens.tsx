@@ -17,6 +17,8 @@ export interface SurveyAnswers {
 
 interface CloudSurveyScreensProps {
   onComplete: (answers: SurveyAnswers) => void;
+  /** Start at a specific screen (default: "intro") */
+  initialScreen?: SurveyScreen;
 }
 
 // ---------------------------------------------------------------------------
@@ -30,8 +32,8 @@ const USE_CASE_OPTIONS = ["Personal", "Work"];
 // Component
 // ---------------------------------------------------------------------------
 
-export function CloudSurveyScreens({ onComplete }: CloudSurveyScreensProps) {
-  const [screen, setScreen] = useState<SurveyScreen>("intro");
+export function CloudSurveyScreens({ onComplete, initialScreen = "intro" }: CloudSurveyScreensProps) {
+  const [screen, setScreen] = useState<SurveyScreen>(initialScreen);
   const [referralSource, setReferralSource] = useState<string | null>(null);
   const [useCase, setUseCase] = useState<string | null>(null);
   const [selectedStyle, setSelectedStyle] = useState<

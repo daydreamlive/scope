@@ -208,6 +208,7 @@ export async function refreshUserProfile(): Promise<void> {
  * Clear the stored Daydream auth credentials
  */
 export function clearDaydreamAuth(): void {
+  telemetryTrack("user_logged_out", { source: "scope" });
   localStorage.removeItem(AUTH_STORAGE_KEY);
   window.dispatchEvent(new CustomEvent("daydream-auth-change"));
 }
