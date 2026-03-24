@@ -33,6 +33,8 @@ export interface OnboardingState {
   phase: OnboardingPhase;
   inferenceMode: "local" | "cloud" | null;
   onboardingStyle: "teaching" | "simple" | null;
+  selectedWorkflowId: string | null;
+  downloadFailures: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -44,6 +46,9 @@ type OnboardingAction =
   | { type: "COMPLETE_AUTH" }
   | { type: "CLOUD_CONNECTED" }
   | { type: "SET_ONBOARDING_STYLE"; style: "teaching" | "simple" }
+  | { type: "SELECT_WORKFLOW"; workflowId: string }
+  | { type: "START_DOWNLOADING" }
+  | { type: "DOWNLOAD_FAILED" }
   | { type: "WORKFLOW_READY" }
   | { type: "START_FROM_SCRATCH" }
   | { type: "IMPORT_WORKFLOW_READY" }
@@ -100,8 +105,30 @@ function reducer(
     case "SET_ONBOARDING_STYLE":
       return { ...state, onboardingStyle: action.style };
 
+    case "SELECT_WORKFLOW":
+      return { ...state, selectedWorkflowId: action.workflowId };
+
+    case "START_DOWNLOADING":
+      trackEvent("onboarding_workflow_selected", {
+        workflowId: state.selectedWorkflowId,
+      });
+      return { ...state, phase: "downloading" };
+
+    case "DOWNLOAD_FAILED":
+      trackEvent("onboarding_workflow_download_failed", {
+        workflowId: state.selectedWorkflowId,
+        failure_count: state.downloadFailures + 1,
+      });
+      return {
+        ...state,
+        phase: "workflow",
+        downloadFailures: state.downloadFailures + 1,
+      };
+
     case "WORKFLOW_READY":
-      trackEvent("onboarding_workflow_downloaded");
+      trackEvent("onboarding_workflow_downloaded", {
+        workflowId: state.selectedWorkflowId,
+      });
       trackEvent("onboarding_completed");
       markOnboardingCompleted();
       return { ...state, phase: "idle" };
@@ -110,7 +137,7 @@ function reducer(
       trackEvent("onboarding_started_from_scratch");
       trackEvent("onboarding_completed");
       markOnboardingCompleted();
-      return { ...state, phase: "idle" };
+      return { ...state, phase: "idle", selectedWorkflowId: null };
 
     case "IMPORT_WORKFLOW_READY":
       trackEvent("onboarding_imported_workflow");
@@ -183,6 +210,9 @@ interface OnboardingContextValue {
   completeAuth: () => void;
   cloudConnected: () => void;
   setOnboardingStyle: (style: "teaching" | "simple") => void;
+  selectWorkflow: (workflowId: string) => void;
+  startDownloading: () => void;
+  downloadFailed: () => void;
   workflowReady: () => void;
   startFromScratch: () => void;
   importWorkflowReady: () => void;
@@ -200,6 +230,8 @@ const initialState: OnboardingState = {
   phase: "loading",
   inferenceMode: null,
   onboardingStyle: null,
+  selectedWorkflowId: null,
+  downloadFailures: 0,
 };
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
@@ -236,6 +268,18 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const setOnboardingStyle = useCallback(
     (style: "teaching" | "simple") =>
       dispatch({ type: "SET_ONBOARDING_STYLE", style }),
+    []
+  );
+  const selectWorkflow = useCallback(
+    (workflowId: string) => dispatch({ type: "SELECT_WORKFLOW", workflowId }),
+    []
+  );
+  const startDownloading = useCallback(
+    () => dispatch({ type: "START_DOWNLOADING" }),
+    []
+  );
+  const downloadFailed = useCallback(
+    () => dispatch({ type: "DOWNLOAD_FAILED" }),
     []
   );
   const workflowReady = useCallback(
@@ -276,6 +320,9 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         completeAuth,
         cloudConnected,
         setOnboardingStyle,
+        selectWorkflow,
+        startDownloading,
+        downloadFailed,
         workflowReady,
         startFromScratch,
         importWorkflowReady,

@@ -472,6 +472,13 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             c => c.type !== "remove" && c.type !== "add"
           );
         }
+        const removals = changes.filter(c => c.type === "remove");
+        if (removals.length > 0) {
+          trackEvent("node_removed", {
+            count: removals.length,
+            surface: "graph_mode",
+          });
+        }
         onNodesChange(changes);
       },
       [isStreaming, onNodesChange]
@@ -483,6 +490,13 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           changes = changes.filter(
             c => c.type !== "remove" && c.type !== "add"
           );
+        }
+        const removals = changes.filter(c => c.type === "remove");
+        if (removals.length > 0) {
+          trackEvent("connection_removed", {
+            count: removals.length,
+            surface: "graph_mode",
+          });
         }
         onEdgesChange(changes);
       },
