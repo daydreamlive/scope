@@ -3,7 +3,8 @@ import { addEdge, reconnectEdge } from "@xyflow/react";
 import type { Connection, Edge, Node } from "@xyflow/react";
 import { parseHandleId } from "../../../../lib/graphUtils";
 import type { FlowNodeData, SubgraphPort } from "../../../../lib/graphUtils";
-import { buildEdgeStyle, PARAM_TYPE_COLORS } from "../../constants";
+import { buildEdgeStyle } from "../../constants";
+import { PARAM_TYPE_COLORS } from "../../nodeColors";
 import { validateConnection } from "../../utils/connectionValidation";
 import type { ResolvedType } from "../../utils/typeResolution";
 import {

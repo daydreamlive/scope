@@ -25,31 +25,18 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import { PARAM_TYPE_COLORS, HANDLE_COLORS, COLOR_DEFAULT } from "../nodeColors";
 
 type PipelineNodeType = Node<FlowNodeData, "pipeline">;
 
-const PORT_COLORS_HEX: Record<string, string> = {
-  video: "#ffffff",
-  video2: "#ffffff",
-  vace_input_frames: "#ffffff",
-  vace_input_masks: "#f472b6",
-};
-
 function getPortColorHex(portName: string): string {
-  return PORT_COLORS_HEX[portName] ?? "#9ca3af";
+  return HANDLE_COLORS[portName] ?? COLOR_DEFAULT;
 }
-
-const PARAM_TYPE_COLORS: Record<string, string> = {
-  string: "#fbbf24",
-  number: "#38bdf8",
-  boolean: "#34d399",
-};
 
 function getParamTypeColor(
   type: "string" | "number" | "boolean" | "list_number"
 ): string {
-  if (type === "list_number") return PARAM_TYPE_COLORS.number;
-  return PARAM_TYPE_COLORS[type] || "#9ca3af";
+  return PARAM_TYPE_COLORS[type] || COLOR_DEFAULT;
 }
 
 export function PipelineNode({

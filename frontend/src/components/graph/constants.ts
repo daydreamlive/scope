@@ -1,100 +1,95 @@
 import type { Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import { parseHandleId } from "../../lib/graphUtils";
+import {
+  PARAM_TYPE_COLORS,
+  HANDLE_COLORS,
+  COLOR_NUMBER,
+  COLOR_STRING,
+  COLOR_STREAM,
+  COLOR_VACE,
+  COLOR_BOOLEAN,
+  COLOR_DEFAULT,
+} from "./nodeColors";
 
-export const HANDLE_COLORS: Record<string, string> = {
-  video: "#eeeeee",
-  video2: "#eeeeee",
-  vace_input_frames: "#ffffff",
-  vace_input_masks: "#f472b6",
-  source: "#4ade80",
-  sink: "#fb923c",
-  record: "#ef4444",
-};
-
-export const PARAM_TYPE_COLORS: Record<string, string> = {
-  string: "#fbbf24",
-  number: "#38bdf8",
-  boolean: "#34d399",
-  float: "#38bdf8",
-  int: "#38bdf8",
-  video_path: "#eeeeee",
-};
+export { PARAM_TYPE_COLORS, HANDLE_COLORS };
 
 export function getEdgeColor(
   sourceNode: Node<FlowNodeData> | undefined,
   handleId: string | null | undefined
 ): string {
-  if (!sourceNode || !handleId) return "#9ca3af";
+  if (!sourceNode || !handleId) return COLOR_DEFAULT;
 
   const parsed = parseHandleId(handleId);
-  if (!parsed) return "#9ca3af";
+  if (!parsed) return COLOR_DEFAULT;
 
   if (parsed.kind === "param") {
     if (sourceNode.data.nodeType === "primitive") {
       const valueType = sourceNode.data.valueType;
-      return PARAM_TYPE_COLORS[valueType || "string"] || "#9ca3af";
+      return PARAM_TYPE_COLORS[valueType || "string"] || COLOR_DEFAULT;
     }
     if (sourceNode.data.nodeType === "reroute") {
       const valueType = sourceNode.data.valueType;
-      return valueType ? PARAM_TYPE_COLORS[valueType] || "#9ca3af" : "#9ca3af";
+      return valueType
+        ? PARAM_TYPE_COLORS[valueType] || COLOR_DEFAULT
+        : COLOR_DEFAULT;
     }
     if (sourceNode.data.nodeType === "control") {
       const controlType = sourceNode.data.controlType;
       const outputType = controlType === "string" ? "string" : "number";
-      return PARAM_TYPE_COLORS[outputType] || "#9ca3af";
+      return PARAM_TYPE_COLORS[outputType] || COLOR_DEFAULT;
     }
     if (sourceNode.data.nodeType === "math") {
-      return PARAM_TYPE_COLORS["number"] || "#9ca3af";
+      return COLOR_NUMBER;
     }
     if (sourceNode.data.nodeType === "slider") {
-      return "#38bdf8"; // sky-400 (number)
+      return COLOR_NUMBER;
     }
     if (sourceNode.data.nodeType === "knobs") {
-      return "#38bdf8"; // sky-400 (number)
+      return COLOR_NUMBER;
     }
     if (sourceNode.data.nodeType === "xypad") {
-      return "#38bdf8"; // sky-400 (number)
+      return COLOR_NUMBER;
     }
     if (sourceNode.data.nodeType === "tuple") {
       return "#fb923c"; // orange-400 (list_number)
     }
     if (sourceNode.data.nodeType === "image") {
       return sourceNode.data.mediaType === "video"
-        ? "#eeeeee" // white for video_path
-        : "#fbbf24"; // amber-400 for string
+        ? COLOR_STREAM
+        : COLOR_STRING;
     }
     if (sourceNode.data.nodeType === "vace") {
-      return "#a78bfa"; // violet-400 (vace compound)
+      return COLOR_VACE;
     }
     if (sourceNode.data.nodeType === "midi") {
-      return "#38bdf8"; // sky-400 (number)
+      return COLOR_NUMBER;
     }
     if (sourceNode.data.nodeType === "bool") {
-      return "#34d399"; // emerald-400
+      return COLOR_BOOLEAN;
     }
     if (sourceNode.data.nodeType === "trigger") {
-      return "#34d399"; // emerald-400 (boolean)
+      return COLOR_BOOLEAN;
     }
     if (sourceNode.data.nodeType === "subgraph") {
       const port = sourceNode.data.subgraphOutputs?.find(
         p => p.name === parsed.name
       );
       if (port?.paramType) {
-        return PARAM_TYPE_COLORS[port.paramType] || "#9ca3af";
+        return PARAM_TYPE_COLORS[port.paramType] || COLOR_DEFAULT;
       }
-      return "#9ca3af";
+      return COLOR_DEFAULT;
     }
     if (sourceNode.data.nodeType === "subgraph_input") {
       const port = sourceNode.data.subgraphInputs?.find(
         p => p.name === parsed.name
       );
       if (port?.paramType) {
-        return PARAM_TYPE_COLORS[port.paramType] || "#9ca3af";
+        return PARAM_TYPE_COLORS[port.paramType] || COLOR_DEFAULT;
       }
-      return "#9ca3af";
+      return COLOR_DEFAULT;
     }
-    return "#9ca3af";
+    return COLOR_DEFAULT;
   }
 
   if (sourceNode.data.nodeType === "pipeline") {
@@ -113,7 +108,8 @@ export function getEdgeColor(
       p => p.name === parsed.name
     );
     if (port?.portType === "stream") return HANDLE_COLORS.video;
-    if (port?.paramType) return PARAM_TYPE_COLORS[port.paramType] || "#06b6d4";
+    if (port?.paramType)
+      return PARAM_TYPE_COLORS[port.paramType] || COLOR_DEFAULT;
     return HANDLE_COLORS.video;
   }
 
@@ -122,7 +118,8 @@ export function getEdgeColor(
       p => p.name === parsed.name
     );
     if (port?.portType === "stream") return HANDLE_COLORS.video;
-    if (port?.paramType) return PARAM_TYPE_COLORS[port.paramType] || "#9ca3af";
+    if (port?.paramType)
+      return PARAM_TYPE_COLORS[port.paramType] || COLOR_DEFAULT;
     return HANDLE_COLORS.video;
   }
 

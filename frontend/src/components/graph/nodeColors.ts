@@ -24,6 +24,20 @@ export const PARAM_TYPE_COLORS: Record<string, string> = {
   number: COLOR_NUMBER,
   boolean: COLOR_BOOLEAN,
   list_number: COLOR_NUMBER,
+  float: COLOR_NUMBER,
+  int: COLOR_NUMBER,
+  video_path: COLOR_STREAM,
+};
+
+/** Port-level colors for stream handles (video, VACE, source, sink, etc.). */
+export const HANDLE_COLORS: Record<string, string> = {
+  video: COLOR_STREAM,
+  video2: COLOR_STREAM,
+  vace_input_frames: "#ffffff",
+  vace_input_masks: COLOR_LORA, // pink-400
+  source: "#4ade80",
+  sink: "#fb923c",
+  record: "#ef4444",
 };
 
 /** Low-opacity background variant for reroute nodes. */

@@ -1,7 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Edge, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
-import { PARAM_TYPE_COLORS } from "../../constants";
+import { PARAM_TYPE_COLORS } from "../../nodeColors";
 import {
   resolveSourceType,
   resolveDownstreamType,

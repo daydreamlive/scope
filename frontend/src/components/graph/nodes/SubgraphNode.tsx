@@ -15,20 +15,13 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import { PARAM_TYPE_COLORS, COLOR_DEFAULT } from "../nodeColors";
 
 type SubgraphNodeType = Node<FlowNodeData, "subgraph">;
 
-const PORT_TYPE_COLORS: Record<string, string> = {
-  stream: "#eeeeee",
-  string: "#fbbf24",
-  number: "#38bdf8",
-  boolean: "#34d399",
-  list_number: "#38bdf8",
-};
-
 function getPortColor(port: SubgraphPort): string {
-  if (port.portType === "stream") return PORT_TYPE_COLORS.stream;
-  return PORT_TYPE_COLORS[port.paramType || "stream"] || "#9ca3af";
+  if (port.portType === "stream") return PARAM_TYPE_COLORS.stream;
+  return PARAM_TYPE_COLORS[port.paramType || "stream"] || COLOR_DEFAULT;
 }
 
 function formatPortValue(val: unknown): string {
