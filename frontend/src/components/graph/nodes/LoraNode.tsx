@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { Plus, X } from "lucide-react";
@@ -7,6 +7,7 @@ import { buildHandleId } from "../../../lib/graphUtils";
 import { resolveLoRAPath } from "../../../lib/workflowSettings";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
+import { useSlider } from "../hooks/node/useSlider";
 import { useLoRAsContext } from "../../../contexts/LoRAsContext";
 import {
   NodeCard,
@@ -18,10 +19,9 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import { COLOR_LORA as LORA_COLOR } from "../nodeColors";
 
 type LoraNodeType = Node<FlowNodeData, "lora">;
-
-const LORA_COLOR = "#f472b6"; // pink-400
 const SCALE_MIN = -10;
 const SCALE_MAX = 10;
 const SCALE_STEP = 0.1;
@@ -206,44 +206,24 @@ function LoraEntryRow({
   onMergeModeChange: (idx: number, mode: string) => void;
   onRemove: (idx: number) => void;
 }) {
-  const sliderRef = useRef<HTMLDivElement>(null);
-
-  const clampedScale = Math.min(Math.max(entry.scale, SCALE_MIN), SCALE_MAX);
-  const pct = ((clampedScale - SCALE_MIN) / (SCALE_MAX - SCALE_MIN)) * 100;
-
-  const setValueFromMouse = useCallback(
-    (clientX: number) => {
-      if (!sliderRef.current) return;
-      const rect = sliderRef.current.getBoundingClientRect();
-      let ratio = (clientX - rect.left) / rect.width;
-      ratio = Math.min(Math.max(ratio, 0), 1);
-      let newVal = SCALE_MIN + ratio * (SCALE_MAX - SCALE_MIN);
-      newVal =
-        SCALE_MIN + Math.round((newVal - SCALE_MIN) / SCALE_STEP) * SCALE_STEP;
-      newVal = Math.min(Math.max(newVal, SCALE_MIN), SCALE_MAX);
-      onScaleChange(idx, parseFloat(newVal.toFixed(1)));
-    },
+  const onSliderChange = useCallback(
+    (v: number) => onScaleChange(idx, v),
     [idx, onScaleChange]
   );
 
-  const handlePointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const target = e.currentTarget as HTMLElement;
-      target.setPointerCapture(e.pointerId);
-      setValueFromMouse(e.clientX);
-
-      const onMove = (ev: PointerEvent) => setValueFromMouse(ev.clientX);
-      const onUp = () => {
-        target.removeEventListener("pointermove", onMove);
-        target.removeEventListener("pointerup", onUp);
-      };
-      target.addEventListener("pointermove", onMove);
-      target.addEventListener("pointerup", onUp);
-    },
-    [setValueFromMouse]
-  );
+  const {
+    sliderRef,
+    clampedValue: clampedScale,
+    pct,
+    handlePointerDown,
+  } = useSlider({
+    min: SCALE_MIN,
+    max: SCALE_MAX,
+    step: SCALE_STEP,
+    value: entry.scale,
+    onChange: onSliderChange,
+    precision: 1,
+  });
 
   return (
     <div

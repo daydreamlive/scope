@@ -15,14 +15,9 @@ import {
   NodePillSelect,
   collapsedHandleStyle,
 } from "../ui";
+import { PARAM_TYPE_COLORS } from "../nodeColors";
 
 type PrimitiveNodeType = Node<FlowNodeData, "primitive">;
-
-const PARAM_TYPE_COLORS: Record<string, string> = {
-  string: "#fbbf24", // amber-400
-  number: "#38bdf8", // sky-400
-  boolean: "#34d399", // emerald-400
-};
 
 const TYPE_OPTIONS = [
   { label: "String", value: "string" },

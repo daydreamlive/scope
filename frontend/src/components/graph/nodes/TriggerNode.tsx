@@ -6,10 +6,9 @@ import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { NodeCard, NodeHeader, NodeBody, collapsedHandleStyle } from "../ui";
+import { COLOR_BOOLEAN as COLOR } from "../nodeColors";
 
 type TriggerNodeType = Node<FlowNodeData, "trigger">;
-
-const COLOR = "#34d399"; // emerald-400 (boolean)
 
 export function TriggerNode({
   id,

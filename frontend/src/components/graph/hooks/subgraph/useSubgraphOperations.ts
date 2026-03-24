@@ -11,7 +11,7 @@ import type {
   SerializedSubgraphNode,
   SerializedSubgraphEdge,
 } from "../../../../lib/graphUtils";
-import { resolveSourceType } from "../connection/typeResolution";
+import { resolveSourceType } from "../../utils/typeResolution";
 import { toast } from "sonner";
 import { stripNonSerializable } from "../../utils/stripNodeData";
 

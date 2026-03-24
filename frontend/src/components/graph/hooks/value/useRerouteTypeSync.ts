@@ -6,7 +6,7 @@ import {
   resolveSourceType,
   resolveDownstreamType,
   type ResolvedType,
-} from "../connection/typeResolution";
+} from "../../utils/typeResolution";
 
 /**
  * Synchronises reroute-node `valueType` (and edge colours) whenever edges

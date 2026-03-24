@@ -19,6 +19,7 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import { COLOR_NUMBER as COLOR } from "../nodeColors";
 
 type MathNodeType = Node<FlowNodeData, "math">;
 
@@ -47,7 +48,6 @@ const UNARY_OPERATIONS = [
 const ALL_OPERATIONS = [...BINARY_OPERATIONS, ...UNARY_OPERATIONS];
 
 const UNARY_OPS = new Set(UNARY_OPERATIONS.map(o => o.value));
-const COLOR = "#38bdf8"; // sky-400
 
 const OUTPUT_TYPE_OPTIONS = [
   { value: "auto", label: "Auto" },

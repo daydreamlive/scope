@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef } from "react";
 import type { Edge, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 import { parseHandleId } from "../../../../lib/graphUtils";
-import { BOUNDARY_INPUT_ID, BOUNDARY_OUTPUT_ID } from "./useGraphNavigation";
+import {
+  BOUNDARY_INPUT_ID,
+  BOUNDARY_OUTPUT_ID,
+} from "../../utils/subgraphSerialization";
 
 type SetNodes = React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>;
 type SetEdges = React.Dispatch<React.SetStateAction<Edge[]>>;

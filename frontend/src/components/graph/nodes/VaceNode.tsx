@@ -1,4 +1,4 @@
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
@@ -7,6 +7,7 @@ import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { useHandlePositions } from "../hooks/node/useHandlePositions";
 import { useConnectedNumber } from "../hooks/node/useConnectedValue";
+import { useSlider } from "../hooks/node/useSlider";
 import {
   NodeCard,
   NodeHeader,
@@ -16,60 +17,34 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import {
+  COLOR_VACE as VACE_COLOR,
+  COLOR_IMAGE as IMAGE_COLOR,
+} from "../nodeColors";
 
 type VaceNodeType = Node<FlowNodeData, "vace">;
-
-const VACE_COLOR = "#a78bfa"; // violet-400 (vace compound)
-const IMAGE_COLOR = "#fbbf24"; // amber-400 (string)
 
 export function VaceNode({ id, data, selected }: NodeProps<VaceNodeType>) {
   const { updateData } = useNodeData(id);
   const { collapsed, toggleCollapse } = useNodeCollapse();
-  const sliderRef = useRef<HTMLDivElement>(null);
 
   const contextScale =
     typeof data.vaceContextScale === "number" ? data.vaceContextScale : 1.0;
   const contextScaleIn = useConnectedNumber(id, "context_scale", contextScale);
   const effectiveScale = contextScaleIn.value;
-  const min = 0;
-  const max = 2;
-  const step = 0.01;
 
-  const clampedValue = Math.min(Math.max(effectiveScale, min), max);
-  const pct = max > min ? ((clampedValue - min) / (max - min)) * 100 : 0;
-
-  const setValueFromMouse = useCallback(
-    (clientX: number) => {
-      if (!sliderRef.current) return;
-      const rect = sliderRef.current.getBoundingClientRect();
-      let ratio = (clientX - rect.left) / rect.width;
-      ratio = Math.min(Math.max(ratio, 0), 1);
-      let newVal = min + ratio * (max - min);
-      newVal = min + Math.round((newVal - min) / step) * step;
-      newVal = Math.min(Math.max(newVal, min), max);
-      updateData({ vaceContextScale: parseFloat(newVal.toFixed(10)) });
-    },
+  const onSliderChange = useCallback(
+    (v: number) => updateData({ vaceContextScale: v }),
     [updateData]
   );
 
-  const handlePointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const target = e.currentTarget as HTMLElement;
-      target.setPointerCapture(e.pointerId);
-      setValueFromMouse(e.clientX);
-
-      const onMove = (ev: PointerEvent) => setValueFromMouse(ev.clientX);
-      const onUp = () => {
-        target.removeEventListener("pointermove", onMove);
-        target.removeEventListener("pointerup", onUp);
-      };
-      target.addEventListener("pointermove", onMove);
-      target.addEventListener("pointerup", onUp);
-    },
-    [setValueFromMouse]
-  );
+  const { sliderRef, clampedValue, pct, handlePointerDown } = useSlider({
+    min: 0,
+    max: 2,
+    step: 0.01,
+    value: effectiveScale,
+    onChange: onSliderChange,
+  });
 
   // Connected inputs
   const refImage = (data.vaceRefImage as string) || "";

@@ -23,13 +23,9 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import { PARAM_TYPE_COLORS } from "../nodeColors";
 
 type ControlNodeType = Node<FlowNodeData, "control">;
-
-const PARAM_TYPE_COLORS: Record<string, string> = {
-  number: "#38bdf8", // sky-400 (for float and int)
-  string: "#fbbf24", // amber-400
-};
 
 function getControlOutputType(
   controlType: "float" | "int" | "string"

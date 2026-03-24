@@ -19,10 +19,9 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import { COLOR_BOOLEAN as COLOR } from "../nodeColors";
 
 type BoolNodeType = Node<FlowNodeData, "bool">;
-
-const COLOR = "#34d399"; // emerald-400
 
 const MODE_OPTIONS = [
   { value: "gate", label: "Gate" },

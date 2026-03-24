@@ -12,12 +12,9 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import { COLOR_NUMBER, COLOR_DOT } from "../nodeColors";
 
 type XYPadNodeType = Node<FlowNodeData, "xypad">;
-
-const COLOR_X = "#38bdf8"; // sky-400 (number)
-const COLOR_Y = "#38bdf8"; // sky-400 (number)
-const DOT_COLOR = "#fafafa";
 const PAD_SIZE = 160;
 const HEADER_HEIGHT = 28;
 const BODY_PAD = 6; // py-1.5 ≈ 6px
@@ -132,7 +129,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
                   top: 0,
                   bottom: 0,
                   width: 1,
-                  background: `${COLOR_X}33`,
+                  background: `${COLOR_NUMBER}33`,
                 }}
               />
               <div
@@ -142,7 +139,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
                   left: 0,
                   right: 0,
                   height: 1,
-                  background: `${COLOR_Y}33`,
+                  background: `${COLOR_NUMBER}33`,
                 }}
               />
               {/* Dot */}
@@ -151,8 +148,8 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
                 style={{
                   left: `${dotLeft}%`,
                   top: `${dotTop}%`,
-                  background: DOT_COLOR,
-                  boxShadow: `0 0 6px ${DOT_COLOR}`,
+                  background: COLOR_DOT,
+                  boxShadow: `0 0 6px ${COLOR_DOT}`,
                 }}
               />
             </div>
@@ -161,13 +158,13 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
             <div className="flex justify-between px-1">
               <span className={NODE_TOKENS.primaryText}>
                 X:{" "}
-                <span style={{ color: COLOR_X }}>
+                <span style={{ color: COLOR_NUMBER }}>
                   {clampedX.toFixed(dp(rangeX))}
                 </span>
               </span>
               <span className={NODE_TOKENS.primaryText}>
                 Y:{" "}
-                <span style={{ color: COLOR_Y }}>
+                <span style={{ color: COLOR_NUMBER }}>
                   {clampedY.toFixed(dp(rangeY))}
                 </span>
               </span>
@@ -244,7 +241,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
             : {
                 top: padCenterY - handleSpacing / 2,
                 left: 0,
-                backgroundColor: COLOR_X,
+                backgroundColor: COLOR_NUMBER,
               }
         }
       />
@@ -263,7 +260,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
             : {
                 top: padCenterY + handleSpacing / 2,
                 left: 0,
-                backgroundColor: COLOR_Y,
+                backgroundColor: COLOR_NUMBER,
               }
         }
       />
@@ -280,7 +277,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
             : {
                 top: padCenterY - handleSpacing / 2,
                 right: 0,
-                backgroundColor: COLOR_X,
+                backgroundColor: COLOR_NUMBER,
               }
         }
       />
@@ -299,7 +296,7 @@ export function XYPadNode({ id, data, selected }: NodeProps<XYPadNodeType>) {
             : {
                 top: padCenterY + handleSpacing / 2,
                 right: 0,
-                backgroundColor: COLOR_Y,
+                backgroundColor: COLOR_NUMBER,
               }
         }
       />

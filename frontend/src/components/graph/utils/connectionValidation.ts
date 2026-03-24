@@ -8,11 +8,8 @@
 import type { Connection, Edge, Node } from "@xyflow/react";
 import { parseHandleId } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
-import { resolveSourceType } from "../hooks/connection/typeResolution";
-import {
-  BOUNDARY_INPUT_ID,
-  BOUNDARY_OUTPUT_ID,
-} from "../hooks/subgraph/useGraphNavigation";
+import { resolveSourceType } from "./typeResolution";
+import { BOUNDARY_INPUT_ID, BOUNDARY_OUTPUT_ID } from "./subgraphSerialization";
 
 // ---------------------------------------------------------------------------
 // Target-node rules (param → param).  Each entry maps a target nodeType (or

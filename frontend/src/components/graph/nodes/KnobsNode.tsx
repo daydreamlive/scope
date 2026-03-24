@@ -12,10 +12,9 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import { COLOR_NUMBER as COLOR } from "../nodeColors";
 
 type KnobsNodeType = Node<FlowNodeData, "knobs">;
-
-const COLOR = "#38bdf8"; // sky-400 (number)
 const KNOB_SIZE = 40;
 const KNOB_RADIUS = 16;
 const ARC_DEG = 270;

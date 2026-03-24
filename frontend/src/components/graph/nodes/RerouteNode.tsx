@@ -2,20 +2,9 @@ import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { PARAM_TYPE_COLORS as TYPE_COLORS, TYPE_BG } from "../nodeColors";
 
 type RerouteNodeType = Node<FlowNodeData, "reroute">;
-
-const TYPE_COLORS: Record<string, string> = {
-  string: "#fbbf24",
-  number: "#38bdf8",
-  boolean: "#34d399",
-};
-
-const TYPE_BG: Record<string, string> = {
-  string: "rgba(251,191,36,0.12)",
-  number: "rgba(56,189,248,0.12)",
-  boolean: "rgba(52,211,153,0.12)",
-};
 
 export function RerouteNode({ data, selected }: NodeProps<RerouteNodeType>) {
   const vt = data.valueType;

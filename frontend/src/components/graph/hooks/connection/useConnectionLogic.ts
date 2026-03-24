@@ -5,17 +5,17 @@ import { parseHandleId } from "../../../../lib/graphUtils";
 import type { FlowNodeData, SubgraphPort } from "../../../../lib/graphUtils";
 import { buildEdgeStyle, PARAM_TYPE_COLORS } from "../../constants";
 import { validateConnection } from "../../utils/connectionValidation";
-import type { ResolvedType } from "./typeResolution";
+import type { ResolvedType } from "../../utils/typeResolution";
 import {
   resolveSourceType,
   resolveTargetType,
   resolveDownstreamType,
   collectUpstreamChain,
-} from "./typeResolution";
+} from "../../utils/typeResolution";
 import {
   BOUNDARY_INPUT_ID,
   BOUNDARY_OUTPUT_ID,
-} from "../subgraph/useGraphNavigation";
+} from "../../utils/subgraphSerialization";
 
 export type AddSubgraphPortFn = (
   side: "input" | "output",

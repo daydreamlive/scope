@@ -100,11 +100,11 @@ export function deserializeEdges(serialized: SerializedSubgraphEdge[]): Edge[] {
 // Boundary helpers
 // ---------------------------------------------------------------------------
 
-export function isBoundaryNode(n: Node<FlowNodeData>): boolean {
+function isBoundaryNode(n: Node<FlowNodeData>): boolean {
   return n.id === BOUNDARY_INPUT_ID || n.id === BOUNDARY_OUTPUT_ID;
 }
 
-export function isBoundaryEdge(e: Edge): boolean {
+function isBoundaryEdge(e: Edge): boolean {
   return e.source === BOUNDARY_INPUT_ID || e.target === BOUNDARY_OUTPUT_ID;
 }
 

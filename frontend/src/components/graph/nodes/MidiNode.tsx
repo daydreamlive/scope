@@ -14,10 +14,9 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import { COLOR_NUMBER as COLOR } from "../nodeColors";
 
 type MidiNodeType = Node<FlowNodeData, "midi">;
-
-const COLOR = "#38bdf8"; // sky-400 (number)
 
 /** Height of a single channel row (used for handle positioning). */
 const ROW_HEIGHT = 32;

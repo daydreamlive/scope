@@ -1,25 +1,18 @@
-import { useState, useRef, useEffect, useCallback } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData, SubgraphPort } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { EditableLabel } from "../ui/EditableLabel";
+import { PARAM_TYPE_COLORS, COLOR_DEFAULT } from "../nodeColors";
 
 type SubgraphInputNodeType = Node<FlowNodeData, "subgraph_input">;
 
-const PORT_TYPE_COLORS: Record<string, string> = {
-  stream: "#eeeeee",
-  string: "#fbbf24",
-  number: "#38bdf8",
-  boolean: "#34d399",
-  list_number: "#38bdf8",
-};
-
 function getPortColor(port: SubgraphPort): string {
-  if (port.portType === "stream") return PORT_TYPE_COLORS.stream;
-  return PORT_TYPE_COLORS[port.paramType || "stream"] || "#9ca3af";
+  if (port.portType === "stream") return PARAM_TYPE_COLORS.stream;
+  return PARAM_TYPE_COLORS[port.paramType || "stream"] || COLOR_DEFAULT;
 }
 
-export const ADD_HANDLE_ID = buildHandleId("stream", "__add__");
+const ADD_HANDLE_ID = buildHandleId("stream", "__add__");
 
 const ROW_HEIGHT = 28;
 const PAD_Y = 10;
@@ -35,63 +28,6 @@ function rightBracketPath(height: number, depth: number): string {
     `L ${depth} ${height - r}`,
     `Q ${depth} ${height}, 0 ${height}`,
   ].join(" ");
-}
-
-/* ── Inline editable label ── */
-function EditableLabel({
-  value,
-  onCommit,
-}: {
-  value: string;
-  onCommit: (newValue: string) => void;
-}) {
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
-  const inputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (editing) inputRef.current?.select();
-  }, [editing]);
-
-  const commit = useCallback(() => {
-    const trimmed = draft.trim();
-    if (trimmed && trimmed !== value) onCommit(trimmed);
-    else setDraft(value);
-    setEditing(false);
-  }, [draft, value, onCommit]);
-
-  if (!editing) {
-    return (
-      <span
-        className="text-[10px] text-[#999] select-none whitespace-nowrap pr-1.5 cursor-text"
-        onDoubleClick={e => {
-          e.stopPropagation();
-          setDraft(value);
-          setEditing(true);
-        }}
-        title="Double-click to rename"
-      >
-        {value}
-      </span>
-    );
-  }
-
-  return (
-    <input
-      ref={inputRef}
-      className="text-[10px] text-[#ccc] bg-[#333] border border-[#555] rounded px-0.5 outline-none w-16"
-      value={draft}
-      onChange={e => setDraft(e.target.value)}
-      onBlur={commit}
-      onKeyDown={e => {
-        if (e.key === "Enter") commit();
-        if (e.key === "Escape") {
-          setDraft(value);
-          setEditing(false);
-        }
-      }}
-    />
-  );
 }
 
 export function SubgraphInputNode({ data }: NodeProps<SubgraphInputNodeType>) {

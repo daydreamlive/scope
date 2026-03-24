@@ -19,7 +19,7 @@ import type {
 import { parseHandleId, buildHandleId } from "../../../../lib/graphUtils";
 import { getAnyValueFromNode } from "../../utils/getValueFromNode";
 import type { GraphLevel } from "../subgraph/useGraphNavigation";
-import { BOUNDARY_INPUT_ID } from "../subgraph/useGraphNavigation";
+import { BOUNDARY_INPUT_ID } from "../../utils/subgraphSerialization";
 import { computePatternValue } from "../../utils/computePatternValue";
 import { evaluateInnerGraph } from "../subgraph/useSubgraphEval";
 import type { MidiChannelDef } from "../../nodes/MidiNode";

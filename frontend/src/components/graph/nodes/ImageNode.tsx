@@ -11,11 +11,12 @@ import { getAssetUrl } from "../../../lib/api";
 import { MediaPicker } from "../../MediaPicker";
 import { isVideoAsset } from "../../../lib/mediaUtils";
 import { NodeCard, NodeHeader, NODE_TOKENS, collapsedHandleStyle } from "../ui";
+import {
+  COLOR_IMAGE as IMAGE_COLOR,
+  COLOR_STREAM as VIDEO_COLOR,
+} from "../nodeColors";
 
 type ImageNodeType = Node<FlowNodeData, "image">;
-
-const IMAGE_COLOR = "#fbbf24"; // amber-400 (string)
-const VIDEO_COLOR = "#eeeeee"; // white (video_path, matches stream:video)
 
 export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
   const { updateData } = useNodeData(id);

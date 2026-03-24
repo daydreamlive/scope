@@ -1,12 +1,13 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { useHandlePositions } from "../hooks/node/useHandlePositions";
 import { useConnectedNumber } from "../hooks/node/useConnectedValue";
+import { useSlider } from "../hooks/node/useSlider";
 import {
   NodeCard,
   NodeHeader,
@@ -17,15 +18,13 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
+import { COLOR_NUMBER as COLOR } from "../nodeColors";
 
 type SliderNodeType = Node<FlowNodeData, "slider">;
-
-const COLOR = "#38bdf8"; // sky-400 (number)
 
 export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
   const { updateData } = useNodeData(id);
   const { collapsed, toggleCollapse } = useNodeCollapse();
-  const sliderRef = useRef<HTMLDivElement>(null);
 
   const min = data.sliderMin ?? 0;
   const max = data.sliderMax ?? 1;
@@ -39,49 +38,23 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
 
   const value = typeof data.value === "number" ? data.value : effectiveMin;
 
-  const clampedValue = Math.min(Math.max(value, effectiveMin), effectiveMax);
-  const pct =
-    effectiveMax > effectiveMin
-      ? ((clampedValue - effectiveMin) / (effectiveMax - effectiveMin)) * 100
-      : 0;
-
-  const setValueFromMouse = useCallback(
-    (clientX: number) => {
-      if (!sliderRef.current) return;
-      const rect = sliderRef.current.getBoundingClientRect();
-      let ratio = (clientX - rect.left) / rect.width;
-      ratio = Math.min(Math.max(ratio, 0), 1);
-      let newVal = effectiveMin + ratio * (effectiveMax - effectiveMin);
-      newVal = effectiveMin + Math.round((newVal - effectiveMin) / step) * step;
-      newVal = Math.min(Math.max(newVal, effectiveMin), effectiveMax);
-      updateData({ value: parseFloat(newVal.toFixed(10)) });
-    },
-    [effectiveMin, effectiveMax, step, updateData]
+  const onSliderChange = useCallback(
+    (v: number) => updateData({ value: v }),
+    [updateData]
   );
+
+  const { sliderRef, clampedValue, pct, handlePointerDown } = useSlider({
+    min: effectiveMin,
+    max: effectiveMax,
+    step,
+    value,
+    onChange: onSliderChange,
+  });
 
   const { setRowRef, rowPositions } = useHandlePositions([
     minIn.connected,
     maxIn.connected,
   ]);
-
-  const handlePointerDown = useCallback(
-    (e: React.PointerEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const target = e.currentTarget as HTMLElement;
-      target.setPointerCapture(e.pointerId);
-      setValueFromMouse(e.clientX);
-
-      const onMove = (ev: PointerEvent) => setValueFromMouse(ev.clientX);
-      const onUp = () => {
-        target.removeEventListener("pointermove", onMove);
-        target.removeEventListener("pointerup", onUp);
-      };
-      target.addEventListener("pointermove", onMove);
-      target.addEventListener("pointerup", onUp);
-    },
-    [setValueFromMouse]
-  );
 
   return (
     <NodeCard

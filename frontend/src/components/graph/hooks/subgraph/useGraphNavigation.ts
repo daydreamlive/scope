@@ -16,9 +16,6 @@ import {
   BOUNDARY_OUTPUT_ID,
 } from "../../utils/subgraphSerialization";
 
-// Re-export so existing consumers keep working.
-export { BOUNDARY_INPUT_ID, BOUNDARY_OUTPUT_ID };
-
 export interface Viewport {
   x: number;
   y: number;
