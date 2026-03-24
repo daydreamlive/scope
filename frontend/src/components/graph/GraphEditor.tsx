@@ -234,7 +234,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       enrichDepsRef,
       handleEdgeDelete,
       resolveBackendId,
-      isStreamingRef,
       onNodeParamChangeRef,
       onOutputSinkBulkChangeRef,
       handleClear,
@@ -495,7 +494,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       edges,
       findConnectedPipelineParams,
       resolveBackendId,
-      isStreamingRef,
+      isStreaming,
       onNodeParamChangeRef,
       setNodes
     );

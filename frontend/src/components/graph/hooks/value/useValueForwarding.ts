@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useMemo } from "react";
 import type { Edge, Node } from "@xyflow/react";
 import type { FlowNodeData, SubgraphPort } from "../../../../lib/graphUtils";
 import { parseHandleId } from "../../../../lib/graphUtils";
@@ -123,7 +123,7 @@ export function useValueForwarding(
     nodes: Node<FlowNodeData>[]
   ) => Array<{ nodeId: string; paramName: string }>,
   resolveBackendId: (nodeId: string) => string,
-  isStreamingRef: React.RefObject<boolean>,
+  isStreaming: boolean,
   onNodeParamChangeRef: React.RefObject<
     ((nodeId: string, key: string, value: unknown) => void) | undefined
   >,
@@ -139,8 +139,27 @@ export function useValueForwarding(
   // that re-fires this effect with identical producer values.
   const lastSentRef = useRef<Map<string, unknown>>(new Map());
 
+  // Detect streaming session start (false→true) and clear dedup state so the
+  // new backend session receives all parameter values, even if they haven't
+  // changed since the previous session.
+  const wasStreamingRef = useRef(false);
+  const sessionTick = useMemo(() => {
+    if (isStreaming && !wasStreamingRef.current) {
+      wasStreamingRef.current = true;
+      return Date.now();
+    }
+    if (!isStreaming) wasStreamingRef.current = false;
+    return 0;
+  }, [isStreaming]);
+
   useEffect(() => {
-    if (!isStreamingRef.current || !onNodeParamChangeRef.current) return;
+    if (!isStreaming || !onNodeParamChangeRef.current) return;
+
+    // On new session start, clear dedup state so all params are re-sent.
+    if (sessionTick > 0) {
+      lastSentRef.current.clear();
+      prevNodeDataRef.current.clear();
+    }
 
     const sendParam = (
       backendId: string,
@@ -326,7 +345,8 @@ export function useValueForwarding(
     edges,
     findConnectedPipelineParams,
     resolveBackendId,
-    isStreamingRef,
+    isStreaming,
+    sessionTick,
     onNodeParamChangeRef,
   ]);
 
