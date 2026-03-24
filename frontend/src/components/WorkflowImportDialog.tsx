@@ -1,12 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from "react";
-import {
-  CheckCircle2,
-  XCircle,
-  AlertTriangle,
-  Download,
-  Upload,
-  Loader2,
-} from "lucide-react";
+import { AlertTriangle, Download, Upload, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import {
@@ -28,13 +21,13 @@ import {
   AlertDialogTitle,
 } from "./ui/alert-dialog";
 import { toast } from "sonner";
-import type {
-  ScopeWorkflow,
-  ResolutionItem,
-  WorkflowResolutionPlan,
-  WorkflowLoRAProvenance,
-} from "../lib/workflowApi";
+import type { ScopeWorkflow, WorkflowResolutionPlan } from "../lib/workflowApi";
 import { resolveWorkflow } from "../lib/api";
+import {
+  statusIcon,
+  kindLabel,
+  LoRAProvenanceLabel,
+} from "./workflowDialogHelpers";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { usePluginsContext } from "../contexts/PluginsContext";
@@ -44,6 +37,7 @@ import {
   workflowToSettings,
   workflowTimelineToPrompts,
   workflowToPromptState,
+  extractFilename,
 } from "../lib/workflowSettings";
 import type { WorkflowPromptState } from "../lib/workflowSettings";
 import {
@@ -66,75 +60,9 @@ interface WorkflowImportDialogProps {
     timelinePrompts: TimelinePrompt[],
     promptState: WorkflowPromptState | null
   ) => void;
+  /** When set, the dialog calls this instead of onLoad (used for graph-mode import). */
+  onLoadToGraph?: (workflow: ScopeWorkflow) => void;
   initialWorkflow?: ScopeWorkflow | null;
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const statusIcon = (status: ResolutionItem["status"]) => {
-  switch (status) {
-    case "ok":
-      return <CheckCircle2 className="h-4 w-4 text-green-500 shrink-0" />;
-    case "missing":
-      return <XCircle className="h-4 w-4 text-red-500 shrink-0" />;
-    case "version_mismatch":
-      return <AlertTriangle className="h-4 w-4 text-amber-500 shrink-0" />;
-  }
-};
-
-const kindLabel = (kind: ResolutionItem["kind"]) => {
-  switch (kind) {
-    case "pipeline":
-      return "Pipeline";
-    case "plugin":
-      return "Plugin";
-    case "lora":
-      return "LoRA";
-  }
-};
-
-function provenanceLabel(prov: WorkflowLoRAProvenance): string {
-  if (prov.source === "huggingface" && prov.repo_id) {
-    return `HuggingFace: ${prov.repo_id}`;
-  }
-  if (prov.source === "civitai") {
-    return `CivitAI model ${prov.model_id ?? prov.version_id ?? ""}`;
-  }
-  if (prov.source === "url" && prov.url) {
-    return prov.url;
-  }
-  return prov.source;
-}
-
-function findLoRAProvenance(
-  workflow: ScopeWorkflow,
-  filename: string
-): WorkflowLoRAProvenance | null {
-  const lora = workflow.pipelines
-    .flatMap(p => p.loras)
-    .find(l => l.filename === filename);
-  if (lora?.provenance && lora.provenance.source !== "local") {
-    return lora.provenance;
-  }
-  return null;
-}
-
-function LoRAProvenanceLabel({
-  workflow,
-  filename,
-}: {
-  workflow: ScopeWorkflow;
-  filename: string;
-}) {
-  const prov = findLoRAProvenance(workflow, filename);
-  if (!prov) return null;
-  return (
-    <p className="text-[10px] text-muted-foreground mt-0.5">
-      {provenanceLabel(prov)}
-    </p>
-  );
 }
 
 // ---------------------------------------------------------------------------
@@ -145,6 +73,7 @@ export function WorkflowImportDialog({
   open,
   onClose,
   onLoad,
+  onLoadToGraph,
   initialWorkflow,
 }: WorkflowImportDialogProps) {
   const [step, setStep] = useState<ImportStep>("select");
@@ -169,6 +98,7 @@ export function WorkflowImportDialog({
   }, [workflow, refreshPipelines, refreshLoRAs, refreshPlugins]);
 
   const loras = useLoRADownloads(workflow, reResolveWorkflow);
+  const { reset: resetLoras, initialize: initializeLoras } = loras;
 
   // -- Confirm dialog state (shared for load & plugin-install confirms) -----
   const [confirmState, setConfirmState] = useState<{
@@ -210,17 +140,18 @@ export function WorkflowImportDialog({
     reResolveWorkflow,
     confirmPluginInstall
   );
+  const { reset: resetPlugins, initialize: initializePlugins } = plugins;
 
   // Reset all state when dialog closes
   const handleClose = useCallback(() => {
     setStep("select");
     setWorkflow(null);
     setPlan(null);
-    loras.reset();
-    plugins.reset();
+    resetLoras();
+    resetPlugins();
     setValidating(false);
     onClose();
-  }, [onClose, loras.reset, plugins.reset]);
+  }, [onClose, resetLoras, resetPlugins]);
 
   // -----------------------------------------------------------------------
   // Auto-resolve when opened with a preloaded workflow (e.g. from deeplink)
@@ -239,12 +170,12 @@ export function WorkflowImportDialog({
         if (cancelled) return;
         setPlan(resolution);
 
-        loras.initialize(
+        initializeLoras(
           resolution.items
             .filter(i => i.kind === "lora" && i.status === "missing")
             .map(i => i.name)
         );
-        plugins.initialize(
+        initializePlugins(
           resolution.items
             .filter(
               i =>
@@ -317,12 +248,12 @@ export function WorkflowImportDialog({
         setPlan(resolution);
 
         // Initialize dependency states from resolution items
-        loras.initialize(
+        initializeLoras(
           resolution.items
             .filter(i => i.kind === "lora" && i.status === "missing")
             .map(i => i.name)
         );
-        plugins.initialize(
+        initializePlugins(
           resolution.items
             .filter(
               i =>
@@ -343,7 +274,7 @@ export function WorkflowImportDialog({
         setValidating(false);
       }
     },
-    [loras.initialize, plugins.initialize]
+    [initializeLoras, initializePlugins]
   );
 
   const handleDrop = useCallback(
@@ -378,6 +309,30 @@ export function WorkflowImportDialog({
     );
     if (!confirmed) return;
 
+    if (onLoadToGraph) {
+      const freshLoraFiles = await refreshLoRAs();
+      const patchedWorkflow = {
+        ...workflow,
+        pipelines: workflow.pipelines.map(p => ({
+          ...p,
+          loras: p.loras.map(l => {
+            const resolved = freshLoraFiles.find(
+              f =>
+                extractFilename(f.path).toLowerCase() ===
+                l.filename.toLowerCase()
+            );
+            return resolved ? { ...l, filename: resolved.path } : l;
+          }),
+        })),
+      };
+      onLoadToGraph(patchedWorkflow);
+      toast.success("Workflow loaded into graph", {
+        description: `"${workflow.metadata.name}" loaded into the graph editor`,
+      });
+      handleClose();
+      return;
+    }
+
     // Fetch fresh LoRA files to avoid stale closure after downloads
     const freshLoraFiles = await refreshLoRAs();
     const importedSettings = workflowToSettings(workflow, freshLoraFiles);
@@ -389,7 +344,7 @@ export function WorkflowImportDialog({
       description: `"${workflow.metadata.name}" loaded into the interface`,
     });
     handleClose();
-  }, [workflow, onLoad, handleClose, showConfirm, refreshLoRAs]);
+  }, [workflow, onLoad, onLoadToGraph, handleClose, showConfirm, refreshLoRAs]);
 
   // -----------------------------------------------------------------------
   // Derived state
@@ -614,7 +569,7 @@ export function WorkflowImportDialog({
       {/* Confirmation alert dialog (replaces window.confirm) */}
       <AlertDialog
         open={confirmState !== null}
-        onOpenChange={open => {
+        onOpenChange={(open: boolean) => {
           if (!open) handleConfirmCancel();
         }}
       >

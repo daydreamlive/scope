@@ -119,7 +119,7 @@ class LongLiveConfig(BasePipelineConfig):
             order=7,
             component="noise",
             modes=["video"],
-            is_load_param=True,
+            is_load_param=False,
             modulatable=True,
             modulatable_min=0.0,
             modulatable_max=1.0,
@@ -129,7 +129,7 @@ class LongLiveConfig(BasePipelineConfig):
         default=True,
         description="Enable dynamic noise control during generation (video mode only)",
         json_schema_extra=ui_field_config(
-            order=7, component="noise", modes=["video"], is_load_param=True
+            order=7, component="noise", modes=["video"], is_load_param=False
         ),
     )
     quantization: Quantization | None = Field(

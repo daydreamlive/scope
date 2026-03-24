@@ -1,0 +1,95 @@
+{
+  "name": "LFO Range Oscillator",
+  "description": "A sine LFO smoothly oscillates a value between configurable min and max bounds — wire the output to any numeric pipeline parameter",
+  "category": "Controls",
+  "color": "#a78bfa",
+  "thumbnail": null,
+  "nodes": [
+    {
+      "id": "lfo",
+      "type": "control",
+      "position": { "x": 0, "y": 60 },
+      "data": {
+        "label": "LFO",
+        "nodeType": "control",
+        "controlType": "float",
+        "controlPattern": "sine",
+        "controlSpeed": 0.5,
+        "controlMin": 0,
+        "controlMax": 1,
+        "isPlaying": false,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    },
+    {
+      "id": "math_range",
+      "type": "math",
+      "position": { "x": 360, "y": 200 },
+      "width": 240,
+      "data": {
+        "label": "Max − Min",
+        "nodeType": "math",
+        "mathOp": "subtract",
+        "mathDefaultA": 20,
+        "mathDefaultB": 1,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    },
+    {
+      "id": "math_scale",
+      "type": "math",
+      "position": { "x": 360, "y": 60 },
+      "width": 240,
+      "data": {
+        "label": "LFO × Range",
+        "nodeType": "math",
+        "mathOp": "multiply",
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    },
+    {
+      "id": "math_offset",
+      "type": "math",
+      "position": { "x": 720, "y": 60 },
+      "width": 240,
+      "data": {
+        "label": "Result + Min",
+        "nodeType": "math",
+        "mathOp": "add",
+        "mathDefaultB": 1,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_lfo_scale",
+      "source": "lfo",
+      "sourceHandle": "param:value",
+      "target": "math_scale",
+      "targetHandle": "param:a"
+    },
+    {
+      "id": "e_range_scale",
+      "source": "math_range",
+      "sourceHandle": "param:value",
+      "target": "math_scale",
+      "targetHandle": "param:b"
+    },
+    {
+      "id": "e_scale_offset",
+      "source": "math_scale",
+      "sourceHandle": "param:value",
+      "target": "math_offset",
+      "targetHandle": "param:a"
+    }
+  ]
+}

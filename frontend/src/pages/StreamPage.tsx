@@ -19,6 +19,8 @@ import {
   buildScopeWorkflow,
   type WorkflowPromptState,
 } from "../lib/workflowSettings";
+import { GraphEditor } from "../components/graph/GraphEditor";
+import type { GraphEditorHandle } from "../components/graph/GraphEditor";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { LogPanel } from "../components/LogPanel";
@@ -50,16 +52,24 @@ import type {
   DownloadProgress,
   SettingsState,
 } from "../types";
-import type { PromptItem, PromptTransition, PluginInfo } from "../lib/api";
+import type {
+  PromptItem,
+  PromptTransition,
+  GraphConfig,
+  PipelineLoadItem,
+  PluginInfo,
+} from "../lib/api";
 import {
   getInputSourceResolution,
   fetchDaydreamWorkflow,
   getDmxStatus,
 } from "../lib/api";
+import type { ScopeWorkflow } from "../lib/workflowApi";
+import { linearGraphFromSettings, stripUIFields } from "../lib/graphUtils";
+import { resolveLoRAPath } from "../lib/workflowSettings";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { usePluginsContext } from "../contexts/PluginsContext";
 import { useServerInfoContext } from "../contexts/ServerInfoContext";
-import type { ScopeWorkflow } from "../lib/workflowApi";
 import { sendLoRAScaleUpdates } from "../utils/loraHelpers";
 import { toast } from "sonner";
 import {
@@ -124,6 +134,10 @@ export function StreamPage() {
     connectStage: cloudConnectStage,
   } = useCloudStatus();
 
+  const { loraFiles } = useLoRAsContext();
+  const { plugins } = usePluginsContext();
+  const { version: scopeVersion } = useServerInfoContext();
+
   // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
   const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
 
@@ -163,6 +177,7 @@ export function StreamPage() {
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
+    hardwareInfo,
     skipNextModeReset,
   } = useStreamState();
 
@@ -173,6 +188,7 @@ export function StreamPage() {
   const syphonAvailable = availableInputSources.some(
     s => s.source_id === "syphon" && s.available
   );
+  // Output availability flags are passed to GraphEditor for output nodes
   const hasAvailableOutputs =
     spoutAvailable || ndiOutputAvailable || syphonOutputAvailable;
 
@@ -249,6 +265,29 @@ export function StreamPage() {
   // Track when waiting for cloud WebSocket to connect after clicking Play
   const [isCloudConnecting, setIsCloudConnecting] = useState(false);
 
+  // Graph mode state
+  const [graphMode, setGraphMode] = useState(false);
+  const graphEditorRef = useRef<GraphEditorHandle>(null);
+
+  // When true, pipeline controls are disabled in Perform Mode
+  // (set when user edits anything in Graph Mode, cleared when user clicks Clear)
+  const [nonLinearGraph, setNonLinearGraph] = useState(false);
+
+  // Called by GraphEditor whenever user edits the graph
+  const handleGraphChange = useCallback(() => {
+    setNonLinearGraph(true);
+  }, []);
+
+  // Called by GraphEditor when user clicks Clear
+  const handleGraphClear = useCallback(() => {
+    setNonLinearGraph(false);
+  }, []);
+
+  // Clear graph from SettingsPanel (triggers the full graph clear via ref)
+  const handleClearGraphFromSettings = useCallback(() => {
+    graphEditorRef.current?.clearGraph();
+  }, []);
+
   // Video display state
   const [videoScaleMode, setVideoScaleMode] = useState<"fit" | "native">("fit");
 
@@ -297,9 +336,6 @@ export function StreamPage() {
   const [isDaydreamAuthenticated, setIsDaydreamAuthenticated] = useState(
     checkIsAuthenticated()
   );
-  const { loraFiles } = useLoRAsContext();
-  const { plugins } = usePluginsContext();
-  const { version: scopeVersion } = useServerInfoContext();
 
   useEffect(() => {
     const handleAuthChange = () => {
@@ -621,7 +657,7 @@ export function StreamPage() {
     onStreamUpdate: updateVideoTrack,
     onStopStream: stopStream,
     shouldReinitialize: shouldReinitializeVideo,
-    enabled: settings.inputMode === "video",
+    enabled: settings.inputMode === "video" || graphMode,
     // Sync output resolution when user uploads a custom video
     // Store the custom resolution so it persists across mode/pipeline changes
     onCustomVideoResolution: resolution => {
@@ -727,6 +763,9 @@ export function StreamPage() {
   };
 
   const handlePipelineIdChange = (pipelineId: PipelineId) => {
+    // User manually changed pipeline, clear non-linear flag
+    setNonLinearGraph(false);
+
     // Stop the stream if it's currently running
     if (isStreaming) {
       stopStream();
@@ -1061,6 +1100,8 @@ export function StreamPage() {
   type PipelineKind = keyof typeof pipelineSettingsKeys;
 
   const makePipelineIdsHandler = (kind: PipelineKind) => (ids: string[]) => {
+    // User manually changed pipeline chain, clear non-linear flag
+    setNonLinearGraph(false);
     const k = pipelineSettingsKeys[kind];
     // Preserve overrides for processors that remain in the list
     const currentOverrides =
@@ -1203,6 +1244,17 @@ export function StreamPage() {
     if (isStreaming) {
       sendParameterUpdate({
         output_sinks: updated,
+      });
+    }
+  };
+
+  const handleOutputSinkBulkChange = (
+    sinks: Record<string, { enabled: boolean; name: string }>
+  ) => {
+    updateSettings({ outputSinks: sinks });
+    if (isStreaming) {
+      sendParameterUpdate({
+        output_sinks: sinks,
       });
     }
   };
@@ -1625,6 +1677,17 @@ export function StreamPage() {
     }
   }, [settings.beatCacheResetRate, isStreaming, sendParameterUpdateWebRTC]);
 
+  // Send input_source config to backend when it changes during streaming.
+  // This enables live switching between source types (e.g. Syphon → File)
+  // without restarting the stream.
+  useEffect(() => {
+    if (isStreaming && settings.inputSource) {
+      sendParameterUpdateWebRTC({
+        input_source: settings.inputSource,
+      });
+    }
+  }, [settings.inputSource, isStreaming, sendParameterUpdateWebRTC]);
+
   // Beat-synced prompt cycling: rotate through the queued prompt items on beat
   // boundaries. Each prompt item is applied individually at full weight in sequence.
   // The promptItems list in the UI stays unchanged; only the backend receives the
@@ -1809,7 +1872,7 @@ export function StreamPage() {
     }
 
     // Use override pipeline ID if provided, otherwise use current settings
-    const pipelineIdToUse = overridePipelineId || settings.pipelineId;
+    let pipelineIdToUse = overridePipelineId || settings.pipelineId;
 
     try {
       // Build pipeline chain: preprocessors + main pipeline + postprocessors
@@ -1820,6 +1883,125 @@ export function StreamPage() {
       pipelineIds.push(pipelineIdToUse);
       if (settings.postprocessorIds && settings.postprocessorIds.length > 0) {
         pipelineIds.push(...settings.postprocessorIds);
+      }
+
+      // In graph mode (or when a custom graph exists from graph mode),
+      // extract pipeline IDs and source mode from the graph so the
+      // workflow builder settings dominate over perform-mode defaults.
+      let graphSourceMode: string | null = null;
+      let graphInputSource: {
+        enabled: boolean;
+        source_type: string;
+        source_name: string;
+      } | null = null;
+      // The graph config to pass via initialParameters (sent over WebRTC)
+      let graphConfigForStream: ReturnType<
+        NonNullable<typeof graphEditorRef.current>["getCurrentGraphConfig"]
+      > | null = null;
+
+      if (graphMode || nonLinearGraph) {
+        try {
+          // Read graph from frontend React state (always up-to-date)
+          const frontendGraph = graphEditorRef.current?.getCurrentGraphConfig();
+          if (frontendGraph) {
+            graphConfigForStream = frontendGraph;
+          }
+
+          const graphNodes = frontendGraph?.nodes ?? null;
+
+          if (graphNodes) {
+            const graphPipelineIds = graphNodes
+              .filter(n => n.type === "pipeline" && n.pipeline_id)
+              .map(n => n.pipeline_id as string);
+            if (graphPipelineIds.length > 0) {
+              pipelineIds.length = 0;
+              pipelineIds.push(...graphPipelineIds);
+              // Find the main pipeline (first non-preprocessor, non-postprocessor)
+              const mainPid = graphPipelineIds.find(pid => {
+                const schema = pipelines?.[pid];
+                const usage = schema?.usage ?? [];
+                return (
+                  !usage.includes("preprocessor") &&
+                  !usage.includes("postprocessor")
+                );
+              });
+              pipelineIdToUse = mainPid ?? graphPipelineIds[0];
+            }
+
+            // Extract source mode from the graph's source node and normalize
+            // to a valid InputMode. All source_mode values (video, camera,
+            // spout, ndi, syphon) need video input, so graphSourceMode is
+            // always "video". For server-side sources we also capture the
+            // input source config so the backend receives it.
+            const sourceNode = graphNodes.find(n => n.type === "source");
+            if (sourceNode) {
+              const sm = sourceNode.source_mode || "video";
+              // All graph source modes require video InputMode
+              graphSourceMode = "video";
+
+              // For server-side sources, capture input source config
+              if (sm === "spout" || sm === "ndi" || sm === "syphon") {
+                graphInputSource = {
+                  enabled: true,
+                  source_type: sm,
+                  source_name: sourceNode.source_name ?? "",
+                };
+              }
+            }
+          }
+
+          // Adjust resolution in graph node params BEFORE anything reads them.
+          // This ensures all downstream code (loadItems, initialParameters, etc.)
+          // sees the corrected values and the UI reflects them immediately.
+          if (graphConfigForStream?.ui_state) {
+            const nParams = graphConfigForStream.ui_state.node_params as
+              | Record<string, Record<string, unknown>>
+              | undefined;
+            if (nParams && graphNodes) {
+              for (const node of graphNodes) {
+                if (node.type !== "pipeline" || !node.pipeline_id) continue;
+                const bag = nParams[node.id];
+                if (!bag) continue;
+                const h =
+                  typeof bag.height === "number"
+                    ? Math.round(bag.height)
+                    : undefined;
+                const w =
+                  typeof bag.width === "number"
+                    ? Math.round(bag.width)
+                    : undefined;
+                if (h != null && w != null) {
+                  const { resolution: adj, wasAdjusted } =
+                    adjustResolutionForPipeline(
+                      node.pipeline_id as PipelineId,
+                      { height: h, width: w }
+                    );
+                  // Always write back rounded integers
+                  bag.height = wasAdjusted ? adj.height : h;
+                  bag.width = wasAdjusted ? adj.width : w;
+                  if (wasAdjusted) {
+                    console.log(
+                      `[GraphMode] Adjusted ${node.pipeline_id} resolution: ${w}×${h} → ${bag.width}×${bag.height}`
+                    );
+                  }
+                  // Update the graph editor UI so the user sees corrected values
+                  graphEditorRef.current?.updateNodeParam(
+                    node.id,
+                    "height",
+                    bag.height
+                  );
+                  graphEditorRef.current?.updateNodeParam(
+                    node.id,
+                    "width",
+                    bag.width
+                  );
+                }
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Failed to extract pipeline IDs from graph:", err);
+        }
       }
 
       // Check if models are needed but not downloaded for all pipelines in the chain
@@ -1883,9 +2065,13 @@ export function StreamPage() {
       // Always load pipeline with current parameters - backend will handle the rest
       console.log(`Loading ${pipelineIdToUse} pipeline...`);
 
-      // Determine current input mode
-      const currentMode =
+      // Determine current input mode – in graph mode, prefer the source node's
+      // mode so the backend receives the correct input_mode (e.g. "video")
+      let currentMode =
         settings.inputMode || getPipelineDefaultMode(pipelineIdToUse) || "text";
+      if ((graphMode || nonLinearGraph) && graphSourceMode) {
+        currentMode = graphSourceMode as InputMode;
+      }
 
       // Use settings.resolution if available, otherwise fall back to videoResolution
       let resolution = settings.resolution || videoResolution;
@@ -1946,12 +2132,21 @@ export function StreamPage() {
           loadParams = { ...loadParams, ...vaceParams };
         }
 
-        // Merge schema-driven primitive fields (e.g. new_param) so backend receives them
+        // Merge schema-driven primitive fields (e.g. new_param) so backend receives them.
+        // Exclude height/width — they are handled by the dedicated resolution logic
+        // above and must not be overridden by stale schemaFieldOverrides values.
         if (
           settings.schemaFieldOverrides &&
           Object.keys(settings.schemaFieldOverrides).length > 0
         ) {
-          loadParams = { ...loadParams, ...settings.schemaFieldOverrides };
+          const schemaRest = Object.fromEntries(
+            Object.entries(settings.schemaFieldOverrides).filter(
+              ([k]) => k !== "height" && k !== "width"
+            )
+          );
+          if (Object.keys(schemaRest).length > 0) {
+            loadParams = { ...loadParams, ...schemaRest };
+          }
         }
 
         // Include per-processor schema overrides as flat params
@@ -1980,10 +2175,135 @@ export function StreamPage() {
         );
       }
 
-      const loadSuccess = await loadPipeline(
-        pipelineIds,
-        loadParams || undefined
-      );
+      // Build a linear graph for perform mode so backend uses the unified graph path.
+      // In graph/nonLinearGraph mode, graphConfigForStream is already set above.
+      if (!graphMode && !nonLinearGraph) {
+        // Resolve which pipelines should receive input as vace_input_frames
+        // (mirrors the backend's _setup_pipelines_sync fallback logic)
+        const vaceInputVideoIds = new Set<string>();
+        if (
+          vaceEnabled &&
+          (settings.vaceUseInputVideo ?? false) &&
+          currentMode === "video"
+        ) {
+          const allIds = [
+            ...(settings.preprocessorIds ?? []),
+            pipelineIdToUse,
+            ...(settings.postprocessorIds ?? []),
+          ];
+          for (const pid of allIds) {
+            if (pipelines?.[pid]?.supportsVACE) {
+              vaceInputVideoIds.add(pid);
+            }
+          }
+        }
+
+        graphConfigForStream = linearGraphFromSettings(
+          pipelineIdToUse,
+          settings.preprocessorIds ?? [],
+          settings.postprocessorIds ?? [],
+          vaceInputVideoIds.size > 0 ? vaceInputVideoIds : undefined
+        );
+      }
+
+      // Build PipelineLoadItem[] from graph nodes (always available at this
+      // point — perform mode builds a linear graph above).
+      // Per-node load_params ensures each pipeline gets vace_enabled when it supports VACE
+      // and LoRA adapters when configured via LoRA nodes.
+      const loraSettings = graphEditorRef.current?.getGraphLoRASettings() ?? [];
+      const loraByNode = new Map(loraSettings.map(s => [s.pipelineNodeId, s]));
+
+      const loadItems: PipelineLoadItem[] = graphConfigForStream
+        ? graphConfigForStream.nodes
+            .filter(n => n.type === "pipeline" && n.pipeline_id)
+            .map(n => {
+              const pid = n.pipeline_id as string;
+              const pipeSchema = pipelines?.[pid];
+              const nodeLoadParams = { ...(loadParams ?? {}) };
+              const nParams = graphConfigForStream?.ui_state?.node_params as
+                | Record<string, Record<string, unknown>>
+                | undefined;
+              const nodeBag = nParams?.[n.id];
+              if (typeof nodeBag?.height === "number")
+                nodeLoadParams.height = Math.round(nodeBag.height);
+              if (typeof nodeBag?.width === "number")
+                nodeLoadParams.width = Math.round(nodeBag.width);
+              // Ensure resolution is divisible by pipeline's required scale factor
+              if (
+                typeof nodeLoadParams.height === "number" &&
+                typeof nodeLoadParams.width === "number"
+              ) {
+                const { resolution: adjRes, wasAdjusted } =
+                  adjustResolutionForPipeline(pid as PipelineId, {
+                    height: nodeLoadParams.height as number,
+                    width: nodeLoadParams.width as number,
+                  });
+                if (wasAdjusted) {
+                  nodeLoadParams.height = adjRes.height;
+                  nodeLoadParams.width = adjRes.width;
+                }
+              }
+              if (pipeSchema?.supportsQuantization) {
+                const nodeQuant = nodeBag?.quantization;
+                if (typeof nodeQuant === "string") {
+                  nodeLoadParams.quantization = nodeQuant;
+                } else {
+                  // Compute VRAM-based default for this pipeline
+                  const vramThreshold =
+                    pipeSchema.recommendedQuantizationVramThreshold;
+                  if (vramThreshold != null && hardwareInfo?.vram_gb != null) {
+                    nodeLoadParams.quantization =
+                      hardwareInfo.vram_gb > vramThreshold
+                        ? null
+                        : "fp8_e4m3fn";
+                  } else {
+                    nodeLoadParams.quantization = settings.quantization ?? null;
+                  }
+                }
+              }
+              if (pipeSchema?.supportsVACE) {
+                const hasVaceEdge = graphConfigForStream!.edges.some(
+                  e =>
+                    e.to_node === n.id &&
+                    (e.to_port === "vace_input_frames" ||
+                      e.to_port === "vace_input_masks")
+                );
+                nodeLoadParams.vace_enabled = hasVaceEdge;
+                const nodeVaceScale = nodeBag?.vace_context_scale;
+                nodeLoadParams.vace_context_scale =
+                  typeof nodeVaceScale === "number"
+                    ? nodeVaceScale
+                    : (settings.vaceContextScale ?? 1.0);
+              }
+              const loraConfig = loraByNode.get(n.id);
+              if (loraConfig && loraConfig.loras.length > 0) {
+                nodeLoadParams.loras = loraConfig.loras.map(l => ({
+                  ...l,
+                  path: resolveLoRAPath(l.path, loraFiles),
+                }));
+                nodeLoadParams.lora_merge_mode = loraConfig.lora_merge_mode;
+              }
+              return {
+                node_id: n.id,
+                pipeline_id: pid,
+                load_params: nodeLoadParams,
+              };
+            })
+        : pipelineIds.map(pid => ({
+            node_id: pid,
+            pipeline_id: pid,
+            load_params: loadParams,
+          }));
+
+      // Log the resolution values being sent to loadPipeline for debugging
+      for (const item of loadItems) {
+        const lp = item.load_params as Record<string, unknown> | undefined;
+        console.log(
+          `[GraphMode] Loading pipeline ${item.pipeline_id} (node ${item.node_id}) with resolution: ${lp?.width}×${lp?.height}`
+        );
+      }
+
+      const loadSuccess = await loadPipeline(loadItems);
       if (!loadSuccess) {
         console.error("Failed to load pipeline, cannot start stream");
         return false;
@@ -2037,6 +2357,7 @@ export function StreamPage() {
           source_type: string;
           source_name: string;
         };
+        graph?: GraphConfig;
       } = {
         // Signal the intended input mode to the backend so it doesn't
         // briefly fall back to text mode before video frames arrive
@@ -2050,6 +2371,16 @@ export function StreamPage() {
         initialParameters.denoising_step_list = settings.denoisingSteps || [
           700, 500,
         ];
+      }
+
+      // In graph mode, use the graph node's prompt instead of perform mode defaults
+      if (graphMode || nonLinearGraph) {
+        const graphPrompts = graphEditorRef.current?.getGraphNodePrompts();
+        if (graphPrompts && graphPrompts.length > 0) {
+          initialParameters.prompts = [
+            { text: graphPrompts[0].text, weight: 100 },
+          ];
+        }
       }
 
       // Cache management for pipelines that support it
@@ -2075,7 +2406,53 @@ export function StreamPage() {
       initialParameters.produces_audio = latestInfo?.produces_audio ?? false;
 
       // VACE-specific parameters
-      if (currentPipeline?.supportsVACE) {
+      if (graphMode || nonLinearGraph) {
+        // In graph mode, extract VACE settings from VaceNode connections.
+        // The VaceNode's compound output (__vace) carries context_scale,
+        // ref_images, and frame references to the connected pipeline node.
+        const vaceSettings =
+          graphEditorRef.current?.getGraphVaceSettings() ?? [];
+        if (vaceSettings.length > 0) {
+          // Use the first VaceNode's settings for global initialParameters
+          // (backend broadcasts initial_parameters to all processors)
+          const first = vaceSettings[0];
+          initialParameters.vace_enabled = true;
+          initialParameters.vace_context_scale = first.vace_context_scale;
+          initialParameters.vace_use_input_video = first.vace_use_input_video;
+          if (first.vace_ref_images?.length) {
+            initialParameters.vace_ref_images = first.vace_ref_images;
+          }
+          if (first.first_frame_image) {
+            initialParameters.first_frame_image = first.first_frame_image;
+          }
+          if (first.last_frame_image) {
+            initialParameters.last_frame_image = first.last_frame_image;
+          }
+        } else {
+          // No VaceNode in graph; check if any pipeline supports VACE and
+          // use perform-mode settings as fallback
+          const anyVace = pipelineIds.some(
+            pid => pipelines?.[pid]?.supportsVACE
+          );
+          if (anyVace) {
+            initialParameters.vace_enabled = vaceEnabled;
+            initialParameters.vace_context_scale =
+              settings.vaceContextScale ?? 1.0;
+            if (currentMode === "video") {
+              initialParameters.vace_use_input_video =
+                settings.vaceUseInputVideo ?? false;
+            }
+            const vaceParams = getVaceParams(
+              settings.refImages,
+              settings.vaceContextScale
+            );
+            if ("vace_ref_images" in vaceParams) {
+              initialParameters.vace_ref_images = vaceParams.vace_ref_images;
+            }
+          }
+        }
+      } else if (currentPipeline?.supportsVACE) {
+        // Perform mode: use settings panel values
         const vaceParams = getVaceParams(
           settings.refImages,
           settings.vaceContextScale
@@ -2083,10 +2460,7 @@ export function StreamPage() {
         if ("vace_ref_images" in vaceParams) {
           initialParameters.vace_ref_images = vaceParams.vace_ref_images;
         }
-        // Always send vace_context_scale when VACE is supported,
-        // not just when ref images are present (it also applies to input video VACE)
         initialParameters.vace_context_scale = settings.vaceContextScale ?? 1.0;
-        // Add vace_use_input_video parameter
         if (currentMode === "video") {
           initialParameters.vace_use_input_video =
             settings.vaceUseInputVideo ?? false;
@@ -2096,7 +2470,6 @@ export function StreamPage() {
         currentPipeline?.supportsImages &&
         settings.refImages?.length
       ) {
-        // Non-VACE pipelines that support images
         initialParameters.images = settings.refImages;
       }
 
@@ -2124,20 +2497,72 @@ export function StreamPage() {
         }
       }
 
-      // Generic input source (NDI, Spout, etc.) - send if enabled
-      if (settings.inputSource?.enabled) {
+      // Generic input source (NDI, Spout, etc.) - send if enabled.
+      // In graph/workflow mode, prefer the graph's source config over perform-mode settings.
+      if ((graphMode || nonLinearGraph) && graphInputSource) {
+        initialParameters.input_source = graphInputSource;
+      } else if (settings.inputSource?.enabled) {
         initialParameters.input_source = settings.inputSource;
+      }
+
+      // Pass graph config via initialParameters for the backend to use
+      // Strip frontend-only fields (position, size, ui_state) before sending.
+      if (graphConfigForStream) {
+        initialParameters.graph = stripUIFields(graphConfigForStream);
       }
 
       // Include recording toggle state
       initialParameters.recording = isRecording;
 
-      // Include runtime schema field overrides so they reach __call__ on first frame
+      // Include runtime schema field overrides so they reach __call__ on first frame.
+      // Exclude height/width — they are load-time params baked into the pipeline
+      // during initialization and must not leak into runtime parameters (which
+      // would override the adjusted resolution on every __call__).
       if (
         settings.schemaFieldOverrides &&
         Object.keys(settings.schemaFieldOverrides).length > 0
       ) {
-        Object.assign(initialParameters, settings.schemaFieldOverrides);
+        const schemaRuntime = Object.fromEntries(
+          Object.entries(settings.schemaFieldOverrides).filter(
+            ([k]) => k !== "height" && k !== "width"
+          )
+        );
+        Object.assign(initialParameters, schemaRuntime);
+      }
+
+      // Override initialParameters with graph node params for the main pipeline.
+      // When a workflow is imported into graph mode, per-node params (denoising
+      // steps, noise scale, etc.) are stored in ui_state.node_params but not
+      // reflected in settings.*. Apply them so the backend receives the correct
+      // values at stream start.
+      if ((graphMode || nonLinearGraph) && graphConfigForStream?.ui_state) {
+        const nodeParams = graphConfigForStream.ui_state.node_params as
+          | Record<string, Record<string, unknown>>
+          | undefined;
+        if (nodeParams) {
+          const mainNode = graphConfigForStream.nodes.find(
+            n => n.type === "pipeline" && n.pipeline_id === pipelineIdToUse
+          );
+          const mainNodeParams = mainNode ? nodeParams[mainNode.id] : undefined;
+          if (mainNodeParams) {
+            const RUNTIME_PARAMS = [
+              "denoising_step_list",
+              "noise_scale",
+              "noise_controller",
+              "manage_cache",
+              "kv_cache_attention_bias",
+              "vace_enabled",
+              "vace_context_scale",
+              "vace_use_input_video",
+            ] as const;
+            for (const key of RUNTIME_PARAMS) {
+              if (mainNodeParams[key] !== undefined) {
+                (initialParameters as Record<string, unknown>)[key] =
+                  mainNodeParams[key];
+              }
+            }
+          }
+        }
       }
 
       // Reset paused state when starting a fresh stream
@@ -2174,6 +2599,32 @@ export function StreamPage() {
       });
     }
   };
+
+  const handleStartRecording = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await api.startRecording(sessionId);
+    } catch (error) {
+      console.error("Error starting recording:", error);
+      toast.error("Failed to start recording");
+    }
+  }, [sessionId, api]);
+
+  const handleStopRecording = useCallback(async () => {
+    if (!sessionId) return;
+    try {
+      await api.downloadRecording(sessionId);
+    } catch (error) {
+      console.error("Error downloading recording:", error);
+      toast.error("Failed to save recording");
+    }
+    try {
+      await api.stopRecording(sessionId);
+    } catch (error) {
+      console.error("Error stopping recording:", error);
+      toast.error("Failed to stop recording");
+    }
+  }, [sessionId, api]);
 
   // Handle workflow import: load settings, timeline, and prompt state
   const handleWorkflowLoad = useCallback(
@@ -2216,6 +2667,10 @@ export function StreamPage() {
     [updateSettings, skipNextModeReset, settings.inputMode]
   );
 
+  const handleWorkflowLoadToGraph = useCallback((workflow: ScopeWorkflow) => {
+    graphEditorRef.current?.loadWorkflow(workflow);
+  }, []);
+
   return (
     <MIDIProvider
       sendParameterUpdate={sendParameterUpdate}
@@ -2234,431 +2689,594 @@ export function StreamPage() {
           cloudDisabled={isStreaming}
           openSettingsTab={openSettingsTab}
           onSettingsTabOpened={() => setOpenSettingsTab(null)}
+          graphMode={graphMode}
+          onGraphModeToggle={() => {
+            if (!graphMode) {
+              // Switching Perform → Graph: seed a linear graph if none exists in localStorage
+              const currentGraph =
+                graphEditorRef.current?.getCurrentGraphConfig();
+              if (
+                !currentGraph ||
+                (currentGraph.nodes.length === 0 &&
+                  currentGraph.edges.length === 0)
+              ) {
+                // No graph yet — create a linear one from current settings
+                // and save to localStorage so the graph editor picks it up
+                const graph = linearGraphFromSettings(
+                  settings.pipelineId,
+                  settings.preprocessorIds ?? [],
+                  settings.postprocessorIds ?? []
+                );
+                try {
+                  localStorage.setItem(
+                    "scope:graph:backup",
+                    JSON.stringify(graph)
+                  );
+                } catch {
+                  /* ignore */
+                }
+              }
+              // Refresh the graph editor so it picks up the current graph
+              graphEditorRef.current?.refreshGraph();
+            } else {
+              // Switching Graph → Perform: sync pipeline ID and source mode
+              // from the graph so perform mode reflects the workflow builder.
+              try {
+                const frontendGraph =
+                  graphEditorRef.current?.getCurrentGraphConfig();
+                const graphNodes = frontendGraph?.nodes ?? null;
+
+                if (graphNodes) {
+                  // Sync pipeline ID from the graph's first pipeline node
+                  const firstPipeline = graphNodes.find(
+                    n => n.type === "pipeline" && n.pipeline_id
+                  );
+                  if (firstPipeline?.pipeline_id) {
+                    skipNextModeReset(firstPipeline.pipeline_id);
+                    updateSettings({ pipelineId: firstPipeline.pipeline_id });
+                  }
+
+                  const sourceNode = graphNodes.find(n => n.type === "source");
+                  // Default to "video" if source node has no explicit mode
+                  const sourceMode = (sourceNode?.source_mode || "video") as
+                    | "video"
+                    | "camera"
+                    | "spout"
+                    | "ndi"
+                    | "syphon";
+
+                  // Sync inputMode setting so perform mode reflects the graph's choice
+                  const inputMode: InputMode =
+                    sourceMode === "video" || sourceMode === "camera"
+                      ? "video"
+                      : "video"; // server-side sources still use "video" inputMode
+
+                  // Also sync resolution to match the new input mode so
+                  // perform mode shows the correct video-mode defaults.
+                  const pid = (firstPipeline?.pipeline_id ??
+                    settings.pipelineId) as PipelineId;
+                  const modeDefaults = getDefaults(pid, inputMode);
+                  const resolution = customVideoResolution
+                    ? capResolution(customVideoResolution, pid, inputMode)
+                    : {
+                        height: modeDefaults.height,
+                        width: modeDefaults.width,
+                      };
+                  updateSettings({ inputMode, resolution });
+
+                  // Sync to useVideoSource
+                  if (
+                    sourceMode === "spout" ||
+                    sourceMode === "ndi" ||
+                    sourceMode === "syphon"
+                  ) {
+                    // For server-side sources, update settings.inputSource with graph's source_name
+                    updateSettings({
+                      inputSource: {
+                        enabled: true,
+                        source_type: sourceMode,
+                        source_name:
+                          sourceNode?.source_name ??
+                          settings.inputSource?.source_name ??
+                          "",
+                      },
+                    });
+                    switchMode(sourceMode);
+                  } else {
+                    switchMode(sourceMode);
+                  }
+                }
+              } catch {
+                /* ignore */
+              }
+            }
+            // Graph → Perform: just switch mode (modes are independent)
+            setGraphMode(prev => !prev);
+          }}
         />
 
-        {/* Main Content Area */}
-        <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
-          {/* Left Panel - Input & Controls */}
-          <div className="w-1/5 flex flex-col gap-3 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
-            <InputAndControlsPanel
-              className=""
-              pipelines={pipelines}
-              localStream={localStream}
-              isInitializing={isInitializing}
-              error={videoSourceError}
-              mode={mode}
-              onModeChange={handleModeChange}
-              isStreaming={isStreaming}
-              isConnecting={isConnecting || isCloudConnecting}
-              isPipelineLoading={isPipelineLoading}
-              canStartStream={
-                settings.inputMode === "text"
-                  ? !isInitializing
-                  : mode === "spout" || mode === "ndi" || mode === "syphon"
-                    ? !isInitializing
-                    : !!localStream && !isInitializing
-              }
-              onStartStream={handleStartStream}
-              onStopStream={stopStream}
-              onVideoFileUpload={handleVideoFileUpload}
-              pipelineId={settings.pipelineId}
-              prompts={promptItems}
-              onPromptsChange={setPromptItems}
-              onPromptsSubmit={handlePromptsSubmit}
-              onTransitionSubmit={handleTransitionSubmit}
-              interpolationMethod={interpolationMethod}
-              onInterpolationMethodChange={setInterpolationMethod}
-              temporalInterpolationMethod={temporalInterpolationMethod}
-              onTemporalInterpolationMethodChange={
-                setTemporalInterpolationMethod
-              }
-              isLive={isLive}
-              onLivePromptSubmit={handleLivePromptSubmit}
-              selectedTimelinePrompt={selectedTimelinePrompt}
-              onTimelinePromptUpdate={handleTimelinePromptUpdate}
-              isVideoPaused={settings.paused}
-              isTimelinePlaying={isTimelinePlaying}
-              currentTime={timelineCurrentTime}
-              timelinePrompts={timelinePrompts}
-              transitionSteps={transitionSteps}
-              onTransitionStepsChange={setTransitionSteps}
-              spoutReceiverName={
-                settings.inputSource?.source_type === "spout"
-                  ? (settings.inputSource?.source_name ?? "")
-                  : ""
-              }
-              onSpoutReceiverChange={handleSpoutSourceChange}
-              inputMode={
-                settings.inputMode ||
-                getPipelineDefaultMode(settings.pipelineId)
-              }
-              onInputModeChange={handleInputModeChange}
-              spoutAvailable={spoutAvailable}
-              ndiAvailable={ndiAvailable}
-              syphonAvailable={syphonAvailable}
-              selectedNdiSource={settings.inputSource?.source_name ?? ""}
-              onNdiSourceChange={handleNdiSourceChange}
-              selectedSyphonSource={
-                settings.inputSource?.source_type === "syphon"
-                  ? (settings.inputSource?.source_name ?? "")
-                  : ""
-              }
-              onSyphonSourceChange={handleSyphonSourceChange}
-              vaceEnabled={
-                settings.vaceEnabled ??
-                (pipelines?.[settings.pipelineId]?.supportsVACE &&
-                  settings.inputMode !== "video")
-              }
-              refImages={settings.refImages || []}
-              onRefImagesChange={handleRefImagesChange}
-              onSendHints={handleSendHints}
-              isDownloading={isDownloading}
-              supportsImages={pipelines?.[settings.pipelineId]?.supportsImages}
-              firstFrameImage={settings.firstFrameImage}
-              onFirstFrameImageChange={handleFirstFrameImageChange}
-              lastFrameImage={settings.lastFrameImage}
-              onLastFrameImageChange={handleLastFrameImageChange}
-              extensionMode={settings.extensionMode || "firstframe"}
-              onExtensionModeChange={handleExtensionModeChange}
-              onSendExtensionFrames={handleSendExtensionFrames}
-              configSchema={
-                pipelines?.[settings.pipelineId]?.configSchema as
-                  | import("../lib/schemaSettings").ConfigSchemaLike
-                  | undefined
-              }
-              schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
-              onSchemaFieldOverrideChange={(
-                key: string,
-                value: unknown,
-                isRuntimeParam?: boolean
-              ) => {
-                updateSettings({
-                  schemaFieldOverrides: {
-                    ...(settings.schemaFieldOverrides ?? {}),
-                    [key]: value,
-                  },
-                });
-                if (isRuntimeParam && isStreaming) {
-                  sendParameterUpdate({ [key]: value });
-                }
-              }}
-            />
-            <Card>
-              <CardHeader className="px-4 py-3">
-                <CardTitle className="text-base font-medium">
-                  Tempo Sync
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4 pb-4 pt-0">
-                <TempoSyncSection
-                  tempoState={tempoState}
-                  sources={tempoSources ?? null}
-                  loading={tempoLoading}
-                  error={tempoError}
-                  onEnable={enableTempoSync}
-                  onDisable={disableTempoSync}
-                  onSetBpm={setTempoSessionBpm}
-                  onRefreshSources={refreshTempoSources}
-                  quantizeMode={settings.quantizeMode || "none"}
-                  onQuantizeModeChange={mode =>
-                    updateSettings({
-                      quantizeMode: mode as SettingsState["quantizeMode"],
-                    })
-                  }
-                  lookaheadMs={settings.lookaheadMs ?? 0}
-                  onLookaheadMsChange={ms =>
-                    updateSettings({ lookaheadMs: ms })
-                  }
-                  modulations={settings.modulations}
-                  onModulationsChange={modulations =>
-                    updateSettings({ modulations })
-                  }
-                  configSchema={pipelines?.[settings.pipelineId]?.configSchema}
-                  beatCacheResetRate={settings.beatCacheResetRate || "none"}
-                  onBeatCacheResetRateChange={rate =>
-                    updateSettings({
-                      beatCacheResetRate:
-                        rate as SettingsState["beatCacheResetRate"],
-                    })
-                  }
-                  promptCycleRate={settings.promptCycleRate || "none"}
-                  onPromptCycleRateChange={rate =>
-                    updateSettings({
-                      promptCycleRate: rate as SettingsState["promptCycleRate"],
-                    })
-                  }
-                />
-              </CardContent>
-            </Card>
-            {hasAvailableOutputs && (
-              <OutputsPanel
-                className=""
-                outputSinks={settings.outputSinks}
-                onOutputSinkChange={handleOutputSinkChange}
-                spoutAvailable={spoutAvailable}
-                ndiAvailable={ndiOutputAvailable}
-                syphonAvailable={syphonOutputAvailable}
-                isStreaming={isStreaming}
-              />
-            )}
-          </div>
-
-          {/* Center Panel - Video Output + Timeline */}
-          <div className="flex-1 flex flex-col min-h-0">
-            {/* Video area - takes remaining space but can shrink */}
-            <div className="flex-1 min-h-0">
-              <VideoOutput
-                className="h-full"
-                remoteStream={remoteStream}
-                isPipelineLoading={isPipelineLoading}
-                isCloudConnecting={isCloudConnecting}
-                isConnecting={isConnecting}
-                pipelineError={pipelineError}
-                pipelineLoadingStage={pipelineLoadingStage}
-                cloudConnectStage={cloudConnectStage}
-                isPlaying={!settings.paused}
-                isDownloading={isDownloading}
-                onPlayPauseToggle={() => {
-                  // Use timeline's play/pause handler instead of direct video toggle
-                  if (timelinePlayPauseRef.current) {
-                    timelinePlayPauseRef.current();
-                  }
-                }}
-                onStartStream={() => {
-                  // Use timeline's play/pause handler to start stream
-                  if (timelinePlayPauseRef.current) {
-                    timelinePlayPauseRef.current();
-                  }
-                }}
-                onVideoPlaying={() => {
-                  // Execute callback when video starts playing
-                  if (onVideoPlayingCallbackRef.current) {
-                    onVideoPlayingCallbackRef.current();
-                    onVideoPlayingCallbackRef.current = null; // Clear after execution
-                  }
-                }}
-                // Controller input props
-                supportsControllerInput={currentPipelineSupportsController}
-                isPointerLocked={isPointerLocked}
-                onRequestPointerLock={requestPointerLock}
-                videoContainerRef={videoContainerRef}
-                // Video scale mode
-                videoScaleMode={videoScaleMode}
-              />
-            </div>
-            {/* Timeline area - compact, always visible */}
-            <div className="flex-shrink-0 mt-2">
-              <PromptInputWithTimeline
-                currentPrompt={promptItems[0]?.text || ""}
-                currentPromptItems={promptItems}
-                transitionSteps={transitionSteps}
-                temporalInterpolationMethod={temporalInterpolationMethod}
-                onPromptSubmit={text => {
-                  // Update the left panel's prompt state to reflect current timeline prompt
-                  const prompts = [{ text, weight: 100 }];
-                  setPromptItems(prompts);
-
-                  // Send to backend - use transition if streaming and transition steps > 0
-                  if (isStreaming && transitionSteps > 0) {
-                    sendParameterUpdate({
-                      transition: {
-                        target_prompts: prompts,
-                        num_steps: transitionSteps,
-                        temporal_interpolation_method:
-                          temporalInterpolationMethod,
-                      },
-                    });
-                  } else {
-                    // Send direct prompts without transition
-                    sendParameterUpdate({
-                      prompts,
-                      prompt_interpolation_method: interpolationMethod,
-                      denoising_step_list: settings.denoisingSteps || [
-                        700, 500,
-                      ],
-                    });
-                  }
-                }}
-                onPromptItemsSubmit={(
-                  prompts,
-                  blockTransitionSteps,
-                  blockTemporalInterpolationMethod
-                ) => {
-                  // Update the left panel's prompt state to reflect current timeline prompt blend
-                  setPromptItems(prompts);
-
-                  // Use transition params from block if provided, otherwise use global settings
-                  const effectiveTransitionSteps =
-                    blockTransitionSteps ?? transitionSteps;
-                  const effectiveTemporalInterpolationMethod =
-                    blockTemporalInterpolationMethod ??
-                    temporalInterpolationMethod;
-
-                  // Update the left panel's transition settings to reflect current block's values
-                  if (blockTransitionSteps !== undefined) {
-                    setTransitionSteps(blockTransitionSteps);
-                  }
-                  if (blockTemporalInterpolationMethod !== undefined) {
-                    setTemporalInterpolationMethod(
-                      blockTemporalInterpolationMethod
-                    );
-                  }
-
-                  // Send to backend - use transition if streaming and transition steps > 0
-                  if (isStreaming && effectiveTransitionSteps > 0) {
-                    sendParameterUpdate({
-                      transition: {
-                        target_prompts: prompts,
-                        num_steps: effectiveTransitionSteps,
-                        temporal_interpolation_method:
-                          effectiveTemporalInterpolationMethod,
-                      },
-                    });
-                  } else {
-                    // Send direct prompts without transition
-                    sendParameterUpdate({
-                      prompts,
-                      prompt_interpolation_method: interpolationMethod,
-                      denoising_step_list: settings.denoisingSteps || [
-                        700, 500,
-                      ],
-                    });
-                  }
-                }}
-                disabled={
-                  isPipelineLoading ||
-                  isConnecting ||
-                  isCloudConnecting ||
-                  showDownloadDialog
-                }
-                isStreaming={isStreaming}
-                isVideoPaused={settings.paused}
-                timelineRef={timelineRef}
-                onLiveStateChange={setIsLive}
-                onLivePromptSubmit={handleLivePromptSubmit}
-                onDisconnect={stopStream}
-                onStartStream={handleStartStream}
-                onVideoPlayPauseToggle={handlePlayPauseToggle}
-                onPromptEdit={handleTimelinePromptEdit}
-                isCollapsed={isTimelineCollapsed}
-                onCollapseToggle={setIsTimelineCollapsed}
-                externalSelectedPromptId={externalSelectedPromptId}
-                onPlayPauseRef={timelinePlayPauseRef}
-                onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
-                onTimelinePromptsChange={handleTimelinePromptsChange}
-                onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
-                onTimelinePlayingChange={handleTimelinePlayingChange}
-                isLoading={isLoading}
-                videoScaleMode={videoScaleMode}
-                onVideoScaleModeToggle={() =>
-                  setVideoScaleMode(prev => (prev === "fit" ? "native" : "fit"))
-                }
-                isDownloading={isDownloading}
-                onSaveGeneration={handleSaveGeneration}
-                isRecording={isRecording}
-                onRecordingToggle={() => setIsRecording(prev => !prev)}
-                onWorkflowExport={() => setShowWorkflowExport(true)}
-                onWorkflowImport={() => setShowWorkflowImport(true)}
-                onExportToDaydream={handleExportToDaydream}
-                isAuthenticated={isDaydreamAuthenticated}
-                isExportingToDaydream={isExportingToDaydream}
-              />
-            </div>
-          </div>
-
-          {/* Right Panel - Parameters */}
-          <div className="w-1/5 flex flex-col gap-3 min-h-0">
-            <SettingsPanel
-              className="flex-1 min-h-0"
-              pipelines={pipelines}
-              pipelineId={settings.pipelineId}
-              onPipelineIdChange={handlePipelineIdChange}
-              isStreaming={isStreaming}
-              isLoading={isLoading}
-              resolution={
-                settings.resolution || {
-                  height: getDefaults(settings.pipelineId, settings.inputMode)
-                    .height,
-                  width: getDefaults(settings.pipelineId, settings.inputMode)
-                    .width,
-                }
-              }
-              onResolutionChange={handleResolutionChange}
-              denoisingSteps={
-                settings.denoisingSteps ||
-                getDefaults(settings.pipelineId, settings.inputMode)
-                  .denoisingSteps || [750, 250]
-              }
-              onDenoisingStepsChange={handleDenoisingStepsChange}
-              defaultDenoisingSteps={
-                getDefaults(settings.pipelineId, settings.inputMode)
-                  .denoisingSteps || [750, 250]
-              }
-              noiseScale={settings.noiseScale ?? 0.7}
-              onNoiseScaleChange={handleNoiseScaleChange}
-              noiseController={settings.noiseController ?? true}
-              onNoiseControllerChange={handleNoiseControllerChange}
-              manageCache={settings.manageCache ?? true}
-              onManageCacheChange={handleManageCacheChange}
-              quantization={
-                settings.quantization !== undefined
-                  ? settings.quantization
-                  : "fp8_e4m3fn"
-              }
-              onQuantizationChange={handleQuantizationChange}
-              kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
-              onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
-              onResetCache={handleResetCache}
-              loras={settings.loras || []}
-              onLorasChange={handleLorasChange}
-              loraMergeStrategy={
-                settings.loraMergeStrategy ?? "permanent_merge"
-              }
-              inputMode={settings.inputMode}
-              supportsNoiseControls={supportsNoiseControls(settings.pipelineId)}
-              vaceEnabled={
-                settings.vaceEnabled ??
-                (pipelines?.[settings.pipelineId]?.supportsVACE &&
-                  settings.inputMode !== "video")
-              }
-              onVaceEnabledChange={handleVaceEnabledChange}
-              vaceUseInputVideo={settings.vaceUseInputVideo ?? false}
-              onVaceUseInputVideoChange={handleVaceUseInputVideoChange}
-              vaceContextScale={settings.vaceContextScale ?? 1.0}
-              onVaceContextScaleChange={handleVaceContextScaleChange}
-              preprocessorIds={settings.preprocessorIds ?? []}
-              onPreprocessorIdsChange={handlePreprocessorIdsChange}
-              postprocessorIds={settings.postprocessorIds ?? []}
-              onPostprocessorIdsChange={handlePostprocessorIdsChange}
-              preprocessorSchemaFieldOverrides={
-                settings.preprocessorSchemaFieldOverrides ?? {}
-              }
-              postprocessorSchemaFieldOverrides={
-                settings.postprocessorSchemaFieldOverrides ?? {}
-              }
-              onPreprocessorSchemaFieldOverrideChange={
-                handlePreprocessorSchemaFieldOverrideChange
-              }
-              onPostprocessorSchemaFieldOverrideChange={
-                handlePostprocessorSchemaFieldOverrideChange
-              }
-              schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
-              onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
-                updateSettings({
-                  schemaFieldOverrides: {
-                    ...(settings.schemaFieldOverrides ?? {}),
-                    [key]: value,
-                  },
-                });
-                if (isRuntimeParam && isStreaming) {
-                  sendParameterUpdate({ [key]: value });
-                }
-              }}
-              isCloudMode={isCloudMode}
-              onOpenLoRAsSettings={() => setOpenSettingsTab("loras")}
-            />
-          </div>
+        {/* Graph Editor - always mounted so control/value node animations and
+            value-forwarding effects keep running even in perform mode */}
+        <div
+          className={
+            graphMode
+              ? "flex-1 min-h-0 overflow-hidden"
+              : "fixed inset-0 -z-50 invisible pointer-events-none"
+          }
+        >
+          <GraphEditor
+            ref={graphEditorRef}
+            visible={graphMode}
+            isStreaming={isStreaming}
+            isConnecting={isConnecting || isCloudConnecting}
+            isLoading={isPipelineLoading || isDownloading}
+            onNodeParameterChange={(nodeId, key, value) => {
+              sendParameterUpdate({ node_id: nodeId, [key]: value });
+            }}
+            onGraphChange={handleGraphChange}
+            onGraphClear={handleGraphClear}
+            localStream={localStream}
+            remoteStream={remoteStream}
+            onVideoFileUpload={handleVideoFileUpload}
+            onStartStream={() => handleStartStream()}
+            onStopStream={stopStream}
+            onSourceModeChange={mode =>
+              handleModeChange(
+                mode as "video" | "camera" | "spout" | "ndi" | "syphon"
+              )
+            }
+            spoutAvailable={spoutAvailable}
+            ndiAvailable={ndiAvailable}
+            syphonAvailable={syphonAvailable}
+            onSpoutSourceChange={handleSpoutSourceChange}
+            onNdiSourceChange={handleNdiSourceChange}
+            onSyphonSourceChange={handleSyphonSourceChange}
+            onOutputSinkChange={handleOutputSinkChange}
+            onOutputSinkBulkChange={handleOutputSinkBulkChange}
+            spoutOutputAvailable={spoutAvailable}
+            ndiOutputAvailable={ndiOutputAvailable}
+            syphonOutputAvailable={syphonOutputAvailable}
+            onStartRecording={handleStartRecording}
+            onStopRecording={handleStopRecording}
+          />
         </div>
+
+        {/* Main Content Area - Perform Mode */}
+        {!graphMode && (
+          <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
+            {/* Left Panel - Input & Controls */}
+            <div className="w-1/5 flex flex-col gap-3 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
+              <InputAndControlsPanel
+                className=""
+                pipelines={pipelines}
+                localStream={localStream}
+                isInitializing={isInitializing}
+                error={videoSourceError}
+                mode={mode}
+                onModeChange={handleModeChange}
+                isStreaming={isStreaming}
+                isConnecting={isConnecting || isCloudConnecting}
+                isPipelineLoading={isPipelineLoading}
+                canStartStream={
+                  settings.inputMode === "text"
+                    ? !isInitializing
+                    : mode === "spout" || mode === "ndi" || mode === "syphon"
+                      ? !isInitializing
+                      : !!localStream && !isInitializing
+                }
+                onStartStream={handleStartStream}
+                onStopStream={stopStream}
+                onVideoFileUpload={handleVideoFileUpload}
+                pipelineId={settings.pipelineId}
+                prompts={promptItems}
+                onPromptsChange={setPromptItems}
+                onPromptsSubmit={handlePromptsSubmit}
+                onTransitionSubmit={handleTransitionSubmit}
+                interpolationMethod={interpolationMethod}
+                onInterpolationMethodChange={setInterpolationMethod}
+                temporalInterpolationMethod={temporalInterpolationMethod}
+                onTemporalInterpolationMethodChange={
+                  setTemporalInterpolationMethod
+                }
+                isLive={isLive}
+                onLivePromptSubmit={handleLivePromptSubmit}
+                selectedTimelinePrompt={selectedTimelinePrompt}
+                onTimelinePromptUpdate={handleTimelinePromptUpdate}
+                isVideoPaused={settings.paused}
+                isTimelinePlaying={isTimelinePlaying}
+                currentTime={timelineCurrentTime}
+                timelinePrompts={timelinePrompts}
+                transitionSteps={transitionSteps}
+                onTransitionStepsChange={setTransitionSteps}
+                spoutReceiverName={
+                  settings.inputSource?.source_type === "spout"
+                    ? (settings.inputSource?.source_name ?? "")
+                    : ""
+                }
+                onSpoutReceiverChange={handleSpoutSourceChange}
+                inputMode={
+                  settings.inputMode ||
+                  getPipelineDefaultMode(settings.pipelineId)
+                }
+                onInputModeChange={handleInputModeChange}
+                spoutAvailable={spoutAvailable}
+                ndiAvailable={ndiAvailable}
+                syphonAvailable={syphonAvailable}
+                selectedNdiSource={settings.inputSource?.source_name ?? ""}
+                onNdiSourceChange={handleNdiSourceChange}
+                selectedSyphonSource={
+                  settings.inputSource?.source_type === "syphon"
+                    ? (settings.inputSource?.source_name ?? "")
+                    : ""
+                }
+                onSyphonSourceChange={handleSyphonSourceChange}
+                vaceEnabled={
+                  settings.vaceEnabled ??
+                  (pipelines?.[settings.pipelineId]?.supportsVACE &&
+                    settings.inputMode !== "video")
+                }
+                refImages={settings.refImages || []}
+                onRefImagesChange={handleRefImagesChange}
+                onSendHints={handleSendHints}
+                isDownloading={isDownloading}
+                supportsImages={
+                  pipelines?.[settings.pipelineId]?.supportsImages
+                }
+                firstFrameImage={settings.firstFrameImage}
+                onFirstFrameImageChange={handleFirstFrameImageChange}
+                lastFrameImage={settings.lastFrameImage}
+                onLastFrameImageChange={handleLastFrameImageChange}
+                extensionMode={settings.extensionMode || "firstframe"}
+                onExtensionModeChange={handleExtensionModeChange}
+                onSendExtensionFrames={handleSendExtensionFrames}
+                configSchema={
+                  pipelines?.[settings.pipelineId]?.configSchema as
+                    | import("../lib/schemaSettings").ConfigSchemaLike
+                    | undefined
+                }
+                schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
+                onSchemaFieldOverrideChange={(
+                  key: string,
+                  value: unknown,
+                  isRuntimeParam?: boolean
+                ) => {
+                  updateSettings({
+                    schemaFieldOverrides: {
+                      ...(settings.schemaFieldOverrides ?? {}),
+                      [key]: value,
+                    },
+                  });
+                  if (isRuntimeParam && isStreaming) {
+                    sendParameterUpdate({ [key]: value });
+                  }
+                }}
+              />
+              <Card>
+                <CardHeader className="px-4 py-3">
+                  <CardTitle className="text-base font-medium">
+                    Tempo Sync
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-4 pb-4 pt-0">
+                  <TempoSyncSection
+                    tempoState={tempoState}
+                    sources={tempoSources ?? null}
+                    loading={tempoLoading}
+                    error={tempoError}
+                    onEnable={enableTempoSync}
+                    onDisable={disableTempoSync}
+                    onSetBpm={setTempoSessionBpm}
+                    onRefreshSources={refreshTempoSources}
+                    quantizeMode={settings.quantizeMode || "none"}
+                    onQuantizeModeChange={mode =>
+                      updateSettings({
+                        quantizeMode: mode as SettingsState["quantizeMode"],
+                      })
+                    }
+                    lookaheadMs={settings.lookaheadMs ?? 0}
+                    onLookaheadMsChange={ms =>
+                      updateSettings({ lookaheadMs: ms })
+                    }
+                    modulations={settings.modulations}
+                    onModulationsChange={modulations =>
+                      updateSettings({ modulations })
+                    }
+                    configSchema={
+                      pipelines?.[settings.pipelineId]?.configSchema
+                    }
+                    beatCacheResetRate={settings.beatCacheResetRate || "none"}
+                    onBeatCacheResetRateChange={rate =>
+                      updateSettings({
+                        beatCacheResetRate:
+                          rate as SettingsState["beatCacheResetRate"],
+                      })
+                    }
+                    promptCycleRate={settings.promptCycleRate || "none"}
+                    onPromptCycleRateChange={rate =>
+                      updateSettings({
+                        promptCycleRate:
+                          rate as SettingsState["promptCycleRate"],
+                      })
+                    }
+                  />
+                </CardContent>
+              </Card>
+              {hasAvailableOutputs && (
+                <OutputsPanel
+                  className=""
+                  outputSinks={settings.outputSinks}
+                  onOutputSinkChange={handleOutputSinkChange}
+                  spoutAvailable={spoutAvailable}
+                  ndiAvailable={ndiOutputAvailable}
+                  syphonAvailable={syphonOutputAvailable}
+                  isStreaming={isStreaming}
+                />
+              )}
+            </div>
+
+            {/* Center Panel - Video Output + Timeline */}
+            <div className="flex-1 flex flex-col min-h-0">
+              {/* Video area - takes remaining space but can shrink */}
+              <div className="flex-1 min-h-0">
+                <VideoOutput
+                  className="h-full"
+                  remoteStream={remoteStream}
+                  isPipelineLoading={isPipelineLoading}
+                  isCloudConnecting={isCloudConnecting}
+                  isConnecting={isConnecting}
+                  pipelineError={pipelineError}
+                  pipelineLoadingStage={pipelineLoadingStage}
+                  cloudConnectStage={cloudConnectStage}
+                  isPlaying={!settings.paused}
+                  isDownloading={isDownloading}
+                  onPlayPauseToggle={() => {
+                    // Use timeline's play/pause handler instead of direct video toggle
+                    if (timelinePlayPauseRef.current) {
+                      timelinePlayPauseRef.current();
+                    }
+                  }}
+                  onStartStream={() => {
+                    // Use timeline's play/pause handler to start stream
+                    if (timelinePlayPauseRef.current) {
+                      timelinePlayPauseRef.current();
+                    }
+                  }}
+                  onVideoPlaying={() => {
+                    // Execute callback when video starts playing
+                    if (onVideoPlayingCallbackRef.current) {
+                      onVideoPlayingCallbackRef.current();
+                      onVideoPlayingCallbackRef.current = null; // Clear after execution
+                    }
+                  }}
+                  // Controller input props
+                  supportsControllerInput={currentPipelineSupportsController}
+                  isPointerLocked={isPointerLocked}
+                  onRequestPointerLock={requestPointerLock}
+                  videoContainerRef={videoContainerRef}
+                  // Video scale mode
+                  videoScaleMode={videoScaleMode}
+                />
+              </div>
+              {/* Timeline area - compact, always visible */}
+              <div className="flex-shrink-0 mt-2">
+                <PromptInputWithTimeline
+                  currentPrompt={promptItems[0]?.text || ""}
+                  currentPromptItems={promptItems}
+                  transitionSteps={transitionSteps}
+                  temporalInterpolationMethod={temporalInterpolationMethod}
+                  onPromptSubmit={text => {
+                    // Update the left panel's prompt state to reflect current timeline prompt
+                    const prompts = [{ text, weight: 100 }];
+                    setPromptItems(prompts);
+
+                    // Send to backend - use transition if streaming and transition steps > 0
+                    if (isStreaming && transitionSteps > 0) {
+                      sendParameterUpdate({
+                        transition: {
+                          target_prompts: prompts,
+                          num_steps: transitionSteps,
+                          temporal_interpolation_method:
+                            temporalInterpolationMethod,
+                        },
+                      });
+                    } else {
+                      // Send direct prompts without transition
+                      sendParameterUpdate({
+                        prompts,
+                        prompt_interpolation_method: interpolationMethod,
+                        denoising_step_list: settings.denoisingSteps || [
+                          700, 500,
+                        ],
+                      });
+                    }
+                  }}
+                  onPromptItemsSubmit={(
+                    prompts,
+                    blockTransitionSteps,
+                    blockTemporalInterpolationMethod
+                  ) => {
+                    // Update the left panel's prompt state to reflect current timeline prompt blend
+                    setPromptItems(prompts);
+
+                    // Use transition params from block if provided, otherwise use global settings
+                    const effectiveTransitionSteps =
+                      blockTransitionSteps ?? transitionSteps;
+                    const effectiveTemporalInterpolationMethod =
+                      blockTemporalInterpolationMethod ??
+                      temporalInterpolationMethod;
+
+                    // Update the left panel's transition settings to reflect current block's values
+                    if (blockTransitionSteps !== undefined) {
+                      setTransitionSteps(blockTransitionSteps);
+                    }
+                    if (blockTemporalInterpolationMethod !== undefined) {
+                      setTemporalInterpolationMethod(
+                        blockTemporalInterpolationMethod
+                      );
+                    }
+
+                    // Send to backend - use transition if streaming and transition steps > 0
+                    if (isStreaming && effectiveTransitionSteps > 0) {
+                      sendParameterUpdate({
+                        transition: {
+                          target_prompts: prompts,
+                          num_steps: effectiveTransitionSteps,
+                          temporal_interpolation_method:
+                            effectiveTemporalInterpolationMethod,
+                        },
+                      });
+                    } else {
+                      // Send direct prompts without transition
+                      sendParameterUpdate({
+                        prompts,
+                        prompt_interpolation_method: interpolationMethod,
+                        denoising_step_list: settings.denoisingSteps || [
+                          700, 500,
+                        ],
+                      });
+                    }
+                  }}
+                  disabled={
+                    isPipelineLoading ||
+                    isConnecting ||
+                    isCloudConnecting ||
+                    showDownloadDialog
+                  }
+                  isStreaming={isStreaming}
+                  isVideoPaused={settings.paused}
+                  timelineRef={timelineRef}
+                  onLiveStateChange={setIsLive}
+                  onLivePromptSubmit={handleLivePromptSubmit}
+                  onDisconnect={stopStream}
+                  onStartStream={handleStartStream}
+                  onVideoPlayPauseToggle={handlePlayPauseToggle}
+                  onPromptEdit={handleTimelinePromptEdit}
+                  isCollapsed={isTimelineCollapsed}
+                  onCollapseToggle={setIsTimelineCollapsed}
+                  externalSelectedPromptId={externalSelectedPromptId}
+                  onPlayPauseRef={timelinePlayPauseRef}
+                  onVideoPlayingCallbackRef={onVideoPlayingCallbackRef}
+                  onTimelinePromptsChange={handleTimelinePromptsChange}
+                  onTimelineCurrentTimeChange={handleTimelineCurrentTimeChange}
+                  onTimelinePlayingChange={handleTimelinePlayingChange}
+                  isLoading={isLoading}
+                  videoScaleMode={videoScaleMode}
+                  onVideoScaleModeToggle={() =>
+                    setVideoScaleMode(prev =>
+                      prev === "fit" ? "native" : "fit"
+                    )
+                  }
+                  isDownloading={isDownloading}
+                  onSaveGeneration={handleSaveGeneration}
+                  isRecording={isRecording}
+                  onRecordingToggle={() => setIsRecording(prev => !prev)}
+                  onWorkflowExport={() => setShowWorkflowExport(true)}
+                  onWorkflowImport={() => setShowWorkflowImport(true)}
+                  onExportToDaydream={handleExportToDaydream}
+                  isAuthenticated={isDaydreamAuthenticated}
+                  isExportingToDaydream={isExportingToDaydream}
+                />
+              </div>
+            </div>
+
+            {/* Right Panel - Settings */}
+            <div className="w-1/5 flex flex-col gap-3 min-h-0">
+              <SettingsPanel
+                className="flex-1 min-h-0"
+                pipelines={pipelines}
+                pipelineId={settings.pipelineId}
+                onPipelineIdChange={handlePipelineIdChange}
+                isStreaming={isStreaming}
+                isLoading={isLoading}
+                resolution={
+                  settings.resolution || {
+                    height: getDefaults(settings.pipelineId, settings.inputMode)
+                      .height,
+                    width: getDefaults(settings.pipelineId, settings.inputMode)
+                      .width,
+                  }
+                }
+                onResolutionChange={handleResolutionChange}
+                denoisingSteps={
+                  settings.denoisingSteps ||
+                  getDefaults(settings.pipelineId, settings.inputMode)
+                    .denoisingSteps || [750, 250]
+                }
+                onDenoisingStepsChange={handleDenoisingStepsChange}
+                defaultDenoisingSteps={
+                  getDefaults(settings.pipelineId, settings.inputMode)
+                    .denoisingSteps || [750, 250]
+                }
+                noiseScale={settings.noiseScale ?? 0.7}
+                onNoiseScaleChange={handleNoiseScaleChange}
+                noiseController={settings.noiseController ?? true}
+                onNoiseControllerChange={handleNoiseControllerChange}
+                manageCache={settings.manageCache ?? true}
+                onManageCacheChange={handleManageCacheChange}
+                quantization={
+                  settings.quantization !== undefined
+                    ? settings.quantization
+                    : "fp8_e4m3fn"
+                }
+                onQuantizationChange={handleQuantizationChange}
+                kvCacheAttentionBias={settings.kvCacheAttentionBias ?? 0.3}
+                onKvCacheAttentionBiasChange={handleKvCacheAttentionBiasChange}
+                onResetCache={handleResetCache}
+                loras={settings.loras || []}
+                onLorasChange={handleLorasChange}
+                loraMergeStrategy={
+                  settings.loraMergeStrategy ?? "permanent_merge"
+                }
+                inputMode={settings.inputMode}
+                supportsNoiseControls={supportsNoiseControls(
+                  settings.pipelineId
+                )}
+                vaceEnabled={
+                  settings.vaceEnabled ??
+                  (pipelines?.[settings.pipelineId]?.supportsVACE &&
+                    settings.inputMode !== "video")
+                }
+                onVaceEnabledChange={handleVaceEnabledChange}
+                vaceUseInputVideo={settings.vaceUseInputVideo ?? false}
+                onVaceUseInputVideoChange={handleVaceUseInputVideoChange}
+                vaceContextScale={settings.vaceContextScale ?? 1.0}
+                onVaceContextScaleChange={handleVaceContextScaleChange}
+                preprocessorIds={settings.preprocessorIds ?? []}
+                onPreprocessorIdsChange={handlePreprocessorIdsChange}
+                postprocessorIds={settings.postprocessorIds ?? []}
+                onPostprocessorIdsChange={handlePostprocessorIdsChange}
+                preprocessorSchemaFieldOverrides={
+                  settings.preprocessorSchemaFieldOverrides ?? {}
+                }
+                postprocessorSchemaFieldOverrides={
+                  settings.postprocessorSchemaFieldOverrides ?? {}
+                }
+                onPreprocessorSchemaFieldOverrideChange={
+                  handlePreprocessorSchemaFieldOverrideChange
+                }
+                onPostprocessorSchemaFieldOverrideChange={
+                  handlePostprocessorSchemaFieldOverrideChange
+                }
+                schemaFieldOverrides={settings.schemaFieldOverrides ?? {}}
+                onSchemaFieldOverrideChange={(key, value, isRuntimeParam) => {
+                  updateSettings({
+                    schemaFieldOverrides: {
+                      ...(settings.schemaFieldOverrides ?? {}),
+                      [key]: value,
+                    },
+                  });
+                  if (isRuntimeParam && isStreaming) {
+                    sendParameterUpdate({ [key]: value });
+                  }
+                }}
+                isCloudMode={isCloudMode}
+                nonLinearGraph={nonLinearGraph}
+                onClearGraph={handleClearGraphFromSettings}
+                onOpenLoRAsSettings={() => setOpenSettingsTab("loras")}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Log Panel */}
         <LogPanel
@@ -2718,6 +3336,7 @@ export function StreamPage() {
             setPreloadedWorkflow(null);
           }}
           onLoad={handleWorkflowLoad}
+          onLoadToGraph={graphMode ? handleWorkflowLoadToGraph : undefined}
           initialWorkflow={preloadedWorkflow}
         />
       </div>

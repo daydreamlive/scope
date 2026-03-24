@@ -101,8 +101,16 @@ class TimestampNormalizingTrack(MediaStreamTrack):
             if self._base_pts is None:
                 self._base_pts = frame.pts
 
-            # Create a new frame with normalized timestamp
+            # Create a new frame with normalized timestamp.
+            # Pad to even dimensions — libx264 requires width and height divisible by 2.
             arr = frame.to_ndarray(format="rgb24")
+            h, w = arr.shape[:2]
+            pad_w = w % 2
+            pad_h = h % 2
+            if pad_w or pad_h:
+                import numpy as np
+
+                arr = np.pad(arr, ((0, pad_h), (0, pad_w), (0, 0)), mode="edge")
             new_frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
             new_frame.pts = frame.pts - self._base_pts
             new_frame.time_base = frame.time_base
