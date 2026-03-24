@@ -19,10 +19,23 @@ test.describe("Cloud Streaming", () => {
     // Increase timeout for this test
     test.setTimeout(180000); // 3 minutes
 
+    // Mock the onboarding status API to skip onboarding in e2e tests
+    await page.route("**/api/v1/onboarding/status", async (route) => {
+      if (route.request().method() === "GET") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ completed: true, inference_mode: null }),
+        });
+      } else {
+        await route.fulfill({ status: 200, body: "{}" });
+      }
+    });
+
     // Navigate to the app (running at localhost:8000)
     await page.goto("/");
     await expect(
-      page.locator("h1", { hasText: "Daydream Scope" })
+      page.getByRole("heading", { name: "Daydream Scope", exact: true })
     ).toBeVisible({ timeout: 15000 });
 
     // Take screenshot after initial load — app loads directly into the streaming interface

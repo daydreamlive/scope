@@ -28,8 +28,9 @@ export function GraphToolbar({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   return (
-    <div className={NODE_TOKENS.toolbar}>
+    <div data-tour="add-node" className={NODE_TOKENS.toolbar}>
       <button
+        data-tour="play-button"
         onClick={isStreaming ? onStopStream : onStartStream}
         disabled={isConnecting || isLoading}
         className={`${NODE_TOKENS.toolbarButton} ${isConnecting || isLoading ? "opacity-50 cursor-not-allowed" : ""}`}

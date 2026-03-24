@@ -1,32 +1,20 @@
 import React, { useEffect, useState } from 'react';
+import FogOfWarBackground from './FogOfWarBackground';
 
 interface ServerLoadingProps {
   onComplete: () => void;
   onError: (error: string) => void;
 }
 
-declare global {
-  interface Window {
-    scope: {
-      onServerStatus: (callback: (isRunning: boolean) => void) => void;
-      onServerError: (callback: (error: string) => void) => void;
-      getServerStatus: () => Promise<{ isRunning: boolean }>;
-    };
-  }
-}
-
 const ServerLoading: React.FC<ServerLoadingProps> = ({ onComplete, onError }) => {
-  const [serverRunning, setServerRunning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const scope = window.scope;
 
-    // Query the current server status on mount
     if (scope?.getServerStatus) {
       scope.getServerStatus().then((result: { isRunning: boolean }) => {
         if (result.isRunning) {
-          setServerRunning(true);
           onComplete();
         }
       });
@@ -35,7 +23,6 @@ const ServerLoading: React.FC<ServerLoadingProps> = ({ onComplete, onError }) =>
     if (scope?.onServerStatus) {
       scope.onServerStatus((isRunning: boolean) => {
         if (isRunning) {
-          setServerRunning(true);
           onComplete();
         }
       });
@@ -59,13 +46,18 @@ const ServerLoading: React.FC<ServerLoadingProps> = ({ onComplete, onError }) =>
         flexDirection: 'column',
         background: 'hsl(0, 0%, 6%)',
         color: 'hsl(0, 0%, 90%)',
-        fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+        fontFamily: 'Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
         overflow: 'hidden',
+        position: 'relative',
       }}>
+        <FogOfWarBackground />
+        <div style={{ position: 'absolute', inset: 0, zIndex: 1, backdropFilter: 'blur(48px)', pointerEvents: 'none' }} />
         <div style={{
           textAlign: 'center',
           maxWidth: 600,
           padding: '0 24px',
+          position: 'relative',
+          zIndex: 10,
         }}>
           <h1 style={{
             marginBottom: 48,
@@ -112,13 +104,18 @@ const ServerLoading: React.FC<ServerLoadingProps> = ({ onComplete, onError }) =>
       flexDirection: 'column',
       background: 'hsl(0, 0%, 6%)',
       color: 'hsl(0, 0%, 90%)',
-      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      fontFamily: 'Manrope, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
       overflow: 'hidden',
+      position: 'relative',
     }}>
+      <FogOfWarBackground />
+      <div style={{ position: 'absolute', inset: 0, zIndex: 1, backdropFilter: 'blur(48px)', pointerEvents: 'none' }} />
       <div style={{
         textAlign: 'center',
         maxWidth: 600,
         padding: '0 24px',
+        position: 'relative',
+        zIndex: 10,
       }}>
         <h1 style={{
           marginBottom: 48,
