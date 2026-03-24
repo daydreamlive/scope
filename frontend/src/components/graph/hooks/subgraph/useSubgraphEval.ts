@@ -429,6 +429,8 @@ export function useSubgraphEval(
 
     const sgNodes = currentNodes.filter(n => n.data.nodeType === "subgraph");
     if (sgNodes.length === 0) {
+      evalStateRef.current.clear();
+      lastOutputsRef.current.clear();
       rafHandle.current = null;
       return;
     }
@@ -489,6 +491,17 @@ export function useSubgraphEval(
       lastOutputsRef.current.set(sg.id, key);
 
       updates.push({ nodeId: sg.id, portValues: merged });
+    }
+
+    // Prune stale persistent state for subgraph nodes no longer on canvas
+    if (evalStateRef.current.size > sgNodes.length) {
+      const activeSgIds = new Set(sgNodes.map(n => n.id));
+      for (const key of evalStateRef.current.keys()) {
+        if (!activeSgIds.has(key)) evalStateRef.current.delete(key);
+      }
+      for (const key of lastOutputsRef.current.keys()) {
+        if (!activeSgIds.has(key)) lastOutputsRef.current.delete(key);
+      }
     }
 
     if (updates.length > 0) {

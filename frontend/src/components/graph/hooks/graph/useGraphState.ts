@@ -253,7 +253,7 @@ export function useGraphState(
     if (availablePipelineIds.length === 0) return;
     setNodes(nds => {
       if (nds.length === 0) return nds;
-      return enrichNodes(nds, enrichDeps);
+      return enrichNodes(nds, enrichDepsRef.current);
     });
   }, [
     availablePipelineIds,

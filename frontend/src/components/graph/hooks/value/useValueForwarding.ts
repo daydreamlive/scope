@@ -134,8 +134,24 @@ export function useValueForwarding(
   // Track previous node data to skip backend sends when only positions changed
   const prevNodeDataRef = useRef<Map<string, FlowNodeData>>(new Map());
 
+  // Dedup: tracks last value sent per (backendId:paramName) to prevent
+  // duplicate sends when the RAF loop's setNodes triggers a re-render
+  // that re-fires this effect with identical producer values.
+  const lastSentRef = useRef<Map<string, unknown>>(new Map());
+
   useEffect(() => {
     if (!isStreamingRef.current || !onNodeParamChangeRef.current) return;
+
+    const sendParam = (
+      backendId: string,
+      paramName: string,
+      value: unknown
+    ) => {
+      const dedupKey = `${backendId}\0${paramName}`;
+      if (valuesEqual(lastSentRef.current.get(dedupKey), value)) return;
+      lastSentRef.current.set(dedupKey, value);
+      onNodeParamChangeRef.current!(backendId, paramName, value);
+    };
 
     // Check if any producer node data actually changed (not just positions)
     let anyDataChanged = false;
@@ -278,36 +294,15 @@ export function useValueForwarding(
             typeof node.data.vaceContextScale === "number"
               ? node.data.vaceContextScale
               : 1.0;
-          onNodeParamChangeRef.current(
-            backendId,
-            "vace_context_scale",
-            ctxScale
-          );
+          sendParam(backendId, "vace_context_scale", ctxScale);
 
-          onNodeParamChangeRef.current(
-            backendId,
-            "vace_use_input_video",
-            false
-          );
+          sendParam(backendId, "vace_use_input_video", false);
           const refImg = (node.data.vaceRefImage as string) || "";
-          if (refImg)
-            onNodeParamChangeRef.current(backendId, "vace_ref_images", [
-              refImg,
-            ]);
+          if (refImg) sendParam(backendId, "vace_ref_images", [refImg]);
           const firstFrame = (node.data.vaceFirstFrame as string) || "";
-          if (firstFrame)
-            onNodeParamChangeRef.current(
-              backendId,
-              "first_frame_image",
-              firstFrame
-            );
+          if (firstFrame) sendParam(backendId, "first_frame_image", firstFrame);
           const lastFrame = (node.data.vaceLastFrame as string) || "";
-          if (lastFrame)
-            onNodeParamChangeRef.current(
-              backendId,
-              "last_frame_image",
-              lastFrame
-            );
+          if (lastFrame) sendParam(backendId, "last_frame_image", lastFrame);
           continue;
         }
 
@@ -318,15 +313,11 @@ export function useValueForwarding(
         if (!entry || entry.value === undefined) continue;
 
         if (resolvedParamName === "__prompt") {
-          onNodeParamChangeRef.current(resolvedBackendId, "prompts", [
+          sendParam(resolvedBackendId, "prompts", [
             { text: String(entry.value), weight: 100 },
           ]);
         } else {
-          onNodeParamChangeRef.current(
-            resolvedBackendId,
-            resolvedParamName,
-            entry.value
-          );
+          sendParam(resolvedBackendId, resolvedParamName, entry.value);
         }
       }
     }

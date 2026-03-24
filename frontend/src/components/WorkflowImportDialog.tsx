@@ -173,6 +173,7 @@ export function WorkflowImportDialog({
   }, [workflow, refreshPipelines, refreshLoRAs, refreshPlugins]);
 
   const loras = useLoRADownloads(workflow, reResolveWorkflow);
+  const { reset: resetLoras, initialize: initializeLoras } = loras;
 
   // -- Confirm dialog state (shared for load & plugin-install confirms) -----
   const [confirmState, setConfirmState] = useState<{
@@ -214,17 +215,18 @@ export function WorkflowImportDialog({
     reResolveWorkflow,
     confirmPluginInstall
   );
+  const { reset: resetPlugins, initialize: initializePlugins } = plugins;
 
   // Reset all state when dialog closes
   const handleClose = useCallback(() => {
     setStep("select");
     setWorkflow(null);
     setPlan(null);
-    loras.reset();
-    plugins.reset();
+    resetLoras();
+    resetPlugins();
     setValidating(false);
     onClose();
-  }, [onClose, loras.reset, plugins.reset]);
+  }, [onClose, resetLoras, resetPlugins]);
 
   // -----------------------------------------------------------------------
   // Auto-resolve when opened with a preloaded workflow (e.g. from deeplink)
@@ -243,12 +245,12 @@ export function WorkflowImportDialog({
         if (cancelled) return;
         setPlan(resolution);
 
-        loras.initialize(
+        initializeLoras(
           resolution.items
             .filter(i => i.kind === "lora" && i.status === "missing")
             .map(i => i.name)
         );
-        plugins.initialize(
+        initializePlugins(
           resolution.items
             .filter(
               i =>
@@ -321,12 +323,12 @@ export function WorkflowImportDialog({
         setPlan(resolution);
 
         // Initialize dependency states from resolution items
-        loras.initialize(
+        initializeLoras(
           resolution.items
             .filter(i => i.kind === "lora" && i.status === "missing")
             .map(i => i.name)
         );
-        plugins.initialize(
+        initializePlugins(
           resolution.items
             .filter(
               i =>
@@ -347,7 +349,7 @@ export function WorkflowImportDialog({
         setValidating(false);
       }
     },
-    [loras.initialize, plugins.initialize]
+    [initializeLoras, initializePlugins]
   );
 
   const handleDrop = useCallback(

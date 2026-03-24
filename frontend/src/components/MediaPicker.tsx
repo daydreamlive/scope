@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { X, Upload, Film } from "lucide-react";
 import { Button } from "./ui/button";
 import {
@@ -8,21 +8,7 @@ import {
   type AssetFileInfo,
 } from "../lib/api";
 import { useCloudStatus } from "../hooks/useCloudStatus";
-
-const VIDEO_EXTENSIONS = new Set([
-  ".mp4",
-  ".webm",
-  ".mov",
-  ".avi",
-  ".mkv",
-  ".m4v",
-]);
-
-/** Returns true when the file path / name looks like a video. */
-export function isVideoAsset(path: string): boolean {
-  const ext = path.slice(path.lastIndexOf(".")).toLowerCase();
-  return VIDEO_EXTENSIONS.has(ext);
-}
+import { isVideoAsset } from "../lib/mediaUtils";
 
 interface MediaPickerProps {
   isOpen: boolean;
@@ -46,7 +32,7 @@ export function MediaPicker({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
 
-  const loadAssets = async () => {
+  const loadAssets = useCallback(async () => {
     setIsLoading(true);
     try {
       if (accept === "all") {
@@ -69,13 +55,13 @@ export function MediaPicker({
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [accept]);
 
   useEffect(() => {
     if (isOpen) {
       loadAssets();
     }
-  }, [isOpen]);
+  }, [isOpen, loadAssets]);
 
   // Refresh asset list when cloud connection state changes while picker is open
   const { isConnected: isCloudConnected } = useCloudStatus();

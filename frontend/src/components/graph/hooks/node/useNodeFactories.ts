@@ -527,6 +527,7 @@ export function useNodeFactories({
       setPendingNodePosition(null);
     },
     [
+      nodes,
       pendingNodePosition,
       addNode,
       availablePipelineIds,

@@ -136,6 +136,7 @@ export function GraphWorkflowImportDialog({
   }, [onReResolve]);
 
   const loras = useLoRADownloads(workflow, reResolveWorkflow);
+  const { reset: resetLoras } = loras;
 
   // -- Confirm dialog state
   const [confirmState, setConfirmState] = useState<{
@@ -176,12 +177,13 @@ export function GraphWorkflowImportDialog({
     reResolveWorkflow,
     confirmPluginInstall
   );
+  const { reset: resetPlugins } = plugins;
 
   const handleClose = useCallback(() => {
-    loras.reset();
-    plugins.reset();
+    resetLoras();
+    resetPlugins();
     onCancel();
-  }, [onCancel, loras.reset, plugins.reset]);
+  }, [onCancel, resetLoras, resetPlugins]);
 
   const handleLoad = useCallback(() => {
     toast.success("Workflow loaded into graph", {
@@ -189,10 +191,10 @@ export function GraphWorkflowImportDialog({
         ? `"${workflow.metadata.name}" loaded`
         : undefined,
     });
-    loras.reset();
-    plugins.reset();
+    resetLoras();
+    resetPlugins();
     onConfirm();
-  }, [workflow, onConfirm, loras.reset, plugins.reset]);
+  }, [workflow, onConfirm, resetLoras, resetPlugins]);
 
   // -- Derived state
   const missingLoRAs = plan?.items.filter(

@@ -8,7 +8,8 @@ import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { getAssetUrl } from "../../../lib/api";
-import { MediaPicker, isVideoAsset } from "../../MediaPicker";
+import { MediaPicker } from "../../MediaPicker";
+import { isVideoAsset } from "../../../lib/mediaUtils";
 import { NodeCard, NodeHeader, NODE_TOKENS, collapsedHandleStyle } from "../ui";
 
 type ImageNodeType = Node<FlowNodeData, "image">;

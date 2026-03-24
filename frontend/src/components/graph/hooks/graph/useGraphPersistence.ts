@@ -321,6 +321,10 @@ export function useGraphPersistence({
   // localStorage does not mark the graph as user-edited.
   const suppressChanges = useRef(false);
 
+  // Fingerprint of the last auto-saved graph JSON.  Compared before writing
+  // to localStorage so we skip the expensive save when nothing changed.
+  const lastSavedJsonRef = useRef<string>("");
+
   const loadGraph = useCallback(() => {
     if (Object.keys(portsMap).length === 0) return;
     resetNavigationRef.current?.();
@@ -373,7 +377,15 @@ export function useGraphPersistence({
       setStatus("No graph configured");
     }
     initialLoadDone.current = true;
-  }, [portsMap]);
+  }, [
+    portsMap,
+    enrichDepsRef,
+    handleEdgeDelete,
+    resetNavigationRef,
+    setEdges,
+    setNodeParams,
+    setNodes,
+  ]);
 
   useEffect(() => {
     loadGraph();
@@ -398,6 +410,8 @@ export function useGraphPersistence({
           nodeParamsRef.current
         );
         const graphJson = JSON.stringify(graphConfig);
+        if (graphJson === lastSavedJsonRef.current) return;
+        lastSavedJsonRef.current = graphJson;
         saveGraphToLocalStorage(graphJson);
         setStatus(
           `Saved: ${graphConfig.nodes.length} nodes, ${graphConfig.edges.length} edges`
@@ -423,6 +437,7 @@ export function useGraphPersistence({
         nodeParamsRef.current
       );
       const graphJson = JSON.stringify(graphConfig);
+      lastSavedJsonRef.current = graphJson;
       saveGraphToLocalStorage(graphJson);
       setStatus(
         `Saved: ${graphConfig.nodes.length} nodes, ${graphConfig.edges.length} edges`
