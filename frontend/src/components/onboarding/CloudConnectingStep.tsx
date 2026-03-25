@@ -155,7 +155,11 @@ export function CloudConnectingStep({
   if (!surveyDone && !telemetrySkippedSurvey) {
     return (
       <div className="flex flex-col items-center gap-6 w-full max-w-md mx-auto">
-        <CloudSurveyScreens onComplete={handleSurveyComplete} onBack={onBack} />
+        <CloudSurveyScreens
+          onComplete={handleSurveyComplete}
+          onBack={onBack}
+          initialScreen="referral"
+        />
         {/* Small connection status at bottom */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {isConnected ? (

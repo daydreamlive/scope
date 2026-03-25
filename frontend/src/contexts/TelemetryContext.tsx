@@ -6,6 +6,8 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
+import { track } from "../lib/telemetry";
 import {
   initTelemetry,
   identifyUser,
@@ -22,6 +24,7 @@ import {
   getDaydreamUserDisplayName,
   getDaydreamUserEmail,
 } from "../lib/auth";
+import { fetchOnboardingStatus } from "../lib/onboardingStorage";
 
 // ---------------------------------------------------------------------------
 // Context shape
@@ -55,7 +58,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
   const [isEnvDisabled] = useState(() => isEnvTelemetryDisabled());
   const [isDisclosed, setIsDisclosed] = useState(() => checkDisclosed());
 
-  // Initialize Mixpanel SDK on mount, and if user is already logged in,
+  // Initialize analytics SDK on mount, and if user is already logged in,
   // identify them so events are associated with their daydream account.
   useEffect(() => {
     initTelemetry();
@@ -63,6 +66,55 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     if (userId) {
       identifyUser(userId, getDaydreamUserDisplayName(), getDaydreamUserEmail());
     }
+
+    // For existing users who completed onboarding before analytics was added,
+    // show an opt-in toast (the onboarding flow handles its own disclosure).
+    if (!checkDisclosed()) {
+      fetchOnboardingStatus().then((status) => {
+        if (status.completed) {
+          track("telemetry_disclosure_shown", { path: "existing_user_banner" });
+          const shownAt = Date.now();
+          toast(
+            "Help us improve Scope by sending anonymous usage data. We track UI interactions and feature usage patterns, and we do not collect prompts, parameters, file paths, videos, images, or session replays.",
+            {
+              duration: Infinity,
+              dismissible: false,
+              action: {
+                label: "Yes",
+                onClick: () => {
+                  persistDisclosed();
+                  setIsDisclosed(true);
+                  setTelemetryEnabled(true);
+                  setIsEnabled(true);
+                  flushTelemetryQueue();
+                  track("telemetry_disclosure_responded", {
+                    action: "accepted",
+                    path: "existing_user_banner",
+                    time_to_respond_ms: Date.now() - shownAt,
+                    auto_advanced: false,
+                  });
+                },
+              },
+              cancel: {
+                label: "No thanks",
+                onClick: () => {
+                  persistDisclosed();
+                  setIsDisclosed(true);
+                  dropTelemetryQueue();
+                  track("telemetry_disclosure_responded", {
+                    action: "disabled",
+                    path: "existing_user_banner",
+                    time_to_respond_ms: Date.now() - shownAt,
+                    auto_advanced: false,
+                  });
+                },
+              },
+            },
+          );
+        }
+      });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setEnabled = useCallback((enabled: boolean) => {
