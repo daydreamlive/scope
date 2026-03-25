@@ -1090,6 +1090,14 @@ class FrameProcessor:
         graph_data = self.parameters.get("graph")
         if graph_data is not None:
             api_graph = GraphConfig.model_validate(graph_data)
+
+            # A graph without source nodes cannot receive video input.
+            # Force text mode so pipeline processors don't wait forever
+            # for frames that will never arrive (e.g. Workflow Builder
+            # with no Source node connected to cloud).
+            if not api_graph.get_source_node_ids():
+                self.parameters["input_mode"] = "text"
+                self._video_mode = False
         else:
             # Determine which pipelines should receive input as vace_input_frames
             vace_input_video_ids: set[str] = set()
