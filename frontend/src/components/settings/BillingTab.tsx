@@ -22,14 +22,12 @@ function RedeemCodeSection({ onRedeemed }: { onRedeemed: () => void }) {
       }
       const result = await redeemCreditCode(apiKey, trimmed);
       toast.success(
-        `${result.credits} credits added${result.label ? ` — ${result.label}` : ""}`,
+        `${result.credits} credits added${result.label ? ` — ${result.label}` : ""}`
       );
       setCode("");
       onRedeemed();
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to redeem code",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to redeem code");
     } finally {
       setIsRedeeming(false);
     }

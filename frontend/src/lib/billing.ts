@@ -119,9 +119,34 @@ export interface RedeemCodeResponse {
   newBalance: number;
 }
 
+// ─── Inference token ──────────────────────────────────────────────────────
+
+export interface InferenceTokenResponse {
+  authorized: boolean;
+  token?: string;
+  expiresAt?: string;
+  reason?: string;
+}
+
+export async function requestInferenceToken(
+  apiKey: string,
+  deviceId?: string
+): Promise<InferenceTokenResponse> {
+  const res = await fetch(`${DAYDREAM_API_BASE}/credits/inference-token`, {
+    method: "POST",
+    headers: headers(apiKey),
+    body: JSON.stringify({ deviceId }),
+  });
+  // 403 is expected when unauthorized — parse the body, don't throw
+  if (!res.ok && res.status !== 403) {
+    throw new Error(`Failed to request inference token: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function redeemCreditCode(
   apiKey: string,
-  code: string,
+  code: string
 ): Promise<RedeemCodeResponse> {
   const res = await fetch(`${DAYDREAM_API_BASE}/credits/codes/redeem`, {
     method: "POST",

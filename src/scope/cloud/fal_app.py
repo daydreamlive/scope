@@ -421,6 +421,7 @@ class ScopeApp(fal.App, keep_alive=300):
         "requests",
         "httpx",  # For async HTTP requests
         "aiokafka",  # For Kafka event publishing
+        "pyjwt",  # For inference token validation
     ]
 
     auth_mode = "public"
@@ -460,6 +461,8 @@ class ScopeApp(fal.App, keep_alive=300):
             "LD_LIBRARY_PATH",
             # Daydream API
             "DAYDREAM_API_BASE",
+            # Inference JWT validation
+            "INFERENCE_JWT_SECRET",
             # Kafka
             "KAFKA_BOOTSTRAP_SERVERS",
             "KAFKA_TOPIC",
@@ -571,10 +574,48 @@ class ScopeApp(fal.App, keep_alive=300):
         This keeps a persistent connection to prevent fal from spawning new runners.
         """
         import json
+        import os
         import uuid
 
         import httpx
         from starlette.websockets import WebSocketDisconnect, WebSocketState
+
+        # ─── JWT validation ──────────────────────────────────────────────
+        # Extract and validate inference token before accepting the connection.
+        # Must accept() before close() in Starlette — so we accept, send error, close.
+        jwt_secret = os.getenv("INFERENCE_JWT_SECRET")
+        user_id = None
+
+        if jwt_secret:
+            import jwt as pyjwt
+
+            token = ws.query_params.get("fal_jwt_token")
+            reject_reason = None
+
+            if not token:
+                reject_reason = "Missing inference token"
+            else:
+                try:
+                    payload = pyjwt.decode(token, jwt_secret, algorithms=["HS256"])
+                    user_id = payload.get("sub")
+                    if not user_id:
+                        reject_reason = "Invalid token: missing sub claim"
+                    else:
+                        print(f"[Auth] JWT validated for user {user_id}")
+                except pyjwt.ExpiredSignatureError:
+                    reject_reason = "Token expired"
+                except pyjwt.InvalidTokenError as e:
+                    reject_reason = f"Invalid token: {e}"
+
+            if reject_reason:
+                print(f"[Auth] Rejecting WebSocket: {reject_reason}")
+                await ws.accept()
+                await ws.close(4001, reject_reason)
+                return
+        else:
+            print(
+                "[Auth] WARNING: INFERENCE_JWT_SECRET not set, skipping token validation"
+            )
 
         # Initialize Kafka publisher if not already done
         global kafka_publisher
@@ -586,8 +627,6 @@ class ScopeApp(fal.App, keep_alive=300):
 
         # Generate a unique connection ID for this WebSocket session
         connection_id = str(uuid.uuid4())[:8]  # Short ID for readability in logs
-        # User ID for log correlation (set via set_user_id message)
-        user_id = None
 
         def log_prefix() -> str:
             """Get log prefix - uses user_id if set, otherwise connection_id."""
