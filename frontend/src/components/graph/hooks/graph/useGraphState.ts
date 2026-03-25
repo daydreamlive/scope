@@ -73,8 +73,8 @@ export interface GraphEditorCallbacks {
   onOutputSinkBulkChange?: (
     sinks: Record<string, { enabled: boolean; name: string }>
   ) => void;
-  onStartRecording?: () => void;
-  onStopRecording?: () => void;
+  onStartRecording?: (nodeId?: string) => void;
+  onStopRecording?: (nodeId?: string) => void;
 }
 
 export interface GraphEditorStreams {

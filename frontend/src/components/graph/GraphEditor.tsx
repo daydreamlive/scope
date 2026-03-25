@@ -177,8 +177,8 @@ interface GraphEditorProps {
   spoutOutputAvailable?: boolean;
   ndiOutputAvailable?: boolean;
   syphonOutputAvailable?: boolean;
-  onStartRecording?: () => void;
-  onStopRecording?: () => void;
+  onStartRecording?: (nodeId?: string) => void;
+  onStopRecording?: (nodeId?: string) => void;
 }
 
 export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(

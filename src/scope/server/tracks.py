@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import fractions
 import logging
+import queue
 import threading
 import time
 from typing import TYPE_CHECKING
 
+import torch
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import VideoFrame
@@ -17,6 +19,57 @@ if TYPE_CHECKING:
     from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
+
+
+class QueueVideoTrack(MediaStreamTrack):
+    """Track that reads video frames from a queue (torch.Tensor → VideoFrame).
+
+    Bridges a graph output queue to the aiortc MediaStreamTrack interface so it
+    can be consumed by RecordingManager / MediaRecorder.
+    """
+
+    kind = "video"
+
+    def __init__(self, frame_queue: queue.Queue, fps: float = 30.0):
+        super().__init__()
+        self._queue = frame_queue
+        self.fps = fps
+        self._pts: int = 0
+        self._frame_ptime = 1.0 / fps
+        self._last_send_time: float | None = None
+
+    async def recv(self) -> VideoFrame:
+        if self.readyState != "live":
+            raise MediaStreamError
+
+        while True:
+            try:
+                frame_tensor: torch.Tensor = self._queue.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.01)
+                if self.readyState != "live":
+                    raise MediaStreamError from None
+                continue
+
+            frame_squeezed = frame_tensor.squeeze(0)
+            if frame_squeezed.is_cuda:
+                frame_squeezed = frame_squeezed.cpu()
+            frame_np = frame_squeezed.numpy()
+
+            video_frame = VideoFrame.from_ndarray(frame_np, format="rgb24")
+
+            # Pace timestamps
+            if self._last_send_time is not None:
+                elapsed = time.time() - self._last_send_time
+                wait = self._frame_ptime - elapsed
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                self._pts += int(self._frame_ptime * VIDEO_CLOCK_RATE)
+            self._last_send_time = time.time()
+
+            video_frame.pts = self._pts
+            video_frame.time_base = VIDEO_TIME_BASE
+            return video_frame
 
 
 class SinkOutputTrack(MediaStreamTrack):

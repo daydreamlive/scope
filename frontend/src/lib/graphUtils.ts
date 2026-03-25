@@ -204,9 +204,9 @@ export interface FlowNodeData {
   isStreaming?: boolean;
 
   /* ── Record node fields ── */
-  /** For record nodes: callback to start recording */
+  /** For record nodes: callback to start recording (node_id is bound by enrichment) */
   onStartRecording?: () => void;
-  /** For record nodes: callback to stop recording */
+  /** For record nodes: callback to stop recording (node_id is bound by enrichment) */
   onStopRecording?: () => void;
   /** For record nodes: incoming trigger value from connected nodes */
   triggerValue?: boolean;
@@ -763,7 +763,6 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "subgraph",
   "subgraph_input",
   "subgraph_output",
-  "record",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
@@ -1007,7 +1006,9 @@ export function flowToGraphConfig(
           ? "source"
           : n.data.nodeType === "sink"
             ? "sink"
-            : "pipeline",
+            : n.data.nodeType === "record"
+              ? "record"
+              : "pipeline",
       pipeline_id:
         n.data.nodeType === "pipeline"
           ? (n.data.pipelineId ?? null)

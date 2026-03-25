@@ -46,8 +46,8 @@ export interface EnrichNodesDeps {
   syphonOutputAvailable: boolean;
   handleEdgeDelete: (edgeId: string) => void;
   isStreaming: boolean;
-  onStartRecordingRef: React.RefObject<(() => void) | undefined>;
-  onStopRecordingRef: React.RefObject<(() => void) | undefined>;
+  onStartRecordingRef: React.RefObject<((nodeId?: string) => void) | undefined>;
+  onStopRecordingRef: React.RefObject<((nodeId?: string) => void) | undefined>;
 }
 
 const FIXED_SIZE_NODE_TYPES = new Set(["source", "sink", "image"]);
@@ -164,13 +164,14 @@ export function enrichNodes(
       };
     }
     if (n.data.nodeType === "record") {
+      const nodeId = n.id;
       return {
         ...n,
         data: {
           ...n.data,
           isStreaming: deps.isStreaming,
-          onStartRecording: deps.onStartRecordingRef.current,
-          onStopRecording: deps.onStopRecordingRef.current,
+          onStartRecording: () => deps.onStartRecordingRef.current?.(nodeId),
+          onStopRecording: () => deps.onStopRecordingRef.current?.(nodeId),
         },
       };
     }

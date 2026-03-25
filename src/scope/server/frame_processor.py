@@ -136,6 +136,9 @@ class FrameProcessor:
         self._input_sources_by_node: dict[str, dict] = {}
         # Per-sink-node output sinks: node_id -> {sink, thread, type, name}
         self._output_sinks_by_node: dict[str, dict] = {}
+        # Per-record-node queues and recording managers
+        self._record_queues_by_node: dict[str, queue.Queue] = {}
+        self._recording_managers_by_node: dict[str, dict] = {}
 
         # Frame counting for debug logging
         self._frames_in = 0
@@ -351,6 +354,15 @@ class FrameProcessor:
                 logger.error(f"Error closing output sink for node {node_id}: {e}")
         self._output_sinks_by_node.clear()
 
+        # Clean up per-node recording managers
+        for node_id, entry in list(self._recording_managers_by_node.items()):
+            try:
+                entry["track"].stop()
+            except Exception as e:
+                logger.error(f"Error stopping record track for node {node_id}: {e}")
+        self._recording_managers_by_node.clear()
+        self._record_queues_by_node.clear()
+
         # Clean up cloud callbacks in cloud mode
         if self._cloud_mode and self.cloud_manager:
             self.cloud_manager.remove_frame_callback(self._on_frame_from_cloud)
@@ -563,6 +575,64 @@ class FrameProcessor:
     def get_source_node_ids(self) -> list[str]:
         """Return the list of source node IDs available for writing."""
         return list(self._source_queues_by_node.keys())
+
+    def get_record_node_ids(self) -> list[str]:
+        """Return the list of record node IDs in the graph."""
+        return list(self._record_queues_by_node.keys())
+
+    async def start_node_recording(self, node_id: str) -> bool:
+        """Start recording for a specific record node."""
+        rec_q = self._record_queues_by_node.get(node_id)
+        if rec_q is None:
+            logger.error(f"No record queue for node {node_id}")
+            return False
+
+        if node_id in self._recording_managers_by_node:
+            entry = self._recording_managers_by_node[node_id]
+            if entry["manager"].is_recording_started:
+                logger.info(f"Record node {node_id} already recording")
+                return True
+
+        from aiortc.contrib.media import MediaRelay
+
+        from .recording import RecordingManager
+        from .tracks import QueueVideoTrack
+
+        track = QueueVideoTrack(rec_q, fps=self.get_fps())
+        relay = MediaRelay()
+        manager = RecordingManager(video_track=track)
+        manager.set_relay(relay)
+
+        self._recording_managers_by_node[node_id] = {
+            "manager": manager,
+            "track": track,
+            "relay": relay,
+        }
+
+        await manager.start_recording()
+        logger.info(f"Started recording for record node {node_id}")
+        return True
+
+    async def stop_node_recording(self, node_id: str) -> bool:
+        """Stop recording for a specific record node."""
+        entry = self._recording_managers_by_node.get(node_id)
+        if entry is None:
+            return False
+        await entry["manager"].stop_recording()
+        logger.info(f"Stopped recording for record node {node_id}")
+        return True
+
+    async def download_node_recording(self, node_id: str) -> str | None:
+        """Finalize and return the recording file path for a record node."""
+        entry = self._recording_managers_by_node.get(node_id)
+        if entry is None:
+            return None
+        return await entry["manager"].finalize_and_get_recording()
+
+    def get_node_recording_manager(self, node_id: str):
+        """Return the RecordingManager for a record node, or None."""
+        entry = self._recording_managers_by_node.get(node_id)
+        return entry["manager"] if entry else None
 
     def get(self) -> torch.Tensor | None:
         if not self.running:
@@ -1285,10 +1355,11 @@ class FrameProcessor:
         self.pipeline_processors = graph_run.processors
         self.pipeline_ids = graph_run.pipeline_ids
 
-        # Store per-node queue mappings for multi-source/sink
+        # Store per-node queue mappings for multi-source/sink/record
         self._source_queues_by_node = graph_run.source_queues_by_node
         self._sink_queues_by_node = graph_run.sink_queues_by_node
         self._sink_processors_by_node = graph_run.sink_processors_by_node
+        self._record_queues_by_node = graph_run.record_queues_by_node
 
         # Index processors by node_id for per-node parameter routing
         for proc in self.pipeline_processors:
@@ -1308,7 +1379,8 @@ class FrameProcessor:
             f"Created graph with {len(self.pipeline_processors)} processors, "
             f"sink={graph_run.sink_node_id}, "
             f"sources={list(self._source_queues_by_node.keys())}, "
-            f"sinks={list(self._sink_queues_by_node.keys())}"
+            f"sinks={list(self._sink_queues_by_node.keys())}, "
+            f"records={list(self._record_queues_by_node.keys())}"
         )
 
     def _setup_multi_input_sources(self, graph):

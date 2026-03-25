@@ -48,6 +48,8 @@ class GraphRun:
     sink_node_id: str | None
     # Node ids of output/sink nodes (e.g. "output") for preview mapping
     output_node_ids: list[str]
+    # Per-record-node output queues: record_node_id -> output queue
+    record_queues_by_node: dict[str, queue.Queue]
 
 
 def build_graph(
@@ -197,8 +199,7 @@ def build_graph(
                     else:
                         feeder_proc.output_queues[port] = [sink_q]
                     logger.info(
-                        "Sink %s: dedicated queue on %s port '%s' "
-                        "(total queues: %d)",
+                        "Sink %s: dedicated queue on %s port '%s' (total queues: %d)",
                         sink_id,
                         e.from_node,
                         port,
@@ -241,6 +242,30 @@ def build_graph(
                     queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
                 ]
 
+    # 5) Wire record nodes: same as sinks, create dedicated output queues
+    # on the feeding pipeline processor.
+    record_queues_by_node: dict[str, queue.Queue] = {}
+    for rec_id in graph.get_record_node_ids():
+        for e in graph.edges_to(rec_id):
+            if e.kind == "stream":
+                feeder_proc = node_processors.get(e.from_node)
+                if feeder_proc is not None:
+                    rec_q = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
+                    record_queues_by_node[rec_id] = rec_q
+                    port = e.from_port
+                    if port in feeder_proc.output_queues:
+                        feeder_proc.output_queues[port].append(rec_q)
+                    else:
+                        feeder_proc.output_queues[port] = [rec_q]
+                    logger.info(
+                        "Record %s: dedicated queue on %s port '%s' (total queues: %d)",
+                        rec_id,
+                        e.from_node,
+                        port,
+                        len(feeder_proc.output_queues[port]),
+                    )
+                break
+
     # Collect output/sink node IDs for preview mapping
     output_node_ids = [n.id for n in graph.nodes if n.type == "sink"]
 
@@ -254,6 +279,7 @@ def build_graph(
         pipeline_ids=pipeline_ids,
         sink_node_id=sink_node_id,
         output_node_ids=output_node_ids,
+        record_queues_by_node=record_queues_by_node,
     )
 
 
