@@ -2985,8 +2985,6 @@ async def get_onboarding_status():
     """Read onboarding completion state from ~/.daydream-scope/onboarding.json."""
     if _ONBOARDING_FILE.exists():
         try:
-            import json
-
             data = json.loads(_ONBOARDING_FILE.read_text())
             return OnboardingStatusResponse(
                 completed=data.get("completed", False),
@@ -3003,8 +3001,6 @@ async def get_onboarding_status():
 @app.put("/api/v1/onboarding/status", response_model=OnboardingStatusResponse)
 async def update_onboarding_status(body: OnboardingStatusUpdate):
     """Write onboarding completion state to ~/.daydream-scope/onboarding.json."""
-    import json
-
     _ONBOARDING_FILE.parent.mkdir(parents=True, exist_ok=True)
     # Merge with existing data so we don't lose fields when partially updating
     existing: dict = {}

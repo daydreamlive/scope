@@ -2,27 +2,12 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { Loader2, CheckCircle2 } from "lucide-react";
 import { useCloudStatus } from "../../hooks/useCloudStatus";
 import { getDaydreamUserId } from "../../lib/auth";
-import { persistSurveyAnswers } from "../../lib/onboardingStorage";
-import { useOnboarding } from "../../contexts/OnboardingContext";
 import {
-  CloudSurveyScreens,
-  type SurveyAnswers,
-} from "./CloudSurveyScreens";
-
-/** Fire-and-forget: tell the backend to connect to the cloud relay. */
-async function activateCloudRelay() {
-  const userId = getDaydreamUserId();
-  if (!userId) return;
-  try {
-    await fetch("/api/v1/cloud/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
-    });
-  } catch (err) {
-    console.error("[Onboarding] Failed to auto-connect to cloud:", err);
-  }
-}
+  persistSurveyAnswers,
+  activateCloudRelay,
+} from "../../lib/onboardingStorage";
+import { useOnboarding } from "../../contexts/OnboardingContext";
+import { CloudSurveyScreens, type SurveyAnswers } from "./CloudSurveyScreens";
 
 interface CloudConnectingStepProps {
   onConnected: () => void;
@@ -35,14 +20,14 @@ export function CloudConnectingStep({ onConnected }: CloudConnectingStepProps) {
 
   const [surveyDone, setSurveyDone] = useState(false);
   const [surveyAnswers, setSurveyAnswers] = useState<SurveyAnswers | null>(
-    null,
+    null
   );
 
   // Ensure cloud relay is connecting on mount
   useEffect(() => {
     if (didConnect.current) return;
     didConnect.current = true;
-    activateCloudRelay().then(() => refresh());
+    activateCloudRelay(getDaydreamUserId()).then(() => refresh());
   }, [refresh]);
 
   // Keep polling while this step is visible
@@ -88,9 +73,7 @@ export function CloudConnectingStep({ onConnected }: CloudConnectingStepProps) {
             <>
               <Loader2 className="h-3 w-3 animate-spin" />
               <span>
-                {isConnecting && connectStage
-                  ? connectStage
-                  : "Connecting..."}
+                {isConnecting && connectStage ? connectStage : "Connecting..."}
               </span>
             </>
           )}

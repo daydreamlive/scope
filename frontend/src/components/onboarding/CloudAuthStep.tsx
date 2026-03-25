@@ -7,26 +7,12 @@ import {
   getDaydreamUserId,
   redirectToSignIn,
 } from "../../lib/auth";
+import { activateCloudRelay } from "../../lib/onboardingStorage";
 
 type AuthState = "idle" | "waiting" | "success" | "error";
 
 const AUTH_TIMEOUT_MS = 60_000;
 const AUTO_ADVANCE_DELAY_MS = 2_000;
-
-/** Fire-and-forget: tell the backend to connect to the cloud relay. */
-async function activateCloudRelay() {
-  const userId = getDaydreamUserId();
-  if (!userId) return;
-  try {
-    await fetch("/api/v1/cloud/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
-    });
-  } catch (err) {
-    console.error("[Onboarding] Failed to auto-connect to cloud:", err);
-  }
-}
 
 interface CloudAuthStepProps {
   onComplete: () => void;
@@ -36,8 +22,8 @@ export function CloudAuthStep({ onComplete }: CloudAuthStepProps) {
   const [authState, setAuthState] = useState<AuthState>(() =>
     isAuthenticated() ? "success" : "idle"
   );
-  const [displayName, setDisplayName] = useState<string | null>(
-    getDaydreamUserDisplayName
+  const [displayName, setDisplayName] = useState<string | null>(() =>
+    getDaydreamUserDisplayName()
   );
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const advanceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -46,7 +32,7 @@ export function CloudAuthStep({ onComplete }: CloudAuthStepProps) {
   useEffect(() => {
     if (authState === "success") {
       setDisplayName(getDaydreamUserDisplayName());
-      activateCloudRelay();
+      activateCloudRelay(getDaydreamUserId());
       advanceRef.current = setTimeout(onComplete, AUTO_ADVANCE_DELAY_MS);
     }
     return () => {
@@ -60,7 +46,7 @@ export function CloudAuthStep({ onComplete }: CloudAuthStepProps) {
     const handleSuccess = () => {
       setAuthState("success");
       setDisplayName(getDaydreamUserDisplayName());
-      activateCloudRelay();
+      activateCloudRelay(getDaydreamUserId());
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       advanceRef.current = setTimeout(onComplete, AUTO_ADVANCE_DELAY_MS);
     };
