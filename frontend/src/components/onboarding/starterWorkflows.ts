@@ -24,9 +24,10 @@ export interface StarterWorkflow {
 export function getWorkflowsForStyle(
   style: "teaching" | "simple" | null,
 ): StarterWorkflow[] {
-  if (!style) return STARTER_WORKFLOWS;
+  // Default to teaching workflows when no style is set (e.g. local mode)
+  const effectiveStyle = style ?? "teaching";
   return STARTER_WORKFLOWS.filter(
-    (wf) => wf.onboardingStyle === style || wf.onboardingStyle === "both",
+    (wf) => wf.onboardingStyle === effectiveStyle || wf.onboardingStyle === "both",
   );
 }
 
