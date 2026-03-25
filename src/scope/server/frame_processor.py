@@ -134,6 +134,8 @@ class FrameProcessor:
         self._sink_processors_by_node: dict[str, PipelineProcessor] = {}
         # Per-source-node input sources: node_id -> {source, thread, type}
         self._input_sources_by_node: dict[str, dict] = {}
+        # Per-sink-node output sinks: node_id -> {sink, thread, type, name}
+        self._output_sinks_by_node: dict[str, dict] = {}
 
         # Frame counting for debug logging
         self._frames_in = 0
@@ -161,10 +163,17 @@ class FrameProcessor:
             sinks_config = self.parameters.pop("output_sinks")
             self._update_output_sinks_from_config(sinks_config)
 
-        # Process generic input source settings
+        # Process generic input source settings.
+        # Skip if a graph config with per-node sources is present — those are
+        # handled by _setup_multi_input_sources and the legacy global mechanism
+        # would broadcast frames to ALL source queues.
         if "input_source" in self.parameters:
-            input_source_config = self.parameters.pop("input_source")
-            self._update_input_source(input_source_config)
+            if self._graph_has_per_node_sources():
+                self.parameters.pop("input_source")
+                logger.info("Skipping legacy input_source — graph has per-node sources")
+            else:
+                input_source_config = self.parameters.pop("input_source")
+                self._update_input_source(input_source_config)
 
         # Reset frame counters on start
         self._frames_in = 0
@@ -325,6 +334,22 @@ class FrameProcessor:
             if thread and thread.is_alive():
                 thread.join(timeout=2.0)
         self._input_sources_by_node.clear()
+
+        # Clean up per-node output sinks (multi-sink graph mode)
+        for node_id, entry in list(self._output_sinks_by_node.items()):
+            thread = entry.get("thread")
+            if thread and thread.is_alive():
+                thread.join(timeout=2.0)
+                if thread.is_alive():
+                    logger.warning(
+                        f"Output sink thread for node '{node_id}' "
+                        f"did not stop within 2s"
+                    )
+            try:
+                entry["sink"].close()
+            except Exception as e:
+                logger.error(f"Error closing output sink for node {node_id}: {e}")
+        self._output_sinks_by_node.clear()
 
         # Clean up cloud callbacks in cloud mode
         if self._cloud_mode and self.cloud_manager:
@@ -522,6 +547,18 @@ class FrameProcessor:
     def get_sink_node_ids(self) -> list[str]:
         """Return the list of sink node IDs available for reading."""
         return list(self._sink_queues_by_node.keys())
+
+    def get_unhandled_sink_node_ids(self) -> list[str]:
+        """Return sink node IDs that don't have their own output sink thread.
+
+        These sinks need external draining (e.g. by the headless consumer)
+        to prevent their queues from filling up and stalling the pipeline.
+        """
+        return [
+            sid
+            for sid in self._sink_queues_by_node
+            if sid not in self._output_sinks_by_node
+        ]
 
     def get_source_node_ids(self) -> list[str]:
         """Return the list of source node IDs available for writing."""
@@ -844,10 +881,15 @@ class FrameProcessor:
             sinks_config = parameters.pop("output_sinks")
             self._update_output_sinks_from_config(sinks_config)
 
-        # Handle generic input source settings
+        # Handle generic input source settings.
+        # Skip when per-node graph sources are active to avoid broadcasting
+        # frames to all queues (the per-node threads handle routing).
         if "input_source" in parameters:
-            input_source_config = parameters.pop("input_source")
-            self._update_input_source(input_source_config)
+            if self._input_sources_by_node:
+                parameters.pop("input_source")
+            else:
+                input_source_config = parameters.pop("input_source")
+                self._update_input_source(input_source_config)
 
         if "modulations" in parameters:
             raw = parameters.pop("modulations")
@@ -1037,6 +1079,22 @@ class FrameProcessor:
                 time.sleep(0.01)
 
         logger.info(f"Output sink thread stopped: {sink_type} ({frame_count} frames)")
+
+    def _graph_has_per_node_sources(self) -> bool:
+        """Check if the graph config has source nodes with non-WebRTC modes.
+
+        When True, those sources will be handled by _setup_multi_input_sources
+        and the legacy global input_source mechanism should be skipped.
+        """
+        graph_data = self.parameters.get("graph")
+        if not graph_data or not isinstance(graph_data, dict):
+            return False
+        for node in graph_data.get("nodes", []):
+            if node.get("type") == "source":
+                sm = node.get("source_mode")
+                if sm in ("spout", "ndi", "syphon"):
+                    return True
+        return False
 
     def _update_input_source(self, config: dict):
         """Update generic input source configuration."""
@@ -1243,6 +1301,9 @@ class FrameProcessor:
         # Set up per-source-node input sources for non-WebRTC sources
         self._setup_multi_input_sources(graph)
 
+        # Set up per-sink-node output sinks for non-WebRTC sinks
+        self._setup_multi_output_sinks(graph)
+
         logger.info(
             f"Created graph with {len(self.pipeline_processors)} processors, "
             f"sink={graph_run.sink_node_id}, "
@@ -1374,6 +1435,115 @@ class FrameProcessor:
 
         logger.info(
             f"Multi-source thread stopped ({source_type}) node {node_id} "
+            f"after {frame_count} frames"
+        )
+
+    def _setup_multi_output_sinks(self, graph):
+        """Set up per-sink-node output sinks for non-WebRTC graph sinks.
+
+        For sink nodes with sink_mode in (spout, ndi, syphon), creates a
+        separate OutputSink + sender thread for each one.
+        """
+        from .graph_schema import GraphConfig
+
+        if not isinstance(graph, GraphConfig):
+            return
+
+        for node in graph.nodes:
+            if node.type != "sink":
+                continue
+            sink_mode = getattr(node, "sink_mode", None)
+            if sink_mode not in ("spout", "ndi", "syphon"):
+                continue
+            sink_name = getattr(node, "sink_name", "") or ""
+            node_id = node.id
+
+            if node_id not in self._sink_queues_by_node:
+                continue
+
+            from scope.core.outputs import get_output_sink_classes
+
+            sink_classes = get_output_sink_classes()
+            sink_class = sink_classes.get(sink_mode)
+            if sink_class is None:
+                logger.warning(
+                    f"Output sink '{sink_mode}' not available for node {node_id}"
+                )
+                continue
+
+            try:
+                width, height = self._get_pipeline_dimensions()
+                sink = sink_class()
+                if sink.create(sink_name, width, height):
+                    thread = threading.Thread(
+                        target=self._multi_output_sink_loop,
+                        args=(node_id, sink_mode),
+                        daemon=True,
+                    )
+                    self._output_sinks_by_node[node_id] = {
+                        "sink": sink,
+                        "thread": thread,
+                        "type": sink_mode,
+                        "name": sink_name,
+                    }
+                    thread.start()
+                    logger.info(
+                        f"Multi-sink: started {sink_mode} '{sink_name}' "
+                        f"for node {node_id}"
+                    )
+                else:
+                    logger.error(
+                        f"Failed to create output sink {sink_mode} for node {node_id}"
+                    )
+                    sink.close()
+            except Exception as e:
+                logger.error(
+                    f"Error creating output sink '{sink_mode}' for node {node_id}: {e}"
+                )
+
+    def _multi_output_sink_loop(self, node_id: str, sink_type: str):
+        """Background thread that sends frames for a specific sink node."""
+        entry = self._output_sinks_by_node.get(node_id)
+        if entry is None:
+            return
+
+        sink = entry["sink"]
+        sink_q = self._sink_queues_by_node.get(node_id)
+        if sink_q is None:
+            logger.error(f"No sink queue for node {node_id}")
+            return
+
+        frame_count = 0
+        logger.info(f"Multi-sink output thread started: {sink_type} node {node_id}")
+
+        while self.running and node_id in self._output_sinks_by_node:
+            try:
+                try:
+                    frame = sink_q.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+                # Convert tensor to numpy for the output sink
+                frame_squeezed = frame.squeeze(0)
+                if frame_squeezed.is_cuda:
+                    frame_squeezed = frame_squeezed.cpu()
+                frame_np = frame_squeezed.numpy()
+
+                sink.send_frame(frame_np)
+                frame_count += 1
+
+                if frame_count % 300 == 0:
+                    logger.debug(
+                        f"Multi-sink ({sink_type}) node {node_id}: "
+                        f"{frame_count} frames sent"
+                    )
+
+            except Exception as e:
+                logger.error(f"Error in multi-sink output loop node {node_id}: {e}")
+                time.sleep(0.01)
+
+        logger.info(
+            f"Multi-sink output thread stopped ({sink_type}) node {node_id} "
             f"after {frame_count} frames"
         )
 

@@ -35,17 +35,49 @@ class HeadlessSession:
         self._frame_consumer_task = asyncio.create_task(self._consume_frames())
 
     async def _consume_frames(self):
-        """Pull frames from FrameProcessor so pipeline workers don't stall."""
+        """Pull frames from FrameProcessor so pipeline workers don't stall.
+
+        Only drains sink queues that are NOT already consumed by per-node
+        output sink threads (Syphon/NDI/Spout).  This avoids competing
+        for frames on the same queue.
+        """
         from av import VideoFrame
 
-        while self._frame_consumer_running and self.frame_processor.running:
-            frame_tensor = self.frame_processor.get()
-            if frame_tensor is not None:
-                frame_np = frame_tensor.numpy()
-                with self._frame_lock:
-                    self._last_frame = VideoFrame.from_ndarray(frame_np, format="rgb24")
+        fp = self.frame_processor
+
+        while self._frame_consumer_running and fp.running:
+            # Determine which sinks still need draining
+            unhandled = fp.get_unhandled_sink_node_ids()
+
+            if unhandled:
+                # Drain each unhandled sink queue
+                got_frame = False
+                for sink_id in unhandled:
+                    frame_tensor = fp.get_from_sink(sink_id)
+                    if frame_tensor is not None:
+                        got_frame = True
+                        frame_np = frame_tensor.numpy()
+                        with self._frame_lock:
+                            self._last_frame = VideoFrame.from_ndarray(
+                                frame_np, format="rgb24"
+                            )
+                if not got_frame:
+                    await asyncio.sleep(0.01)
+            elif fp.get_sink_node_ids():
+                # All sinks have output threads — nothing to drain.
+                # Just sleep; capture_frame can snapshot from output sinks.
+                await asyncio.sleep(0.05)
             else:
-                await asyncio.sleep(0.01)
+                # No multi-sink graph — use legacy get()
+                frame_tensor = fp.get()
+                if frame_tensor is not None:
+                    frame_np = frame_tensor.numpy()
+                    with self._frame_lock:
+                        self._last_frame = VideoFrame.from_ndarray(
+                            frame_np, format="rgb24"
+                        )
+                else:
+                    await asyncio.sleep(0.01)
 
     async def close(self):
         """Stop the frame processor and consumer."""

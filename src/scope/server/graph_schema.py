@@ -57,6 +57,14 @@ class GraphNode(BaseModel):
         default=None,
         description="Source name/identifier for Spout/NDI/Syphon sources (sender name for Spout, source identifier for NDI/Syphon)",
     )
+    sink_mode: str | None = Field(
+        default=None,
+        description="Output sink mode for sink nodes: 'spout', 'ndi', 'syphon'. When set, frames are sent to the specified output sink instead of (or in addition to) WebRTC.",
+    )
+    sink_name: str | None = Field(
+        default=None,
+        description="Sink name/identifier for Spout/NDI/Syphon output sinks (sender name for Spout, source identifier for NDI/Syphon)",
+    )
 
 
 class GraphEdge(BaseModel):
