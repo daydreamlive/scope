@@ -83,7 +83,7 @@ export function TelemetryDisclosure({
     : 0;
 
   return (
-    <div className="w-full max-w-md mx-auto animate-in fade-in-0 slide-in-from-bottom-4 duration-500">
+    <div className="relative z-20 w-full max-w-md mx-auto pointer-events-auto animate-in fade-in-0 slide-in-from-bottom-4 duration-500">
       <div className="rounded-xl border border-border/50 bg-card/80 backdrop-blur-sm p-6 space-y-4">
         <div className="flex items-center gap-3">
           <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-muted">
