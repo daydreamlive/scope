@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from .schema import PluginInfo
     from .webrtc import WebRTCManager
 
+from scope.core.config import get_base_dir
 from scope.core.lora.manifest import (
     LoRAManifestEntry,
     LoRAProvenance,
@@ -2961,7 +2962,9 @@ async def get_cloud_stats(
 # Onboarding
 # ---------------------------------------------------------------------------
 
-_ONBOARDING_FILE = Path("~/.daydream-scope/onboarding.json").expanduser()
+
+def _get_onboarding_file() -> Path:
+    return get_base_dir() / "onboarding.json"
 
 
 class OnboardingStatusResponse(BaseModel):
@@ -2982,10 +2985,11 @@ class OnboardingStatusUpdate(BaseModel):
 
 @app.get("/api/v1/onboarding/status", response_model=OnboardingStatusResponse)
 async def get_onboarding_status():
-    """Read onboarding completion state from ~/.daydream-scope/onboarding.json."""
-    if _ONBOARDING_FILE.exists():
+    """Read onboarding completion state from onboarding.json."""
+    onboarding_file = _get_onboarding_file()
+    if onboarding_file.exists():
         try:
-            data = json.loads(_ONBOARDING_FILE.read_text())
+            data = json.loads(onboarding_file.read_text())
             return OnboardingStatusResponse(
                 completed=data.get("completed", False),
                 inference_mode=data.get("inference_mode"),
@@ -3000,13 +3004,14 @@ async def get_onboarding_status():
 
 @app.put("/api/v1/onboarding/status", response_model=OnboardingStatusResponse)
 async def update_onboarding_status(body: OnboardingStatusUpdate):
-    """Write onboarding completion state to ~/.daydream-scope/onboarding.json."""
-    _ONBOARDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+    """Write onboarding completion state to onboarding.json."""
+    onboarding_file = _get_onboarding_file()
+    onboarding_file.parent.mkdir(parents=True, exist_ok=True)
     # Merge with existing data so we don't lose fields when partially updating
     existing: dict = {}
-    if _ONBOARDING_FILE.exists():
+    if onboarding_file.exists():
         try:
-            existing = json.loads(_ONBOARDING_FILE.read_text())
+            existing = json.loads(onboarding_file.read_text())
         except Exception:
             pass
     if body.completed is not None:
@@ -3019,7 +3024,7 @@ async def update_onboarding_status(body: OnboardingStatusUpdate):
         existing["referral_source"] = body.referral_source
     if body.use_case is not None:
         existing["use_case"] = body.use_case
-    _ONBOARDING_FILE.write_text(json.dumps(existing))
+    onboarding_file.write_text(json.dumps(existing))
     return OnboardingStatusResponse(
         completed=existing.get("completed", False),
         inference_mode=existing.get("inference_mode"),
