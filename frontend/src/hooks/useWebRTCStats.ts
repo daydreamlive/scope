@@ -19,7 +19,7 @@ export function useWebRTCStats({
     bitrate: 0,
   });
 
-  const statsIntervalRef = useRef<number | null>(null);
+  const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previousStatsRef = useRef<{
     framesReceived?: number;
     bytesReceived?: number;

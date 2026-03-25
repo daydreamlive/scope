@@ -1,10 +1,12 @@
 import { useCallback } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useOnboarding } from "../../contexts/OnboardingContext";
+import { useTelemetry } from "../../contexts/TelemetryContext";
 import { InferenceModeStep } from "./InferenceModeStep";
 import { CloudAuthStep } from "./CloudAuthStep";
 import { CloudConnectingStep } from "./CloudConnectingStep";
 import { WorkflowPickerStep } from "./WorkflowPickerStep";
+import { TelemetryDisclosure } from "./TelemetryDisclosure";
 import { FogOfWarBackground } from "./FogOfWarBackground";
 import type { StarterWorkflow } from "./starterWorkflows";
 
@@ -36,7 +38,22 @@ export function OnboardingOverlay({
     workflowReady,
     importWorkflowReady,
     goBack,
+    telemetryDisclosed,
   } = useOnboarding();
+  const { markDisclosed, setEnabled, flushQueue, dropQueue } = useTelemetry();
+
+  const handleTelemetryAccept = useCallback(() => {
+    markDisclosed();
+    setEnabled(true);
+    flushQueue();
+    telemetryDisclosed();
+  }, [markDisclosed, setEnabled, flushQueue, telemetryDisclosed]);
+
+  const handleTelemetryDecline = useCallback(() => {
+    markDisclosed();
+    dropQueue();
+    telemetryDisclosed();
+  }, [markDisclosed, dropQueue, telemetryDisclosed]);
 
   const handleSelectWorkflow = useCallback(
     (wf: StarterWorkflow) => {
@@ -71,8 +88,12 @@ export function OnboardingOverlay({
         ? 1
         : state.phase === "cloud_connecting"
           ? 2
-          : 3;
-  const totalSteps = state.inferenceMode === "cloud" ? 4 : 2;
+          : state.phase === "telemetry_disclosure"
+            ? 1
+            : state.inferenceMode === "cloud"
+              ? 3
+              : 2;
+  const totalSteps = state.inferenceMode === "cloud" ? 4 : 3;
 
   return (
     <div className="fixed inset-0 z-[100] bg-background animate-in fade-in-0 duration-300">
@@ -131,6 +152,14 @@ export function OnboardingOverlay({
 
         {state.phase === "cloud_connecting" && (
           <CloudConnectingStep onConnected={cloudConnected} onBack={goBack} />
+        )}
+
+        {state.phase === "telemetry_disclosure" && (
+          <TelemetryDisclosure
+            onAccept={handleTelemetryAccept}
+            onDecline={handleTelemetryDecline}
+            path="local_interstitial"
+          />
         )}
 
         {state.phase === "workflow" && (

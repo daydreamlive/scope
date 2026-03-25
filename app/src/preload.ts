@@ -112,6 +112,13 @@ contextBridge.exposeInMainWorld('scope', {
     };
   },
 
+  getEnvTelemetryDisabled: () => {
+    return (
+      process.env.SCOPE_TELEMETRY_DISABLED === "1" ||
+      process.env.DO_NOT_TRACK === "1"
+    );
+  },
+
   openExternal: (url: string) => ipcRenderer.invoke(IPC_CHANNELS.OPEN_EXTERNAL, url),
 
   onAuthCallback: (callback: (data: { token: string; userId: string | null; state: string | null }) => void) => {

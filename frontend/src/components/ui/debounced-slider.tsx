@@ -31,7 +31,7 @@ export function DebouncedSlider({
   debounceMs = 100,
 }: DebouncedSliderProps) {
   const [localValue, setLocalValue] = useState<number[]>(value);
-  const commitTimeoutRef = useRef<number | null>(null);
+  const commitTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Sync with external value changes
   useEffect(() => {
