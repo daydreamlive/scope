@@ -561,6 +561,7 @@ export function StreamPage() {
     isConnecting,
     peerConnectionRef,
     sinkNodeIdsRef,
+    sinkMidMapRef,
     startStream,
     stopStream,
     updateVideoTrack,
@@ -630,6 +631,7 @@ export function StreamPage() {
     peerConnectionRef,
     isStreaming,
     sinkNodeIdsRef,
+    sinkMidMapRef,
   });
 
   // Video container ref for controller input pointer lock

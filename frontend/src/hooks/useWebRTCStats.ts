@@ -15,12 +15,14 @@ interface UseWebRTCStatsProps {
   peerConnectionRef: React.MutableRefObject<RTCPeerConnection | null>;
   isStreaming: boolean;
   sinkNodeIdsRef?: React.RefObject<string[]>;
+  sinkMidMapRef?: React.RefObject<Record<string, string>>;
 }
 
 export function useWebRTCStats({
   peerConnectionRef,
   isStreaming,
   sinkNodeIdsRef,
+  sinkMidMapRef,
 }: UseWebRTCStatsProps) {
   const [perSinkStats, setPerSinkStats] = useState<Record<string, WebRTCStats>>(
     {}
@@ -103,16 +105,11 @@ export function useWebRTCStats({
               ? bitrateHist.reduce((s, v) => s + v, 0) / bitrateHist.length
               : bitrate;
 
-          // Map MID to sink node ID
-          const midNum = Number(mid);
+          // Map MID to sink node ID using the mapping built during ontrack
+          const midMap = sinkMidMapRef?.current ?? {};
           let sinkId: string | undefined;
-          if (
-            sinkIds.length > 0 &&
-            Number.isInteger(midNum) &&
-            midNum >= 0 &&
-            midNum < sinkIds.length
-          ) {
-            sinkId = sinkIds[midNum];
+          if (mid != null && midMap[mid]) {
+            sinkId = midMap[mid];
           } else if (sinkIds.length === 1) {
             sinkId = sinkIds[0];
           }
@@ -140,7 +137,7 @@ export function useWebRTCStats({
     } catch (error) {
       console.error("Error getting WebRTC stats:", error);
     }
-  }, [peerConnectionRef, isStreaming, sinkNodeIdsRef]);
+  }, [peerConnectionRef, isStreaming, sinkNodeIdsRef, sinkMidMapRef]);
 
   useEffect(() => {
     const pc = peerConnectionRef.current;

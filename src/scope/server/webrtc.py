@@ -329,16 +329,8 @@ class WebRTCManager:
                 # Add the relayed video track to WebRTC connection
                 pc.addTrack(relayed_track)
 
-                # Create additional SinkOutputTracks for extra sinks (beyond the first)
-                if len(sink_node_ids) > 1:
-                    for sink_id in sink_node_ids[1:]:
-                        extra_track = SinkOutputTrack(
-                            primary_track=video_track,
-                            sink_node_id=sink_id,
-                        )
-                        session.additional_tracks.append(extra_track)
-                        pc.addTrack(relay.subscribe(extra_track))
-                        logger.info(f"Added extra sink track for node {sink_id}")
+                # Extra sink tracks are added AFTER setRemoteDescription (below)
+                # so they can be placed on the correct recvonly transceivers.
 
                 # Eagerly initialize frame processor when graph has sources or
                 # multiple sinks, so SourceInputHandler / SinkOutputTrack can
@@ -554,6 +546,46 @@ class WebRTCManager:
                             f"Audio track attached to transceiver (mid={t.mid})"
                         )
                         break
+
+            # Attach extra sink video tracks to the recvonly transceivers
+            # that the browser created for additional sinks.  This must happen
+            # AFTER setRemoteDescription so the offer's transceivers exist.
+            # We identify the right transceivers by: kind=video, no sender
+            # track, and no receiver track (browser declared recvonly, so the
+            # server only sends — no RemoteStreamTrack was created).
+            if len(sink_node_ids) > 1 and video_track is not None and relay is not None:
+                recv_only_video = [
+                    t
+                    for t in pc.getTransceivers()
+                    if t.kind == "video"
+                    and t.sender.track is None
+                    and t.receiver.track is None
+                ]
+                logger.info(
+                    f"Found {len(recv_only_video)} recv-only video "
+                    f"transceivers for {len(sink_node_ids) - 1} extra sink(s)"
+                )
+                for i, sink_id in enumerate(sink_node_ids[1:]):
+                    extra_track = SinkOutputTrack(
+                        primary_track=video_track,
+                        sink_node_id=sink_id,
+                    )
+                    session.additional_tracks.append(extra_track)
+                    relayed = relay.subscribe(extra_track)
+                    if i < len(recv_only_video):
+                        t = recv_only_video[i]
+                        t.sender.replaceTrack(relayed)
+                        t.direction = "sendonly"
+                        logger.info(
+                            f"Added extra sink track for node {sink_id} "
+                            f"on transceiver mid={t.mid}"
+                        )
+                    else:
+                        pc.addTrack(relayed)
+                        logger.info(
+                            f"Added extra sink track for node {sink_id} "
+                            f"via addTrack fallback"
+                        )
 
             # Create answer
             answer = await pc.createAnswer()

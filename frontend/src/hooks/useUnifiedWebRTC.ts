@@ -83,6 +83,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   const sessionIdRef = useRef<string | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidate[]>([]);
   const sinkNodeIdsRef = useRef<string[]>([]);
+  const sinkMidMapRef = useRef<Record<string, string>>({});
 
   // Helper to get ICE servers
   const fetchIceServers = useCallback(async (): Promise<RTCConfiguration> => {
@@ -301,14 +302,23 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           console.log("[UnifiedWebRTC] Forced VP8-only codec");
         }
 
-        // Add extra recvonly transceivers for additional sink nodes
+        // Add extra recvonly transceivers for additional sink nodes.
+        // Build a map from transceiver → sink node ID so ontrack can
+        // correctly route received video regardless of MID numbering.
         sinkNodeIdsRef.current = sinkNodeIds ?? [];
-        if (sinkNodeIds && sinkNodeIds.length > 1) {
+        sinkMidMapRef.current = {};
+        const sinkTransceiverMap = new Map<RTCRtpTransceiver, string>();
+        if (sinkNodeIds && sinkNodeIds.length > 0) {
+          // The first sink reuses the primary sendrecv transceiver
+          if (transceiver) {
+            sinkTransceiverMap.set(transceiver, sinkNodeIds[0]);
+          }
           for (let i = 1; i < sinkNodeIds.length; i++) {
             const t = pc.addTransceiver("video", { direction: "recvonly" });
             if (vp8Codecs.length > 0) {
               t.setCodecPreferences(vp8Codecs);
             }
+            sinkTransceiverMap.set(t, sinkNodeIds[i]);
             console.log(
               `[UnifiedWebRTC] Added recvonly transceiver for sink ${sinkNodeIds[i]}`
             );
@@ -317,11 +327,11 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
 
         // Event handlers — assign received tracks to sink nodes.
         // Audio tracks are collected into the primary sink's stream.
-        let fallbackVideoTrackIndex = 0;
+        const assignedSinkIds = new Set<string>();
         const combinedAudioTracks: MediaStreamTrack[] = [];
         pc.ontrack = (evt: RTCTrackEvent) => {
           console.log(
-            `[UnifiedWebRTC] Track received: ${evt.track.kind} (id: ${evt.track.id})`
+            `[UnifiedWebRTC] Track received: ${evt.track.kind} (id: ${evt.track.id}, mid=${evt.transceiver?.mid ?? "n/a"})`
           );
 
           // Audio tracks are merged into the primary remote stream
@@ -341,18 +351,22 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           ]);
 
           if (ids.length > 1) {
-            let sinkId: string | undefined;
-            const mid = Number(evt.transceiver?.mid);
-            if (Number.isInteger(mid) && mid >= 0 && mid < ids.length) {
-              sinkId = ids[mid];
-            } else if (fallbackVideoTrackIndex < ids.length) {
-              sinkId = ids[fallbackVideoTrackIndex];
-              fallbackVideoTrackIndex += 1;
+            // Look up sink ID by transceiver identity (not MID index)
+            let sinkId = sinkTransceiverMap.get(evt.transceiver);
+            if (!sinkId) {
+              // Fallback: assign to the first sink that hasn't received a stream yet
+              sinkId = ids.find(id => !assignedSinkIds.has(id));
             }
 
             if (sinkId) {
+              assignedSinkIds.add(sinkId);
+              // Record MID → sink mapping for stats collection
+              const mid = evt.transceiver?.mid;
+              if (mid != null) {
+                sinkMidMapRef.current[mid] = sinkId;
+              }
               console.log(
-                `[UnifiedWebRTC] Setting remote stream for sink ${sinkId} (mid=${evt.transceiver?.mid ?? "n/a"})`
+                `[UnifiedWebRTC] Setting remote stream for sink ${sinkId} (mid=${mid ?? "n/a"}, mapHit=${sinkTransceiverMap.has(evt.transceiver)})`
               );
               if (sinkId === ids[0]) {
                 setRemoteStream(streamForTrack);
@@ -362,6 +376,14 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
                 [sinkId]: streamForTrack,
               }));
               return;
+            }
+          }
+
+          // Single sink or no sink IDs — also record MID mapping
+          if (ids.length === 1) {
+            const mid = evt.transceiver?.mid;
+            if (mid != null) {
+              sinkMidMapRef.current[mid] = ids[0];
             }
           }
 
@@ -660,6 +682,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
     sessionIdRef.current = null;
     queuedCandidatesRef.current = [];
     sinkNodeIdsRef.current = [];
+    sinkMidMapRef.current = {};
 
     setRemoteStream(null);
     setRemoteStreams({});
@@ -684,6 +707,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
     isStreaming,
     peerConnectionRef,
     sinkNodeIdsRef,
+    sinkMidMapRef,
     sessionId: sessionIdRef.current,
     startStream,
     stopStream,
