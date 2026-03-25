@@ -663,6 +663,19 @@ class WebRTCManager:
             )
             self.sessions[session.id] = session
 
+            # Parse graph from initial parameters for multi-source/sink
+            sink_node_ids: list[str] = []
+            webrtc_source_node_ids: list[str] = []
+            graph_data = initial_parameters.get("graph")
+            if graph_data and isinstance(graph_data, dict):
+                for node in graph_data.get("nodes", []):
+                    if node.get("type") == "sink":
+                        sink_node_ids.append(node["id"])
+                    elif node.get("type") == "source":
+                        sm = node.get("source_mode", "video")
+                        if sm not in ("spout", "ndi", "syphon"):
+                            webrtc_source_node_ids.append(node["id"])
+
             # Determine media modalities from initial_parameters. These are
             # set by the frontend from the pipeline/status endpoint, which is
             # proxied to the cloud backend — so they reflect the cloud
@@ -723,11 +736,20 @@ class WebRTCManager:
 
             logger.info(f"Created session: {session.id}")
 
+            video_track_index = [0]
+
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
                 logger.info(f"Track received: {track.kind} for session {session.id}")
                 if track.kind == "video" and cloud_track is not None:
-                    cloud_track.set_source_track(track)
+                    idx = video_track_index[0]
+                    video_track_index[0] += 1
+                    if idx == 0 or not webrtc_source_node_ids:
+                        # Primary source → existing CloudTrack input path
+                        cloud_track.set_source_track(track)
+                    else:
+                        # Extra source → buffer for wiring after cloud connects
+                        cloud_track.add_extra_source_track(idx, track)
 
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
@@ -796,6 +818,41 @@ class WebRTCManager:
                             f"Audio track attached to transceiver (mid={t.mid})"
                         )
                         break
+
+            # Attach extra sink video tracks to the browser's recvonly
+            # transceivers (same pattern as the local-mode handler).
+            if len(sink_node_ids) > 1 and cloud_track is not None and relay is not None:
+                from .cloud_track import CloudSinkOutputTrack
+
+                extra_sink_tracks: list[CloudSinkOutputTrack] = []
+                recv_only_video = [
+                    t
+                    for t in pc.getTransceivers()
+                    if t.kind == "video"
+                    and t.sender.track is None
+                    and t.receiver.track is None
+                ]
+                logger.info(
+                    f"Cloud relay: {len(recv_only_video)} recv-only video "
+                    f"transceivers for {len(sink_node_ids) - 1} extra sink(s)"
+                )
+                for i, sink_id in enumerate(sink_node_ids[1:]):
+                    extra_track = CloudSinkOutputTrack()
+                    extra_sink_tracks.append(extra_track)
+                    session.additional_tracks.append(extra_track)
+                    relayed = relay.subscribe(extra_track)
+                    if i < len(recv_only_video):
+                        tv = recv_only_video[i]
+                        tv.sender.replaceTrack(relayed)
+                        tv.direction = "sendonly"
+                        logger.info(
+                            f"Cloud relay: extra sink {sink_id} on mid={tv.mid}"
+                        )
+                    else:
+                        pc.addTrack(relayed)
+                        logger.info(f"Cloud relay: extra sink {sink_id} via addTrack")
+                # Tell CloudTrack to wire these after cloud connection starts
+                cloud_track.set_extra_sink_tracks(extra_sink_tracks)
 
             # Create answer
             answer = await pc.createAnswer()

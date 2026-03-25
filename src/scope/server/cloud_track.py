@@ -82,6 +82,11 @@ class CloudTrack(MediaStreamTrack):
         self._last_frame: VideoFrame | None = None
         self._started = False
 
+        # Multi-source / multi-sink (wired up in _start after cloud connects)
+        self._pending_extra_sources: list[tuple[int, MediaStreamTrack]] = []
+        self._extra_sink_tracks: list[CloudSinkOutputTrack] = []
+        self._extra_input_handlers: list[CloudSourceInputHandler] = []
+
     def set_source_track(self, track: MediaStreamTrack) -> None:
         """Set the source track for input frames (from browser)."""
         self._source_track = track
@@ -119,6 +124,25 @@ class CloudTrack(MediaStreamTrack):
         if self._source_track is not None:
             self._input_running = True
             self._input_task = asyncio.create_task(self._input_loop())
+
+        # Wire up extra source tracks now that the cloud connection exists
+        webrtc_client = self.cloud_manager._webrtc_client
+        if webrtc_client is not None:
+            for idx, track in self._pending_extra_sources:
+                if idx < len(webrtc_client.input_tracks):
+                    handler = CloudSourceInputHandler(webrtc_client.input_tracks[idx])
+                    handler.start(track)
+                    self._extra_input_handlers.append(handler)
+                    logger.info(f"Wired extra source track {idx} to cloud input")
+            self._pending_extra_sources.clear()
+
+            # Wire extra sink output callbacks
+            for i, sink_track in enumerate(self._extra_sink_tracks):
+                sink_index = i + 1  # 0 is primary
+                handler = webrtc_client.extra_output_handlers.get(sink_index)
+                if handler is not None:
+                    handler.add_callback(sink_track.put_frame)
+                    logger.info(f"Wired extra sink track {i} to cloud output")
 
         logger.info("Relay started")
 
@@ -232,6 +256,11 @@ class CloudTrack(MediaStreamTrack):
         self._input_running = False
         self._started = False  # Reset so next session starts fresh
 
+        # Stop extra source input handlers first
+        for handler in self._extra_input_handlers:
+            await handler.stop()
+        self._extra_input_handlers.clear()
+
         if self._input_task:
             self._input_task.cancel()
             try:
@@ -252,8 +281,144 @@ class CloudTrack(MediaStreamTrack):
         # Stop WebRTC connection to cloud - next session will start fresh
         await self.cloud_manager.stop_webrtc()
 
+    # ------------------------------------------------------------------
+    # Multi-source / multi-sink helpers
+    # ------------------------------------------------------------------
+
+    def add_extra_source_track(self, track_index: int, track: MediaStreamTrack) -> None:
+        """Register an extra browser source track to forward to cloud.
+
+        *track_index* is the position among the cloud input tracks
+        (0 is the primary handled by ``_input_loop``).  If the cloud
+        connection is already established the handler starts immediately;
+        otherwise it is buffered until :meth:`_start` completes.
+        """
+        if self._started:
+            webrtc_client = self.cloud_manager._webrtc_client
+            if webrtc_client is not None and track_index < len(
+                webrtc_client.input_tracks
+            ):
+                handler = CloudSourceInputHandler(
+                    webrtc_client.input_tracks[track_index]
+                )
+                handler.start(track)
+                self._extra_input_handlers.append(handler)
+                logger.info(f"Wired extra source track {track_index} (immediate)")
+        else:
+            self._pending_extra_sources.append((track_index, track))
+
+    def set_extra_sink_tracks(self, tracks: list[CloudSinkOutputTrack]) -> None:
+        """Register extra sink output tracks that need cloud callbacks."""
+        self._extra_sink_tracks = list(tracks)
+
     def get_stats(self) -> dict:
         """Get relay statistics."""
         if self.frame_processor:
             return self.frame_processor.get_frame_stats()
         return {}
+
+
+class CloudSinkOutputTrack(MediaStreamTrack):
+    """Lightweight bridge: cloud output track → browser for extra sinks.
+
+    Frames are pushed in via :meth:`put_frame` (called from the
+    ``CloudWebRTCClient`` receive loop) and pulled by aiortc via
+    :meth:`recv`.
+    """
+
+    kind = "video"
+
+    def __init__(self, fps: int = 30):
+        super().__init__()
+        self._queue: asyncio.Queue[VideoFrame] = asyncio.Queue(maxsize=2)
+        self.fps = fps
+        self.frame_ptime = 1.0 / fps
+        self._pts: int = 0
+        self._last_send_time: float | None = None
+        self._last_frame: VideoFrame | None = None
+
+    def put_frame(self, frame: VideoFrame) -> None:
+        """Enqueue a frame received from cloud (drop-if-full)."""
+        try:
+            self._queue.put_nowait(frame)
+        except asyncio.QueueFull:
+            pass
+
+    async def recv(self) -> VideoFrame:
+        while True:
+            try:
+                frame = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+            except TimeoutError:
+                if self._last_frame is not None:
+                    frame = self._last_frame
+                else:
+                    await asyncio.sleep(0.01)
+                    continue
+
+            # Pace output
+            if self._last_send_time is not None:
+                elapsed = time.time() - self._last_send_time
+                wait = self.frame_ptime - elapsed
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                self._pts += int(self.frame_ptime * VIDEO_CLOCK_RATE)
+            self._last_send_time = time.time()
+
+            frame.pts = self._pts
+            frame.time_base = VIDEO_TIME_BASE
+            self._last_frame = frame
+            return frame
+
+    def get_last_frame(self):
+        return self._last_frame
+
+
+class CloudSourceInputHandler:
+    """Bridges a browser source track to a cloud ``FrameInputTrack``.
+
+    Reads frames from *browser_track* and pushes them into
+    *cloud_input_track* which is on the relay→cloud WebRTC connection.
+    """
+
+    def __init__(self, cloud_input_track):
+        self.cloud_input_track = cloud_input_track
+        self._running = False
+        self._task: asyncio.Task | None = None
+
+    def start(self, browser_track: MediaStreamTrack) -> None:
+        self._browser_track = browser_track
+        self._running = True
+        self._task = asyncio.create_task(self._input_loop())
+
+    async def _input_loop(self) -> None:
+        consecutive_errors = 0
+        max_consecutive_errors = 10
+        while self._running:
+            try:
+                frame = await self._browser_track.recv()
+                consecutive_errors = 0
+                self.cloud_input_track.put_frame(frame)
+            except asyncio.CancelledError:
+                break
+            except MediaStreamError:
+                logger.info("Cloud source input track ended")
+                break
+            except Exception as e:
+                consecutive_errors += 1
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.error(
+                        f"CloudSourceInputHandler stopping after "
+                        f"{consecutive_errors} errors: {e}"
+                    )
+                    break
+                await asyncio.sleep(0.01)
+        self._running = False
+
+    async def stop(self) -> None:
+        self._running = False
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
