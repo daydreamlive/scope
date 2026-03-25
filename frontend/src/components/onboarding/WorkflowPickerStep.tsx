@@ -1,11 +1,8 @@
 import { useState } from "react";
 import { Play } from "lucide-react";
 import { Button } from "../ui/button";
-import { STARTER_WORKFLOWS, getWorkflowsForStyle, type StarterWorkflow } from "./starterWorkflows";
+import { getWorkflowsForStyle, type StarterWorkflow } from "./starterWorkflows";
 import { useOnboarding } from "../../contexts/OnboardingContext";
-
-// Re-export for consumers that imported from here previously
-export { STARTER_WORKFLOWS, type StarterWorkflow };
 
 // ---------------------------------------------------------------------------
 // Types
@@ -64,7 +61,7 @@ export function WorkflowPickerStep({
                   src={wf.thumbnail}
                   alt={wf.title}
                   className="w-full h-full object-cover"
-                  onError={(e) => {
+                  onError={e => {
                     (e.target as HTMLImageElement).style.display = "none";
                   }}
                 />

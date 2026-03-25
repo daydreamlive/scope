@@ -3014,16 +3014,7 @@ async def update_onboarding_status(body: OnboardingStatusUpdate):
             existing = json.loads(onboarding_file.read_text())
         except Exception:
             pass
-    if body.completed is not None:
-        existing["completed"] = body.completed
-    if body.inference_mode is not None:
-        existing["inference_mode"] = body.inference_mode
-    if body.onboarding_style is not None:
-        existing["onboarding_style"] = body.onboarding_style
-    if body.referral_source is not None:
-        existing["referral_source"] = body.referral_source
-    if body.use_case is not None:
-        existing["use_case"] = body.use_case
+    existing.update(body.model_dump(exclude_none=True))
     onboarding_file.write_text(json.dumps(existing))
     return OnboardingStatusResponse(
         completed=existing.get("completed", False),

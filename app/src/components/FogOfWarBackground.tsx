@@ -109,10 +109,11 @@ const FogOfWarBackground: React.FC = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    const hasFinePointer = window.matchMedia("(pointer: fine)").matches;
     const prefersReduced = window.matchMedia(
       "(prefers-reduced-motion: reduce)"
     ).matches;
-    if (prefersReduced) {
+    if (!hasFinePointer || prefersReduced) {
       setUseFallback(true);
       return;
     }

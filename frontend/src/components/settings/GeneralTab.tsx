@@ -24,7 +24,6 @@ export function GeneralTab({
   onReportBug,
 }: GeneralTabProps) {
   const handleDocsClick = () => {
-    console.log("Docs clicked");
     window.open(
       "https://docs.daydream.live/knowledge-hub/tutorials/scope",
       "_blank"
@@ -32,12 +31,10 @@ export function GeneralTab({
   };
 
   const handleDiscordClick = () => {
-    console.log("Discord clicked");
     window.open("https://discord.gg/mnfGR4Fjhp", "_blank");
   };
 
   const handleGithubClick = () => {
-    console.log("GitHub clicked");
     window.open("https://github.com/daydreamlive/scope", "_blank");
   };
 
