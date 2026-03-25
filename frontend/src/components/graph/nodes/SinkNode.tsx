@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
@@ -20,6 +20,17 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
     | { fps: number; bitrate: number }
     | undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
+  const [videoSize, setVideoSize] = useState<{
+    width: number;
+    height: number;
+  } | null>(null);
+
+  const handleResize = useCallback(() => {
+    const v = videoRef.current;
+    if (v && v.videoWidth > 0 && v.videoHeight > 0) {
+      setVideoSize({ width: v.videoWidth, height: v.videoHeight });
+    }
+  }, []);
 
   useEffect(() => {
     if (videoRef.current && remoteStream instanceof MediaStream) {
@@ -47,11 +58,17 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
                 autoPlay
                 muted
                 playsInline
+                onResize={handleResize}
               />
             ) : (
               <div className="flex items-center justify-center h-full text-[10px] text-[#8c8c8d]">
                 No output stream
               </div>
+            )}
+            {videoSize && (
+              <span className="absolute bottom-1 right-1 text-[9px] text-[#8c8c8d] bg-black/60 px-1 rounded">
+                {videoSize.width}&times;{videoSize.height}
+              </span>
             )}
           </div>
           {sinkStats && (sinkStats.fps > 0 || sinkStats.bitrate > 0) && (

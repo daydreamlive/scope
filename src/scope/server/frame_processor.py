@@ -401,7 +401,9 @@ class FrameProcessor:
         to prevent concurrent threads from overwriting the buffer contents.
         Prefer :meth:`_frame_array_to_gpu` which handles locking automatically.
         """
-        # Caller is expected to already hold _pinned_buffer_lock.
+        assert self._pinned_buffer_lock.locked(), (
+            "_get_or_create_pinned_buffer must be called with _pinned_buffer_lock held"
+        )
         if shape not in self._pinned_buffer_cache:
             self._pinned_buffer_cache[shape] = torch.empty(
                 shape, dtype=torch.uint8, pin_memory=True

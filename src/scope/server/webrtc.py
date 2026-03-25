@@ -1034,7 +1034,11 @@ class WebRTCManager:
                     session.video_track.pause(parameters["paused"])
                 elif session.frame_processor:
                     session.frame_processor.paused = parameters["paused"]
-            if session.video_track and hasattr(session.video_track, "frame_processor"):
+            if (
+                session.video_track
+                and hasattr(session.video_track, "frame_processor")
+                and session.video_track.frame_processor
+            ):
                 session.video_track.frame_processor.update_parameters(parameters)
             elif session.frame_processor:
                 session.frame_processor.update_parameters(parameters)
