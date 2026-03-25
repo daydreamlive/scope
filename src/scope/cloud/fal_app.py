@@ -271,7 +271,7 @@ def _should_forward_log(line: str) -> bool:
 
 # Connection timeout settings
 MAX_CONNECTION_DURATION_SECONDS = (
-    3600  # Close connection after 60 minutes regardless of activity
+    7200  # Close connection after 120 minutes regardless of activity
 )
 TIMEOUT_CHECK_INTERVAL_SECONDS = 60  # Check for timeout every 60 seconds
 
