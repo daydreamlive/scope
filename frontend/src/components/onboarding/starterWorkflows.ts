@@ -163,12 +163,12 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 nodeType: "lora",
                 loras: [
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/diffslime_acidzlime-000016.safetensors",
+                    path: "diffslime_acidzlime-000016.safetensors",
                     scale: 1.5,
                     mergeMode: "permanent_merge",
                   },
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/daydream-scope-dissolve.safetensors",
+                    path: "daydream-scope-dissolve.safetensors",
                     scale: 1.5,
                     mergeMode: "permanent_merge",
                   },
@@ -486,12 +486,12 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 nodeType: "lora",
                 loras: [
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
+                    path: "Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
                     scale: 0.7,
                     mergeMode: "permanent_merge",
                   },
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/daydream-scope-dissolve.safetensors",
+                    path: "daydream-scope-dissolve.safetensors",
                     scale: 1.5,
                     mergeMode: "permanent_merge",
                   },
@@ -802,7 +802,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 nodeType: "lora",
                 loras: [
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/[flux.2.klein]pixelart_redmond-000032.safetensors",
+                    path: "[flux.2.klein]pixelart_redmond-000032.safetensors",
                     scale: 1.6,
                     mergeMode: "runtime_peft",
                   },
@@ -1113,12 +1113,12 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 nodeType: "lora",
                 loras: [
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/diffslime_acidzlime-000016.safetensors",
+                    path: "diffslime_acidzlime-000016.safetensors",
                     scale: 1.5,
                     mergeMode: "permanent_merge",
                   },
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/daydream-scope-dissolve.safetensors",
+                    path: "daydream-scope-dissolve.safetensors",
                     scale: 1.5,
                     mergeMode: "permanent_merge",
                   },
@@ -1349,17 +1349,17 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 nodeType: "lora",
                 loras: [
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
+                    path: "Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
                     scale: 0.5,
                     mergeMode: "permanent_merge",
                   },
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/Kubakub_v1_Wan2.1_1-3B_t2v_torchoptadam80epochs.safetensors",
+                    path: "Kubakub_v1_Wan2.1_1-3B_t2v_torchoptadam80epochs.safetensors",
                     scale: 1,
                     mergeMode: "permanent_merge",
                   },
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/daydream-scope-dissolve.safetensors",
+                    path: "daydream-scope-dissolve.safetensors",
                     scale: 0.3,
                     mergeMode: "permanent_merge",
                   },
@@ -1588,7 +1588,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 nodeType: "lora",
                 loras: [
                   {
-                    path: "/tmp/.daydream-scope/assets/lora/[flux.2.klein]pixelart_redmond-000032.safetensors",
+                    path: "[flux.2.klein]pixelart_redmond-000032.safetensors",
                     scale: 1.6,
                     mergeMode: "runtime_peft",
                   },
