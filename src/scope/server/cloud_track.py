@@ -99,6 +99,13 @@ class CloudTrack(MediaStreamTrack):
         logger.info("Starting WebRTC connection to cloud...")
         await self.cloud_manager.start_webrtc(self.initial_parameters)
 
+        # Surface worker param-update errors (e.g. IP adapter URL timeout) to the
+        # notification_callback chain so the UI can show them to the user.
+        if self.notification_callback:
+            self.cloud_manager.add_worker_error_callback(
+                self._on_worker_error
+            )
+
         # Create FrameProcessor in cloud mode (unless one was injected)
         if self.frame_processor is None:
             from .frame_processor import FrameProcessor
@@ -210,6 +217,24 @@ class CloudTrack(MediaStreamTrack):
 
             await asyncio.sleep(0.01)
 
+    def _on_worker_error(self, error_message: str, raw_payload: dict) -> None:
+        """Forward a cloud worker param-update error to the notification callback."""
+        if self.notification_callback:
+            try:
+                self.notification_callback(
+                    {
+                        "type": "worker_param_update_error",
+                        "error_message": error_message,
+                        "raw_payload": raw_payload,
+                    }
+                )
+            except Exception as exc:
+                import logging as _logging
+
+                _logging.getLogger(__name__).error(
+                    f"Error in notification_callback for worker error: {exc}"
+                )
+
     def update_parameters(self, params: dict) -> None:
         """Update pipeline parameters on cloud."""
         # Send to cloud first
@@ -248,6 +273,10 @@ class CloudTrack(MediaStreamTrack):
             self.frame_processor = None
         else:
             logger.info("Stopped.")
+
+        # Deregister worker error callback before tearing down WebRTC
+        if self.notification_callback:
+            self.cloud_manager.remove_worker_error_callback(self._on_worker_error)
 
         # Stop WebRTC connection to cloud - next session will start fresh
         await self.cloud_manager.stop_webrtc()

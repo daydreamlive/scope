@@ -269,6 +269,21 @@ class CloudWebRTCClient:
         @self._data_channel.on("message")
         def on_dc_message(message):
             logger.debug(f"Data channel message: {message}")
+            # Parse the message and surface any worker errors.
+            # The cloud worker may respond with JSON like:
+            #   {"error": "..."} or {"last_error": "...", "last_error_time": ...}
+            try:
+                import json as _json
+
+                parsed = _json.loads(message)
+                error_text = parsed.get("error") or parsed.get("last_error")
+                if error_text:
+                    logger.warning(f"Worker reported param-update error: {error_text}")
+                    if hasattr(self.cloud_manager, "_on_worker_error"):
+                        self.cloud_manager._on_worker_error(error_text, parsed)
+            except Exception:
+                # Non-JSON or unexpected format — just ignore
+                pass
 
         # Handle incoming track (processed frames from cloud)
         @self.pc.on("track")
