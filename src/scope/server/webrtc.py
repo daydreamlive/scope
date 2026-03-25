@@ -52,6 +52,28 @@ vpx.MIN_BITRATE = 5000000
 vpx.MAX_BITRATE = 10000000
 
 
+def _parse_graph_node_ids(
+    initial_parameters: dict,
+) -> tuple[list[str], list[str]]:
+    """Extract sink and WebRTC source node IDs from graph initial parameters.
+
+    Returns:
+        (sink_node_ids, webrtc_source_node_ids)
+    """
+    sink_node_ids: list[str] = []
+    webrtc_source_node_ids: list[str] = []
+    graph_data = initial_parameters.get("graph")
+    if graph_data and isinstance(graph_data, dict):
+        for node in graph_data.get("nodes", []):
+            if node.get("type") == "sink":
+                sink_node_ids.append(node["id"])
+            elif node.get("type") == "source":
+                sm = node.get("source_mode", "video")
+                if sm not in ("spout", "ndi", "syphon"):
+                    webrtc_source_node_ids.append(node["id"])
+    return sink_node_ids, webrtc_source_node_ids
+
+
 class Session:
     """WebRTC Session containing peer connection and associated tracks."""
 
@@ -272,18 +294,9 @@ class WebRTCManager:
             produces_video = PipelineRegistry.chain_produces_video(pipeline_ids)
 
             # Parse graph from initial parameters to find sink/source node IDs
-            sink_node_ids: list[str] = []
-            webrtc_source_node_ids: list[str] = []
-            graph_data = initial_parameters.get("graph")
-            if graph_data and isinstance(graph_data, dict):
-                for node in graph_data.get("nodes", []):
-                    if node.get("type") == "sink":
-                        sink_node_ids.append(node["id"])
-                    elif node.get("type") == "source":
-                        # Only WebRTC sources need input handlers
-                        sm = node.get("source_mode", "video")
-                        if sm not in ("spout", "ndi", "syphon"):
-                            webrtc_source_node_ids.append(node["id"])
+            sink_node_ids, webrtc_source_node_ids = _parse_graph_node_ids(
+                initial_parameters
+            )
 
             # Assign the first sink node ID so the primary track reads
             # from the correct per-sink queue.
@@ -664,17 +677,9 @@ class WebRTCManager:
             self.sessions[session.id] = session
 
             # Parse graph from initial parameters for multi-source/sink
-            sink_node_ids: list[str] = []
-            webrtc_source_node_ids: list[str] = []
-            graph_data = initial_parameters.get("graph")
-            if graph_data and isinstance(graph_data, dict):
-                for node in graph_data.get("nodes", []):
-                    if node.get("type") == "sink":
-                        sink_node_ids.append(node["id"])
-                    elif node.get("type") == "source":
-                        sm = node.get("source_mode", "video")
-                        if sm not in ("spout", "ndi", "syphon"):
-                            webrtc_source_node_ids.append(node["id"])
+            sink_node_ids, webrtc_source_node_ids = _parse_graph_node_ids(
+                initial_parameters
+            )
 
             # Determine media modalities from initial_parameters. These are
             # set by the frontend from the pipeline/status endpoint, which is

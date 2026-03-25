@@ -309,11 +309,14 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
         sinkMidMapRef.current = {};
         const sinkTransceiverMap = new Map<RTCRtpTransceiver, string>();
         if (sinkNodeIds && sinkNodeIds.length > 0) {
-          // The first sink reuses the primary sendrecv transceiver
+          // The first sink reuses the primary sendrecv transceiver when
+          // available. If there's no primary transceiver (no source tracks),
+          // create a dedicated recvonly transceiver so it's always mapped.
+          const startIdx = transceiver ? 1 : 0;
           if (transceiver) {
             sinkTransceiverMap.set(transceiver, sinkNodeIds[0]);
           }
-          for (let i = 1; i < sinkNodeIds.length; i++) {
+          for (let i = startIdx; i < sinkNodeIds.length; i++) {
             const t = pc.addTransceiver("video", { direction: "recvonly" });
             if (vp8Codecs.length > 0) {
               t.setCodecPreferences(vp8Codecs);

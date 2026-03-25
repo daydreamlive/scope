@@ -395,13 +395,30 @@ class FrameProcessor:
 
         This avoids repeated pinned memory allocations, which are expensive.
         Pinned memory enables faster DMA transfers to GPU.
+
+        IMPORTANT: The returned buffer is shared. Callers must hold
+        ``_pinned_buffer_lock`` across the ``copy_()`` → ``.cuda()`` sequence
+        to prevent concurrent threads from overwriting the buffer contents.
+        Prefer :meth:`_frame_array_to_gpu` which handles locking automatically.
+        """
+        # Caller is expected to already hold _pinned_buffer_lock.
+        if shape not in self._pinned_buffer_cache:
+            self._pinned_buffer_cache[shape] = torch.empty(
+                shape, dtype=torch.uint8, pin_memory=True
+            )
+        return self._pinned_buffer_cache[shape]
+
+    def _frame_array_to_gpu(self, frame_array) -> torch.Tensor:
+        """Convert a numpy frame array to a GPU tensor using pinned memory.
+
+        Thread-safe: holds ``_pinned_buffer_lock`` across the full
+        copy → transfer sequence so concurrent threads cannot corrupt the
+        shared pinned buffer.
         """
         with self._pinned_buffer_lock:
-            if shape not in self._pinned_buffer_cache:
-                self._pinned_buffer_cache[shape] = torch.empty(
-                    shape, dtype=torch.uint8, pin_memory=True
-                )
-            return self._pinned_buffer_cache[shape]
+            pinned_buffer = self._get_or_create_pinned_buffer(frame_array.shape)
+            pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
+            return pinned_buffer.cuda(non_blocking=True)
 
     def put(self, frame: VideoFrame) -> bool:
         if not self.running:
@@ -437,13 +454,7 @@ class FrameProcessor:
         frame_array = frame.to_ndarray(format="rgb24")
 
         if torch.cuda.is_available():
-            shape = frame_array.shape
-            pinned_buffer = self._get_or_create_pinned_buffer(shape)
-            # Note: We reuse pinned buffers for performance. This assumes the copy_()
-            # operation completes before the next frame arrives.
-            # In practice, copy_() is very fast (~microseconds) and frames arrive at 60 FPS max
-            pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
-            frame_tensor = pinned_buffer.cuda(non_blocking=True)
+            frame_tensor = self._frame_array_to_gpu(frame_array)
         else:
             frame_tensor = torch.as_tensor(frame_array, dtype=torch.uint8)
 
@@ -471,10 +482,7 @@ class FrameProcessor:
         frame_array = frame.to_ndarray(format="rgb24")
 
         if torch.cuda.is_available():
-            shape = frame_array.shape
-            pinned_buffer = self._get_or_create_pinned_buffer(shape)
-            pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
-            frame_tensor = pinned_buffer.cuda(non_blocking=True)
+            frame_tensor = self._frame_array_to_gpu(frame_array)
         else:
             frame_tensor = torch.as_tensor(frame_array, dtype=torch.uint8)
 
@@ -549,47 +557,7 @@ class FrameProcessor:
             except queue.Empty:
                 return None
 
-        # Common processing for both modes
-        self._frames_out += 1
-
-        # Emit playback_ready event on first frame output
-        if not self._playback_ready_emitted:
-            self._playback_ready_emitted = True
-            time_to_first_frame_ms = (
-                int((time.monotonic() - self._stream_start_time) * 1000)
-                if self._stream_start_time is not None
-                else None
-            )
-            publish_event(
-                event_type="playback_ready",
-                session_id=self.session_id,
-                connection_id=self.connection_id,
-                pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
-                user_id=self.user_id,
-                metadata={
-                    "mode": "cloud" if self._cloud_mode else "local",
-                    "ttff_ms": time_to_first_frame_ms,
-                },
-                connection_info=self.connection_info,
-            )
-            logger.info(
-                f"[FRAME-PROCESSOR] First frame produced, playback ready "
-                f"(session={self.session_id}, mode={'cloud' if self._cloud_mode else 'local'}, "
-                f"ttff={time_to_first_frame_ms}ms)"
-            )
-
-        # Fan out frame to all active output sinks
-        if self.output_sinks:
-            try:
-                frame_np = frame.numpy()
-                for _sink_type, entry in self.output_sinks.items():
-                    try:
-                        entry["queue"].put_nowait(frame_np)
-                    except queue.Full:
-                        pass
-            except Exception as e:
-                logger.error(f"Error enqueueing output sink frame: {e}")
-
+        self._on_frame_output(frame)
         return frame
 
     def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
@@ -713,6 +681,10 @@ class FrameProcessor:
         instead of get(). Emits the playback_ready event on first frame
         and fans out to output sinks (NDI/Spout).
         """
+        self._on_frame_output(frame)
+
+    def _on_frame_output(self, frame: torch.Tensor) -> None:
+        """Common post-output logic: increment counter, emit playback_ready, fan out to sinks."""
         self._frames_out += 1
 
         if not self._playback_ready_emitted:
@@ -1166,12 +1138,7 @@ class FrameProcessor:
                                 self._frames_to_cloud += 1
                     elif self._graph_source_queues:
                         if torch.cuda.is_available():
-                            shape = rgb_frame.shape
-                            pinned_buffer = self._get_or_create_pinned_buffer(shape)
-                            pinned_buffer.copy_(
-                                torch.as_tensor(rgb_frame, dtype=torch.uint8)
-                            )
-                            frame_tensor = pinned_buffer.cuda(non_blocking=True)
+                            frame_tensor = self._frame_array_to_gpu(rgb_frame)
                         else:
                             frame_tensor = torch.as_tensor(rgb_frame, dtype=torch.uint8)
 
@@ -1375,12 +1342,7 @@ class FrameProcessor:
                     queues = self._source_queues_by_node.get(node_id)
                     if queues:
                         if torch.cuda.is_available():
-                            shape = rgb_frame.shape
-                            pinned_buffer = self._get_or_create_pinned_buffer(shape)
-                            pinned_buffer.copy_(
-                                torch.as_tensor(rgb_frame, dtype=torch.uint8)
-                            )
-                            frame_tensor = pinned_buffer.cuda(non_blocking=True)
+                            frame_tensor = self._frame_array_to_gpu(rgb_frame)
                         else:
                             frame_tensor = torch.as_tensor(rgb_frame, dtype=torch.uint8)
 
