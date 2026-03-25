@@ -276,8 +276,10 @@ export function FogOfWarBackground() {
   if (useFallback) {
     return (
       <div
-        className="pointer-events-none absolute inset-0"
         style={{
+          position: "absolute",
+          inset: 0,
+          pointerEvents: "none",
           background: `
             radial-gradient(ellipse at 70% 20%, rgba(234, 146, 30, 0.12) 0%, transparent 65%),
             radial-gradient(ellipse at 20% 80%, rgba(56, 189, 192, 0.08) 0%, transparent 65%),
@@ -292,8 +294,10 @@ export function FogOfWarBackground() {
   return (
     <canvas
       ref={canvasRef}
-      className="pointer-events-none absolute inset-0"
+      style={{ position: "absolute", inset: 0, pointerEvents: "none" }}
       aria-hidden="true"
     />
   );
 }
+
+export default FogOfWarBackground;

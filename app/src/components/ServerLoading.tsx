@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import FogOfWarBackground from './FogOfWarBackground';
+import FogOfWarBackground from '@shared/onboarding/FogOfWarBackground';
 
 interface ServerLoadingProps {
   onComplete: () => void;
