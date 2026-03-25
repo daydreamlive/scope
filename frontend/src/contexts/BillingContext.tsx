@@ -13,6 +13,7 @@ import {
   createCheckoutSession,
   createPortalSession,
   setOverageEnabled,
+  requestInferenceToken,
 } from "../lib/billing";
 import { getDaydreamAPIKey } from "../lib/auth";
 import { getDeviceId } from "../lib/deviceId";
@@ -48,6 +49,8 @@ interface BillingContextValue extends BillingState {
   setPaywallReason: (
     reason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null,
   ) => void;
+  /** Get a valid inference token (requests new one if expired) */
+  getInferenceToken: () => Promise<string | null>;
 }
 
 const defaultState: BillingContextValue = {
@@ -65,6 +68,7 @@ const defaultState: BillingContextValue = {
   setShowPaywall: () => {},
   paywallReason: null,
   setPaywallReason: () => {},
+  getInferenceToken: async () => null,
 };
 
 const BillingContext = createContext<BillingContextValue>(defaultState);
@@ -99,6 +103,12 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevTrialExhausted = useRef(false);
+
+  // Inference token cache — refresh before 5-min expiry
+  const inferenceTokenRef = useRef<{
+    token: string;
+    expiresAt: number;
+  } | null>(null);
 
   // Warning thresholds (tracked so we only toast once per threshold)
   const creditWarningShown = useRef<"none" | "low" | "critical">("none");
@@ -254,6 +264,35 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("billing:credits-exhausted", handler);
   }, []);
 
+  const getInferenceToken = useCallback(async (): Promise<string | null> => {
+    // Return cached token if still valid (with 60s buffer)
+    const cached = inferenceTokenRef.current;
+    if (cached && cached.expiresAt > Date.now() + 60_000) {
+      return cached.token;
+    }
+
+    try {
+      const apiKey = getDaydreamAPIKey();
+      if (!apiKey) return null;
+      const deviceId = getDeviceId();
+      const result = await requestInferenceToken(apiKey, deviceId);
+
+      if (!result.authorized || !result.token) {
+        inferenceTokenRef.current = null;
+        return null;
+      }
+
+      inferenceTokenRef.current = {
+        token: result.token,
+        expiresAt: new Date(result.expiresAt!).getTime(),
+      };
+      return result.token;
+    } catch (err) {
+      console.error("[Billing] Failed to get inference token:", err);
+      return null;
+    }
+  }, []);
+
   const openCheckout = useCallback(
     async (tier: "basic" | "pro") => {
       try {
@@ -319,6 +358,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         setShowPaywall,
         paywallReason,
         setPaywallReason,
+        getInferenceToken,
       }}
     >
       {children}

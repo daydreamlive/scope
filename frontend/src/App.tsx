@@ -8,7 +8,7 @@ import { ServerInfoProvider } from "./contexts/ServerInfoContext";
 import { CloudProvider } from "./lib/cloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
 import { OnboardingProvider } from "./contexts/OnboardingContext";
-import { BillingProvider } from "./contexts/BillingContext";
+import { BillingProvider, useBilling } from "./contexts/BillingContext";
 import {
   handleOAuthCallback,
   initElectronAuthListener,
@@ -18,17 +18,35 @@ import { toast } from "sonner";
 import { TelemetryProvider } from "./contexts/TelemetryContext";
 import "./index.css";
 
-// Get cloud WebSocket URL and API key from environment variables
+// Get cloud WebSocket URL from environment variables
 // Set VITE_CLOUD_WS_URL to enable cloud mode, e.g.:
 // VITE_CLOUD_WS_URL=wss://fal.run/your-username/scope-app/ws
-// VITE_CLOUD_KEY=your-cloud-api-key
 const CLOUD_WS_URL = import.meta.env.VITE_CLOUD_WS_URL as string | undefined;
+// Static API key — only used when INFERENCE_JWT_SECRET is not configured on
+// the inference server (i.e. local dev without billing enforcement)
 const CLOUD_KEY = import.meta.env.VITE_CLOUD_KEY as string | undefined;
 
 type AuthResult =
   | { type: "success" }
   | { type: "error"; message: string }
   | null;
+
+/**
+ * Bridge component: reads getInferenceToken from BillingContext
+ * and passes it as tokenProvider to CloudProvider.
+ */
+function BillingCloudBridge({ children }: { children: React.ReactNode }) {
+  const { getInferenceToken } = useBilling();
+  return (
+    <CloudProvider
+      wsUrl={CLOUD_WS_URL}
+      apiKey={CLOUD_KEY}
+      tokenProvider={getInferenceToken}
+    >
+      {children}
+    </CloudProvider>
+  );
+}
 
 function App() {
   const [isHandlingAuth, setIsHandlingAuth] = useState(true);
@@ -112,13 +130,13 @@ function App() {
           <LoRAsProvider>
             <PluginsProvider>
               <ServerInfoProvider>
-                <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
-                  <OnboardingProvider>
-                    <BillingProvider>
+                <OnboardingProvider>
+                  <BillingProvider>
+                    <BillingCloudBridge>
                       <StreamPage />
-                    </BillingProvider>
-                  </OnboardingProvider>
-                </CloudProvider>
+                    </BillingCloudBridge>
+                  </BillingProvider>
+                </OnboardingProvider>
               </ServerInfoProvider>
             </PluginsProvider>
             <Toaster />
