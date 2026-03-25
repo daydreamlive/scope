@@ -84,7 +84,8 @@ function getArrowStyle(
   // For top/bottom positions, compute horizontal offset so the arrow points
   // at the anchor center even when the popover was clamped to the viewport.
   const anchorCenterX = anchorRect.left + anchorRect.width / 2;
-  const popoverLeft = typeof popoverStyle.left === "number" ? popoverStyle.left : 0;
+  const popoverLeft =
+    typeof popoverStyle.left === "number" ? popoverStyle.left : 0;
   const arrowLeft = Math.max(
     ARROW_SIZE + 8,
     Math.min(anchorCenterX - popoverLeft, POPOVER_WIDTH - ARROW_SIZE - 8)

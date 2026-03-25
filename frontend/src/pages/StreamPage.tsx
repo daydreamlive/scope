@@ -126,10 +126,8 @@ function getVaceParams(
 
 export function StreamPage() {
   // Onboarding state
-  const {
-    state: onboardingState,
-    isOverlayVisible: showOnboardingOverlay,
-  } = useOnboarding();
+  const { state: onboardingState, isOverlayVisible: showOnboardingOverlay } =
+    useOnboarding();
 
   // Get API functions that work in both local and cloud modes
   const api = useApi();
@@ -165,7 +163,11 @@ export function StreamPage() {
     ) {
       refreshCloudStatus();
     }
-  }, [onboardingState.phase, onboardingState.inferenceMode, refreshCloudStatus]);
+  }, [
+    onboardingState.phase,
+    onboardingState.inferenceMode,
+    refreshCloudStatus,
+  ]);
 
   // Log stream for the log panel
   const {
@@ -3398,7 +3400,6 @@ export function StreamPage() {
             dialogOpen={showWorkflowImport}
           />
         )}
-
       </div>
     </MIDIProvider>
   );

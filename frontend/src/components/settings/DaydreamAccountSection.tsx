@@ -34,8 +34,8 @@ export function DaydreamAccountSection({
 }: DaydreamAccountSectionProps) {
   // Auth state — initialise eagerly so the toggle is never briefly disabled on mount
   const [isSignedIn, setIsSignedIn] = useState(() => isAuthenticated());
-  const [displayName, setDisplayName] = useState<string | null>(
-    () => getDaydreamUserDisplayName()
+  const [displayName, setDisplayName] = useState<string | null>(() =>
+    getDaydreamUserDisplayName()
   );
 
   // Use shared cloud status hook - avoids redundant polling with Header
@@ -227,7 +227,9 @@ export function DaydreamAccountSection({
         </div>
         <p className="text-xs text-muted-foreground">
           Use remote inference for running pipelines.
-          {!isSignedIn && !(status.connected || status.connecting) && " Log in required."}
+          {!isSignedIn &&
+            !(status.connected || status.connecting) &&
+            " Log in required."}
         </p>
 
         {status.connected && status.connection_id && (

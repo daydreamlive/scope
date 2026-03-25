@@ -75,7 +75,10 @@ export function OnboardingOverlay({
       <FogOfWarBackground />
 
       {/* Blur veil between fog background and content */}
-      <div className="pointer-events-none absolute inset-0 z-[1] backdrop-blur-2xl" aria-hidden="true" />
+      <div
+        className="pointer-events-none absolute inset-0 z-[1] backdrop-blur-2xl"
+        aria-hidden="true"
+      />
 
       {/* Content layer — above the fog canvas + blur veil */}
       <div className="relative z-10 flex flex-col items-center justify-center h-full p-6">

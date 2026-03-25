@@ -69,9 +69,7 @@ export function WorkflowsTab({ onLoad }: WorkflowsTabProps) {
       setWorkflows(data.workflows);
     } catch (err) {
       console.error("Failed to fetch workflows:", err);
-      setError(
-        err instanceof Error ? err.message : "Failed to load workflows"
-      );
+      setError(err instanceof Error ? err.message : "Failed to load workflows");
     } finally {
       setIsLoading(false);
     }

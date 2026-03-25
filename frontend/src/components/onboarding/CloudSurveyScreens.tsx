@@ -40,16 +40,13 @@ export function CloudSurveyScreens({ onComplete }: CloudSurveyScreensProps) {
   const [transitioning, setTransitioning] = useState(false);
 
   // Advance with a brief delay so the user sees their selection highlight
-  const advanceAfterDelay = useCallback(
-    (next: SurveyScreen, delayMs = 300) => {
-      setTransitioning(true);
-      setTimeout(() => {
-        setScreen(next);
-        setTransitioning(false);
-      }, delayMs);
-    },
-    [],
-  );
+  const advanceAfterDelay = useCallback((next: SurveyScreen, delayMs = 300) => {
+    setTransitioning(true);
+    setTimeout(() => {
+      setScreen(next);
+      setTransitioning(false);
+    }, delayMs);
+  }, []);
 
   const handleReferralSelect = useCallback(
     (option: string) => {
@@ -60,7 +57,7 @@ export function CloudSurveyScreens({ onComplete }: CloudSurveyScreensProps) {
       });
       advanceAfterDelay("use_case");
     },
-    [advanceAfterDelay],
+    [advanceAfterDelay]
   );
 
   const handleUseCaseSelect = useCallback(
@@ -72,7 +69,7 @@ export function CloudSurveyScreens({ onComplete }: CloudSurveyScreensProps) {
       });
       advanceAfterDelay("onboarding_style");
     },
-    [advanceAfterDelay],
+    [advanceAfterDelay]
   );
 
   const handleSkip = useCallback(() => {
@@ -140,7 +137,7 @@ export function CloudSurveyScreens({ onComplete }: CloudSurveyScreensProps) {
               How&rsquo;d you hear about Daydream?
             </h3>
             <div className="flex flex-col gap-2">
-              {REFERRAL_OPTIONS.map((option) => (
+              {REFERRAL_OPTIONS.map(option => (
                 <button
                   key={option}
                   onClick={() => handleReferralSelect(option)}
@@ -165,7 +162,7 @@ export function CloudSurveyScreens({ onComplete }: CloudSurveyScreensProps) {
               Are you using Daydream for work?
             </h3>
             <div className="flex flex-col gap-2">
-              {USE_CASE_OPTIONS.map((option) => (
+              {USE_CASE_OPTIONS.map(option => (
                 <button
                   key={option}
                   onClick={() => handleUseCaseSelect(option)}
@@ -228,9 +225,7 @@ export function CloudSurveyScreens({ onComplete }: CloudSurveyScreensProps) {
               >
                 <div
                   className={`mt-0.5 flex items-center justify-center h-8 w-8 rounded-lg shrink-0 transition-colors ${
-                    selectedStyle === "simple"
-                      ? "bg-foreground/10"
-                      : "bg-muted"
+                    selectedStyle === "simple" ? "bg-foreground/10" : "bg-muted"
                   }`}
                 >
                   <Zap className="h-4 w-4 text-foreground" />

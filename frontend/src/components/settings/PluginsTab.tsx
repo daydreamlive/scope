@@ -111,8 +111,8 @@ export function PluginsTab({
         <div className="rounded-lg bg-muted/50 p-4 flex items-start gap-2">
           <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
           <p className="text-sm text-muted-foreground">
-            With remote inference enabled, nodes can only be installed from
-            the Nodes tab.
+            With remote inference enabled, nodes can only be installed from the
+            Nodes tab.
           </p>
         </div>
       )}
@@ -132,9 +132,7 @@ export function PluginsTab({
 
       {/* Installed Plugins Section */}
       <div className="rounded-lg bg-muted/50 p-4 space-y-3">
-        <h3 className="text-sm font-medium text-foreground">
-          Installed Nodes
-        </h3>
+        <h3 className="text-sm font-medium text-foreground">Installed Nodes</h3>
         {isLoading ? (
           <p className="text-sm text-muted-foreground">Loading nodes...</p>
         ) : plugins.length === 0 ? (

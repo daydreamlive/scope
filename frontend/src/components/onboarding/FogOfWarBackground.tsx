@@ -225,10 +225,7 @@ export function FogOfWarBackground() {
           my,
           BRUSH_RADIUS
         );
-        brushGrad.addColorStop(
-          0,
-          `rgba(255, 255, 255, ${BRUSH_CENTER_ALPHA})`
-        );
+        brushGrad.addColorStop(0, `rgba(255, 255, 255, ${BRUSH_CENTER_ALPHA})`);
         brushGrad.addColorStop(0.5, `rgba(255, 255, 255, ${BRUSH_MID_ALPHA})`);
         brushGrad.addColorStop(1, "rgba(255, 255, 255, 0)");
         trailCtx.fillStyle = brushGrad;

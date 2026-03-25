@@ -44,7 +44,9 @@ export function Header({
     "general" | "account" | "api-keys" | "loras" | "osc"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
-  const [pluginsInitialTab, setPluginsInitialTab] = useState<string | undefined>(undefined);
+  const [pluginsInitialTab, setPluginsInitialTab] = useState<
+    string | undefined
+  >(undefined);
 
   // Use shared cloud status hook - single source of truth
   const { isConnected, isConnecting, lastCloseCode, lastCloseReason } =
@@ -216,7 +218,10 @@ export function Header({
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { setPluginsInitialTab("discover"); setPluginsOpen(true); }}
+            onClick={() => {
+              setPluginsInitialTab("discover");
+              setPluginsOpen(true);
+            }}
             className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
             title="Nodes"
           >
@@ -227,7 +232,10 @@ export function Header({
             data-tour="workflows-button"
             variant="ghost"
             size="sm"
-            onClick={() => { setPluginsInitialTab("workflows"); setPluginsOpen(true); }}
+            onClick={() => {
+              setPluginsInitialTab("workflows");
+              setPluginsOpen(true);
+            }}
             className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
             title="Workflows"
           >

@@ -22,12 +22,12 @@ export interface StarterWorkflow {
 
 /** Return workflows filtered for the given onboarding style. */
 export function getWorkflowsForStyle(
-  style: "teaching" | "simple" | null,
+  style: "teaching" | "simple" | null
 ): StarterWorkflow[] {
   // Default to teaching workflows when no style is set (e.g. local mode)
   const effectiveStyle = style ?? "teaching";
   return STARTER_WORKFLOWS.filter(
-    (wf) => wf.onboardingStyle === effectiveStyle || wf.onboardingStyle === "both",
+    wf => wf.onboardingStyle === effectiveStyle || wf.onboardingStyle === "both"
   );
 }
 
@@ -129,7 +129,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             id: "output",
             type: "sink",
             x: 971.58,
-            y: 187.50,
+            y: 187.5,
             w: 299,
             h: 238,
           },
@@ -213,7 +213,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_1",
               type: "note",
-              position: { x: 335.52, y: -144.70 },
+              position: { x: 335.52, y: -144.7 },
               width: 200,
               height: 185,
               data: {
@@ -375,8 +375,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               provenance: {
                 source: "huggingface",
                 repo_id: "daydreamlive/Wan2.1-1.3b-lora-highresfix",
-                hf_filename:
-                  "Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
+                hf_filename: "Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
               },
             },
             {
@@ -529,7 +528,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 label: "Note",
                 nodeType: "note",
                 noteText:
-                  "WELCOME TO SCOPE\n\nThis educational workflow will walk you through some core concepts.\n\nFirst, let's add an input source. Right click on the canvas and search \"Source\".\n\nClick on the Source node to add it.",
+                  'WELCOME TO SCOPE\n\nThis educational workflow will walk you through some core concepts.\n\nFirst, let\'s add an input source. Right click on the canvas and search "Source".\n\nClick on the Source node to add it.',
                 locked: true,
                 pinned: true,
               },
@@ -745,7 +744,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             type: "pipeline",
             pipeline_id: "longlive",
             x: 379.12,
-            y: 179.30,
+            y: 179.3,
             w: 240,
             h: 684,
           },
@@ -840,7 +839,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 label: "Note",
                 nodeType: "note",
                 noteText:
-                  "WELCOME TO SCOPE\n\nThis educational workflow will walk you through some core concepts.\n\nFirst, let's add an input source. Right click on the canvas and search \"Source\".\n\nClick on the Source node to add it.",
+                  'WELCOME TO SCOPE\n\nThis educational workflow will walk you through some core concepts.\n\nFirst, let\'s add an input source. Right click on the canvas and search "Source".\n\nClick on the Source node to add it.',
                 locked: false,
                 pinned: false,
               },
@@ -863,7 +862,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_2",
               type: "note",
-              position: { x: 956.80, y: -128.58 },
+              position: { x: 956.8, y: -128.58 },
               width: 241,
               height: 131,
               data: {
@@ -878,7 +877,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_3",
               type: "note",
-              position: { x: 1319.52, y: -137.70 },
+              position: { x: 1319.52, y: -137.7 },
               width: 320,
               height: 185,
               data: {
@@ -995,7 +994,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
           loras: [
             {
               id: "dd6e92b8-fdfd-4336-9d6e-2b9442772a20",
-              sha256: "a4028744227d95ca03eb0db1a0906dc34d84356d44ab4778348ceb35661ec94a",
+              sha256:
+                "a4028744227d95ca03eb0db1a0906dc34d84356d44ab4778348ceb35661ec94a",
               filename: "diffslime_acidzlime-000016.safetensors",
               weight: 1.5,
               merge_mode: "permanent_merge",
@@ -1007,7 +1007,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             },
             {
               id: "5e3c2671-81f3-4d14-a12b-8457258c48c4",
-              sha256: "fd373e0991a33df28f6d0d4a13d8553e2c9625483e309e8ec952a96a2570bec9",
+              sha256:
+                "fd373e0991a33df28f6d0d4a13d8553e2c9625483e309e8ec952a96a2570bec9",
               filename: "daydream-scope-dissolve.safetensors",
               weight: 1.5,
               merge_mode: "permanent_merge",
@@ -1229,7 +1230,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
           loras: [
             {
               id: "a28b8bd2-81f0-4b99-92fe-2bda347ad5f2",
-              sha256: "bc5f39b3a6e55fcbf4f3c84806cb37b324996adb0d2a6ee9e9b9789e23948515",
+              sha256:
+                "bc5f39b3a6e55fcbf4f3c84806cb37b324996adb0d2a6ee9e9b9789e23948515",
               filename: "Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
               weight: 0.5,
               merge_mode: "permanent_merge",
@@ -1241,8 +1243,10 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             },
             {
               id: "ff72452c-b344-4004-bd69-4237687ad5bc",
-              sha256: "c68897f7f50f6ab3e4370810b6c7cdfb1bf47eeb9e69aaac1998e76a57b58ea2",
-              filename: "Kubakub_v1_Wan2.1_1-3B_t2v_torchoptadam80epochs.safetensors",
+              sha256:
+                "c68897f7f50f6ab3e4370810b6c7cdfb1bf47eeb9e69aaac1998e76a57b58ea2",
+              filename:
+                "Kubakub_v1_Wan2.1_1-3B_t2v_torchoptadam80epochs.safetensors",
               weight: 1,
               merge_mode: "permanent_merge",
               provenance: {
@@ -1253,7 +1257,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             },
             {
               id: "2ecf282d-4007-45fc-9dbc-c8583e6f6c91",
-              sha256: "fd373e0991a33df28f6d0d4a13d8553e2c9625483e309e8ec952a96a2570bec9",
+              sha256:
+                "fd373e0991a33df28f6d0d4a13d8553e2c9625483e309e8ec952a96a2570bec9",
               filename: "daydream-scope-dissolve.safetensors",
               weight: 0.3,
               merge_mode: "permanent_merge",
@@ -1427,8 +1432,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               denoising_step_list: [1000, 750, 500, 250],
               vace_use_input_video: false,
               kv_cache_attention_bias: 0.3,
-              __prompt:
-                "abstract butterfly made of Kubakub dissolve",
+              __prompt: "abstract butterfly made of Kubakub dissolve",
             },
           },
         },
@@ -1478,7 +1482,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
           loras: [
             {
               id: "1889086a-9554-4549-8b53-cc53e58ec547",
-              sha256: "2074e3fc23d7039bfa78d140337f720f5417ad1857b95326ac757243fd6f0607",
+              sha256:
+                "2074e3fc23d7039bfa78d140337f720f5417ad1857b95326ac757243fd6f0607",
               filename: "[flux.2.klein]pixelart_redmond-000032.safetensors",
               weight: 1.6,
               merge_mode: "runtime_peft",
