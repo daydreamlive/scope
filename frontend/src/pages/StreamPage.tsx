@@ -75,6 +75,7 @@ import { toast } from "sonner";
 import { useOnboarding } from "../contexts/OnboardingContext";
 import { OnboardingOverlay } from "../components/onboarding/OnboardingOverlay";
 import { WorkspaceTour } from "../components/onboarding/WorkspaceTour";
+import { StarterWorkflowsChip } from "../components/onboarding/StarterWorkflowsChip";
 import {
   isAuthenticated as checkIsAuthenticated,
   getDaydreamAPIKey,
@@ -326,6 +327,9 @@ export function StreamPage() {
 
   // Settings dialog navigation state
   const [openSettingsTab, setOpenSettingsTab] = useState<string | null>(null);
+
+  // Plugins dialog navigation state (used by starter workflows chip)
+  const [openPluginsTab, setOpenPluginsTab] = useState<string | null>(null);
 
   // Open account tab after sign-in (success or error)
   useEffect(() => {
@@ -2723,6 +2727,8 @@ export function StreamPage() {
           cloudDisabled={isStreaming}
           openSettingsTab={openSettingsTab}
           onSettingsTabOpened={() => setOpenSettingsTab(null)}
+          openPluginsTab={openPluginsTab}
+          onPluginsTabOpened={() => setOpenPluginsTab(null)}
           graphMode={graphMode}
           onGraphModeToggle={() => {
             if (!graphMode) {
@@ -2830,6 +2836,8 @@ export function StreamPage() {
           onLoadWorkflow={data => {
             setPreloadedWorkflow(data as ScopeWorkflow);
             setShowWorkflowImport(true);
+            // Ensure we're in graph mode so the workflow loads into the graph editor
+            if (!graphMode) setGraphMode(true);
           }}
         />
 
@@ -3394,11 +3402,15 @@ export function StreamPage() {
 
         {/* Post-onboarding tooltip tour (play → workflows) */}
         {!showOnboardingOverlay && onboardingState.phase === "idle" && (
-          <WorkspaceTour
-            onboardingStyle={onboardingState.onboardingStyle}
-            isStreaming={isStreaming}
-            dialogOpen={showWorkflowImport}
-          />
+          <>
+            <WorkspaceTour
+              onboardingStyle={onboardingState.onboardingStyle}
+              dialogOpen={showWorkflowImport}
+            />
+            <StarterWorkflowsChip
+              onOpenWorkflows={() => setOpenPluginsTab("workflows")}
+            />
+          </>
         )}
       </div>
     </MIDIProvider>

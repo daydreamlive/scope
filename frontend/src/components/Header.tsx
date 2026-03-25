@@ -20,6 +20,9 @@ interface HeaderProps {
   // External settings tab control
   openSettingsTab?: string | null;
   onSettingsTabOpened?: () => void;
+  // External plugins tab control (e.g. from starter workflows chip)
+  openPluginsTab?: string | null;
+  onPluginsTabOpened?: () => void;
   // Graph mode toggle
   graphMode?: boolean;
   onGraphModeToggle?: () => void;
@@ -34,6 +37,8 @@ export function Header({
   cloudDisabled,
   openSettingsTab,
   onSettingsTabOpened,
+  openPluginsTab,
+  onPluginsTabOpened,
   graphMode = false,
   onGraphModeToggle,
   onLoadWorkflow,
@@ -123,6 +128,15 @@ export function Header({
       onSettingsTabOpened?.();
     }
   }, [openSettingsTab, onSettingsTabOpened]);
+
+  // React to external requests to open a specific plugins dialog tab
+  useEffect(() => {
+    if (openPluginsTab) {
+      setPluginsInitialTab(openPluginsTab);
+      setPluginsOpen(true);
+      onPluginsTabOpened?.();
+    }
+  }, [openPluginsTab, onPluginsTabOpened]);
 
   useEffect(() => {
     // Handle deep link actions for plugin installation

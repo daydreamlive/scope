@@ -37,7 +37,7 @@ export const SIMPLE_TOUR_STEPS: TourStepDef[] = [
     anchor: "workflows-button",
     title: "Explore Workflows",
     description:
-      "When you're ready to explore, browse our library of community-built Workflows or submit your own.",
+      "When you're ready, try the other starter workflows or browse community creations.",
     position: "bottom",
     showSkip: false,
     showDone: true,
@@ -58,7 +58,7 @@ export const TEACHING_TOUR_STEPS: TourStepDef[] = [
     anchor: "workflows-button",
     title: "Explore Workflows",
     description:
-      "When you're ready to explore, browse our library of community-built Workflows or submit your own.",
+      "When you're ready, try the other starter workflows or browse community creations.",
     position: "bottom",
     showSkip: false,
     showDone: true,

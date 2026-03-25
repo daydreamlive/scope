@@ -4,8 +4,8 @@
 
 // Images live in public/assets/onboarding/ — reference by URL, not module import
 const mythicalCreatureThumb = "/assets/onboarding/mythical-creature.png";
-const dissolvingCatThumb = "/assets/onboarding/dissolving-cat.webp";
-const pixelArtThumb = "/assets/onboarding/pixel-art.png";
+const dissolvingSunflowerThumb = "/assets/onboarding/dissolving-sunflower.png";
+const blobmeThumb = "/assets/onboarding/blobme.png";
 
 export interface StarterWorkflow {
   id: string;
@@ -333,24 +333,24 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
   },
   {
     id: "starter-ref-image",
-    title: "Dissolving Cat Flowers",
-    category: "Reference Image Extension",
+    title: "Dissolving Sunflower",
+    category: "Depth Map",
     description:
-      "Use a depth-mapped reference video to guide generation with the dissolve style. Great for extending existing footage.",
+      "A dissolving sunflower in abstract particles using depth estimation and dissolve LoRA — transforms your camera feed into dreamy, particle-filled visuals.",
     color: "#4ade80",
-    thumbnail: dissolvingCatThumb,
+    thumbnail: dissolvingSunflowerThumb,
     onboardingStyle: "teaching",
     workflow: {
       format: "scope-workflow",
       format_version: "1.0",
       metadata: {
-        name: "Dissolving Cat Flowers",
-        created_at: "2026-03-20T22:33:38.001Z",
-        scope_version: "0.1.8",
+        name: "Dissolving Sunflower",
+        created_at: "2026-03-25T21:25:43.546Z",
+        scope_version: "0.1.9",
       },
       prompts: [
         {
-          text: "abstract dissolving flowers made of ral-dissolve swaying in the wind",
+          text: "A high resolution ral-dissolve scene. A **sunflower** sitting in the ral-dissolve, looking around in abstract dissolving particles",
           weight: 1,
         },
       ],
@@ -372,6 +372,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               filename: "Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
               weight: 0.7,
               merge_mode: "permanent_merge",
+              sha256:
+                "bc5f39b3a6e55fcbf4f3c84806cb37b324996adb0d2a6ee9e9b9789e23948515",
               provenance: {
                 source: "huggingface",
                 repo_id: "daydreamlive/Wan2.1-1.3b-lora-highresfix",
@@ -383,6 +385,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               filename: "daydream-scope-dissolve.safetensors",
               weight: 1.5,
               merge_mode: "permanent_merge",
+              sha256:
+                "fd373e0991a33df28f6d0d4a13d8553e2c9625483e309e8ec952a96a2570bec9",
               provenance: {
                 source: "civitai",
                 version_id: "2680702",
@@ -415,10 +419,10 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
       graph: {
         nodes: [
           {
-            id: "depth",
+            id: "video-depth-anything",
             type: "pipeline",
             pipeline_id: "video-depth-anything",
-            x: 50,
+            x: 350,
             y: 200,
             w: 240,
             h: 114,
@@ -427,8 +431,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             id: "longlive",
             type: "pipeline",
             pipeline_id: "longlive",
-            x: 342,
-            y: 174,
+            x: 650,
+            y: 200,
             w: 240,
             h: 684,
           },
@@ -436,7 +440,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             id: "rife",
             type: "pipeline",
             pipeline_id: "passthrough",
-            x: 650,
+            x: 950,
             y: 200,
             w: 240,
             h: 114,
@@ -444,13 +448,20 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
           {
             id: "output",
             type: "sink",
-            x: 972,
-            y: 188,
-            w: 299,
-            h: 238,
+            x: 1250,
+            y: 200,
+            w: 240,
+            h: 200,
           },
         ],
         edges: [
+          {
+            from: "video-depth-anything",
+            from_port: "video",
+            to_node: "longlive",
+            to_port: "vace_input_frames",
+            kind: "stream",
+          },
           {
             from: "longlive",
             from_port: "video",
@@ -465,20 +476,13 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             to_port: "video",
             kind: "stream",
           },
-          {
-            from: "depth",
-            from_port: "video",
-            to_node: "longlive",
-            to_port: "vace_input_frames",
-            kind: "stream",
-          },
         ],
         ui_state: {
           nodes: [
             {
               id: "lora-0",
               type: "lora",
-              position: { x: -119, y: 529 },
+              position: { x: 90.6, y: 823.8 },
               width: 240,
               height: 293,
               data: {
@@ -502,13 +506,13 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "vace",
               type: "vace",
-              position: { x: -118, y: 333 },
+              position: { x: 97.5, y: 533 },
               width: 240,
               height: 178,
               data: {
                 label: "VACE",
                 nodeType: "vace",
-                vaceContextScale: 1,
+                vaceContextScale: 0.5,
                 vaceRefImage: "",
                 vaceFirstFrame: "",
                 vaceLastFrame: "",
@@ -521,7 +525,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note",
               type: "note",
-              position: { x: -132, y: -144 },
+              position: { x: -318.29, y: -150.75 },
               width: 253,
               height: 203,
               data: {
@@ -536,14 +540,14 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_1",
               type: "note",
-              position: { x: 336, y: -145 },
-              width: 200,
+              position: { x: 100, y: -145 },
+              width: 220,
               height: 185,
               data: {
                 label: "Note",
                 nodeType: "note",
                 noteText:
-                  "Next, click and hold the white dot on the Source, and connect it to the Depth Anything node.\n\nThis preprocessor extracts depth information from your video, which guides the generation to follow the structure of your original footage.",
+                  "Next, click the white dot on the Source node and drag it to connect the Source to the Depth Anything node.\n\nThis preprocessor estimates depth in your video, preserving 3D structure while the AI stylizes the output.",
                 locked: true,
                 pinned: true,
               },
@@ -551,7 +555,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_2",
               type: "note",
-              position: { x: 1003, y: -142 },
+              position: { x: 1280, y: -128.58 },
               width: 241,
               height: 131,
               data: {
@@ -566,7 +570,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_3",
               type: "note",
-              position: { x: 1444, y: -143 },
+              position: { x: 1600, y: -137.7 },
               width: 320,
               height: 185,
               data: {
@@ -581,14 +585,14 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_4",
               type: "note",
-              position: { x: 667, y: -144 },
+              position: { x: 950, y: -127.56 },
               width: 227,
-              height: 149,
+              height: 131,
               data: {
                 label: "Note",
                 nodeType: "note",
                 noteText:
-                  'Next, click the dropdown and change it from "passthrough" to "rife" \n\nRife interpolates between frames, creating smoother output video.\n',
+                  'Next, click the dropdown and change "passthrough" to "rife".\n\nRife interpolates between frames for a smoother video',
                 locked: false,
                 pinned: true,
               },
@@ -596,7 +600,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "record",
               type: "record",
-              position: { x: 1007, y: 459 },
+              position: { x: 1330, y: 553.06 },
               width: 180,
               height: 95,
               data: {
@@ -647,7 +651,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               vace_use_input_video: true,
               kv_cache_attention_bias: 0.3,
               __prompt:
-                "abstract dissolving flowers made of ral-dissolve swaying in the wind",
+                "A high resolution ral-dissolve scene. A **sunflower** sitting in the ral-dissolve, looking around in abstract dissolving particles",
             },
           },
         },
@@ -655,38 +659,33 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
     },
   },
   {
-    id: "starter-inpainting",
-    title: "Pixel Art, Preserved Background",
-    category: "Inpainting",
+    id: "starter-blobme",
+    title: "Paint Blobs",
+    category: "Depth Map",
     description:
-      "Use YOLO masking to preserve your background while transforming subjects into pixel art style.",
+      "Abstract morphing sculpture using depth estimation and acid slime LoRA — transforms your camera feed into dripping, multicolored art.",
     color: "#60a5fa",
-    thumbnail: pixelArtThumb,
+    thumbnail: blobmeThumb,
     onboardingStyle: "teaching",
     workflow: {
       format: "scope-workflow",
       format_version: "1.0",
       metadata: {
-        name: "Pixel Art, Preserved Background",
-        created_at: "2026-03-20T22:31:18.153Z",
-        scope_version: "0.1.8",
+        name: "Paint Blobs",
+        created_at: "2026-03-25T21:20:02.968Z",
+        scope_version: "0.1.9",
       },
       prompts: [
         {
-          text: "pixel art scene, 2d",
+          text: "abstract morphing multicolored sculpture of ral-acidzlime, dripping paint pour",
           weight: 1,
         },
       ],
       pipelines: [
         {
-          pipeline_id: "yolo_mask",
+          pipeline_id: "video-depth-anything",
           pipeline_version: "1.0.0",
-          source: {
-            type: "git",
-            plugin_name: "scope-yolo-mask",
-            plugin_version: "0.1.0",
-            package_spec: "git+https://github.com/daydreamlive/scope_yolo_mask",
-          },
+          source: { type: "builtin" },
           loras: [],
           params: {},
         },
@@ -697,12 +696,14 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
           loras: [
             {
               id: "lora-0",
-              filename: "[flux.2.klein]pixelart_redmond-000032.safetensors",
+              filename: "diffslime_acidzlime-000016.safetensors",
               weight: 1.6,
-              merge_mode: "runtime_peft",
+              merge_mode: "permanent_merge",
+              sha256: "a4028744227d95ca03eb0db1a0906dc34d84356d44ab4778348ceb35661ec94a",
               provenance: {
                 source: "civitai",
-                version_id: "2724902",
+                version_id: "2704300",
+                url: "https://civitai.com/api/download/models/2704300",
               },
             },
           ],
@@ -715,9 +716,12 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             quantization: null,
             vace_enabled: true,
             noise_controller: true,
-            denoising_step_list: [1000, 858, 748, 550],
+            vace_context_scale: 0.9,
+            denoising_step_list: [1000, 750, 650],
             vace_use_input_video: true,
             kv_cache_attention_bias: 0.3,
+            reset_cache: true,
+            vae_type: "lightvae",
           },
         },
         {
@@ -731,11 +735,11 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
       graph: {
         nodes: [
           {
-            id: "yolo_mask",
+            id: "video-depth-anything",
             type: "pipeline",
-            pipeline_id: "yolo_mask",
-            x: 40.02,
-            y: 158.22,
+            pipeline_id: "video-depth-anything",
+            x: 350,
+            y: 200,
             w: 240,
             h: 114,
           },
@@ -743,32 +747,32 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             id: "longlive",
             type: "pipeline",
             pipeline_id: "longlive",
-            x: 379.12,
-            y: 179.3,
+            x: 650,
+            y: 200,
             w: 240,
             h: 684,
-          },
-          {
-            id: "output",
-            type: "sink",
-            x: 944.15,
-            y: 170.29,
-            w: 299,
-            h: 238,
           },
           {
             id: "pipeline",
             type: "pipeline",
             pipeline_id: "passthrough",
-            x: 659.47,
-            y: 202.25,
+            x: 950,
+            y: 200,
             w: 240,
             h: 114,
+          },
+          {
+            id: "output",
+            type: "sink",
+            x: 1268.16,
+            y: 202.72,
+            w: 338,
+            h: 303,
           },
         ],
         edges: [
           {
-            from: "yolo_mask",
+            from: "video-depth-anything",
             from_port: "video",
             to_node: "longlive",
             to_port: "vace_input_frames",
@@ -794,7 +798,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "lora-0",
               type: "lora",
-              position: { x: -119, y: 529 },
+              position: { x: 176.93, y: 581.84 },
               width: 240,
               height: 191,
               data: {
@@ -802,18 +806,18 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 nodeType: "lora",
                 loras: [
                   {
-                    path: "[flux.2.klein]pixelart_redmond-000032.safetensors",
+                    path: "diffslime_acidzlime-000016.safetensors",
                     scale: 1.6,
-                    mergeMode: "runtime_peft",
+                    mergeMode: "permanent_merge",
                   },
                 ],
-                loraMergeMode: "runtime_peft",
+                loraMergeMode: "permanent_merge",
               },
             },
             {
               id: "vace",
               type: "vace",
-              position: { x: -118, y: 333 },
+              position: { x: 317.92, y: 373.95 },
               width: 240,
               height: 178,
               data: {
@@ -839,7 +843,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 label: "Note",
                 nodeType: "note",
                 noteText:
-                  'WELCOME TO SCOPE\n\nThis educational workflow will walk you through some core concepts.\n\nFirst, let\'s add an input source. Right click on the canvas and search "Source".\n\nClick on the Source node to add it.',
+                  'WELCOME TO SCOPE\n\nThis educational workflow will walk you through some core concepts.\n\nFirst, let\'s add an input source. Right click on the canvas and search "Source".\n\nClick on the Source node to add it, and change the source to Camera (or leave as file if you prefer not to use your webcam).',
                 locked: false,
                 pinned: false,
               },
@@ -847,14 +851,14 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_1",
               type: "note",
-              position: { x: 44, y: -145 },
+              position: { x: 100, y: -145 },
               width: 220,
               height: 185,
               data: {
                 label: "Note",
                 nodeType: "note",
                 noteText:
-                  "Next, click the white dot on the Source node and drag it to connect the Source to the YOLO Mask node.\n\nThis preprocessor detects objects in your video and creates a mask, preserving your background while only transforming the detected subjects.",
+                  "Next, click the white dot on the Source node and drag it to connect the Source to the Depth Anything node.\n\nThis preprocessor estimates depth in your video, preserving 3D structure while the AI stylizes the output.",
                 locked: false,
                 pinned: true,
               },
@@ -862,7 +866,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_2",
               type: "note",
-              position: { x: 956.8, y: -128.58 },
+              position: { x: 1280, y: -128.58 },
               width: 241,
               height: 131,
               data: {
@@ -877,7 +881,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_3",
               type: "note",
-              position: { x: 1319.52, y: -137.7 },
+              position: { x: 1600, y: -137.7 },
               width: 320,
               height: 185,
               data: {
@@ -892,7 +896,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "note_4",
               type: "note",
-              position: { x: 640.87, y: -127.56 },
+              position: { x: 950, y: -127.56 },
               width: 227,
               height: 131,
               data: {
@@ -907,7 +911,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "record",
               type: "record",
-              position: { x: 1007.34, y: 453.06 },
+              position: { x: 1330, y: 553.06 },
               width: 180,
               height: 95,
               data: {
@@ -949,10 +953,14 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               quantization: null,
               vace_enabled: true,
               noise_controller: true,
-              denoising_step_list: [1000, 858, 748, 550],
+              vace_context_scale: 0.9,
+              denoising_step_list: [1000, 750, 650],
               vace_use_input_video: true,
               kv_cache_attention_bias: 0.3,
-              __prompt: "pixel art scene, 2d",
+              reset_cache: true,
+              vae_type: "lightvae",
+              __prompt:
+                "abstract morphing multicolored sculpture of ral-acidzlime, dripping paint pour",
             },
           },
         },
@@ -1201,40 +1209,47 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
   },
   {
     id: "simple-ref-image",
-    title: "Kubakub Butterfly Abstract",
-    category: "Style LoRA",
+    title: "Dissolving Sunflower",
+    category: "Depth Map",
     description:
-      "Abstract butterfly visuals using Kubakub and dissolve LoRAs with high-res fix — text-to-video generation with rich organic style.",
+      "A dissolving sunflower in abstract particles using depth estimation and dissolve LoRA — transforms your camera feed into dreamy, particle-filled visuals.",
     color: "#4ade80",
-    thumbnail: dissolvingCatThumb,
+    thumbnail: dissolvingSunflowerThumb,
     onboardingStyle: "simple",
     workflow: {
       format: "scope-workflow",
       format_version: "1.0",
       metadata: {
-        name: "Kubakub Butterfly Abstract",
-        created_at: "2026-03-09T13:27:43.977Z",
-        scope_version: "0.1.6",
+        name: "Dissolving Sunflower",
+        created_at: "2026-03-25T21:25:43.546Z",
+        scope_version: "0.1.9",
       },
       prompts: [
         {
-          text: "abstract butterfly made of Kubakub dissolve",
+          text: "A high resolution ral-dissolve scene. A **sunflower** sitting in the ral-dissolve, looking around in abstract dissolving particles",
           weight: 1,
         },
       ],
       pipelines: [
+        {
+          pipeline_id: "video-depth-anything",
+          pipeline_version: "1.0.0",
+          source: { type: "builtin" },
+          loras: [],
+          params: {},
+        },
         {
           pipeline_id: "longlive",
           pipeline_version: "1.0.0",
           source: { type: "builtin" },
           loras: [
             {
-              id: "a28b8bd2-81f0-4b99-92fe-2bda347ad5f2",
+              id: "lora-0",
+              filename: "Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
+              weight: 0.7,
+              merge_mode: "permanent_merge",
               sha256:
                 "bc5f39b3a6e55fcbf4f3c84806cb37b324996adb0d2a6ee9e9b9789e23948515",
-              filename: "Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
-              weight: 0.5,
-              merge_mode: "permanent_merge",
               provenance: {
                 source: "huggingface",
                 repo_id: "daydreamlive/Wan2.1-1.3b-lora-highresfix",
@@ -1242,26 +1257,12 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               },
             },
             {
-              id: "ff72452c-b344-4004-bd69-4237687ad5bc",
-              sha256:
-                "c68897f7f50f6ab3e4370810b6c7cdfb1bf47eeb9e69aaac1998e76a57b58ea2",
-              filename:
-                "Kubakub_v1_Wan2.1_1-3B_t2v_torchoptadam80epochs.safetensors",
-              weight: 1,
+              id: "lora-1",
+              filename: "daydream-scope-dissolve.safetensors",
+              weight: 1.5,
               merge_mode: "permanent_merge",
-              provenance: {
-                url: "https://civitai.com/api/download/models/1787596",
-                source: "civitai",
-                version_id: "1787596",
-              },
-            },
-            {
-              id: "2ecf282d-4007-45fc-9dbc-c8583e6f6c91",
               sha256:
                 "fd373e0991a33df28f6d0d4a13d8553e2c9625483e309e8ec952a96a2570bec9",
-              filename: "daydream-scope-dissolve.safetensors",
-              weight: 0.3,
-              merge_mode: "permanent_merge",
               provenance: {
                 source: "civitai",
                 version_id: "2680702",
@@ -1271,15 +1272,15 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
           params: {
             width: 512,
             height: 512,
-            input_mode: "text",
+            input_mode: "video",
             noise_scale: 0.7,
             manage_cache: false,
             quantization: null,
             vace_enabled: true,
             noise_controller: true,
-            vace_context_scale: 0.8,
-            denoising_step_list: [1000, 750, 500, 250],
-            vace_use_input_video: false,
+            vace_context_scale: 0.5,
+            denoising_step_list: [1000, 750],
+            vace_use_input_video: true,
             kv_cache_attention_bias: 0.3,
           },
         },
@@ -1294,11 +1295,27 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
       graph: {
         nodes: [
           {
+            id: "input",
+            type: "source",
+            source_mode: "video",
+            x: 34.1,
+            y: 218.17,
+          },
+          {
+            id: "video-depth-anything",
+            type: "pipeline",
+            pipeline_id: "video-depth-anything",
+            x: 350,
+            y: 200,
+            w: 240,
+            h: 114,
+          },
+          {
             id: "longlive",
             type: "pipeline",
             pipeline_id: "longlive",
-            x: 342.27,
-            y: 173.73,
+            x: 650,
+            y: 200,
             w: 240,
             h: 684,
           },
@@ -1306,7 +1323,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             id: "rife",
             type: "pipeline",
             pipeline_id: "rife",
-            x: 650,
+            x: 950,
             y: 200,
             w: 240,
             h: 114,
@@ -1314,13 +1331,27 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
           {
             id: "output",
             type: "sink",
-            x: 971.58,
-            y: 187.5,
-            w: 299,
-            h: 238,
+            x: 1250,
+            y: 200,
+            w: 240,
+            h: 200,
           },
         ],
         edges: [
+          {
+            from: "input",
+            from_port: "video",
+            to_node: "video-depth-anything",
+            to_port: "video",
+            kind: "stream",
+          },
+          {
+            from: "video-depth-anything",
+            from_port: "video",
+            to_node: "longlive",
+            to_port: "vace_input_frames",
+            kind: "stream",
+          },
           {
             from: "longlive",
             from_port: "video",
@@ -1341,7 +1372,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "lora-0",
               type: "lora",
-              position: { x: -119.22, y: 528.92 },
+              position: { x: 90.6, y: 823.8 },
               width: 240,
               height: 293,
               data: {
@@ -1350,17 +1381,12 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 loras: [
                   {
                     path: "Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
-                    scale: 0.5,
-                    mergeMode: "permanent_merge",
-                  },
-                  {
-                    path: "Kubakub_v1_Wan2.1_1-3B_t2v_torchoptadam80epochs.safetensors",
-                    scale: 1,
+                    scale: 0.7,
                     mergeMode: "permanent_merge",
                   },
                   {
                     path: "daydream-scope-dissolve.safetensors",
-                    scale: 0.3,
+                    scale: 1.5,
                     mergeMode: "permanent_merge",
                   },
                 ],
@@ -1370,13 +1396,13 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "vace",
               type: "vace",
-              position: { x: -117.71, y: 333.09 },
+              position: { x: 97.5, y: 533 },
               width: 240,
               height: 178,
               data: {
                 label: "VACE",
                 nodeType: "vace",
-                vaceContextScale: 1,
+                vaceContextScale: 0.5,
                 vaceRefImage: "",
                 vaceFirstFrame: "",
                 vaceLastFrame: "",
@@ -1389,7 +1415,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "record",
               type: "record",
-              position: { x: 1006.75, y: 458.87 },
+              position: { x: 1330, y: 553.06 },
               width: 180,
               height: 95,
               data: {
@@ -1422,17 +1448,18 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             longlive: {
               width: 512,
               height: 512,
-              input_mode: "text",
+              input_mode: "video",
               noise_scale: 0.7,
               manage_cache: false,
               quantization: null,
               vace_enabled: true,
               noise_controller: true,
-              vace_context_scale: 0.8,
-              denoising_step_list: [1000, 750, 500, 250],
-              vace_use_input_video: false,
+              vace_context_scale: 0.5,
+              denoising_step_list: [1000, 750],
+              vace_use_input_video: true,
               kv_cache_attention_bias: 0.3,
-              __prompt: "abstract butterfly made of Kubakub dissolve",
+              __prompt:
+                "A high resolution ral-dissolve scene. A **sunflower** sitting in the ral-dissolve, looking around in abstract dissolving particles",
             },
           },
         },
@@ -1440,38 +1467,33 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
     },
   },
   {
-    id: "simple-inpainting",
-    title: "Pixel Art, Preserved Background",
-    category: "Inpainting",
+    id: "simple-blobme",
+    title: "Paint Blobs",
+    category: "Depth Map",
     description:
-      "Use YOLO masking to preserve your background while transforming subjects into pixel art style.",
+      "Abstract morphing sculpture using depth estimation and acid slime LoRA — transforms your camera feed into dripping, multicolored art.",
     color: "#60a5fa",
-    thumbnail: pixelArtThumb,
+    thumbnail: blobmeThumb,
     onboardingStyle: "simple",
     workflow: {
       format: "scope-workflow",
       format_version: "1.0",
       metadata: {
-        name: "Pixel Art, Preserved Background",
-        created_at: "2026-03-06T18:06:54.484Z",
-        scope_version: "0.1.6",
+        name: "Paint Blobs",
+        created_at: "2026-03-25T21:20:02.968Z",
+        scope_version: "0.1.9",
       },
       prompts: [
         {
-          text: "pixel art scene, 2d",
+          text: "abstract morphing multicolored sculpture of ral-acidzlime, dripping paint pour",
           weight: 1,
         },
       ],
       pipelines: [
         {
-          pipeline_id: "yolo_mask",
+          pipeline_id: "video-depth-anything",
           pipeline_version: "1.0.0",
-          source: {
-            type: "git",
-            plugin_name: "scope-yolo-mask",
-            plugin_version: "0.1.0",
-            package_spec: "git+https://github.com/daydreamlive/scope_yolo_mask",
-          },
+          source: { type: "builtin" },
           loras: [],
           params: {},
         },
@@ -1481,16 +1503,15 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
           source: { type: "builtin" },
           loras: [
             {
-              id: "1889086a-9554-4549-8b53-cc53e58ec547",
-              sha256:
-                "2074e3fc23d7039bfa78d140337f720f5417ad1857b95326ac757243fd6f0607",
-              filename: "[flux.2.klein]pixelart_redmond-000032.safetensors",
+              id: "lora-0",
+              filename: "diffslime_acidzlime-000016.safetensors",
               weight: 1.6,
-              merge_mode: "runtime_peft",
+              merge_mode: "permanent_merge",
+              sha256: "a4028744227d95ca03eb0db1a0906dc34d84356d44ab4778348ceb35661ec94a",
               provenance: {
-                url: "https://civitai.com/api/download/models/2724902",
                 source: "civitai",
-                version_id: "2724902",
+                version_id: "2704300",
+                url: "https://civitai.com/api/download/models/2704300",
               },
             },
           ],
@@ -1503,10 +1524,20 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             quantization: null,
             vace_enabled: true,
             noise_controller: true,
-            denoising_step_list: [1000, 858, 748, 550],
+            vace_context_scale: 0.9,
+            denoising_step_list: [1000, 750, 650],
             vace_use_input_video: true,
             kv_cache_attention_bias: 0.3,
+            reset_cache: true,
+            vae_type: "lightvae",
           },
+        },
+        {
+          pipeline_id: "rife",
+          pipeline_version: "1.0.0",
+          source: { type: "builtin" },
+          loras: [],
+          params: {},
         },
       ],
       graph: {
@@ -1514,16 +1545,16 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
           {
             id: "input",
             type: "source",
-            source_mode: "video",
-            x: -200,
+            source_mode: "camera",
+            x: 50,
             y: 200,
           },
           {
-            id: "yolo_mask",
+            id: "video-depth-anything",
             type: "pipeline",
-            pipeline_id: "yolo_mask",
-            x: 40.02,
-            y: 158.22,
+            pipeline_id: "video-depth-anything",
+            x: 350,
+            y: 200,
             w: 240,
             h: 114,
           },
@@ -1531,37 +1562,39 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             id: "longlive",
             type: "pipeline",
             pipeline_id: "longlive",
-            x: 379.12,
-            y: 179.3,
+            x: 650,
+            y: 200,
             w: 240,
             h: 684,
           },
           {
+            id: "rife",
+            type: "pipeline",
+            pipeline_id: "rife",
+            x: 950,
+            y: 200,
+            w: 240,
+            h: 114,
+          },
+          {
             id: "output",
             type: "sink",
-            x: 944.15,
-            y: 170.29,
-            w: 299,
-            h: 238,
+            x: 1250,
+            y: 200,
+            w: 240,
+            h: 200,
           },
         ],
         edges: [
           {
             from: "input",
             from_port: "video",
-            to_node: "yolo_mask",
+            to_node: "video-depth-anything",
             to_port: "video",
             kind: "stream",
           },
           {
-            from: "input",
-            from_port: "video",
-            to_node: "longlive",
-            to_port: "video",
-            kind: "stream",
-          },
-          {
-            from: "yolo_mask",
+            from: "video-depth-anything",
             from_port: "video",
             to_node: "longlive",
             to_port: "vace_input_frames",
@@ -1569,6 +1602,13 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
           },
           {
             from: "longlive",
+            from_port: "video",
+            to_node: "rife",
+            to_port: "video",
+            kind: "stream",
+          },
+          {
+            from: "rife",
             from_port: "video",
             to_node: "output",
             to_port: "video",
@@ -1580,7 +1620,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "lora-0",
               type: "lora",
-              position: { x: -119, y: 529 },
+              position: { x: 176.93, y: 581.84 },
               width: 240,
               height: 191,
               data: {
@@ -1588,18 +1628,18 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 nodeType: "lora",
                 loras: [
                   {
-                    path: "[flux.2.klein]pixelart_redmond-000032.safetensors",
+                    path: "diffslime_acidzlime-000016.safetensors",
                     scale: 1.6,
-                    mergeMode: "runtime_peft",
+                    mergeMode: "permanent_merge",
                   },
                 ],
-                loraMergeMode: "runtime_peft",
+                loraMergeMode: "permanent_merge",
               },
             },
             {
               id: "vace",
               type: "vace",
-              position: { x: -118, y: 333 },
+              position: { x: 317.92, y: 373.95 },
               width: 240,
               height: 178,
               data: {
@@ -1618,7 +1658,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "record",
               type: "record",
-              position: { x: 1007.34, y: 453.06 },
+              position: { x: 1330, y: 553.06 },
               width: 180,
               height: 95,
               data: {
@@ -1657,10 +1697,14 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               quantization: null,
               vace_enabled: true,
               noise_controller: true,
-              denoising_step_list: [1000, 858, 748, 550],
+              vace_context_scale: 0.9,
+              denoising_step_list: [1000, 750, 650],
               vace_use_input_video: true,
               kv_cache_attention_bias: 0.3,
-              __prompt: "pixel art scene, 2d",
+              reset_cache: true,
+              vae_type: "lightvae",
+              __prompt:
+                "abstract morphing multicolored sculpture of ral-acidzlime, dripping paint pour",
             },
           },
         },

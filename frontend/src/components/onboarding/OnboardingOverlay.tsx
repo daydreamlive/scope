@@ -39,6 +39,8 @@ export function OnboardingOverlay({
   const handleSelectWorkflow = useCallback(
     (wf: StarterWorkflow) => {
       onActivateGraphMode();
+      // Remember which starter was chosen so the chip can suggest a different one
+      localStorage.setItem("scope_starter_chosen_id", wf.id);
       // Complete onboarding FIRST so the overlay dismisses and the
       // WorkflowImportDialog (which renders at a lower z-index) becomes
       // visible and interactive.
