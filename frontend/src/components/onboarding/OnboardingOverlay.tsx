@@ -86,8 +86,11 @@ export function OnboardingOverlay({
 
       {/* Content layer — above the fog canvas + blur veil */}
       <div className="relative z-10 flex flex-col items-center justify-center h-full p-6">
-        {/* Back button — visible after the first step */}
-        {state.phase !== "inference" && state.phase !== "loading" && (
+        {/* Back button — visible after the first step (hidden during survey
+            screens which handle their own internal back navigation) */}
+        {state.phase !== "inference" &&
+          state.phase !== "loading" &&
+          state.phase !== "cloud_connecting" && (
           <button
             onClick={goBack}
             className="absolute top-6 left-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
@@ -127,7 +130,7 @@ export function OnboardingOverlay({
         )}
 
         {state.phase === "cloud_connecting" && (
-          <CloudConnectingStep onConnected={cloudConnected} />
+          <CloudConnectingStep onConnected={cloudConnected} onBack={goBack} />
         )}
 
         {state.phase === "workflow" && (

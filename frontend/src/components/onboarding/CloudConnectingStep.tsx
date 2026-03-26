@@ -11,9 +11,10 @@ import { CloudSurveyScreens, type SurveyAnswers } from "./CloudSurveyScreens";
 
 interface CloudConnectingStepProps {
   onConnected: () => void;
+  onBack?: () => void;
 }
 
-export function CloudConnectingStep({ onConnected }: CloudConnectingStepProps) {
+export function CloudConnectingStep({ onConnected, onBack }: CloudConnectingStepProps) {
   const { isConnected, isConnecting, connectStage, refresh } = useCloudStatus();
   const { setOnboardingStyle } = useOnboarding();
   const didConnect = useRef(false);
@@ -61,7 +62,7 @@ export function CloudConnectingStep({ onConnected }: CloudConnectingStepProps) {
   if (!surveyDone) {
     return (
       <div className="flex flex-col items-center gap-6 w-full max-w-md mx-auto">
-        <CloudSurveyScreens onComplete={handleSurveyComplete} />
+        <CloudSurveyScreens onComplete={handleSurveyComplete} onBack={onBack} />
         {/* Small connection status at bottom */}
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           {isConnected ? (
