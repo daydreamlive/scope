@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import Callable
@@ -266,6 +267,11 @@ class CloudConnectionManager:
 
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with JWT token."""
+        # Allow overriding the full WS URL for local cloud testing
+        override = os.environ.get("SCOPE_CLOUD_WS_URL")
+        if override:
+            return override
+
         app_id = self.app_id.strip("/") if self.app_id else ""
         # Ensure we're connecting to the /ws endpoint
         if not app_id.endswith("/ws"):
