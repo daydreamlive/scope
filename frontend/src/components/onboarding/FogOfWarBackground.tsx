@@ -110,7 +110,9 @@ export function FogOfWarBackground() {
     if (!canvas) return;
 
     // Guard: mobile or reduced motion
-    const hasFinePointer = window.matchMedia("(pointer: fine)").matches;
+    // Use "any-pointer: fine" so Windows touchscreen laptops with a mouse
+    // still get the WebGL effect (their primary pointer may be "coarse").
+    const hasFinePointer = window.matchMedia("(any-pointer: fine)").matches;
     const prefersReduced = window.matchMedia(
       "(prefers-reduced-motion: reduce)"
     ).matches;

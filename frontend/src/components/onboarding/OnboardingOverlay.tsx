@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { ArrowLeft } from "lucide-react";
 import { useOnboarding } from "../../contexts/OnboardingContext";
 import { InferenceModeStep } from "./InferenceModeStep";
 import { CloudAuthStep } from "./CloudAuthStep";
@@ -34,6 +35,7 @@ export function OnboardingOverlay({
     startFromScratch,
     workflowReady,
     importWorkflowReady,
+    goBack,
   } = useOnboarding();
 
   const handleSelectWorkflow = useCallback(
@@ -84,6 +86,17 @@ export function OnboardingOverlay({
 
       {/* Content layer — above the fog canvas + blur veil */}
       <div className="relative z-10 flex flex-col items-center justify-center h-full p-6">
+        {/* Back button — visible after the first step */}
+        {state.phase !== "inference" && state.phase !== "loading" && (
+          <button
+            onClick={goBack}
+            className="absolute top-6 left-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="h-4 w-4" />
+            Back
+          </button>
+        )}
+
         {/* Step indicator */}
         <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-2">
           {Array.from({ length: totalSteps }).map((_, i) => (

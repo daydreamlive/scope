@@ -43,6 +43,7 @@ type OnboardingAction =
   | { type: "WORKFLOW_READY" }
   | { type: "START_FROM_SCRATCH" }
   | { type: "IMPORT_WORKFLOW_READY" }
+  | { type: "GO_BACK" }
   | {
       type: "LOADED";
       completed: boolean;
@@ -103,6 +104,22 @@ function reducer(
       markOnboardingCompleted();
       return { ...state, phase: "idle" };
 
+    case "GO_BACK": {
+      // Navigate backwards through the onboarding flow
+      switch (state.phase) {
+        case "cloud_auth":
+          return { ...state, phase: "inference", inferenceMode: null };
+        case "cloud_connecting":
+          return { ...state, phase: "cloud_auth" };
+        case "workflow":
+          if (state.inferenceMode === "cloud")
+            return { ...state, phase: "cloud_connecting" };
+          return { ...state, phase: "inference", inferenceMode: null };
+        default:
+          return state;
+      }
+    }
+
     case "LOADED": {
       if (action.completed)
         return {
@@ -149,6 +166,7 @@ interface OnboardingContextValue {
   workflowReady: () => void;
   startFromScratch: () => void;
   importWorkflowReady: () => void;
+  goBack: () => void;
 }
 
 const OnboardingContext = createContext<OnboardingContextValue | null>(null);
@@ -211,6 +229,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     () => dispatch({ type: "IMPORT_WORKFLOW_READY" }),
     []
   );
+  const goBack = useCallback(() => dispatch({ type: "GO_BACK" }), []);
 
   const isOnboarding = state.phase !== "idle";
   const isOverlayVisible = [
@@ -234,6 +253,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         workflowReady,
         startFromScratch,
         importWorkflowReady,
+        goBack,
       }}
     >
       {children}

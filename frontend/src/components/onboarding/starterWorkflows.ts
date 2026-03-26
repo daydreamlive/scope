@@ -15,19 +15,19 @@ export interface StarterWorkflow {
   color: string;
   thumbnail: string;
   /** Which onboarding style this workflow belongs to. */
-  onboardingStyle: "teaching" | "simple" | "both";
+  onboardingStyle: "teaching" | "simple" | "local" | "both";
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   workflow: Record<string, any>;
 }
 
 /** Return workflows filtered for the given onboarding style. */
 export function getWorkflowsForStyle(
-  style: "teaching" | "simple" | null
+  style: "teaching" | "simple" | "local" | null,
 ): StarterWorkflow[] {
-  // Default to teaching workflows when no style is set (e.g. local mode)
+  // Default to teaching workflows when no style is set
   const effectiveStyle = style ?? "teaching";
   return STARTER_WORKFLOWS.filter(
-    wf => wf.onboardingStyle === effectiveStyle || wf.onboardingStyle === "both"
+    wf => wf.onboardingStyle === effectiveStyle || wf.onboardingStyle === "both",
   );
 }
 
@@ -1751,6 +1751,122 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 "abstract morphing multicolored sculpture of ral-acidzlime, dripping paint pour",
             },
           },
+        },
+      },
+    },
+  },
+
+  // -----------------------------------------------------------------------
+  // Local-mode workflow (no GPU required — runs on CPU)
+  // -----------------------------------------------------------------------
+  {
+    id: "local-passthrough",
+    title: "Camera Preview",
+    category: "Getting Started",
+    description:
+      "A simple camera passthrough to verify your setup works. Most real-time video generation workflows require a GPU with at least 24GB of VRAM.",
+    color: "#94a3b8",
+    thumbnail: "",
+    onboardingStyle: "local",
+    workflow: {
+      format: "scope-workflow",
+      format_version: "1.0",
+      metadata: {
+        name: "Camera Preview",
+        created_at: "2026-03-26T00:00:00.000Z",
+        scope_version: "0.1.9",
+      },
+      prompts: [],
+      pipelines: [
+        {
+          pipeline_id: "passthrough",
+          pipeline_version: "1.0.0",
+          source: { type: "builtin" },
+          loras: [],
+          params: {},
+        },
+      ],
+      graph: {
+        nodes: [
+          {
+            id: "input",
+            type: "source",
+            source_mode: "camera",
+            x: 50,
+            y: 200,
+          },
+          {
+            id: "passthrough",
+            type: "pipeline",
+            pipeline_id: "passthrough",
+            x: 350,
+            y: 200,
+            w: 240,
+            h: 114,
+          },
+          {
+            id: "output",
+            type: "sink",
+            x: 650,
+            y: 200,
+            w: 240,
+            h: 200,
+          },
+        ],
+        edges: [
+          {
+            from: "input",
+            from_port: "video",
+            to_node: "passthrough",
+            to_port: "video",
+            kind: "stream",
+          },
+          {
+            from: "passthrough",
+            from_port: "video",
+            to_node: "output",
+            to_port: "video",
+            kind: "stream",
+          },
+        ],
+        ui_state: {
+          nodes: [
+            {
+              id: "note",
+              type: "note",
+              position: { x: 50, y: -150 },
+              width: 350,
+              height: 180,
+              data: {
+                label: "Note",
+                nodeType: "note",
+                noteText:
+                  "WELCOME TO SCOPE\n\nThis is a simple camera passthrough to verify your setup.\n\nMost real-time AI video workflows require a GPU with at least 24GB of VRAM. If you don't have a compatible GPU, we recommend connecting to Daydream Cloud instead.\n\nYou can switch to Cloud mode anytime in Settings.",
+                locked: true,
+                pinned: true,
+              },
+            },
+            {
+              id: "record",
+              type: "record",
+              position: { x: 700, y: 450 },
+              width: 180,
+              height: 95,
+              data: {
+                label: "Record",
+                nodeType: "record",
+                parameterInputs: [
+                  { name: "trigger", type: "boolean", defaultValue: false },
+                ],
+                isStreaming: false,
+              },
+            },
+          ],
+          edges: [],
+          node_flags: {
+            note: { locked: true, pinned: true },
+          },
+          node_params: {},
         },
       },
     },

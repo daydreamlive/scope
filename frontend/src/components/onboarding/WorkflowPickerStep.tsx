@@ -24,24 +24,33 @@ export function WorkflowPickerStep({
   onImportWorkflow,
 }: WorkflowPickerStepProps) {
   const { state } = useOnboarding();
-  const workflows = getWorkflowsForStyle(state.onboardingStyle);
+  // Local mode gets its own lightweight workflows; cloud mode uses the
+  // teaching/simple style chosen during the survey screens.
+  const workflows =
+    state.inferenceMode === "local"
+      ? getWorkflowsForStyle("local")
+      : getWorkflowsForStyle(state.onboardingStyle);
   const [selected, setSelected] = useState<string | null>(null);
 
   const selectedWorkflow = workflows.find(wf => wf.id === selected);
+
+  const isLocal = state.inferenceMode === "local";
 
   return (
     <div className="flex flex-col items-center gap-6 w-full max-w-3xl mx-auto">
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-semibold text-foreground">
-          Pick a workflow to get started
+          {isLocal ? "Get started" : "Pick a workflow to get started"}
         </h2>
         <p className="text-sm text-muted-foreground">
-          Choose one and you&rsquo;ll be generating in seconds.
+          {isLocal
+            ? "This workflow verifies your local setup. Most AI video workflows require a GPU with at least 24GB of VRAM."
+            : "Choose one and you\u2019ll be generating in seconds."}
         </p>
       </div>
 
       {/* Workflow cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 w-full">
+      <div className={`grid gap-4 w-full ${workflows.length === 1 ? "grid-cols-1 max-w-sm mx-auto" : "grid-cols-1 sm:grid-cols-3"}`}>
         {workflows.map(wf => {
           const isSelected = selected === wf.id;
 
