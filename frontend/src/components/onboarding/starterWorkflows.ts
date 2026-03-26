@@ -1772,11 +1772,10 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
       format: "scope-workflow",
       format_version: "1.0",
       metadata: {
-        name: "Camera Preview",
-        created_at: "2026-03-26T00:00:00.000Z",
+        name: "Camera Check",
+        created_at: "2026-03-26T16:25:35.191Z",
         scope_version: "0.1.9",
       },
-      prompts: [],
       pipelines: [
         {
           pipeline_id: "passthrough",
@@ -1794,6 +1793,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             source_mode: "camera",
             x: 50,
             y: 200,
+            w: 240,
+            h: 200,
           },
           {
             id: "passthrough",
@@ -1836,7 +1837,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               type: "note",
               position: { x: 50, y: -150 },
               width: 350,
-              height: 180,
+              height: 203,
               data: {
                 label: "Note",
                 nodeType: "note",
@@ -1849,7 +1850,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             {
               id: "record",
               type: "record",
-              position: { x: 700, y: 450 },
+              position: { x: 1023.65, y: 216.15 },
               width: 180,
               height: 95,
               data: {
@@ -1862,11 +1863,18 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               },
             },
           ],
-          edges: [],
+          edges: [
+            {
+              id: "xy-edge__outputstream:out-recordstream:video",
+              source: "output",
+              sourceHandle: "stream:out",
+              target: "record",
+              targetHandle: "stream:video",
+            },
+          ],
           node_flags: {
             note: { locked: true, pinned: true },
           },
-          node_params: {},
         },
       },
     },

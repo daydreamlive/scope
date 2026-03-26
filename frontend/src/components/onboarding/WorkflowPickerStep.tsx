@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Play } from "lucide-react";
+import { Play, Camera } from "lucide-react";
 import { Button } from "../ui/button";
 import { getWorkflowsForStyle, type StarterWorkflow } from "./starterWorkflows";
 import { useOnboarding } from "../../contexts/OnboardingContext";
@@ -34,7 +34,7 @@ export function WorkflowPickerStep({
   const selectedWorkflow = workflows.find(wf => wf.id === selected);
 
   return (
-    <div className="flex flex-col items-center gap-6 w-full max-w-3xl mx-auto">
+    <div className={`flex flex-col items-center gap-6 w-full mx-auto ${workflows.length > 3 ? "max-w-5xl" : "max-w-3xl"}`}>
       <div className="text-center space-y-2">
         <h2 className="text-2xl font-semibold text-foreground">
           Pick a workflow to get started
@@ -61,15 +61,20 @@ export function WorkflowPickerStep({
             >
               {/* Thumbnail */}
               <div className="w-full aspect-video rounded-lg mb-3 overflow-hidden bg-black/20">
-                <img
-                  src={wf.thumbnail}
-                  alt={wf.title}
-                  className="w-full h-full object-cover"
-                  onError={e => {
-                    (e.target as HTMLImageElement).style.display = "none";
-                  }}
-                />
-              </div>
+                {wf.thumbnail ? (
+                  <img
+                    src={wf.thumbnail}
+                    alt={wf.title}
+                    className="w-full h-full object-cover"
+                    onError={e => {
+                      (e.target as HTMLImageElement).style.display = "none";
+                    }}
+                  />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900">
+                    <Camera className="h-8 w-8 text-slate-500" />
+                  </div>
+                )}</div>
 
               <div className="flex items-start justify-between gap-2 mb-1">
                 <p className="text-sm font-medium text-foreground">
