@@ -529,6 +529,22 @@ class PipelineProcessor:
                 queues = self.output_queues.get(port)
                 if not queues:
                     continue
+                # Convert batch-format tensors [B, C, F, H, W] to frame format
+                # [B*F, H, W, C] so they can be split and queued as individual
+                # frames.  This handles outputs from preprocessor pipelines
+                # (e.g. VACE frames/masks) which produce pre-batched 5D tensors
+                # rather than per-frame 4D tensors.
+                if value.dim() == 5:
+                    b, c, f, h, w = value.shape
+                    value = (
+                        value.permute(0, 2, 3, 4, 1)
+                        .reshape(b * f, h, w, c)
+                        .contiguous()
+                    )
+                    # Convert [-1, 1] to [0, 1] for uint8 encoding; downstream
+                    # preprocess_chunk reverses this via (x / 255) * 2 - 1.
+                    if value.min() < 0:
+                        value = (value + 1.0) / 2.0
                 # Resize output queues to fit at least one full batch
                 target_size = value.shape[0] * OUTPUT_QUEUE_MAX_SIZE_FACTOR
                 self._resize_output_queue(port, target_size)

@@ -44,6 +44,12 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
                 description="Input frames for VACE conditioning",
             ),
             InputParam(
+                "vace_input_masks",
+                default=None,
+                type_hint=list[torch.Tensor] | torch.Tensor | None,
+                description="Input masks for VACE conditioning",
+            ),
+            InputParam(
                 "height",
                 required=True,
                 type_hint=int,
@@ -107,6 +113,18 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
                 target_num_frames=target_num_frames,
             )
 
+        if block_state.vace_input_masks is not None and isinstance(
+            block_state.vace_input_masks, list
+        ):
+            block_state.vace_input_masks = preprocess_masks(
+                block_state.vace_input_masks,
+                device=components.config.device,
+                dtype=components.config.dtype,
+                height=block_state.height,
+                width=block_state.width,
+                target_num_frames=target_num_frames,
+            )
+
         self.set_block_state(state, block_state)
         return components, state
 
@@ -144,3 +162,45 @@ def preprocess_video(
         video = video[:, :, indices]
 
     return video
+
+
+def preprocess_masks(
+    masks: list[torch.Tensor],
+    device: torch.device,
+    dtype: torch.dtype,
+    height: int,
+    width: int,
+    target_num_frames: int,
+) -> torch.Tensor:
+    """Preprocess mask frames from list of THWC tensors to [B, 1, F, H, W] tensor.
+
+    Unlike preprocess_video, masks are normalized to [0, 1] (not [-1, 1]).
+    """
+    from einops import rearrange
+
+    from scope.core.pipelines.process import normalize_frame_sizes
+
+    masks = normalize_frame_sizes(
+        masks, target_height=height, target_width=width, device=device, dtype=dtype
+    )
+
+    # Stack and rearrange: list of [1, H, W, C] -> [B, C, T, H, W]
+    masks = rearrange(torch.stack(masks, dim=1), "B T H W C -> B C T H W")
+    # Normalize from [0, 255] uint8 to [0, 1] float (binary masks)
+    masks = (masks.float() / 255.0).clamp(0, 1)
+
+    _, _, num_frames, _, _ = masks.shape
+    if num_frames != target_num_frames:
+        indices = (
+            torch.linspace(
+                0,
+                num_frames - 1,
+                target_num_frames,
+                device=masks.device,
+            )
+            .round()
+            .long()
+        )
+        masks = masks[:, :, indices]
+
+    return masks
