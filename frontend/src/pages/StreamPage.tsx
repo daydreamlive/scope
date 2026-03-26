@@ -2304,6 +2304,13 @@ export function StreamPage() {
           settings.postprocessorIds ?? [],
           vaceInputVideoIds.size > 0 ? vaceInputVideoIds : undefined
         );
+
+        // Extract sink node IDs so WebRTC stats can map tracks to sinks
+        graphSinkNodeIds.push(
+          ...graphConfigForStream.nodes
+            .filter(n => n.type === "sink")
+            .map(n => n.id)
+        );
       }
 
       // Build PipelineLoadItem[] from graph nodes (always available at this
@@ -3428,6 +3435,7 @@ export function StreamPage() {
         <StatusBar
           fps={Object.values(perSinkStats)[0]?.fps ?? 0}
           bitrate={Object.values(perSinkStats)[0]?.bitrate ?? 0}
+          showMetrics={!graphMode}
           onLogToggle={toggleLogPanel}
           isLogOpen={isLogPanelOpen}
           logUnreadCount={logUnreadCount}

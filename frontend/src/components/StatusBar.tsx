@@ -4,6 +4,7 @@ interface StatusBarProps {
   className?: string;
   fps?: number;
   bitrate?: number;
+  showMetrics?: boolean;
   onLogToggle?: () => void;
   isLogOpen?: boolean;
   logUnreadCount?: number;
@@ -13,6 +14,7 @@ export function StatusBar({
   className = "",
   fps,
   bitrate,
+  showMetrics = true,
   onLogToggle,
   isLogOpen,
   logUnreadCount = 0,
@@ -76,10 +78,12 @@ export function StatusBar({
       </div>
 
       {/* Right: Metrics */}
-      <div className="flex items-center gap-6 ml-auto">
-        <MetricItem label="FPS" value={fpsValue} />
-        <MetricItem label="Bitrate" value={bitrateValue} />
-      </div>
+      {showMetrics && (
+        <div className="flex items-center gap-6 ml-auto">
+          <MetricItem label="FPS" value={fpsValue} />
+          <MetricItem label="Bitrate" value={bitrateValue} />
+        </div>
+      )}
     </div>
   );
 }
