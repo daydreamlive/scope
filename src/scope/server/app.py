@@ -20,7 +20,14 @@ from typing import TYPE_CHECKING
 
 import click
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -511,6 +518,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Local cloud WebSocket endpoint — enabled by SCOPE_CLOUD_WS=1
+if os.environ.get("SCOPE_CLOUD_WS") == "1":
+    from fastapi import WebSocket as _WebSocket
+
+    from .cloud_ws_endpoint import cloud_ws_handler
+
+    @app.websocket("/ws")
+    async def cloud_ws(ws: _WebSocket):
+        await cloud_ws_handler(ws)
 
 
 @app.get("/health", response_model=HealthResponse)
