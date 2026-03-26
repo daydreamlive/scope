@@ -113,21 +113,21 @@ export function CloudSurveyScreens({ onComplete, onBack }: CloudSurveyScreensPro
 
   // Shared card wrapper — key on screen name to re-trigger entrance animation
   return (
-    <div
-      key={screen}
-      className="w-full max-w-md mx-auto animate-in fade-in-0 slide-in-from-bottom-4 duration-500"
-    >
-      <div className="rounded-xl border border-border/50 bg-card/80 backdrop-blur-sm p-6 space-y-5">
-        {/* Back link — visible on all screens after intro */}
-        {screen !== "intro" && (
-          <button
-            onClick={goBackSurvey}
-            className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors -mt-1 -ml-1"
-          >
-            <ArrowLeft className="h-3 w-3" />
-            Back
-          </button>
-        )}
+    <>
+      {/* Back button — fixed top-left to match the overlay's back button style */}
+      <button
+        onClick={goBackSurvey}
+        className="fixed top-6 left-6 z-[110] flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back
+      </button>
+
+      <div
+        key={screen}
+        className="w-full max-w-md mx-auto animate-in fade-in-0 slide-in-from-bottom-4 duration-500"
+      >
+        <div className="rounded-xl border border-border/50 bg-card/80 backdrop-blur-sm p-6 space-y-5">
 
         {/* ---- Intro ---- */}
         {screen === "intro" && (
@@ -281,5 +281,6 @@ export function CloudSurveyScreens({ onComplete, onBack }: CloudSurveyScreensPro
         )}
       </div>
     </div>
+    </>
   );
 }
