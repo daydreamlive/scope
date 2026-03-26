@@ -94,9 +94,10 @@ class FrameProcessor:
 
         self.paused = False
 
-        # Pinned memory buffer cache for faster GPU transfers (local mode only)
-        self._pinned_buffer_cache = {}
-        self._pinned_buffer_lock = threading.Lock()
+        # Per-thread pinned buffers for H→D upload (local mode). Avoids sharing one
+        # buffer across WebRTC/NDI/Spout threads (race) without a global lock that
+        # serializes every frame.
+        self._thread_pin_local = threading.local()
 
         # Cloud mode: send frames to cloud instead of local processing
         self._cloud_mode = cloud_manager is not None
@@ -130,6 +131,8 @@ class FrameProcessor:
         # Multi-source/sink support: per-node queue routing
         self._source_queues_by_node: dict[str, list[queue.Queue]] = {}
         self._sink_queues_by_node: dict[str, queue.Queue] = {}
+        # NDI/Spout/Syphon: duplicate fan-out queue (see graph_executor.GraphRun)
+        self._sink_hardware_queues_by_node: dict[str, queue.Queue] = {}
         # Per-sink-node feeder processors for per-sink FPS
         self._sink_processors_by_node: dict[str, PipelineProcessor] = {}
         # Per-source-node input sources: node_id -> {source, thread, type}
@@ -427,51 +430,42 @@ class FrameProcessor:
             connection_info=self.connection_info,
         )
 
-    def _get_or_create_pinned_buffer(self, shape):
-        """Get or create a reusable pinned memory buffer for the given shape.
-
-        This avoids repeated pinned memory allocations, which are expensive.
-        Pinned memory enables faster DMA transfers to GPU.
-
-        IMPORTANT: The returned buffer is shared. Callers must hold
-        ``_pinned_buffer_lock`` across the ``copy_()`` → ``.cuda()`` sequence
-        to prevent concurrent threads from overwriting the buffer contents.
-        Prefer :meth:`_frame_array_to_gpu` which handles locking automatically.
-        """
-        assert self._pinned_buffer_lock.locked(), (
-            "_get_or_create_pinned_buffer must be called with _pinned_buffer_lock held"
-        )
-        if shape not in self._pinned_buffer_cache:
-            self._pinned_buffer_cache[shape] = torch.empty(
-                shape, dtype=torch.uint8, pin_memory=True
-            )
-        return self._pinned_buffer_cache[shape]
+    def _thread_local_pinned_buffer(self, shape: tuple[int, ...]) -> torch.Tensor:
+        """Pinned host tensor for the current thread and frame shape."""
+        if not hasattr(self._thread_pin_local, "buffers"):
+            self._thread_pin_local.buffers = {}
+        buf_map: dict[tuple[int, ...], torch.Tensor] = self._thread_pin_local.buffers
+        if shape not in buf_map:
+            buf_map[shape] = torch.empty(shape, dtype=torch.uint8, pin_memory=True)
+        return buf_map[shape]
 
     def _frame_array_to_gpu(self, frame_array) -> torch.Tensor:
         """Convert a numpy frame array to a GPU tensor using pinned memory.
 
-        Thread-safe: holds ``_pinned_buffer_lock`` across the full
-        copy → transfer sequence so concurrent threads cannot corrupt the
-        shared pinned buffer.
+        Uses a **per-thread** pinned buffer so WebRTC, NDI, and Spout threads can
+        upload concurrently (no shared buffer, no global lock). Within one thread,
+        ``non_blocking=False`` ensures the H→D copy finishes before the next
+        ``copy_`` overwrites the pinned buffer.
         """
-        with self._pinned_buffer_lock:
-            pinned_buffer = self._get_or_create_pinned_buffer(frame_array.shape)
-            pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
-            return pinned_buffer.cuda(non_blocking=True)
+        shape = tuple(frame_array.shape)
+        pinned_buffer = self._thread_local_pinned_buffer(shape)
+        pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
+        return pinned_buffer.cuda(non_blocking=False)
 
-    def put(self, frame: VideoFrame) -> bool:
-        if not self.running:
-            return False
-
-        self._frames_in += 1
-
-        # Log stats and emit heartbeat every HEARTBEAT_INTERVAL_SECONDS
+    def _maybe_emit_frame_heartbeat(self) -> None:
+        """Log stats periodically when frames flow (shared by put() paths)."""
         now = time.time()
         if now - self._last_heartbeat_time >= HEARTBEAT_INTERVAL_SECONDS:
             self._log_frame_stats()
             self._last_heartbeat_time = now
 
+    def put(self, frame: VideoFrame) -> bool:
+        if not self.running:
+            return False
+
         if self._cloud_mode:
+            self._frames_in += 1
+            self._maybe_emit_frame_heartbeat()
             # Cloud mode: send frame to cloud (only in video mode)
             # In text mode, cloud generates video from prompts only - no input frames
             if not self._video_mode:
@@ -488,7 +482,27 @@ class FrameProcessor:
 
         # Local mode: put into graph source queues
         if not self._graph_source_queues:
+            self._frames_in += 1
+            self._maybe_emit_frame_heartbeat()
             return False
+
+        # Multi-source graphs: legacy put() must not fan out to every source
+        # queue (that mixes one input into all pipelines). Single-source graphs
+        # (including one source with fan-out edges) have exactly one entry in
+        # _source_queues_by_node — route the same as put_to_source.
+        if len(self._source_queues_by_node) > 1:
+            logger.warning(
+                "Ignoring legacy put(frame): graph has multiple source nodes; "
+                "use put_to_source() per source (WebRTC multi-source)"
+            )
+            return False
+
+        self._frames_in += 1
+        self._maybe_emit_frame_heartbeat()
+
+        if len(self._source_queues_by_node) == 1:
+            only_id = next(iter(self._source_queues_by_node))
+            return self.put_to_source(frame, only_id, count_frame=False)
 
         frame_array = frame.to_ndarray(format="rgb24")
 
@@ -507,7 +521,13 @@ class FrameProcessor:
 
         return True
 
-    def put_to_source(self, frame: VideoFrame, source_node_id: str) -> bool:
+    def put_to_source(
+        self,
+        frame: VideoFrame,
+        source_node_id: str,
+        *,
+        count_frame: bool = True,
+    ) -> bool:
         """Route a frame to a specific source node's queues only (multi-source)."""
         if not self.running:
             return False
@@ -516,7 +536,8 @@ class FrameProcessor:
         if not queues:
             return False
 
-        self._frames_in += 1
+        if count_frame:
+            self._frames_in += 1
 
         frame_array = frame.to_ndarray(format="rgb24")
 
@@ -1358,6 +1379,7 @@ class FrameProcessor:
         # Store per-node queue mappings for multi-source/sink/record
         self._source_queues_by_node = graph_run.source_queues_by_node
         self._sink_queues_by_node = graph_run.sink_queues_by_node
+        self._sink_hardware_queues_by_node = graph_run.sink_hardware_queues_by_node
         self._sink_processors_by_node = graph_run.sink_processors_by_node
         self._record_queues_by_node = graph_run.record_queues_by_node
 
@@ -1446,34 +1468,25 @@ class FrameProcessor:
                 )
 
     def _multi_input_source_loop(self, node_id: str, source_type: str):
-        """Background thread that receives frames for a specific source node."""
+        """Background thread that receives frames for a specific source node.
+
+        Receives as fast as the source provides frames, without throttling to
+        pipeline output FPS. Throttling on measured get_fps() created a feedback
+        loop: slower output → lower get_fps() → longer sleeps → starved inputs →
+        even slower output. Backpressure is queue full + drop, same as
+        :meth:`_input_source_receiver_loop`.
+        """
         entry = self._input_sources_by_node.get(node_id)
         if entry is None:
             return
 
         source = entry["source"]
-        target_fps = self.get_fps()
-        frame_interval = 1.0 / target_fps
-        last_frame_time = 0.0
         frame_count = 0
 
         while self.running and node_id in self._input_sources_by_node:
             try:
-                current_pipeline_fps = self.get_fps()
-                if current_pipeline_fps > 0:
-                    target_fps = current_pipeline_fps
-                    frame_interval = 1.0 / target_fps
-
-                current_time = time.time()
-                time_since_last = current_time - last_frame_time
-                if time_since_last < frame_interval:
-                    time.sleep(frame_interval - time_since_last)
-                    continue
-
                 rgb_frame = source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
-                    last_frame_time = time.time()
-
                     queues = self._source_queues_by_node.get(node_id)
                     if queues:
                         if torch.cuda.is_available():
@@ -1580,7 +1593,9 @@ class FrameProcessor:
             return
 
         sink = entry["sink"]
-        sink_q = self._sink_queues_by_node.get(node_id)
+        sink_q = self._sink_hardware_queues_by_node.get(node_id)
+        if sink_q is None:
+            sink_q = self._sink_queues_by_node.get(node_id)
         if sink_q is None:
             logger.error(f"No sink queue for node {node_id}")
             return

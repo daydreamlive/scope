@@ -20,6 +20,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# PipelineProcessor clamps measured throughput to MIN_FPS (1.0). Using that
+# value for WebRTC pacing sets frame_ptime≈1s and caps previews at ~1 FPS
+# even when the sink queue has frames. The clamp is a stats floor, not a
+# desired playback rate — use a normal cadence unless the pipeline reports
+# a clearly intentional native_fps (always > 1 when set).
+_WEBRTC_PLAYBACK_FPS_DEFAULT = 30.0
+
+
+def _webrtc_playback_fps(pipeline_fps: float) -> float:
+    """FPS for pacing outbound WebRTC video; avoid ~1 FPS from MIN_FPS clamp."""
+    if pipeline_fps <= 0:
+        return _WEBRTC_PLAYBACK_FPS_DEFAULT
+    if pipeline_fps <= 1.01:
+        return _WEBRTC_PLAYBACK_FPS_DEFAULT
+    return pipeline_fps
+
 
 class QueueVideoTrack(MediaStreamTrack):
     """Track that reads video frames from a queue (torch.Tensor → VideoFrame).
@@ -130,7 +146,9 @@ class SinkOutputTrack(MediaStreamTrack):
             else:
                 # Update FPS from the specific sink's feeder processor
                 if fp:
-                    self.fps = fp.get_fps_for_sink(self.sink_node_id)
+                    self.fps = _webrtc_playback_fps(
+                        fp.get_fps_for_sink(self.sink_node_id)
+                    )
                     self.frame_ptime = 1.0 / self.fps
 
                 frame_tensor = fp.get_from_sink(self.sink_node_id)
@@ -349,11 +367,12 @@ class VideoProcessingTrack(MediaStreamTrack):
                 # Update FPS from the specific sink's feeder processor, or global
                 if self.frame_processor:
                     if self.sink_node_id:
-                        self.fps = self.frame_processor.get_fps_for_sink(
+                        raw = self.frame_processor.get_fps_for_sink(
                             self.sink_node_id
                         )
                     else:
-                        self.fps = self.frame_processor.get_fps()
+                        raw = self.frame_processor.get_fps()
+                    self.fps = _webrtc_playback_fps(raw)
                     self.frame_ptime = 1.0 / self.fps
 
                 # If paused, wait for the appropriate frame interval before returning

@@ -36,8 +36,11 @@ class GraphRun:
     source_queues_by_node: dict[str, list[queue.Queue]]
     # The processor whose output_queue we read from for get() (first sink, backward compat)
     sink_processor: PipelineProcessor | None
-    # Per-sink-node output queues: sink_node_id -> output queue to read from
+    # Per-sink-node output queues: sink_node_id -> queue for WebRTC / get_from_sink()
     sink_queues_by_node: dict[str, queue.Queue]
+    # When sink_mode is ndi/spout/syphon: separate queue for Spout/NDI/Syphon threads so
+    # they do not race WebRTC on the same queue (each frame would otherwise be consumed once).
+    sink_hardware_queues_by_node: dict[str, queue.Queue]
     # Per-sink-node feeder processors: sink_node_id -> PipelineProcessor that feeds it
     sink_processors_by_node: dict[str, PipelineProcessor]
     # All pipeline processors (for start/stop/update_parameters)
@@ -180,7 +183,9 @@ def build_graph(
     # processor's output_queues list. The processor's fan-out loop
     # (pipeline_processor.py line ~550) puts frames into every queue in the
     # list, so each sink receives its own independent copy of the frame.
+    node_by_id = {n.id: n for n in graph.nodes}
     sink_queues_by_node: dict[str, queue.Queue] = {}
+    sink_hardware_queues_by_node: dict[str, queue.Queue] = {}
     sink_processors_by_node: dict[str, PipelineProcessor] = {}
     for sink_id in graph.get_sink_node_ids():
         for e in graph.edges_to(sink_id):
@@ -188,21 +193,34 @@ def build_graph(
                 feeder_proc = node_processors.get(e.from_node)
                 if feeder_proc is not None:
                     sink_processors_by_node[sink_id] = feeder_proc
-                    # Create a dedicated queue for this sink node
+                    sink_node = node_by_id.get(sink_id)
+                    sink_mode = (
+                        getattr(sink_node, "sink_mode", None) if sink_node else None
+                    )
+                    # WebRTC preview reads sink_queues_by_node; NDI/Spout/Syphon threads
+                    # must use a separate queue or they steal frames from get_from_sink().
                     sink_q = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
                     sink_queues_by_node[sink_id] = sink_q
-                    # Append it to the feeder's output_queues so the fan-out
-                    # loop distributes frames to it automatically.
+                    extra_hw: list[queue.Queue] = []
+                    if sink_mode in ("ndi", "spout", "syphon"):
+                        sink_q_hw = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
+                        sink_hardware_queues_by_node[sink_id] = sink_q_hw
+                        extra_hw.append(sink_q_hw)
+
                     port = e.from_port
+                    to_append = [sink_q, *extra_hw]
                     if port in feeder_proc.output_queues:
-                        feeder_proc.output_queues[port].append(sink_q)
+                        for q in to_append:
+                            feeder_proc.output_queues[port].append(q)
                     else:
-                        feeder_proc.output_queues[port] = [sink_q]
+                        feeder_proc.output_queues[port] = list(to_append)
                     logger.info(
-                        "Sink %s: dedicated queue on %s port '%s' (total queues: %d)",
+                        "Sink %s: dedicated queue(s) on %s port '%s' "
+                        "(webrtc + hardware=%s, total on port: %d)",
                         sink_id,
                         e.from_node,
                         port,
+                        bool(extra_hw),
                         len(feeder_proc.output_queues[port]),
                     )
                 break
@@ -274,6 +292,7 @@ def build_graph(
         source_queues_by_node=source_queues_by_node,
         sink_processor=sink_processor,
         sink_queues_by_node=sink_queues_by_node,
+        sink_hardware_queues_by_node=sink_hardware_queues_by_node,
         sink_processors_by_node=sink_processors_by_node,
         processors=list(node_processors.values()),
         pipeline_ids=pipeline_ids,
