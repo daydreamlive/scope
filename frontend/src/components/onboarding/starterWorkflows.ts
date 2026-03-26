@@ -301,6 +301,13 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               target: "longlive",
               targetHandle: "param:__vace",
             },
+            {
+              id: "xy-edge__rifestream:video-recordstream:video",
+              source: "rife",
+              sourceHandle: "stream:video",
+              target: "record",
+              targetHandle: "stream:video",
+            },
           ],
           node_flags: {
             note: { locked: true, pinned: true },
@@ -628,6 +635,13 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               target: "longlive",
               targetHandle: "param:__vace",
             },
+            {
+              id: "xy-edge__rifestream:video-recordstream:video",
+              source: "rife",
+              sourceHandle: "stream:video",
+              target: "record",
+              targetHandle: "stream:video",
+            },
           ],
           node_flags: {
             note: { locked: true, pinned: true },
@@ -699,7 +713,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               filename: "diffslime_acidzlime-000016.safetensors",
               weight: 1.6,
               merge_mode: "permanent_merge",
-              sha256: "a4028744227d95ca03eb0db1a0906dc34d84356d44ab4778348ceb35661ec94a",
+              sha256:
+                "a4028744227d95ca03eb0db1a0906dc34d84356d44ab4778348ceb35661ec94a",
               provenance: {
                 source: "civitai",
                 version_id: "2704300",
@@ -938,6 +953,13 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               sourceHandle: "param:__vace",
               target: "longlive",
               targetHandle: "param:__vace",
+            },
+            {
+              id: "xy-edge__pipelinestream:video-recordstream:video",
+              source: "pipeline",
+              sourceHandle: "stream:video",
+              target: "record",
+              targetHandle: "stream:video",
             },
           ],
           node_flags: {
@@ -1183,6 +1205,13 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               sourceHandle: "param:__vace",
               target: "longlive",
               targetHandle: "param:__vace",
+            },
+            {
+              id: "xy-edge__rifestream:video-recordstream:video",
+              source: "rife",
+              sourceHandle: "stream:video",
+              target: "record",
+              targetHandle: "stream:video",
             },
           ],
           node_params: {
@@ -1443,6 +1472,13 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               target: "longlive",
               targetHandle: "param:__vace",
             },
+            {
+              id: "xy-edge__rifestream:video-recordstream:video",
+              source: "rife",
+              sourceHandle: "stream:video",
+              target: "record",
+              targetHandle: "stream:video",
+            },
           ],
           node_params: {
             longlive: {
@@ -1507,7 +1543,8 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               filename: "diffslime_acidzlime-000016.safetensors",
               weight: 1.6,
               merge_mode: "permanent_merge",
-              sha256: "a4028744227d95ca03eb0db1a0906dc34d84356d44ab4778348ceb35661ec94a",
+              sha256:
+                "a4028744227d95ca03eb0db1a0906dc34d84356d44ab4778348ceb35661ec94a",
               provenance: {
                 source: "civitai",
                 version_id: "2704300",
@@ -1685,6 +1722,13 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               sourceHandle: "param:__vace",
               target: "longlive",
               targetHandle: "param:__vace",
+            },
+            {
+              id: "xy-edge__rifestream:video-recordstream:video",
+              source: "rife",
+              sourceHandle: "stream:video",
+              target: "record",
+              targetHandle: "stream:video",
             },
           ],
           node_params: {
