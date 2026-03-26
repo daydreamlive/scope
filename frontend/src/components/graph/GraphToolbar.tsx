@@ -1,6 +1,23 @@
 import { useRef } from "react";
-import { Play, Square } from "lucide-react";
+import {
+  Play,
+  Square,
+  MoreVertical,
+  Upload,
+  Download,
+  Trash2,
+  Loader2,
+  Settings,
+  Plug,
+} from "lucide-react";
 import { NODE_TOKENS } from "./ui";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from "@/components/ui/dropdown-menu";
 
 interface GraphToolbarProps {
   isStreaming: boolean;
@@ -12,6 +29,8 @@ interface GraphToolbarProps {
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onExport: () => void;
   onClear: () => void;
+  onOpenSettings?: () => void;
+  onOpenPlugins?: () => void;
 }
 
 export function GraphToolbar({
@@ -24,49 +43,50 @@ export function GraphToolbar({
   onImport,
   onExport,
   onClear,
+  onOpenSettings,
+  onOpenPlugins,
 }: GraphToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const busy = isConnecting || isLoading;
 
   return (
     <div className={NODE_TOKENS.toolbar}>
-      <button
-        onClick={isStreaming ? onStopStream : onStartStream}
-        disabled={isConnecting || isLoading}
-        className={`${NODE_TOKENS.toolbarButton} ${isConnecting || isLoading ? "opacity-50 cursor-not-allowed" : ""}`}
-        title={isStreaming ? "Stop stream" : "Start stream"}
-      >
-        {isConnecting || isLoading ? (
-          <span className="inline-flex items-center gap-1">
-            <svg
-              className="animate-spin h-3 w-3"
-              viewBox="0 0 24 24"
-              fill="none"
-            >
-              <circle
-                className="opacity-25"
-                cx="12"
-                cy="12"
-                r="10"
-                stroke="currentColor"
-                strokeWidth="4"
-              />
-              <path
-                className="opacity-75"
-                fill="currentColor"
-                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-              />
-            </svg>
-          </span>
-        ) : isStreaming ? (
-          <Square className="h-3.5 w-3.5" />
-        ) : (
-          <Play className="h-3.5 w-3.5" />
-        )}
-      </button>
-
-      <div className="flex-1" />
-
-      {status && <span className={NODE_TOKENS.toolbarStatus}>{status}</span>}
+      {/* ── Left: Menu dropdown ── */}
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button className={NODE_TOKENS.toolbarMenuButton}>
+            <MoreVertical className="h-3.5 w-3.5" />
+            Menu
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="start" sideOffset={6}>
+          <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+            <Upload className="h-4 w-4" />
+            Import Workflow
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onExport}>
+            <Download className="h-4 w-4" />
+            Export Workflow
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={onOpenSettings}>
+            <Settings className="h-4 w-4" />
+            Settings
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={onOpenPlugins}>
+            <Plug className="h-4 w-4" />
+            Plugins
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={onClear}
+            className="text-red-400 focus:text-red-300"
+          >
+            <Trash2 className="h-4 w-4" />
+            Clear Graph
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
 
       <input
         ref={fileInputRef}
@@ -78,21 +98,34 @@ export function GraphToolbar({
         }}
         className="hidden"
       />
+
+      {/* ── Spacer ── */}
+      <div className="flex-1" />
+
+      {/* ── Status text ── */}
+      {status && <span className={NODE_TOKENS.toolbarStatus}>{status}</span>}
+
+      {/* ── Right: Hero Play / Stop button ── */}
       <button
-        onClick={() => fileInputRef.current?.click()}
-        className={NODE_TOKENS.toolbarButton}
+        onClick={isStreaming ? onStopStream : onStartStream}
+        disabled={busy}
+        className={
+          busy
+            ? NODE_TOKENS.toolbarHeroBusy
+            : isStreaming
+              ? NODE_TOKENS.toolbarHeroStop
+              : NODE_TOKENS.toolbarHeroRun
+        }
+        title={isStreaming ? "Stop stream" : "Start stream"}
       >
-        Import
-      </button>
-      <button onClick={onExport} className={NODE_TOKENS.toolbarButton}>
-        Export
-      </button>
-      <button
-        onClick={onClear}
-        className={NODE_TOKENS.toolbarButton}
-        title="Clear graph"
-      >
-        Clear
+        {busy ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : isStreaming ? (
+          <Square className="h-3.5 w-3.5" />
+        ) : (
+          <Play className="h-3.5 w-3.5" />
+        )}
+        {busy ? "Starting…" : isStreaming ? "Stop" : "Run"}
       </button>
     </div>
   );

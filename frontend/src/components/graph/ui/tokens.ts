@@ -19,8 +19,14 @@ export const NODE_TOKENS = {
   panelBackground: "bg-[#181717]",
   panelBorder: "border-[rgba(119,119,119,0.15)]",
   toolbar:
-    "flex items-center gap-2 px-4 py-2 bg-[#181717] border-b border-[rgba(119,119,119,0.15)]",
-  toolbarButton:
-    "px-3 py-1.5 text-xs font-medium rounded-lg bg-[#2a2a2a] border border-[rgba(119,119,119,0.35)] text-[#fafafa] hover:bg-[#2a2a2a]/80 transition-colors",
-  toolbarStatus: "text-xs text-[#8c8c8d] ml-2",
+    "flex items-stretch h-9 bg-[#181717] border-b border-[rgba(119,119,119,0.15)]",
+  toolbarMenuButton:
+    "inline-flex items-center gap-1.5 px-4 text-xs font-medium text-[#8c8c8d] hover:bg-[rgba(255,255,255,0.06)] hover:text-[#fafafa] transition-colors cursor-pointer",
+  toolbarHeroRun:
+    "inline-flex items-center gap-1.5 px-5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors cursor-pointer",
+  toolbarHeroStop:
+    "inline-flex items-center gap-1.5 px-5 text-xs font-semibold bg-red-600/80 text-white hover:bg-red-700 transition-colors cursor-pointer",
+  toolbarHeroBusy:
+    "inline-flex items-center gap-1.5 px-5 text-xs font-semibold text-[#8c8c8d] opacity-60 cursor-not-allowed",
+  toolbarStatus: "text-xs text-[#8c8c8d] mr-3 self-center",
 } as const;
