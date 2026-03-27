@@ -187,7 +187,7 @@ class CloudWebRTCClient:
         await client.connect()
 
         # Send frames to cloud
-        client.input_track.put_frame(frame)
+        client.input_tracks[0].put_frame(frame)
 
         # Receive processed frames
         client.output_handler.add_callback(my_callback)
@@ -196,8 +196,6 @@ class CloudWebRTCClient:
     def __init__(self, cloud_manager: CloudConnectionManager):
         self.cloud_manager = cloud_manager
         self.pc: RTCPeerConnection | None = None
-        self.input_track: FrameInputTrack | None = None
-        # Multi-source: all input tracks (index 0 == self.input_track)
         self.input_tracks: list[FrameInputTrack] = []
         self.output_handler = FrameOutputHandler()
         # Multi-sink: extra output handlers keyed by track receive order (1-based)
@@ -283,7 +281,6 @@ class CloudWebRTCClient:
             track = FrameInputTrack(fps=30)
             self.input_tracks.append(track)
             self.pc.addTrack(track)
-        self.input_track = self.input_tracks[0]
 
         # Only add a recvonly audio transceiver when the pipeline produces
         # audio, so the cloud doesn't waste resources encoding/sending silence.
@@ -317,19 +314,19 @@ class CloudWebRTCClient:
             logger.debug(f"Data channel message: {message}")
 
         # Handle incoming tracks (processed frames from cloud).
-        # Track 0 goes to the primary output_handler; extra tracks go to
-        # per-sink output handlers so they can be relayed independently.
-        video_track_index = [0]
+        # Each video track maps to an output handler by receive order.
+        received_video_count = [0]
 
         @self.pc.on("track")
         async def on_track(track: MediaStreamTrack):
             if track.kind == "video":
-                idx = video_track_index[0]
-                video_track_index[0] += 1
+                idx = received_video_count[0]
+                received_video_count[0] += 1
                 logger.info(f"Received video track from cloud (index={idx})")
                 if idx == 0:
+                    handler = self.output_handler
                     self._receive_task = asyncio.create_task(
-                        self._receive_frames(track)
+                        self._receive_frames(track, handler)
                     )
                     asyncio.create_task(self._request_keyframe())
                 else:
@@ -636,7 +633,6 @@ class CloudWebRTCClient:
             await self.pc.close()
             self.pc = None
 
-        self.input_track = None
         self.input_tracks = []
         self.extra_output_handlers.clear()
         self._data_channel = None

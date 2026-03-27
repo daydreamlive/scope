@@ -659,7 +659,7 @@ class CloudConnectionManager:
             logger.info("WebRTC connection stopped")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
-        """Send a frame to the primary (index 0) cloud input track."""
+        """Send a frame to cloud input track index 0."""
         return self.send_frame_to_track(frame, 0)
 
     def send_frame_to_track(

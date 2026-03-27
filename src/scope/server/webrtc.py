@@ -483,8 +483,8 @@ class WebRTCManager:
 
             logger.info(f"Created new session: {session}")
 
-            # Track index counter for matching incoming tracks to source nodes
-            video_track_index = [0]
+            # Counter for matching incoming video tracks to source nodes
+            received_video_count = [0]
 
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
@@ -492,8 +492,8 @@ class WebRTCManager:
                 if track.kind == "video" and video_track is not None:
                     if webrtc_source_node_ids:
                         # Multi-source: route each track via SourceInputHandler
-                        idx = video_track_index[0]
-                        video_track_index[0] += 1
+                        idx = received_video_count[0]
+                        received_video_count[0] += 1
                         if idx < len(webrtc_source_node_ids):
                             handler = SourceInputHandler(
                                 frame_processor=video_track.frame_processor,

@@ -105,10 +105,6 @@ class FrameProcessor:
         self._cloud_audio_queue: queue.Queue = queue.Queue(maxsize=50)
         self._frames_to_cloud = 0
         self._frames_from_cloud = 0
-        # Track index for the primary browser source in cloud mode.
-        # Defaults to 0; overridden when the graph has non-WebRTC sources
-        # that shift the WebRTC source track positions.
-        self._primary_cloud_track_index: int = 0
 
         # Output sinks keyed by type
         self.output_sinks: dict[str, dict] = {}
@@ -172,13 +168,17 @@ class FrameProcessor:
             self._update_output_sinks_from_config(sinks_config)
 
         # Process generic input source settings.
-        # Skip if a graph config with per-node sources is present — those are
-        # handled by _setup_multi_input_sources and the legacy global mechanism
-        # would broadcast frames to ALL source queues.
+        # When a graph has source nodes, per-node input setup handles routing,
+        # so skip the global input_source mechanism.
         if "input_source" in self.parameters:
-            if self._graph_has_per_node_sources():
+            graph_data = self.parameters.get("graph")
+            has_graph_sources = False
+            if graph_data and isinstance(graph_data, dict):
+                has_graph_sources = any(
+                    n.get("type") == "source" for n in graph_data.get("nodes", [])
+                )
+            if has_graph_sources:
                 self.parameters.pop("input_source")
-                logger.info("Skipping legacy input_source — graph has per-node sources")
             else:
                 input_source_config = self.parameters.pop("input_source")
                 self._update_input_source(input_source_config)
@@ -202,29 +202,13 @@ class FrameProcessor:
                 self.cloud_manager.add_frame_callback(self._on_frame_from_cloud)
                 self.cloud_manager.add_audio_callback(self._on_audio_from_cloud)
 
-            # Set up per-node input sources (Syphon/NDI/Spout) and record
-            # queues in cloud mode.  Also compute the cloud input track index
-            # for the primary browser source (first WebRTC source node).
+            # Set up per-node input sources and record queues in cloud mode.
             graph_data = self.parameters.get("graph")
             if graph_data and isinstance(graph_data, dict):
                 from .graph_schema import GraphConfig
 
                 graph = GraphConfig(**graph_data)
-
-                # Find the track index for the first WebRTC source so that
-                # put() sends browser frames to the correct cloud input track.
-                if self.cloud_manager:
-                    for node in graph.nodes:
-                        if node.type == "source":
-                            sm = getattr(node, "source_mode", "video") or "video"
-                            if sm not in ("spout", "ndi", "syphon"):
-                                idx = self.cloud_manager.get_source_track_index(node.id)
-                                if idx is not None:
-                                    self._primary_cloud_track_index = idx
-                                break
-
-                if self._graph_has_per_node_sources():
-                    self._setup_multi_input_sources(graph)
+                self._setup_multi_input_sources(graph)
 
                 # Set up record queues so cloud record frames can be
                 # received locally for recording.
@@ -511,56 +495,38 @@ class FrameProcessor:
             self._last_heartbeat_time = now
 
     def put(self, frame: VideoFrame) -> bool:
+        """Put a frame into the pipeline.
+
+        For single-source graphs, delegates to put_to_source() with the
+        sole source node.  For multi-source graphs, callers must use
+        put_to_source() directly — this method returns False.
+        """
         if not self.running:
             return False
+
+        # Single-source shortcut: delegate to put_to_source
+        if len(self._source_queues_by_node) == 1:
+            return self.put_to_source(
+                frame, next(iter(self._source_queues_by_node)), count_frame=True
+            )
 
         if self._cloud_mode:
             self._frames_in += 1
             self._maybe_emit_frame_heartbeat()
-            # Cloud mode: send frame to cloud (only in video mode)
-            # In text mode, cloud generates video from prompts only - no input frames
+            # Text mode: cloud generates from prompts only, ignore input
             if not self._video_mode:
-                return True  # Silently ignore frames in text mode
+                return True
+            # No graph sources — send directly to cloud track 0
             if self.cloud_manager:
                 frame_array = frame.to_ndarray(format="rgb24")
-                if self._primary_cloud_track_index != 0:
-                    sent = self.cloud_manager.send_frame_to_track(
-                        frame_array, self._primary_cloud_track_index
-                    )
-                else:
-                    sent = self.cloud_manager.send_frame(frame_array)
-                if sent:
+                if self.cloud_manager.send_frame(frame_array):
                     self._frames_to_cloud += 1
                     return True
-                else:
-                    logger.debug("[FRAME-PROCESSOR] Failed to send frame to cloud")
-                    return False
             return False
 
-        # Local mode: put into graph source queues
-        if not self._graph_source_queues:
-            self._frames_in += 1
-            self._maybe_emit_frame_heartbeat()
-            return False
-
-        # Multi-source graphs: legacy put() must not fan out to every source
-        # queue (that mixes one input into all pipelines). Single-source graphs
-        # (including one source with fan-out edges) have exactly one entry in
-        # _source_queues_by_node — route the same as put_to_source.
-        if len(self._source_queues_by_node) > 1:
-            logger.warning(
-                "Ignoring legacy put(frame): graph has multiple source nodes; "
-                "use put_to_source() per source (WebRTC multi-source)"
-            )
-            return False
-
+        # Local mode with no source queues
         self._frames_in += 1
         self._maybe_emit_frame_heartbeat()
-
-        if len(self._source_queues_by_node) == 1:
-            only_id = next(iter(self._source_queues_by_node))
-            return self.put_to_source(frame, only_id, count_frame=False)
-
         return False
 
     def put_to_source(
@@ -570,16 +536,36 @@ class FrameProcessor:
         *,
         count_frame: bool = True,
     ) -> bool:
-        """Route a frame to a specific source node's queues only (multi-source)."""
+        """Route a frame to a specific source node (multi-source)."""
         if not self.running:
-            return False
-
-        queues = self._source_queues_by_node.get(source_node_id)
-        if not queues:
             return False
 
         if count_frame:
             self._frames_in += 1
+            self._maybe_emit_frame_heartbeat()
+
+        if self._cloud_mode:
+            # Cloud mode: forward to the correct cloud input track
+            if not self._video_mode:
+                return True
+            if self.cloud_manager:
+                frame_array = frame.to_ndarray(format="rgb24")
+                track_idx = self.cloud_manager.get_source_track_index(source_node_id)
+                if track_idx is not None:
+                    sent = self.cloud_manager.send_frame_to_track(
+                        frame_array, track_idx
+                    )
+                else:
+                    sent = self.cloud_manager.send_frame(frame_array)
+                if sent:
+                    self._frames_to_cloud += 1
+                    return True
+            return False
+
+        # Local mode: put into source node queues
+        queues = self._source_queues_by_node.get(source_node_id)
+        if not queues:
+            return False
 
         frame_tensor = self._frame_array_to_tensor(frame.to_ndarray(format="rgb24"))
 
@@ -1040,10 +1026,9 @@ class FrameProcessor:
             self._update_output_sinks_from_config(sinks_config)
 
         # Handle generic input source settings.
-        # Skip when per-node graph sources are active to avoid broadcasting
-        # frames to all queues (the per-node threads handle routing).
+        # Skip when per-node sources or graph source queues are active.
         if "input_source" in parameters:
-            if self._input_sources_by_node:
+            if self._input_sources_by_node or self._source_queues_by_node:
                 parameters.pop("input_source")
             else:
                 input_source_config = parameters.pop("input_source")
@@ -1237,22 +1222,6 @@ class FrameProcessor:
                 time.sleep(0.01)
 
         logger.info(f"Output sink thread stopped: {sink_type} ({frame_count} frames)")
-
-    def _graph_has_per_node_sources(self) -> bool:
-        """Check if the graph config has source nodes with non-WebRTC modes.
-
-        When True, those sources will be handled by _setup_multi_input_sources
-        and the legacy global input_source mechanism should be skipped.
-        """
-        graph_data = self.parameters.get("graph")
-        if not graph_data or not isinstance(graph_data, dict):
-            return False
-        for node in graph_data.get("nodes", []):
-            if node.get("type") == "source":
-                sm = node.get("source_mode")
-                if sm in ("spout", "ndi", "syphon", "video_file"):
-                    return True
-        return False
 
     def _update_input_source(self, config: dict):
         """Update generic input source configuration."""
@@ -1561,8 +1530,7 @@ class FrameProcessor:
                 rgb_frame = source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
                     if self._cloud_mode:
-                        # Cloud mode: forward frames to cloud manager
-                        # Route to the correct input track for this source node
+                        # Cloud mode: forward to the correct cloud input track
                         if self._video_mode and self.cloud_manager:
                             track_idx = self.cloud_manager.get_source_track_index(
                                 node_id
@@ -1583,10 +1551,7 @@ class FrameProcessor:
                                 try:
                                     sq.put_nowait(frame_tensor)
                                 except queue.Full:
-                                    logger.debug(
-                                        f"Multi-source node {node_id} queue full, "
-                                        f"dropping {source_type} frame"
-                                    )
+                                    pass
 
                     frame_count += 1
                     if frame_count % 100 == 0:

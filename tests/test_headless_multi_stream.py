@@ -396,9 +396,12 @@ class TestHeadlessRESTEndpoints:
 
     @pytest.fixture
     def mock_pipeline_manager(self):
+        from unittest.mock import AsyncMock
+
         pipeline = StubPipeline()
         manager = MagicMock()
         manager.get_pipeline_by_id = MagicMock(return_value=pipeline)
+        manager.load_pipelines = AsyncMock()
         return manager
 
     @pytest.fixture
