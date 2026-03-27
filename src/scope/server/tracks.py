@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import fractions
 import logging
+import sys
 import threading
 import time
 from typing import TYPE_CHECKING
@@ -88,6 +89,16 @@ class VideoProcessingTrack(MediaStreamTrack):
                 self.input_task_running = False
                 break
             except Exception as e:
+                # Fatal CUDA hardware errors (e.g. NVLink faults) put the CUDA
+                # runtime into an unrecoverable state — no software-level recovery
+                # is possible.  Exit immediately so fal.ai can respawn the container.
+                msg = str(e).lower()
+                if type(e).__name__ == "AcceleratorError" or "nvlink" in msg or "hardware error" in msg:
+                    logger.critical(
+                        f"Fatal CUDA hardware error in input loop (container will restart): {e}",
+                        exc_info=True,
+                    )
+                    sys.exit(1)
                 consecutive_errors += 1
                 if consecutive_errors >= max_consecutive_errors:
                     logger.error(
