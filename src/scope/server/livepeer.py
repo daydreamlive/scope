@@ -96,6 +96,7 @@ class LivepeerConnection:
         self._user_id = user_id
 
         if self.is_connected:
+            self._connecting = False
             return
 
         if not self._configured:
