@@ -319,6 +319,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     const [showAddNodeModal, setShowAddNodeModal] = useState(false);
     const [showBlueprintModal, setShowBlueprintModal] = useState(false);
     const [showClearConfirm, setShowClearConfirm] = useState(false);
+    const [showDefaultConfirm, setShowDefaultConfirm] = useState(false);
     const [showExportDialog, setShowExportDialog] = useState(false);
     const [showWorkflowExport, setShowWorkflowExport] = useState(false);
     const [isDaydreamAuthenticated, setIsDaydreamAuthenticated] = useState(
@@ -804,6 +805,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             onImport={handleImport}
             onExport={() => setShowExportDialog(true)}
             onClear={() => setShowClearConfirm(true)}
+            onDefaultWorkflow={() => setShowDefaultConfirm(true)}
             onOpenSettings={onOpenSettings}
             onOpenPlugins={onOpenPlugins}
           />
@@ -957,6 +959,64 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                   }}
                 >
                   Clear
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+
+          <AlertDialog
+            open={showDefaultConfirm}
+            onOpenChange={(open: boolean) => {
+              if (!open) setShowDefaultConfirm(false);
+            }}
+          >
+            <AlertDialogContent className="sm:max-w-md">
+              <AlertDialogHeader>
+                <AlertDialogTitle>Reset to default workflow?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will replace the current graph with the default Source,
+                  Passthrough, Sink workflow. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel onClick={() => setShowDefaultConfirm(false)}>
+                  Cancel
+                </AlertDialogCancel>
+                <AlertDialogAction
+                  onClick={() => {
+                    setShowDefaultConfirm(false);
+                    if (isStreaming) onStopStream?.();
+                    loadGraphFromParsed(
+                      {
+                        nodes: [
+                          { id: "input", type: "source", source_mode: "video" },
+                          {
+                            id: "passthrough",
+                            type: "pipeline",
+                            pipeline_id: "passthrough",
+                          },
+                          { id: "output", type: "sink" },
+                        ],
+                        edges: [
+                          {
+                            from: "input",
+                            from_port: "video",
+                            to: "passthrough",
+                            to_port: "video",
+                          },
+                          {
+                            from: "passthrough",
+                            from_port: "video",
+                            to: "output",
+                            to_port: "video",
+                          },
+                        ],
+                      },
+                      "default"
+                    );
+                  }}
+                >
+                  Reset
                 </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>

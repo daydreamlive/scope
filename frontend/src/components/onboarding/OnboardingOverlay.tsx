@@ -91,14 +91,14 @@ export function OnboardingOverlay({
         {state.phase !== "inference" &&
           state.phase !== "loading" &&
           state.phase !== "cloud_connecting" && (
-          <button
-            onClick={goBack}
-            className="absolute top-6 left-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Back
-          </button>
-        )}
+            <button
+              onClick={goBack}
+              className="absolute top-6 left-6 flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Back
+            </button>
+          )}
 
         {/* Step indicator */}
         <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-2">

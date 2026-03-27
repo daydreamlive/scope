@@ -22,12 +22,12 @@ export interface StarterWorkflow {
 
 /** Return workflows filtered for the given onboarding style. */
 export function getWorkflowsForStyle(
-  style: "teaching" | "simple" | "local" | null,
+  style: "teaching" | "simple" | "local" | null
 ): StarterWorkflow[] {
   // Default to teaching workflows when no style is set
   const effectiveStyle = style ?? "teaching";
   return STARTER_WORKFLOWS.filter(
-    wf => wf.onboardingStyle === effectiveStyle || wf.onboardingStyle === "both",
+    wf => wf.onboardingStyle === effectiveStyle || wf.onboardingStyle === "both"
   );
 }
 
@@ -235,7 +235,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 label: "Note",
                 nodeType: "note",
                 noteText:
-                  "Finally, click the Play button in the upper left corner.\n\nAfter 30-45 seconds, generation will begin playing in the Sink node.",
+                  "Finally, click the Run button in the upper right corner.\n\nAfter 30-45 seconds, generation will begin playing in the Sink node.",
                 locked: true,
                 pinned: true,
               },
@@ -569,7 +569,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 label: "Note",
                 nodeType: "note",
                 noteText:
-                  "Finally, click the Play button in the upper left corner.\n\nAfter 30-45 seconds, generation will begin playing in the Sink node.",
+                  "Finally, click the Run button in the upper right corner.\n\nAfter 30-45 seconds, generation will begin playing in the Sink node.",
                 locked: true,
                 pinned: true,
               },
@@ -888,7 +888,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 label: "Note",
                 nodeType: "note",
                 noteText:
-                  "Finally, click the Play button in the upper left corner.\n\nAfter 30-45 seconds, generation will begin playing in the Sink node.",
+                  "Finally, click the Run button in the upper right corner.\n\nAfter 30-45 seconds, generation will begin playing in the Sink node.",
                 locked: false,
                 pinned: false,
               },

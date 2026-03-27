@@ -32,7 +32,10 @@ const USE_CASE_OPTIONS = ["Personal", "Work"];
 // Component
 // ---------------------------------------------------------------------------
 
-export function CloudSurveyScreens({ onComplete, onBack }: CloudSurveyScreensProps) {
+export function CloudSurveyScreens({
+  onComplete,
+  onBack,
+}: CloudSurveyScreensProps) {
   const [screen, setScreen] = useState<SurveyScreen>("intro");
   const [referralSource, setReferralSource] = useState<string | null>(null);
   const [useCase, setUseCase] = useState<string | null>(null);
@@ -128,159 +131,163 @@ export function CloudSurveyScreens({ onComplete, onBack }: CloudSurveyScreensPro
         className="w-full max-w-md mx-auto animate-in fade-in-0 slide-in-from-bottom-4 duration-500"
       >
         <div className="rounded-xl border border-border/50 bg-card/80 backdrop-blur-sm p-6 space-y-5">
-
-        {/* ---- Intro ---- */}
-        {screen === "intro" && (
-          <>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-muted">
-                <MessageCircle className="h-4 w-4 text-muted-foreground" />
+          {/* ---- Intro ---- */}
+          {screen === "intro" && (
+            <>
+              <div className="flex items-center gap-3">
+                <div className="flex items-center justify-center h-8 w-8 rounded-lg bg-muted">
+                  <MessageCircle className="h-4 w-4 text-muted-foreground" />
+                </div>
+                <h3 className="text-sm font-medium text-foreground">
+                  Getting Started
+                </h3>
               </div>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                While we connect to the cloud, let&rsquo;s get to know each
+                other.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleSkip}
+                  className="flex-1 px-4 py-2 text-sm font-medium rounded-lg border border-border hover:bg-muted/50 transition-colors text-foreground"
+                >
+                  No thanks
+                </button>
+                <button
+                  onClick={() => setScreen("referral")}
+                  className="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-colors"
+                >
+                  Next
+                </button>
+              </div>
+            </>
+          )}
+
+          {/* ---- Referral Source ---- */}
+          {screen === "referral" && (
+            <>
               <h3 className="text-sm font-medium text-foreground">
-                Getting Started
+                How&rsquo;d you hear about Daydream?
               </h3>
-            </div>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              While we connect to the cloud, let&rsquo;s get to know each other.
-            </p>
-            <div className="flex items-center gap-2">
-              <button
-                onClick={handleSkip}
-                className="flex-1 px-4 py-2 text-sm font-medium rounded-lg border border-border hover:bg-muted/50 transition-colors text-foreground"
-              >
-                No thanks
-              </button>
-              <button
-                onClick={() => setScreen("referral")}
-                className="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-colors"
-              >
-                Next
-              </button>
-            </div>
-          </>
-        )}
+              <div className="flex flex-col gap-2">
+                {REFERRAL_OPTIONS.map(option => (
+                  <button
+                    key={option}
+                    onClick={() => handleReferralSelect(option)}
+                    disabled={transitioning}
+                    className={`w-full px-4 py-3 text-sm font-medium rounded-lg border text-left transition-all ${
+                      referralSource === option
+                        ? "border-foreground/30 bg-card ring-2 ring-foreground/10"
+                        : "border-border hover:border-border/80 hover:bg-muted/50"
+                    } text-foreground`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
 
-        {/* ---- Referral Source ---- */}
-        {screen === "referral" && (
-          <>
-            <h3 className="text-sm font-medium text-foreground">
-              How&rsquo;d you hear about Daydream?
-            </h3>
-            <div className="flex flex-col gap-2">
-              {REFERRAL_OPTIONS.map(option => (
+          {/* ---- Use Case ---- */}
+          {screen === "use_case" && (
+            <>
+              <h3 className="text-sm font-medium text-foreground">
+                Are you using Daydream for work?
+              </h3>
+              <div className="flex flex-col gap-2">
+                {USE_CASE_OPTIONS.map(option => (
+                  <button
+                    key={option}
+                    onClick={() => handleUseCaseSelect(option)}
+                    disabled={transitioning}
+                    className={`w-full px-4 py-3 text-sm font-medium rounded-lg border text-left transition-all ${
+                      useCase === option
+                        ? "border-foreground/30 bg-card ring-2 ring-foreground/10"
+                        : "border-border hover:border-border/80 hover:bg-muted/50"
+                    } text-foreground`}
+                  >
+                    {option}
+                  </button>
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* ---- Onboarding Style ---- */}
+          {screen === "onboarding_style" && (
+            <>
+              <h3 className="text-sm font-medium text-foreground">
+                Choose an onboarding style
+              </h3>
+              <div className="flex flex-col gap-3">
                 <button
-                  key={option}
-                  onClick={() => handleReferralSelect(option)}
-                  disabled={transitioning}
-                  className={`w-full px-4 py-3 text-sm font-medium rounded-lg border text-left transition-all ${
-                    referralSource === option
-                      ? "border-foreground/30 bg-card ring-2 ring-foreground/10"
-                      : "border-border hover:border-border/80 hover:bg-muted/50"
-                  } text-foreground`}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* ---- Use Case ---- */}
-        {screen === "use_case" && (
-          <>
-            <h3 className="text-sm font-medium text-foreground">
-              Are you using Daydream for work?
-            </h3>
-            <div className="flex flex-col gap-2">
-              {USE_CASE_OPTIONS.map(option => (
-                <button
-                  key={option}
-                  onClick={() => handleUseCaseSelect(option)}
-                  disabled={transitioning}
-                  className={`w-full px-4 py-3 text-sm font-medium rounded-lg border text-left transition-all ${
-                    useCase === option
-                      ? "border-foreground/30 bg-card ring-2 ring-foreground/10"
-                      : "border-border hover:border-border/80 hover:bg-muted/50"
-                  } text-foreground`}
-                >
-                  {option}
-                </button>
-              ))}
-            </div>
-          </>
-        )}
-
-        {/* ---- Onboarding Style ---- */}
-        {screen === "onboarding_style" && (
-          <>
-            <h3 className="text-sm font-medium text-foreground">
-              Choose an onboarding style
-            </h3>
-            <div className="flex flex-col gap-3">
-              <button
-                onClick={() => setSelectedStyle("teaching")}
-                className={`w-full flex items-start gap-3 p-4 rounded-lg border-2 text-left transition-all cursor-pointer ${
-                  selectedStyle === "teaching"
-                    ? "border-foreground/30 bg-card ring-2 ring-foreground/10"
-                    : "border-border bg-card/50 hover:border-border/80 hover:bg-card"
-                }`}
-              >
-                <div
-                  className={`mt-0.5 flex items-center justify-center h-8 w-8 rounded-lg shrink-0 transition-colors ${
+                  onClick={() => setSelectedStyle("teaching")}
+                  className={`w-full flex items-start gap-3 p-4 rounded-lg border-2 text-left transition-all cursor-pointer ${
                     selectedStyle === "teaching"
-                      ? "bg-foreground/10"
-                      : "bg-muted"
+                      ? "border-foreground/30 bg-card ring-2 ring-foreground/10"
+                      : "border-border bg-card/50 hover:border-border/80 hover:bg-card"
                   }`}
                 >
-                  <GraduationCap className="h-4 w-4 text-foreground" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">
-                    Teaching Mode
-                  </p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Interactive onboarding, recommended for anyone already
-                    familiar with node-based AI tools
-                  </p>
-                </div>
-              </button>
+                  <div
+                    className={`mt-0.5 flex items-center justify-center h-8 w-8 rounded-lg shrink-0 transition-colors ${
+                      selectedStyle === "teaching"
+                        ? "bg-foreground/10"
+                        : "bg-muted"
+                    }`}
+                  >
+                    <GraduationCap className="h-4 w-4 text-foreground" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">
+                      Teaching Mode
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Interactive onboarding, recommended for anyone already
+                      familiar with node-based AI tools
+                    </p>
+                  </div>
+                </button>
 
-              <button
-                onClick={() => setSelectedStyle("simple")}
-                className={`w-full flex items-start gap-3 p-4 rounded-lg border-2 text-left transition-all cursor-pointer ${
-                  selectedStyle === "simple"
-                    ? "border-foreground/30 bg-card ring-2 ring-foreground/10"
-                    : "border-border bg-card/50 hover:border-border/80 hover:bg-card"
-                }`}
+                <button
+                  onClick={() => setSelectedStyle("simple")}
+                  className={`w-full flex items-start gap-3 p-4 rounded-lg border-2 text-left transition-all cursor-pointer ${
+                    selectedStyle === "simple"
+                      ? "border-foreground/30 bg-card ring-2 ring-foreground/10"
+                      : "border-border bg-card/50 hover:border-border/80 hover:bg-card"
+                  }`}
+                >
+                  <div
+                    className={`mt-0.5 flex items-center justify-center h-8 w-8 rounded-lg shrink-0 transition-colors ${
+                      selectedStyle === "simple"
+                        ? "bg-foreground/10"
+                        : "bg-muted"
+                    }`}
+                  >
+                    <Zap className="h-4 w-4 text-foreground" />
+                  </div>
+                  <div className="space-y-1">
+                    <p className="text-sm font-medium text-foreground">
+                      Simple
+                    </p>
+                    <p className="text-xs text-muted-foreground leading-relaxed">
+                      Get a good result fast, recommended if you&rsquo;re new to
+                      real-time AI
+                    </p>
+                  </div>
+                </button>
+              </div>
+
+              <Button
+                onClick={handleStyleConfirm}
+                disabled={!selectedStyle}
+                className="w-full"
               >
-                <div
-                  className={`mt-0.5 flex items-center justify-center h-8 w-8 rounded-lg shrink-0 transition-colors ${
-                    selectedStyle === "simple" ? "bg-foreground/10" : "bg-muted"
-                  }`}
-                >
-                  <Zap className="h-4 w-4 text-foreground" />
-                </div>
-                <div className="space-y-1">
-                  <p className="text-sm font-medium text-foreground">Simple</p>
-                  <p className="text-xs text-muted-foreground leading-relaxed">
-                    Get a good result fast, recommended if you&rsquo;re new to
-                    real-time AI
-                  </p>
-                </div>
-              </button>
-            </div>
-
-            <Button
-              onClick={handleStyleConfirm}
-              disabled={!selectedStyle}
-              className="w-full"
-            >
-              Continue
-            </Button>
-          </>
-        )}
+                Continue
+              </Button>
+            </>
+          )}
+        </div>
       </div>
-    </div>
     </>
   );
 }

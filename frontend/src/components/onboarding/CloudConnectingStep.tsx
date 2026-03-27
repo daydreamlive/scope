@@ -14,7 +14,10 @@ interface CloudConnectingStepProps {
   onBack?: () => void;
 }
 
-export function CloudConnectingStep({ onConnected, onBack }: CloudConnectingStepProps) {
+export function CloudConnectingStep({
+  onConnected,
+  onBack,
+}: CloudConnectingStepProps) {
   const { isConnected, isConnecting, connectStage, refresh } = useCloudStatus();
   const { setOnboardingStyle } = useOnboarding();
   const didConnect = useRef(false);
