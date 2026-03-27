@@ -9,6 +9,7 @@ import {
   Loader2,
   Settings,
   Plug,
+  RotateCcw,
 } from "lucide-react";
 import { NODE_TOKENS } from "./ui";
 import {
@@ -29,6 +30,7 @@ interface GraphToolbarProps {
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onExport: () => void;
   onClear: () => void;
+  onDefaultWorkflow?: () => void;
   onOpenSettings?: () => void;
   onOpenPlugins?: () => void;
 }
@@ -43,6 +45,7 @@ export function GraphToolbar({
   onImport,
   onExport,
   onClear,
+  onDefaultWorkflow,
   onOpenSettings,
   onOpenPlugins,
 }: GraphToolbarProps) {
@@ -50,7 +53,7 @@ export function GraphToolbar({
   const busy = isConnecting || isLoading;
 
   return (
-    <div className={NODE_TOKENS.toolbar}>
+    <div data-tour="add-node" className={NODE_TOKENS.toolbar}>
       {/* ── Left: Menu dropdown ── */}
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
@@ -75,9 +78,13 @@ export function GraphToolbar({
           </DropdownMenuItem>
           <DropdownMenuItem onSelect={onOpenPlugins}>
             <Plug className="h-4 w-4" />
-            Plugins
+            Nodes
           </DropdownMenuItem>
           <DropdownMenuSeparator />
+          <DropdownMenuItem onSelect={onDefaultWorkflow}>
+            <RotateCcw className="h-4 w-4" />
+            Default Workflow
+          </DropdownMenuItem>
           <DropdownMenuItem
             onSelect={onClear}
             className="text-red-400 focus:text-red-300"
@@ -107,6 +114,7 @@ export function GraphToolbar({
 
       {/* ── Right: Hero Play / Stop button ── */}
       <button
+        data-tour="play-button"
         onClick={isStreaming ? onStopStream : onStartStream}
         disabled={busy}
         className={

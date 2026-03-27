@@ -21,12 +21,12 @@ export const NODE_TOKENS = {
   toolbar:
     "flex items-stretch h-9 bg-[#181717] border-b border-[rgba(119,119,119,0.15)]",
   toolbarMenuButton:
-    "inline-flex items-center gap-1.5 px-4 text-xs font-medium text-[#8c8c8d] hover:bg-[rgba(255,255,255,0.06)] hover:text-[#fafafa] transition-colors cursor-pointer",
+    "inline-flex items-center gap-1.5 px-4 text-xs font-medium text-[#8c8c8d] hover:bg-[rgba(255,255,255,0.06)] hover:text-[#fafafa] transition-colors cursor-pointer select-none",
   toolbarHeroRun:
-    "inline-flex items-center gap-1.5 px-5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors cursor-pointer",
+    "inline-flex items-center gap-1.5 px-5 text-xs font-semibold bg-emerald-600 text-white hover:bg-emerald-700 transition-colors cursor-pointer select-none",
   toolbarHeroStop:
-    "inline-flex items-center gap-1.5 px-5 text-xs font-semibold bg-red-600/80 text-white hover:bg-red-700 transition-colors cursor-pointer",
+    "inline-flex items-center gap-1.5 px-5 text-xs font-semibold bg-red-600/80 text-white hover:bg-red-700 transition-colors cursor-pointer select-none",
   toolbarHeroBusy:
-    "inline-flex items-center gap-1.5 px-5 text-xs font-semibold text-[#8c8c8d] opacity-60 cursor-not-allowed",
+    "inline-flex items-center gap-1.5 px-5 text-xs font-semibold text-[#8c8c8d] opacity-60 cursor-not-allowed select-none",
   toolbarStatus: "text-xs text-[#8c8c8d] mr-3 self-center",
 } as const;

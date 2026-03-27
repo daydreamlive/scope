@@ -1,11 +1,34 @@
 import os
 from pathlib import Path
 
+# Default base directory
+DEFAULT_BASE_DIR = "~/.daydream-scope"
+
+# Environment variable for overriding base directory
+BASE_DIR_ENV_VAR = "DAYDREAM_SCOPE_DIR"
+
 # Default models directory
 DEFAULT_MODELS_DIR = "~/.daydream-scope/models"
 
 # Environment variable for overriding models directory
 MODELS_DIR_ENV_VAR = "DAYDREAM_SCOPE_MODELS_DIR"
+
+
+def get_base_dir() -> Path:
+    """
+    Get the base directory path for all Daydream Scope data.
+
+    Priority order:
+    1. DAYDREAM_SCOPE_DIR environment variable
+    2. Default: ~/.daydream-scope
+
+    Returns:
+        Path: Absolute path to the base directory
+    """
+    env_dir = os.environ.get(BASE_DIR_ENV_VAR)
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    return Path(DEFAULT_BASE_DIR).expanduser().resolve()
 
 
 def get_models_dir() -> Path:

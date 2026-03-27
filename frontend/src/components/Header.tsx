@@ -20,9 +20,15 @@ interface HeaderProps {
   // External settings tab control
   openSettingsTab?: string | null;
   onSettingsTabOpened?: () => void;
+  // External plugins tab control (e.g. from starter workflows chip)
+  openPluginsTab?: string | null;
+  onPluginsTabOpened?: () => void;
   // Graph mode toggle
   graphMode?: boolean;
   onGraphModeToggle?: () => void;
+  // Workflow loading from Workflows tab
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onLoadWorkflow?: (workflowData: Record<string, any>) => void;
 }
 
 export function Header({
@@ -31,8 +37,11 @@ export function Header({
   cloudDisabled,
   openSettingsTab,
   onSettingsTabOpened,
+  openPluginsTab,
+  onPluginsTabOpened,
   graphMode = false,
   onGraphModeToggle,
+  onLoadWorkflow,
 }: HeaderProps) {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
@@ -40,6 +49,9 @@ export function Header({
     "general" | "account" | "api-keys" | "loras" | "osc"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
+  const [pluginsInitialTab, setPluginsInitialTab] = useState<
+    string | undefined
+  >(undefined);
 
   // Use shared cloud status hook - single source of truth
   const { isConnected, isConnecting, lastCloseCode, lastCloseReason } =
@@ -117,6 +129,15 @@ export function Header({
     }
   }, [openSettingsTab, onSettingsTabOpened]);
 
+  // React to external requests to open a specific plugins dialog tab
+  useEffect(() => {
+    if (openPluginsTab) {
+      setPluginsInitialTab(openPluginsTab);
+      setPluginsOpen(true);
+      onPluginsTabOpened?.();
+    }
+  }, [openPluginsTab, onPluginsTabOpened]);
+
   useEffect(() => {
     // Handle deep link actions for plugin installation
     if (window.scope?.onDeepLinkAction) {
@@ -137,6 +158,7 @@ export function Header({
   const handlePluginsClose = () => {
     setPluginsOpen(false);
     setInitialPluginPath("");
+    setPluginsInitialTab(undefined);
   };
 
   return (
@@ -189,7 +211,7 @@ export function Header({
                 ? "Cloud connected"
                 : isConnecting
                   ? "Connecting to cloud..."
-                  : "Enable remote inference"
+                  : "Connect to cloud"
             }
           >
             {isConnected ? (
@@ -204,26 +226,46 @@ export function Header({
                 ? "Connected"
                 : isConnecting
                   ? "Connecting..."
-                  : "Enable Remote Inference"}
+                  : "Connect to Cloud"}
             </span>
           </Button>
           <Button
             variant="ghost"
-            size="icon"
-            onClick={() => setPluginsOpen(true)}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 w-8"
-            title="Plugins"
+            size="sm"
+            onClick={() => {
+              setPluginsInitialTab("discover");
+              setPluginsOpen(true);
+            }}
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
+            title="Nodes"
           >
-            <Plug className="h-5 w-5" />
+            <Plug className="h-4 w-4" />
+            <span className="text-xs font-medium">Nodes</span>
           </Button>
           <Button
+            data-tour="workflows-button"
             variant="ghost"
-            size="icon"
+            size="sm"
+            onClick={() => {
+              setPluginsInitialTab("workflows");
+              setPluginsOpen(true);
+            }}
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
+            title="Workflows"
+          >
+            <Workflow className="h-4 w-4" />
+            <span className="text-xs font-medium">Workflows</span>
+          </Button>
+          <Button
+            data-tour="settings-button"
+            variant="ghost"
+            size="sm"
             onClick={() => setSettingsOpen(true)}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 w-8"
+            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
             title="Settings"
           >
-            <Settings className="h-5 w-5" />
+            <Settings className="h-4 w-4" />
+            <span className="text-xs font-medium">Settings</span>
           </Button>
         </div>
       </div>
@@ -232,8 +274,10 @@ export function Header({
         open={pluginsOpen}
         onClose={handlePluginsClose}
         initialPluginPath={initialPluginPath}
+        initialTab={pluginsInitialTab}
         disabled={cloudDisabled || isConnecting}
         cloudConnected={isConnected}
+        onLoadWorkflow={onLoadWorkflow}
       />
 
       <SettingsDialog

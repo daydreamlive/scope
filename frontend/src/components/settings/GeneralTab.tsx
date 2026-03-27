@@ -1,5 +1,8 @@
-import { BookOpenText, Bug, Github } from "lucide-react";
+import { BookOpenText, Bug, Github, RotateCcw } from "lucide-react";
 import { Input } from "../ui/input";
+import { Button } from "../ui/button";
+import { resetOnboarding } from "../../lib/onboardingStorage";
+import { toast } from "sonner";
 
 interface GeneralTabProps {
   version: string;
@@ -21,7 +24,6 @@ export function GeneralTab({
   onReportBug,
 }: GeneralTabProps) {
   const handleDocsClick = () => {
-    console.log("Docs clicked");
     window.open(
       "https://docs.daydream.live/knowledge-hub/tutorials/scope",
       "_blank"
@@ -29,12 +31,10 @@ export function GeneralTab({
   };
 
   const handleDiscordClick = () => {
-    console.log("Discord clicked");
     window.open("https://discord.gg/mnfGR4Fjhp", "_blank");
   };
 
   const handleGithubClick = () => {
-    console.log("GitHub clicked");
     window.open("https://github.com/daydreamlive/scope", "_blank");
   };
 
@@ -145,6 +145,30 @@ export function GeneralTab({
             className="flex-1"
             disabled
           />
+        </div>
+      </div>
+
+      {/* Advanced */}
+      <div className="rounded-lg bg-muted/50 p-4 space-y-4">
+        <h3 className="text-sm font-medium text-foreground">Advanced</h3>
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <p className="text-sm text-foreground">Show onboarding again</p>
+            <p className="text-xs text-muted-foreground">
+              Re-run the welcome flow on next launch.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              resetOnboarding();
+              toast.success("Onboarding will show on next launch");
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+            Reset
+          </Button>
         </div>
       </div>
     </div>

@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from .schema import PluginInfo
     from .webrtc import WebRTCManager
 
+from scope.core.config import get_base_dir
 from scope.core.lora.manifest import (
     LoRAManifestEntry,
     LoRAProvenance,
@@ -2955,6 +2956,73 @@ async def get_cloud_stats(
 
     # Return full status with stats
     return cloud_manager.get_status()
+
+
+# ---------------------------------------------------------------------------
+# Onboarding
+# ---------------------------------------------------------------------------
+
+
+def _get_onboarding_file() -> Path:
+    return get_base_dir() / "onboarding.json"
+
+
+class OnboardingStatusResponse(BaseModel):
+    completed: bool
+    inference_mode: str | None = None
+    onboarding_style: str | None = None
+    referral_source: str | None = None
+    use_case: str | None = None
+
+
+class OnboardingStatusUpdate(BaseModel):
+    completed: bool | None = None
+    inference_mode: str | None = None
+    onboarding_style: str | None = None
+    referral_source: str | None = None
+    use_case: str | None = None
+
+
+@app.get("/api/v1/onboarding/status", response_model=OnboardingStatusResponse)
+async def get_onboarding_status():
+    """Read onboarding completion state from onboarding.json."""
+    onboarding_file = _get_onboarding_file()
+    if onboarding_file.exists():
+        try:
+            data = json.loads(onboarding_file.read_text())
+            return OnboardingStatusResponse(
+                completed=data.get("completed", False),
+                inference_mode=data.get("inference_mode"),
+                onboarding_style=data.get("onboarding_style"),
+                referral_source=data.get("referral_source"),
+                use_case=data.get("use_case"),
+            )
+        except Exception:
+            pass
+    return OnboardingStatusResponse(completed=False)
+
+
+@app.put("/api/v1/onboarding/status", response_model=OnboardingStatusResponse)
+async def update_onboarding_status(body: OnboardingStatusUpdate):
+    """Write onboarding completion state to onboarding.json."""
+    onboarding_file = _get_onboarding_file()
+    onboarding_file.parent.mkdir(parents=True, exist_ok=True)
+    # Merge with existing data so we don't lose fields when partially updating
+    existing: dict = {}
+    if onboarding_file.exists():
+        try:
+            existing = json.loads(onboarding_file.read_text())
+        except Exception:
+            pass
+    existing.update(body.model_dump(exclude_none=True))
+    onboarding_file.write_text(json.dumps(existing))
+    return OnboardingStatusResponse(
+        completed=existing.get("completed", False),
+        inference_mode=existing.get("inference_mode"),
+        onboarding_style=existing.get("onboarding_style"),
+        referral_source=existing.get("referral_source"),
+        use_case=existing.get("use_case"),
+    )
 
 
 @app.get("/{path:path}")
