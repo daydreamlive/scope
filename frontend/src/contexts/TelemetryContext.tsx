@@ -6,8 +6,6 @@ import {
   useEffect,
   type ReactNode,
 } from "react";
-import { toast } from "sonner";
-import { track } from "../lib/telemetry";
 import {
   initTelemetry,
   identifyUser,
@@ -72,53 +70,16 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     }
 
     // For existing users who completed onboarding before analytics was added,
-    // show an opt-in toast (the onboarding flow handles its own disclosure).
+    // silently mark disclosure as done and keep telemetry off (opt-in default).
     if (!checkDisclosed()) {
       fetchOnboardingStatus().then(status => {
         if (status.completed) {
-          track("telemetry_disclosure_shown", { path: "existing_user_banner" });
-          const shownAt = Date.now();
-          toast(
-            "Help us improve Scope by sending anonymous usage data. We track UI interactions and feature usage patterns, and we do not collect prompts, parameters, file paths, videos, images, or session replays.",
-            {
-              duration: Infinity,
-              dismissible: false,
-              action: {
-                label: "Yes",
-                onClick: () => {
-                  persistDisclosed();
-                  setIsDisclosed(true);
-                  setTelemetryEnabled(true);
-                  setIsEnabled(true);
-                  flushTelemetryQueue();
-                  track("telemetry_disclosure_responded", {
-                    action: "accepted",
-                    path: "existing_user_banner",
-                    time_to_respond_ms: Date.now() - shownAt,
-                    auto_advanced: false,
-                  });
-                },
-              },
-              cancel: {
-                label: "No thanks",
-                onClick: () => {
-                  persistDisclosed();
-                  setIsDisclosed(true);
-                  dropTelemetryQueue();
-                  track("telemetry_disclosure_responded", {
-                    action: "disabled",
-                    path: "existing_user_banner",
-                    time_to_respond_ms: Date.now() - shownAt,
-                    auto_advanced: false,
-                  });
-                },
-              },
-            }
-          );
+          persistDisclosed();
+          setIsDisclosed(true);
+          dropTelemetryQueue();
         }
       });
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const setEnabled = useCallback((enabled: boolean) => {

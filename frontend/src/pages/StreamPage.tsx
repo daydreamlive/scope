@@ -75,7 +75,7 @@ import { toast } from "sonner";
 import { useOnboarding } from "../contexts/OnboardingContext";
 import { OnboardingOverlay } from "../components/onboarding/OnboardingOverlay";
 import { WorkspaceTour } from "../components/onboarding/WorkspaceTour";
-import { StarterWorkflowsChip } from "../components/onboarding/StarterWorkflowsChip";
+
 import {
   isAuthenticated as checkIsAuthenticated,
   getDaydreamAPIKey,
@@ -332,10 +332,13 @@ export function StreamPage() {
   // Plugins dialog navigation state (used by starter workflows chip)
   const [openPluginsTab, setOpenPluginsTab] = useState<string | null>(null);
 
-  // Open account tab after sign-in (success or error)
+  // Open account tab after sign-in (success or error), but not during onboarding
+  // where the auth step is part of the flow and the dialog would block the overlay.
   useEffect(() => {
     const handleAuthEvent = () => {
-      setOpenSettingsTab("account");
+      if (!showOnboardingOverlay) {
+        setOpenSettingsTab("account");
+      }
     };
     window.addEventListener("daydream-auth-success", handleAuthEvent);
     window.addEventListener("daydream-auth-error", handleAuthEvent);
@@ -343,7 +346,7 @@ export function StreamPage() {
       window.removeEventListener("daydream-auth-success", handleAuthEvent);
       window.removeEventListener("daydream-auth-error", handleAuthEvent);
     };
-  }, []);
+  }, [showOnboardingOverlay]);
 
   // Download dialog state
   const [showDownloadDialog, setShowDownloadDialog] = useState(false);
@@ -3438,15 +3441,10 @@ export function StreamPage() {
 
         {/* Post-onboarding tooltip tour (play → workflows) */}
         {!showOnboardingOverlay && onboardingState.phase === "idle" && (
-          <>
-            <WorkspaceTour
-              onboardingStyle={onboardingState.onboardingStyle}
-              dialogOpen={showWorkflowImport}
-            />
-            <StarterWorkflowsChip
-              onOpenWorkflows={() => setOpenPluginsTab("workflows")}
-            />
-          </>
+          <WorkspaceTour
+            onboardingStyle={onboardingState.onboardingStyle}
+            dialogOpen={showWorkflowImport}
+          />
         )}
       </div>
     </MIDIProvider>
