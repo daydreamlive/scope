@@ -306,6 +306,20 @@ class PipelineManager:
 
             models_dir = get_models_dir()
             error_msg = f"Failed to load pipeline {key}: {e}"
+            # For InductorError / SubprocException, log the inner exception too so the
+            # actual subprocess failure reason is visible in logs rather than the wrapper.
+            inner_exc = getattr(e, "inner_exception", None)
+            if type(e).__name__ == "InductorError" or (
+                inner_exc is not None
+                and "SubprocException" in type(inner_exc).__name__
+            ):
+                inner_msg = str(inner_exc) if inner_exc is not None else str(e)
+                logger.error(
+                    "torch.inductor SubprocException during pipeline load for %s — "
+                    "inner exception: %s",
+                    key,
+                    inner_msg,
+                )
             logger.error(
                 f"{error_msg}. If this error persists, consider removing the models "
                 f"directory '{models_dir}' and re-downloading models."
