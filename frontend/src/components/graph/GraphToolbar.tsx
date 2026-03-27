@@ -19,6 +19,7 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import { trackEvent } from "../../lib/analytics";
 
 interface GraphToolbarProps {
   isStreaming: boolean;
@@ -67,7 +68,12 @@ export function GraphToolbar({
             <Upload className="h-4 w-4" />
             Import Workflow
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={onExport}>
+          <DropdownMenuItem
+            onSelect={() => {
+              onExport();
+              trackEvent("workflow_exported", { surface: "graph_mode" });
+            }}
+          >
             <Download className="h-4 w-4" />
             Export Workflow
           </DropdownMenuItem>
@@ -102,6 +108,7 @@ export function GraphToolbar({
         onChange={e => {
           if (isStreaming) onStopStream?.();
           onImport(e);
+          trackEvent("workflow_imported", { surface: "graph_mode" });
         }}
         className="hidden"
       />

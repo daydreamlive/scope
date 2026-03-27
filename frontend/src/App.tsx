@@ -14,6 +14,7 @@ import {
   initEnvKeyAuth,
 } from "./lib/auth";
 import { toast } from "sonner";
+import { TelemetryProvider } from "./contexts/TelemetryContext";
 import "./index.css";
 
 // Get cloud WebSocket URL and API key from environment variables
@@ -104,22 +105,24 @@ function App() {
   }
 
   return (
-    <CloudStatusProvider>
-      <PipelinesProvider>
-        <LoRAsProvider>
-          <PluginsProvider>
-            <ServerInfoProvider>
-              <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
-                <OnboardingProvider>
-                  <StreamPage />
-                </OnboardingProvider>
-              </CloudProvider>
-            </ServerInfoProvider>
-          </PluginsProvider>
-          <Toaster />
-        </LoRAsProvider>
-      </PipelinesProvider>
-    </CloudStatusProvider>
+    <TelemetryProvider>
+      <CloudStatusProvider>
+        <PipelinesProvider>
+          <LoRAsProvider>
+            <PluginsProvider>
+              <ServerInfoProvider>
+                <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
+                  <OnboardingProvider>
+                    <StreamPage />
+                  </OnboardingProvider>
+                </CloudProvider>
+              </ServerInfoProvider>
+            </PluginsProvider>
+            <Toaster />
+          </LoRAsProvider>
+        </PipelinesProvider>
+      </CloudStatusProvider>
+    </TelemetryProvider>
   );
 }
 

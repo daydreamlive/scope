@@ -3,6 +3,7 @@ import { Download, ExternalLink, Search, Loader2 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
+import { trackEvent, createDebouncedTracker } from "../../lib/analytics";
 
 const DAYDREAM_API_BASE =
   (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
@@ -76,6 +77,9 @@ export function DiscoverTab({
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
 
+  // Debounced search tracking (2s)
+  const [debouncedTrack] = useState(() => createDebouncedTracker(2000));
+
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(search), 300);
     return () => clearTimeout(timer);
@@ -101,6 +105,13 @@ export function DiscoverTab({
       }
       const data: DiscoverResponse = await response.json();
       setPlugins(data.plugins);
+      if (debouncedSearch) {
+        debouncedTrack("hub_searched", {
+          query_length: debouncedSearch.length,
+          results_count: data.plugins.length,
+          surface: "hub_browser",
+        });
+      }
     } catch (err) {
       console.error("Failed to fetch discover plugins:", err);
       setError(err instanceof Error ? err.message : "Failed to load plugins");
@@ -219,6 +230,12 @@ export function DiscoverTab({
                       href={daydreamUrl}
                       target="_blank"
                       rel="noopener noreferrer"
+                      onClick={() =>
+                        trackEvent("hub_item_viewed", {
+                          plugin_type: plugin.pluginType,
+                          surface: "hub_browser",
+                        })
+                      }
                     >
                       <ExternalLink className="h-4 w-4" />
                     </a>
@@ -251,7 +268,13 @@ export function DiscoverTab({
                       className="h-8 w-8"
                       title={`Install ${plugin.name}`}
                       disabled={disabled || isInstalling}
-                      onClick={() => onInstall(`git+${plugin.repositoryUrl}`)}
+                      onClick={() => {
+                        trackEvent("hub_item_installed", {
+                          plugin_type: plugin.pluginType,
+                          surface: "hub_browser",
+                        });
+                        onInstall(`git+${plugin.repositoryUrl}`);
+                      }}
                     >
                       <Download className="h-4 w-4" />
                     </Button>

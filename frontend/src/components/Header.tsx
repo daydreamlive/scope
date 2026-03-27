@@ -12,6 +12,7 @@ import { SettingsDialog } from "./SettingsDialog";
 import { PluginsDialog } from "./PluginsDialog";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import { trackEvent } from "../lib/analytics";
 
 interface HeaderProps {
   className?: string;
@@ -172,7 +173,16 @@ export function Header({
             <Button
               variant="ghost"
               size="sm"
-              onClick={onGraphModeToggle}
+              onClick={() => {
+                const fromMode = graphMode ? "graph" : "perform";
+                const toMode = graphMode ? "perform" : "graph";
+                trackEvent("mode_switched", {
+                  from_mode: fromMode,
+                  to_mode: toMode,
+                  surface: "app_chrome",
+                });
+                onGraphModeToggle();
+              }}
               className="text-xs text-muted-foreground hover:text-foreground transition-colors gap-1.5"
               title={
                 graphMode

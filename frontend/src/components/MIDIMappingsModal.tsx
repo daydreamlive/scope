@@ -10,6 +10,7 @@ import {
 import { Button } from "./ui/button";
 import { Trash2 } from "lucide-react";
 import type { MIDIMapping } from "../types/midi";
+import { trackEvent } from "../lib/analytics";
 
 interface MIDIMappingsModalProps {
   open: boolean;
@@ -73,6 +74,7 @@ export function MIDIMappingsModal({
 
   const handleDelete = (index: number) => {
     deleteMapping(index);
+    trackEvent("mapping_deleted", { surface: "performance_mode" });
   };
 
   const handleClearAll = () => {

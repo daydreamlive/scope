@@ -20,6 +20,7 @@ import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { usePluginsContext } from "../contexts/PluginsContext";
 import { useServerInfoContext } from "../contexts/ServerInfoContext";
+import { trackEvent } from "../lib/analytics";
 
 interface WorkflowExportDialogProps {
   open: boolean;
@@ -75,6 +76,10 @@ export function WorkflowExportDialog({
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
+      trackEvent("workflow_exported", {
+        node_count: workflow.graph?.nodes?.length ?? workflow.pipelines.length,
+        surface: "app_chrome",
+      });
       toast.success("Workflow exported", {
         description: `"${name}" saved as .scope-workflow.json`,
       });

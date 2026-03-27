@@ -20,6 +20,7 @@ import {
   refreshUserProfile,
 } from "../../lib/auth";
 import { useCloudStatus } from "../../hooks/useCloudStatus";
+import { trackEvent } from "../../lib/analytics";
 
 interface DaydreamAccountSectionProps {
   /** Callback to refresh pipeline list after cloud mode toggle */
@@ -160,6 +161,13 @@ export function DaydreamAccountSection({
   };
 
   const handleToggle = async (checked: boolean) => {
+    const fromMode = status.connected ? "cloud" : "local";
+    const toMode = checked ? "cloud" : "local";
+    trackEvent("inference_mode_changed", {
+      from_mode: fromMode,
+      to_mode: toMode,
+      surface: "settings",
+    });
     if (checked) {
       await handleConnect();
     } else {

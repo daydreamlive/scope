@@ -12,6 +12,7 @@ import {
   setInferenceMode as persistInferenceMode,
 } from "../lib/onboardingStorage";
 import { trackEvent } from "../lib/analytics";
+import { isDisclosed as checkTelemetryDisclosed } from "../lib/telemetry";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -23,12 +24,17 @@ export type OnboardingPhase =
   | "inference" // step 1: local vs cloud
   | "cloud_auth" // step 2a: sign in (only if cloud chosen)
   | "cloud_connecting" // step 2b: waiting for cloud relay connection
-  | "workflow"; // step 3: starter workflow picker
+  | "telemetry_disclosure" // telemetry opt-in disclosure (local mode only)
+  | "workflow" // step 3: starter workflow picker
+  | "downloading" // step 3b: workflow downloading
+  | "completed"; // persist and transition to idle
 
 export interface OnboardingState {
   phase: OnboardingPhase;
   inferenceMode: "local" | "cloud" | null;
   onboardingStyle: "teaching" | "simple" | null;
+  selectedWorkflowId: string | null;
+  downloadFailures: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -40,10 +46,15 @@ type OnboardingAction =
   | { type: "COMPLETE_AUTH" }
   | { type: "CLOUD_CONNECTED" }
   | { type: "SET_ONBOARDING_STYLE"; style: "teaching" | "simple" }
+  | { type: "SELECT_WORKFLOW"; workflowId: string }
+  | { type: "START_DOWNLOADING" }
+  | { type: "DOWNLOAD_FAILED" }
   | { type: "WORKFLOW_READY" }
   | { type: "START_FROM_SCRATCH" }
   | { type: "IMPORT_WORKFLOW_READY" }
   | { type: "GO_BACK" }
+  | { type: "COMPLETE" }
+  | { type: "TELEMETRY_DISCLOSED" }
   | {
       type: "LOADED";
       completed: boolean;
@@ -72,8 +83,16 @@ function reducer(
       return {
         ...state,
         inferenceMode: action.mode,
-        phase: action.mode === "cloud" ? "cloud_auth" : "workflow",
+        phase:
+          action.mode === "cloud"
+            ? "cloud_auth"
+            : checkTelemetryDisclosed()
+              ? "workflow"
+              : "telemetry_disclosure",
       };
+
+    case "TELEMETRY_DISCLOSED":
+      return { ...state, phase: "workflow" };
 
     case "COMPLETE_AUTH":
       trackEvent("onboarding_auth_completed");
@@ -86,8 +105,30 @@ function reducer(
     case "SET_ONBOARDING_STYLE":
       return { ...state, onboardingStyle: action.style };
 
+    case "SELECT_WORKFLOW":
+      return { ...state, selectedWorkflowId: action.workflowId };
+
+    case "START_DOWNLOADING":
+      trackEvent("onboarding_workflow_selected", {
+        workflowId: state.selectedWorkflowId,
+      });
+      return { ...state, phase: "downloading" };
+
+    case "DOWNLOAD_FAILED":
+      trackEvent("onboarding_workflow_download_failed", {
+        workflowId: state.selectedWorkflowId,
+        failure_count: state.downloadFailures + 1,
+      });
+      return {
+        ...state,
+        phase: "workflow",
+        downloadFailures: state.downloadFailures + 1,
+      };
+
     case "WORKFLOW_READY":
-      trackEvent("onboarding_workflow_downloaded");
+      trackEvent("onboarding_workflow_downloaded", {
+        workflowId: state.selectedWorkflowId,
+      });
       trackEvent("onboarding_completed");
       markOnboardingCompleted();
       return { ...state, phase: "idle" };
@@ -96,7 +137,7 @@ function reducer(
       trackEvent("onboarding_started_from_scratch");
       trackEvent("onboarding_completed");
       markOnboardingCompleted();
-      return { ...state, phase: "idle" };
+      return { ...state, phase: "idle", selectedWorkflowId: null };
 
     case "IMPORT_WORKFLOW_READY":
       trackEvent("onboarding_imported_workflow");
@@ -138,7 +179,13 @@ function reducer(
           return { ...state, phase: "cloud_auth", inferenceMode: "cloud" };
         }
         if (resumeMode === "local") {
-          return { ...state, phase: "workflow", inferenceMode: "local" };
+          return {
+            ...state,
+            phase: checkTelemetryDisclosed()
+              ? "workflow"
+              : "telemetry_disclosure",
+            inferenceMode: "local",
+          };
         }
       }
       return { ...state, phase: "inference" };
@@ -163,10 +210,14 @@ interface OnboardingContextValue {
   completeAuth: () => void;
   cloudConnected: () => void;
   setOnboardingStyle: (style: "teaching" | "simple") => void;
+  selectWorkflow: (workflowId: string) => void;
+  startDownloading: () => void;
+  downloadFailed: () => void;
   workflowReady: () => void;
   startFromScratch: () => void;
   importWorkflowReady: () => void;
   goBack: () => void;
+  telemetryDisclosed: () => void;
 }
 
 const OnboardingContext = createContext<OnboardingContextValue | null>(null);
@@ -179,6 +230,8 @@ const initialState: OnboardingState = {
   phase: "loading",
   inferenceMode: null,
   onboardingStyle: null,
+  selectedWorkflowId: null,
+  downloadFailures: 0,
 };
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
@@ -217,6 +270,18 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
       dispatch({ type: "SET_ONBOARDING_STYLE", style }),
     []
   );
+  const selectWorkflow = useCallback(
+    (workflowId: string) => dispatch({ type: "SELECT_WORKFLOW", workflowId }),
+    []
+  );
+  const startDownloading = useCallback(
+    () => dispatch({ type: "START_DOWNLOADING" }),
+    []
+  );
+  const downloadFailed = useCallback(
+    () => dispatch({ type: "DOWNLOAD_FAILED" }),
+    []
+  );
   const workflowReady = useCallback(
     () => dispatch({ type: "WORKFLOW_READY" }),
     []
@@ -230,6 +295,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     []
   );
   const goBack = useCallback(() => dispatch({ type: "GO_BACK" }), []);
+  const telemetryDisclosed = useCallback(
+    () => dispatch({ type: "TELEMETRY_DISCLOSED" }),
+    []
+  );
 
   const isOnboarding = state.phase !== "idle";
   const isOverlayVisible = [
@@ -237,6 +306,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     "inference",
     "cloud_auth",
     "cloud_connecting",
+    "telemetry_disclosure",
     "workflow",
   ].includes(state.phase);
 
@@ -250,10 +320,14 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         completeAuth,
         cloudConnected,
         setOnboardingStyle,
+        selectWorkflow,
+        startDownloading,
+        downloadFailed,
         workflowReady,
         startFromScratch,
         importWorkflowReady,
         goBack,
+        telemetryDisclosed,
       }}
     >
       {children}

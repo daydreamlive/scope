@@ -55,6 +55,7 @@ import {
   usePluginInstalls,
 } from "../hooks/useWorkflowDependencies";
 import { DependencyStatusIndicator } from "./DependencyStatusIndicator";
+import { trackEvent } from "../lib/analytics";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -413,6 +414,11 @@ export function WorkflowImportDialog({
         })),
       };
       onLoadToGraph(patchedWorkflow);
+      trackEvent("workflow_imported", {
+        node_count: workflow.graph?.nodes?.length ?? workflow.pipelines.length,
+        source: "file",
+        surface: "app_chrome",
+      });
       toast.success("Workflow loaded into graph", {
         description: `"${workflow.metadata.name}" loaded into the graph editor`,
       });
@@ -440,6 +446,11 @@ export function WorkflowImportDialog({
     }
 
     onLoad(importedSettings, timelinePrompts, promptState);
+    trackEvent("workflow_imported", {
+      node_count: workflow.graph?.nodes?.length ?? workflow.pipelines.length,
+      source: "file",
+      surface: "app_chrome",
+    });
     toast.success("Workflow loaded", {
       description: `"${workflow.metadata.name}" loaded into the interface`,
     });

@@ -1,8 +1,11 @@
 import { BookOpenText, Bug, Github, RotateCcw } from "lucide-react";
 import { Input } from "../ui/input";
 import { Button } from "../ui/button";
+import { Switch } from "../ui/switch";
 import { resetOnboarding } from "../../lib/onboardingStorage";
 import { toast } from "sonner";
+import { useTelemetry } from "../../contexts/TelemetryContext";
+import { isEnvTelemetryDisabled } from "../../lib/telemetry";
 
 interface GeneralTabProps {
   version: string;
@@ -148,6 +151,9 @@ export function GeneralTab({
         </div>
       </div>
 
+      {/* Privacy */}
+      <PrivacySection />
+
       {/* Advanced */}
       <div className="rounded-lg bg-muted/50 p-4 space-y-4">
         <h3 className="text-sm font-medium text-foreground">Advanced</h3>
@@ -170,6 +176,48 @@ export function GeneralTab({
             Reset
           </Button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function PrivacySection() {
+  const { isEnabled, setEnabled } = useTelemetry();
+  const envDisabled = isEnvTelemetryDisabled();
+
+  return (
+    <div className="rounded-lg bg-muted/50 p-4 space-y-4">
+      <h3 className="text-sm font-medium text-foreground">Privacy</h3>
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5 flex-1 mr-4">
+          <p className="text-sm text-foreground">
+            Help improve Scope by sending anonymous usage data
+          </p>
+          <p className="text-xs text-muted-foreground">
+            We track UI interactions and feature usage patterns, and we do not
+            collect prompts, parameters, file paths, videos, images, or session
+            replays.{" "}
+            <a
+              href="https://github.com/daydreamlive/scope/tree/main/docs/telemetry.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-foreground transition-colors"
+            >
+              Learn more about our approach
+            </a>
+          </p>
+          {envDisabled && (
+            <p className="text-xs text-yellow-500">
+              Telemetry is disabled via environment variable
+              (SCOPE_TELEMETRY_DISABLED or DO_NOT_TRACK).
+            </p>
+          )}
+        </div>
+        <Switch
+          checked={isEnabled}
+          onCheckedChange={setEnabled}
+          disabled={envDisabled}
+        />
       </div>
     </div>
   );
