@@ -339,6 +339,29 @@ class WebRTCManager:
                 else (all_sink_node_ids[0] if all_sink_node_ids else None)
             )
 
+            # If the graph has pipeline nodes, ensure they are loaded keyed by
+            # node_id so build_graph can find them via node.id.  The pipeline
+            # may already be loaded under its pipeline_id (e.g. from the
+            # load_pipeline API), so we re-register it under the node_id key.
+            graph_data = initial_parameters.get("graph")
+            if graph_data and isinstance(graph_data, dict):
+                for node in graph_data.get("nodes", []):
+                    if (
+                        node.get("type") == "pipeline"
+                        and node.get("pipeline_id")
+                        and node["id"] not in pipeline_manager._pipelines
+                    ):
+                        pid = node["pipeline_id"]
+                        existing = pipeline_manager._pipelines.get(pid)
+                        if existing is not None:
+                            pipeline_manager._pipelines[node["id"]] = existing
+                            pipeline_manager._pipeline_statuses[node["id"]] = (
+                                pipeline_manager._pipeline_statuses.get(pid, "loaded")
+                            )
+                            logger.info(
+                                f"Re-keyed pipeline {pid} as {node['id']} for graph"
+                            )
+
             # Create FrameProcessor (owned by session, shared between tracks)
             frame_processor = FrameProcessor(
                 pipeline_manager=pipeline_manager,
