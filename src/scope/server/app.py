@@ -1204,7 +1204,6 @@ async def close_webrtc_session(
 
 
 @app.get("/api/v1/recordings/{session_id}")
-@cloud_proxy(recording_download_cloud_path, timeout=120.0)
 async def download_recording(
     http_request: Request,
     session_id: str,
@@ -1213,46 +1212,43 @@ async def download_recording(
     cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Download the recording file for the specified session.
-    This will finalize the current recording and create a copy for download,
-    then continue recording with a new file.
 
-    In cloud mode, this proxies the download request to cloud.
+    Local-first: if the session has a local recording, serve it directly.
+    Falls back to cloud proxy only when there is no local recording and
+    cloud is connected (pure cloud mode where recording happens remotely).
     """
     try:
         session = webrtc_manager.get_session(session_id)
-        if not session:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Session {session_id} not found",
+        has_local_recording = session and session.recording_manager
+
+        if has_local_recording:
+            download_file = await session.recording_manager.finalize_and_get_recording()
+            if not download_file or not Path(download_file).exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail="Recording file not available",
+                )
+
+            background_tasks.add_task(cleanup_temp_file, download_file)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"recording-{timestamp}.mp4"
+
+            return FileResponse(
+                download_file,
+                media_type="video/mp4",
+                filename=filename,
             )
 
-        # Check if session has a recording manager
-        if not session.recording_manager:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Recording not available for session {session_id}",
+        if cloud_manager and cloud_manager.is_connected:
+            cloud_path = recording_download_cloud_path(http_request, cloud_manager)
+            return await proxy_with_body(
+                cloud_manager, "GET", cloud_path, timeout=120.0
             )
 
-        # Finalize the recording and get the download file
-        download_file = await session.recording_manager.finalize_and_get_recording()
-        if not download_file or not Path(download_file).exists():
-            raise HTTPException(
-                status_code=404,
-                detail="Recording file not available",
-            )
-
-        # Schedule cleanup of the temp file after download
-        background_tasks.add_task(cleanup_temp_file, download_file)
-
-        # Generate filename with datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"recording-{timestamp}.mp4"
-
-        # Return the file for download
-        return FileResponse(
-            download_file,
-            media_type="video/mp4",
-            filename=filename,
+        raise HTTPException(
+            status_code=404,
+            detail=f"Session {session_id} not found or no recording available",
         )
     except HTTPException:
         raise
