@@ -14,6 +14,7 @@ from .modulation import ModulationEngine
 from .parameter_scheduler import ParameterScheduler
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
+from .recording_coordinator import RecordingCoordinator
 
 if TYPE_CHECKING:
     from av import AudioFrame
@@ -139,9 +140,8 @@ class FrameProcessor:
         self._input_sources_by_node: dict[str, dict] = {}
         # Per-sink-node output sinks: node_id -> {sink, thread, type, name}
         self._output_sinks_by_node: dict[str, dict] = {}
-        # Per-record-node queues and recording managers
-        self._record_queues_by_node: dict[str, queue.Queue] = {}
-        self._recording_managers_by_node: dict[str, dict] = {}
+        # Recording coordination (per-record-node queues and managers)
+        self.recording = RecordingCoordinator(get_fps=self.get_fps)
 
         # Frame counting for debug logging
         self._frames_in = 0
@@ -212,13 +212,7 @@ class FrameProcessor:
 
                 # Set up record queues so cloud record frames can be
                 # received locally for recording.
-                for rec_id in graph.get_record_node_ids():
-                    self._record_queues_by_node[rec_id] = queue.Queue(maxsize=30)
-                if self._record_queues_by_node:
-                    logger.info(
-                        f"[FRAME-PROCESSOR] Cloud mode: created record queues "
-                        f"for {list(self._record_queues_by_node.keys())}"
-                    )
+                self.recording.setup_queues(graph.get_record_node_ids())
 
             logger.info("[FRAME-PROCESSOR] Started in cloud mode")
 
@@ -384,14 +378,8 @@ class FrameProcessor:
                 logger.error(f"Error closing output sink for node {node_id}: {e}")
         self._output_sinks_by_node.clear()
 
-        # Clean up per-node recording managers
-        for node_id, entry in list(self._recording_managers_by_node.items()):
-            try:
-                entry["track"].stop()
-            except Exception as e:
-                logger.error(f"Error stopping record track for node {node_id}: {e}")
-        self._recording_managers_by_node.clear()
-        self._record_queues_by_node.clear()
+        # Clean up per-node recording
+        self.recording.cleanup()
 
         # Clean up cloud callbacks in cloud mode
         if self._cloud_mode and self.cloud_manager:
@@ -602,42 +590,11 @@ class FrameProcessor:
         """Read a frame from a specific record node's output queue."""
         if not self.running:
             return None
-
-        rec_q = self._record_queues_by_node.get(record_node_id)
-        if rec_q is None:
-            return None
-
-        try:
-            frame = rec_q.get_nowait()
-            frame = frame.squeeze(0)
-            if frame.is_cuda:
-                frame = frame.cpu()
-            return frame
-        except queue.Empty:
-            return None
+        return self.recording.get(record_node_id)
 
     def put_to_record(self, record_node_id: str, frame) -> None:
-        """Put a VideoFrame into a record node's queue (cloud mode).
-
-        Called by cloud output callbacks to populate record queues with
-        frames received from the cloud pipeline.
-        """
-        rec_q = self._record_queues_by_node.get(record_node_id)
-        if rec_q is None:
-            return
-        try:
-            frame_np = frame.to_ndarray(format="rgb24")
-            frame_tensor = torch.as_tensor(frame_np, dtype=torch.uint8).unsqueeze(0)
-            try:
-                rec_q.put_nowait(frame_tensor)
-            except queue.Full:
-                try:
-                    rec_q.get_nowait()
-                    rec_q.put_nowait(frame_tensor)
-                except queue.Empty:
-                    pass
-        except Exception as e:
-            logger.error(f"Error putting frame to record node {record_node_id}: {e}")
+        """Put a VideoFrame into a record node's queue (cloud mode)."""
+        self.recording.put(record_node_id, frame)
 
     def get_sink_node_ids(self) -> list[str]:
         """Return the list of sink node IDs available for reading."""
@@ -657,56 +614,19 @@ class FrameProcessor:
 
     def get_record_node_ids(self) -> list[str]:
         """Return the list of record node IDs in the graph."""
-        return list(self._record_queues_by_node.keys())
+        return self.recording.get_node_ids()
 
     async def start_node_recording(self, node_id: str) -> bool:
         """Start recording for a specific record node."""
-        rec_q = self._record_queues_by_node.get(node_id)
-        if rec_q is None:
-            logger.error(f"No record queue for node {node_id}")
-            return False
-
-        if node_id in self._recording_managers_by_node:
-            entry = self._recording_managers_by_node[node_id]
-            if entry["manager"].is_recording_started:
-                logger.info(f"Record node {node_id} already recording")
-                return True
-
-        from .recording import RecordingManager
-        from .tracks import QueueVideoTrack
-
-        track = QueueVideoTrack(rec_q, fps=self.get_fps())
-        manager = RecordingManager(video_track=track)
-        # No MediaRelay: this track is only consumed by RecordingManager.
-        # relay.subscribe() is for sharing one source with WebRTC + recorder;
-        # for a queue-backed track it can prevent MediaRecorder from receiving frames.
-
-        self._recording_managers_by_node[node_id] = {
-            "manager": manager,
-            "track": track,
-        }
-
-        await manager.start_recording()
-        logger.info(f"Started recording for record node {node_id}")
-        return True
+        return await self.recording.start_recording(node_id)
 
     async def stop_node_recording(self, node_id: str) -> bool:
         """Stop recording for a specific record node."""
-        entry = self._recording_managers_by_node.get(node_id)
-        if entry is None:
-            return False
-        await entry["manager"].stop_recording()
-        logger.info(f"Stopped recording for record node {node_id}")
-        return True
+        return await self.recording.stop_recording(node_id)
 
     async def download_node_recording(self, node_id: str) -> str | None:
         """Finalize and return the recording file path for a record node."""
-        entry = self._recording_managers_by_node.get(node_id)
-        if entry is None:
-            return None
-        path = await entry["manager"].finalize_and_get_recording(restart_after=False)
-        self._recording_managers_by_node.pop(node_id, None)
-        return path
+        return await self.recording.download_recording(node_id)
 
     def get(self) -> torch.Tensor | None:
         if not self.running:
@@ -1420,7 +1340,7 @@ class FrameProcessor:
         self._sink_queues_by_node = graph_run.sink_queues_by_node
         self._sink_hardware_queues_by_node = graph_run.sink_hardware_queues_by_node
         self._sink_processors_by_node = graph_run.sink_processors_by_node
-        self._record_queues_by_node = graph_run.record_queues_by_node
+        self.recording.record_queues = graph_run.record_queues_by_node
 
         # Index processors by node_id for per-node parameter routing
         for proc in self.pipeline_processors:
@@ -1441,7 +1361,7 @@ class FrameProcessor:
             f"sink={graph_run.sink_node_id}, "
             f"sources={list(self._source_queues_by_node.keys())}, "
             f"sinks={list(self._sink_queues_by_node.keys())}, "
-            f"records={list(self._record_queues_by_node.keys())}"
+            f"records={self.recording.get_node_ids()}"
         )
 
     def _setup_multi_input_sources(self, graph):

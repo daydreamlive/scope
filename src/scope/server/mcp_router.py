@@ -197,7 +197,7 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
     The cloud sends multiple video tracks:
     - Track 0: primary sink (goes to cloud_manager's main callback → FP._cloud_output_queue)
     - Track 1..N: extra sinks → FP._sink_queues_by_node
-    - Track N+1..M: record nodes → FP._record_queues_by_node
+    - Track N+1..M: record nodes → FP.recording.record_queues
     """
     import queue
 
