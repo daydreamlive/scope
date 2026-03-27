@@ -176,6 +176,8 @@ interface GraphEditorProps {
   syphonOutputAvailable?: boolean;
   onStartRecording?: () => void;
   onStopRecording?: () => void;
+  onOpenSettings?: () => void;
+  onOpenPlugins?: () => void;
 }
 
 export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
@@ -207,6 +209,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       syphonOutputAvailable = false,
       onStartRecording,
       onStopRecording,
+      onOpenSettings,
+      onOpenPlugins,
     },
     ref
   ) {
@@ -800,6 +804,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             onImport={handleImport}
             onExport={() => setShowExportDialog(true)}
             onClear={() => setShowClearConfirm(true)}
+            onOpenSettings={onOpenSettings}
+            onOpenPlugins={onOpenPlugins}
           />
 
           <BreadcrumbNav

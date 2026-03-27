@@ -2838,6 +2838,8 @@ export function StreamPage() {
             syphonOutputAvailable={syphonOutputAvailable}
             onStartRecording={handleStartRecording}
             onStopRecording={handleStopRecording}
+            onOpenSettings={() => setOpenSettingsTab("general")}
+            onOpenPlugins={() => setOpenSettingsTab("plugins")}
           />
         </div>
 
