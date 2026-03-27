@@ -835,10 +835,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             isConnecting={isConnecting}
             isLoading={isLoading}
             status={status}
-            isPlaying={isPlaying}
             onStartStream={onStartStream}
             onStopStream={onStopStream}
-            onPlayPauseToggle={onPlayPauseToggle}
             onImport={handleImport}
             onExport={() => setShowExportDialog(true)}
             onClear={() => setShowClearConfirm(true)}
