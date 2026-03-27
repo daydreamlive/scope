@@ -82,6 +82,7 @@ class LivepeerClient:
         self._shutdown_started = False
         self._shutdown_lock = asyncio.Lock()
         self._runner_ready_event = asyncio.Event()
+        self._connection_id: str | None = None
 
         self._stats = {
             "connected_at": None,
@@ -101,6 +102,10 @@ class LivepeerClient:
             and self._media_publisher is not None
             and self._media_subscriber_task is not None
         )
+
+    @property
+    def connection_id(self) -> str | None:
+        return self._connection_id
 
     async def connect(self, initial_parameters: dict | None = None) -> None:
         """Create a Livepeer job and start the events channel."""
@@ -131,6 +136,7 @@ class LivepeerClient:
             timeout=300.0,
             use_tofu=bool(os.environ.get("LIVEPEER_DEV_MODE")),
         )
+        self._connection_id = getattr(self._job, "manifest_id", None)
 
         # start_lv2v runs in a worker thread without an event loop, so
         # deferred async initialisers need to be kicked off now.
@@ -634,6 +640,7 @@ class LivepeerClient:
             self._job = None
             self._control_writer = None
             self._connected = False
+            self._connection_id = None
 
         await self._teardown_media_handles(media_handles, current_task=current_task)
         await self._drain_or_cancel_task("events loop", events_task, current_task)

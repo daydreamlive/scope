@@ -198,12 +198,26 @@ async def _proxy_ws(client_ws: WebSocket) -> None:
 
         for task in pending:
             task.cancel()
-        for task in pending:
-            with suppress(asyncio.CancelledError):
+
+        # WebSocketDisconnect is used as a signal to tell the caller
+        # the client is gone (normal shutdown) so prioritize that.
+        # Otherwise, re-raise for other types of unexpected errors.
+        disconnect_exc: WebSocketDisconnect | None = None
+        unexpected_exc: Exception | None = None
+        for task in (*done, *pending):
+            try:
                 await task
-        for task in done:
-            with suppress(asyncio.CancelledError, ConnectionClosed):
-                await task
+            except (asyncio.CancelledError, ConnectionClosed):
+                pass
+            except WebSocketDisconnect as exc:
+                disconnect_exc = disconnect_exc or exc
+            except Exception as exc:
+                unexpected_exc = unexpected_exc or exc
+
+        if disconnect_exc is not None:
+            raise disconnect_exc
+        if unexpected_exc is not None:
+            raise unexpected_exc
 
 
 class LivepeerScopeApp(fal.App, keep_alive=300):

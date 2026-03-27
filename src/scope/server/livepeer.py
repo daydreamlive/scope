@@ -270,7 +270,9 @@ class LivepeerConnection:
             "error": self._connect_error,
             "webrtc_connected": self.webrtc_connected,
             "app_id": "livepeer" if self.is_connected else None,
-            "connection_id": None,
+            "connection_id": (
+                self._client.connection_id if self._client is not None else None
+            ),
             "last_close_code": self._last_close_code,
             "last_close_reason": self._last_close_reason,
         }
