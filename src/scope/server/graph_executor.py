@@ -102,7 +102,7 @@ def build_graph(
     for node in graph.nodes:
         if node.type != "pipeline" or node.pipeline_id is None:
             continue
-        pipeline = pipeline_manager.get_pipeline_by_id(node.id)
+        pipeline = pipeline_manager.get_pipeline_by_id(node.pipeline_id)
         processor = PipelineProcessor(
             pipeline=pipeline,
             pipeline_id=node.pipeline_id,
@@ -197,8 +197,7 @@ def build_graph(
                     else:
                         feeder_proc.output_queues[port] = [sink_q]
                     logger.info(
-                        "Sink %s: dedicated queue on %s port '%s' "
-                        "(total queues: %d)",
+                        "Sink %s: dedicated queue on %s port '%s' (total queues: %d)",
                         sink_id,
                         e.from_node,
                         port,
@@ -271,7 +270,7 @@ def _validate_edge_ports(
     for node in graph.nodes:
         if node.type != "pipeline" or node.pipeline_id is None:
             continue
-        pipeline = pipeline_manager.get_pipeline_by_id(node.id)
+        pipeline = pipeline_manager.get_pipeline_by_id(node.pipeline_id)
         config_class = pipeline.get_config_class()
         port_map[node.id] = (set(config_class.inputs), set(config_class.outputs))
 

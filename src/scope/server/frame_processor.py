@@ -325,14 +325,21 @@ class FrameProcessor:
             self.input_source = None
 
         # Clean up per-node input sources (multi-source graph mode)
+        # Join threads first to avoid closing the source while the thread is
+        # still inside receive_frame() (causes segfault with PyAV/FFmpeg).
         for node_id, entry in list(self._input_sources_by_node.items()):
+            thread = entry.get("thread")
+            if thread and thread.is_alive():
+                thread.join(timeout=3.0)
+                if thread.is_alive():
+                    logger.warning(
+                        f"Input source thread for node '{node_id}' "
+                        f"did not stop within 3s"
+                    )
             try:
                 entry["source"].close()
             except Exception as e:
                 logger.error(f"Error closing input source for node {node_id}: {e}")
-            thread = entry.get("thread")
-            if thread and thread.is_alive():
-                thread.join(timeout=2.0)
         self._input_sources_by_node.clear()
 
         # Clean up per-node output sinks (multi-sink graph mode)
@@ -1092,7 +1099,7 @@ class FrameProcessor:
         for node in graph_data.get("nodes", []):
             if node.get("type") == "source":
                 sm = node.get("source_mode")
-                if sm in ("spout", "ndi", "syphon"):
+                if sm in ("spout", "ndi", "syphon", "video_file"):
                     return True
         return False
 
@@ -1326,7 +1333,7 @@ class FrameProcessor:
             if node.type != "source":
                 continue
             source_mode = getattr(node, "source_mode", None)
-            if source_mode not in ("spout", "ndi", "syphon"):
+            if source_mode not in ("spout", "ndi", "syphon", "video_file"):
                 continue
             source_name = getattr(node, "source_name", "") or ""
             node_id = node.id

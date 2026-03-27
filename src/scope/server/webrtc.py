@@ -1043,15 +1043,24 @@ class WebRTCManager:
             return "headless", self.headless_session.frame_processor, True
         return None
 
-    def get_last_frame(self):
-        """Return the most recent frame from the active session, or None."""
-        for session in self.sessions.values():
-            if session.video_track and hasattr(session.video_track, "get_last_frame"):
-                frame = session.video_track.get_last_frame()
-                if frame is not None:
-                    return frame
+    def get_last_frame(self, sink_node_id: str | None = None):
+        """Return the most recent frame from the active session, or None.
+
+        Args:
+            sink_node_id: If provided, return the last frame from this specific
+                sink node (multi-sink graph mode). If None, return the most
+                recent frame from any sink.
+        """
+        if sink_node_id is None:
+            for session in self.sessions.values():
+                if session.video_track and hasattr(
+                    session.video_track, "get_last_frame"
+                ):
+                    frame = session.video_track.get_last_frame()
+                    if frame is not None:
+                        return frame
         if self.headless_session:
-            frame = self.headless_session.get_last_frame()
+            frame = self.headless_session.get_last_frame(sink_node_id=sink_node_id)
             if frame is not None:
                 return frame
         return None
