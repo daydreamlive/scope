@@ -613,11 +613,44 @@ class WebRTCManager:
 
                 asyncio.create_task(_start_cloud())
 
+            audio_relay = None
             if produces_audio:
                 audio_track = AudioProcessingTrack(
                     frame_processor=frame_processor,
                 )
                 session.audio_track = audio_track
+
+            # Recording setup (local recording from relayed cloud frames)
+            from .recording import RECORDING_ENABLED
+
+            recording_param = initial_parameters.get("recording")
+            recording_enabled = (
+                recording_param if recording_param is not None else RECORDING_ENABLED
+            )
+            if recording_enabled and (
+                cloud_track is not None or audio_track is not None
+            ):
+                recording_manager = RecordingManager(
+                    video_track=cloud_track,
+                    audio_track=audio_track,
+                )
+                session.recording_manager = recording_manager
+                if relay is not None:
+                    recording_manager.set_relay(relay)
+                if audio_track is not None:
+                    audio_relay = MediaRelay()
+                    recording_manager.set_audio_relay(audio_relay)
+
+                async def start_recording_when_ready():
+                    try:
+                        await asyncio.sleep(0.1)
+                        await recording_manager.start_recording()
+                    except Exception as e:
+                        logger.debug(f"Could not start recording yet: {e}")
+
+                asyncio.create_task(start_recording_when_ready())
+            else:
+                session.recording_manager = None
 
             logger.info(f"Created session: {session.id}")
 
@@ -685,10 +718,18 @@ class WebRTCManager:
 
             # Attach our audio track to the transceiver that aiortc
             # created from the browser's recvonly audio m-line (if present).
+            # When an audio relay exists (for recording), use a relayed
+            # subscription so the relay fans out to both WebRTC and the
+            # RecordingManager.
             if audio_track is not None:
+                audio_for_webrtc = (
+                    audio_relay.subscribe(audio_track)
+                    if audio_relay is not None
+                    else audio_track
+                )
                 for t in pc.getTransceivers():
                     if t.kind == "audio":
-                        t.sender.replaceTrack(audio_track)
+                        t.sender.replaceTrack(audio_for_webrtc)
                         t.direction = "sendonly"
                         logger.info(
                             f"Audio track attached to transceiver (mid={t.mid})"

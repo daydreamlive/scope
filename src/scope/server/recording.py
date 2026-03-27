@@ -1,5 +1,6 @@
 """Recording-related utility functions for cleanup and download handling."""
 
+import fractions
 import logging
 import os
 import shutil
@@ -10,6 +11,7 @@ from pathlib import Path
 
 from aiortc import MediaStreamTrack
 from aiortc.contrib.media import MediaRecorder, MediaRelay
+from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE
 
 logger = logging.getLogger(__name__)
 
@@ -62,13 +64,14 @@ RECORDING_MAX_LENGTH_SECONDS = _parse_time_duration(RECORDING_MAX_LENGTH_STR)
 
 
 class TimestampNormalizingTrack(MediaStreamTrack):
-    """Wraps a track and normalizes frame timestamps to start from 0.
+    """Wraps a track and assigns wall-clock timestamps starting from 0.
 
-    This is needed because when starting a new recording, the source track's
-    frames have PTS values that continue from the previous recording. Without
-    normalization, the MP4 encoder interprets these high PTS values as
-    indicating the frame should appear later in the video, causing black
-    frames at the start.
+    Uses monotonic wall-clock time to compute PTS so that the recorded
+    MP4 plays back at real-time speed regardless of the source track's
+    own PTS cadence.  This is critical for cloud-relay recordings where
+    frames may arrive slower than the source track's nominal rate (e.g.
+    CloudTrack stamps every frame at 1/30 s intervals even when network
+    round-trips deliver them at 10-15 FPS).
 
     Important: We must create a copy of the frame rather than modifying it
     in place, because the relay shares frame objects across all subscribers.
@@ -79,7 +82,7 @@ class TimestampNormalizingTrack(MediaStreamTrack):
         super().__init__()
         self.kind = source_track.kind
         self._source = source_track
-        self._base_pts = None  # Will be set on first frame
+        self._start_time: float | None = None
         self._last_frame_time: float | None = None
         self._min_frame_interval = 1.0 / RECORDING_MAX_FPS
 
@@ -97,11 +100,10 @@ class TimestampNormalizingTrack(MediaStreamTrack):
                     continue  # Skip this frame
             self._last_frame_time = current_time
 
-            # Capture the first frame's PTS as our base
-            if self._base_pts is None:
-                self._base_pts = frame.pts
+            if self._start_time is None:
+                self._start_time = current_time
 
-            # Create a new frame with normalized timestamp.
+            # Create a new frame with wall-clock-based timestamp.
             # Pad to even dimensions — libx264 requires width and height divisible by 2.
             arr = frame.to_ndarray(format="rgb24")
             h, w = arr.shape[:2]
@@ -112,8 +114,8 @@ class TimestampNormalizingTrack(MediaStreamTrack):
 
                 arr = np.pad(arr, ((0, pad_h), (0, pad_w), (0, 0)), mode="edge")
             new_frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
-            new_frame.pts = frame.pts - self._base_pts
-            new_frame.time_base = frame.time_base
+            new_frame.pts = int((current_time - self._start_time) * VIDEO_CLOCK_RATE)
+            new_frame.time_base = VIDEO_TIME_BASE
             return new_frame
 
     def stop(self):
@@ -122,11 +124,13 @@ class TimestampNormalizingTrack(MediaStreamTrack):
 
 
 class AudioTimestampNormalizingTrack(MediaStreamTrack):
-    """Wraps an audio track and normalizes frame timestamps to start from 0.
+    """Wraps an audio track and assigns wall-clock timestamps starting from 0.
 
     Analogous to TimestampNormalizingTrack but for AudioFrame objects.
-    Unlike video, audio frames are not rate-limited here because the
-    source AudioProcessingTrack already paces at 20ms intervals.
+    Uses wall-clock time for PTS to stay in sync with the video track's
+    wall-clock timestamps.  Unlike video, audio frames are not rate-limited
+    here because the source AudioProcessingTrack already paces at 20ms
+    intervals.
     """
 
     kind = "audio"
@@ -134,17 +138,18 @@ class AudioTimestampNormalizingTrack(MediaStreamTrack):
     def __init__(self, source_track: MediaStreamTrack):
         super().__init__()
         self._source = source_track
-        self._base_pts = None
+        self._start_time: float | None = None
 
     async def recv(self):
         from av import AudioFrame as AvAudioFrame
 
         frame = await self._source.recv()
 
-        if self._base_pts is None:
-            self._base_pts = frame.pts
+        current_time = time.monotonic()
+        if self._start_time is None:
+            self._start_time = current_time
 
-        # Create a copy with normalized PTS (relay shares frame objects,
+        # Create a copy with wall-clock PTS (relay shares frame objects,
         # so we must not mutate in place).
         new_frame = AvAudioFrame(
             format=frame.format.name,
@@ -152,8 +157,8 @@ class AudioTimestampNormalizingTrack(MediaStreamTrack):
             samples=frame.samples,
         )
         new_frame.sample_rate = frame.sample_rate
-        new_frame.pts = frame.pts - self._base_pts
-        new_frame.time_base = frame.time_base
+        new_frame.pts = int((current_time - self._start_time) * frame.sample_rate)
+        new_frame.time_base = fractions.Fraction(1, frame.sample_rate)
         for i, plane in enumerate(frame.planes):
             new_frame.planes[i].update(bytes(plane))
         return new_frame

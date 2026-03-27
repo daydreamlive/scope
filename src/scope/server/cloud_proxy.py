@@ -135,6 +135,20 @@ async def proxy_with_body(
             or response.get("error", CLOUD_REQUEST_FAILED),
         )
 
+    if "_base64_content" in response:
+        content = base64.b64decode(response["_base64_content"])
+        media_type = response.get("media_type", "video/mp4")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = response.get("filename", f"recording-{timestamp}.mp4")
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(content)),
+            },
+        )
+
     return response.get("data", {})
 
 
