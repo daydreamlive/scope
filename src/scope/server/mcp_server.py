@@ -297,12 +297,12 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
         resp = await _client().get("/api/v1/session/frame", params=params)
         resp.raise_for_status()
 
-        suffix_parts = ["scope_frame_"]
+        prefix_parts = ["scope_frame_"]
         if sink_node_id:
-            suffix_parts.append(f"{sink_node_id}_")
+            prefix_parts.append(f"{sink_node_id}_")
 
         with tempfile.NamedTemporaryFile(
-            suffix=".jpg", prefix="".join(suffix_parts), delete=False
+            suffix=".jpg", prefix="".join(prefix_parts), delete=False
         ) as f:
             f.write(resp.content)
             file_path = f.name

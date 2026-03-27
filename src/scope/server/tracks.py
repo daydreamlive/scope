@@ -30,8 +30,6 @@ _WEBRTC_PLAYBACK_FPS_DEFAULT = 30.0
 
 def _webrtc_playback_fps(pipeline_fps: float) -> float:
     """FPS for pacing outbound WebRTC video; avoid ~1 FPS from MIN_FPS clamp."""
-    if pipeline_fps <= 0:
-        return _WEBRTC_PLAYBACK_FPS_DEFAULT
     if pipeline_fps <= 1.01:
         return _WEBRTC_PLAYBACK_FPS_DEFAULT
     return pipeline_fps
@@ -108,12 +106,8 @@ class SinkOutputTrack(MediaStreamTrack):
         self.sink_node_id = sink_node_id
         self.fps = 30
         self.frame_ptime = 1.0 / self.fps
-        self._paused = False
-        self._paused_lock = threading.Lock()
-        self._last_frame = None
         self._last_send_time: float | None = None
         self._pts: int = 0
-        self._frame_lock = threading.Lock()
 
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
         if self.readyState != "live":
@@ -137,43 +131,19 @@ class SinkOutputTrack(MediaStreamTrack):
         fp = self.primary_track.frame_processor
 
         while True:
-            with self._paused_lock:
-                paused = self._paused
+            # Update FPS from the specific sink's feeder processor
+            self.fps = _webrtc_playback_fps(fp.get_fps_for_sink(self.sink_node_id))
+            self.frame_ptime = 1.0 / self.fps
 
-            frame = None
-            if paused:
-                frame = self._last_frame
-            else:
-                # Update FPS from the specific sink's feeder processor
-                if fp:
-                    self.fps = _webrtc_playback_fps(
-                        fp.get_fps_for_sink(self.sink_node_id)
-                    )
-                    self.frame_ptime = 1.0 / self.fps
-
-                frame_tensor = fp.get_from_sink(self.sink_node_id)
-                if frame_tensor is not None:
-                    frame = VideoFrame.from_ndarray(
-                        frame_tensor.numpy(), format="rgb24"
-                    )
-
-            if frame is not None:
+            frame_tensor = fp.get_from_sink(self.sink_node_id)
+            if frame_tensor is not None:
+                frame = VideoFrame.from_ndarray(frame_tensor.numpy(), format="rgb24")
                 pts, time_base = await self.next_timestamp()
                 frame.pts = pts
                 frame.time_base = time_base
-                with self._frame_lock:
-                    self._last_frame = frame
                 return frame
 
             await asyncio.sleep(0.01)
-
-    def get_last_frame(self):
-        with self._frame_lock:
-            return self._last_frame
-
-    def pause(self, paused: bool):
-        with self._paused_lock:
-            self._paused = paused
 
 
 class RecordOutputTrack(MediaStreamTrack):
@@ -198,8 +168,6 @@ class RecordOutputTrack(MediaStreamTrack):
         self.frame_ptime = 1.0 / self.fps
         self._last_send_time: float | None = None
         self._pts: int = 0
-        self._last_frame: VideoFrame | None = None
-        self._frame_lock = threading.Lock()
 
     async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
         if self.readyState != "live":
@@ -228,8 +196,6 @@ class RecordOutputTrack(MediaStreamTrack):
                 pts, time_base = await self.next_timestamp()
                 frame.pts = pts
                 frame.time_base = time_base
-                with self._frame_lock:
-                    self._last_frame = frame
                 return frame
 
             await asyncio.sleep(0.01)
@@ -426,9 +392,7 @@ class VideoProcessingTrack(MediaStreamTrack):
                 # Update FPS from the specific sink's feeder processor, or global
                 if self.frame_processor:
                     if self.sink_node_id:
-                        raw = self.frame_processor.get_fps_for_sink(
-                            self.sink_node_id
-                        )
+                        raw = self.frame_processor.get_fps_for_sink(self.sink_node_id)
                     else:
                         raw = self.frame_processor.get_fps()
                     self.fps = _webrtc_playback_fps(raw)

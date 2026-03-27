@@ -73,9 +73,7 @@ export interface GraphEditorCallbacks {
     sinkType: string,
     config: { enabled: boolean; name: string }
   ) => void;
-  onOutputSinkBulkChange?: (
-    sinks: Record<string, { enabled: boolean; name: string }>
-  ) => void;
+
   onStartRecording?: (nodeId?: string) => void;
   onStopRecording?: (nodeId?: string) => void;
   onEnableTempo?: (req: TempoEnableRequest) => void;
@@ -221,9 +219,6 @@ export function useGraphState(
 
   const onOutputSinkChangeRef = useRef(callbacks.onOutputSinkChange);
   onOutputSinkChangeRef.current = callbacks.onOutputSinkChange;
-
-  const onOutputSinkBulkChangeRef = useRef(callbacks.onOutputSinkBulkChange);
-  onOutputSinkBulkChangeRef.current = callbacks.onOutputSinkBulkChange;
 
   const onStartRecordingRef = useRef(callbacks.onStartRecording);
   onStartRecordingRef.current = callbacks.onStartRecording;
@@ -389,7 +384,6 @@ export function useGraphState(
     isStreamingRef,
     onNodeParamChangeRef: params.onNodeParamChangeRef,
     onOutputSinkChangeRef,
-    onOutputSinkBulkChangeRef,
     enrichDepsRef,
     handleEdgeDelete,
     status: persistence.status,

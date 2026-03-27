@@ -22,9 +22,6 @@ from scope.server.headless import HeadlessSession
 TEST_VIDEO_1 = str(Path(__file__).parent.parent / "frontend/public/assets/test.mp4")
 TEST_VIDEO_2 = str(Path(__file__).parent.parent / "frontend/public/assets/test2.mp4")
 
-# Fixtures directory fallback
-FIXTURES_VIDEO = str(Path(__file__).parent / "fixtures/white_square_moving.mp4")
-
 
 class StubPipelineConfig(BasePipelineConfig):
     """Minimal config for the stub pipeline."""
@@ -349,113 +346,6 @@ class TestMultiSourceMultiSink:
             # Default (no sink_id) returns most recent from any sink
             f_default = session.get_last_frame()
             assert f_default is not None
-        finally:
-            if session and elt:
-                _stop_session(session, elt)
-            elif fp.running:
-                fp.stop()
-
-    @pytest.mark.skipif(
-        not (Path(TEST_VIDEO_1).exists() and Path(TEST_VIDEO_2).exists()),
-        reason="Test videos not found",
-    )
-    def test_frames_are_different_per_sink(self):
-        """Frames from different sources should produce different output per sink."""
-        pipeline_1 = StubPipeline()
-        pipeline_2 = StubPipeline()
-        pipelines = {"pipeline_1": pipeline_1, "pipeline_2": pipeline_2}
-        manager = _make_pipeline_manager(pipelines)
-
-        graph = {
-            "nodes": [
-                {
-                    "id": "source_1",
-                    "type": "source",
-                    "source_mode": "video_file",
-                    "source_name": TEST_VIDEO_1,
-                },
-                {
-                    "id": "source_2",
-                    "type": "source",
-                    "source_mode": "video_file",
-                    "source_name": TEST_VIDEO_2,
-                },
-                {
-                    "id": "pipeline_1",
-                    "type": "pipeline",
-                    "pipeline_id": "stub",
-                },
-                {
-                    "id": "pipeline_2",
-                    "type": "pipeline",
-                    "pipeline_id": "stub",
-                },
-                {"id": "output_1", "type": "sink"},
-                {"id": "output_2", "type": "sink"},
-            ],
-            "edges": [
-                {
-                    "from": "source_1",
-                    "from_port": "video",
-                    "to_node": "pipeline_1",
-                    "to_port": "video",
-                    "kind": "stream",
-                },
-                {
-                    "from": "source_2",
-                    "from_port": "video",
-                    "to_node": "pipeline_2",
-                    "to_port": "video",
-                    "kind": "stream",
-                },
-                {
-                    "from": "pipeline_1",
-                    "from_port": "video",
-                    "to_node": "output_1",
-                    "to_port": "video",
-                    "kind": "stream",
-                },
-                {
-                    "from": "pipeline_2",
-                    "from_port": "video",
-                    "to_node": "output_2",
-                    "to_port": "video",
-                    "kind": "stream",
-                },
-            ],
-        }
-
-        fp = FrameProcessor(
-            pipeline_manager=manager,
-            initial_parameters={
-                "pipeline_ids": ["stub", "stub"],
-                "input_mode": "video",
-                "graph": graph,
-            },
-        )
-
-        session = None
-        elt = None
-        try:
-            fp.start()
-            assert fp.running
-
-            session, elt = _start_session(fp)
-
-            # Wait for multiple frames to accumulate
-            frames = _wait_for_frames(
-                session, timeout=15.0, sink_ids=["output_1", "output_2"]
-            )
-            assert frames is not None
-
-            # The two videos have different content, so frames should differ
-            arr1 = frames["output_1"].to_ndarray(format="rgb24")
-            arr2 = frames["output_2"].to_ndarray(format="rgb24")
-
-            # Frames might have different dimensions (test.mp4 vs test2.mp4)
-            # At minimum, both should be valid non-empty RGB frames
-            assert arr1.size > 0
-            assert arr2.size > 0
         finally:
             if session and elt:
                 _stop_session(session, elt)

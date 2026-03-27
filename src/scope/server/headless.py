@@ -217,12 +217,6 @@ class HeadlessSession:
         )
         return file_path
 
-    def get_recording_path(self) -> str | None:
-        """Return the path of the active recording file, or None."""
-        if self._recorder and self._recorder.file_path:
-            return self._recorder.file_path
-        return None
-
     @property
     def is_recording(self) -> bool:
         return self._recorder is not None and self._recorder.is_recording

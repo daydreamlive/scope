@@ -31,7 +31,12 @@ from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
-from .tracks import SinkOutputTrack, SourceInputHandler, VideoProcessingTrack
+from .tracks import (
+    RecordOutputTrack,
+    SinkOutputTrack,
+    SourceInputHandler,
+    VideoProcessingTrack,
+)
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
@@ -642,8 +647,6 @@ class WebRTCManager:
             # These are requested by CloudWebRTCClient for record nodes;
             # browser clients don't create transceivers for them.
             if record_node_ids and video_track is not None and relay is not None:
-                from .tracks import RecordOutputTrack
-
                 remaining_recv_only = [
                     t
                     for t in pc.getTransceivers()
@@ -753,9 +756,9 @@ class WebRTCManager:
             (
                 sink_node_ids,
                 webrtc_source_node_ids,
-                all_sink_node_ids,
+                _,  # all_sink_node_ids
                 record_node_ids,
-                has_non_webrtc_sources,
+                _,  # has_non_webrtc_sources
             ) = _parse_graph_node_ids(initial_parameters)
 
             # Determine media modalities from initial_parameters. These are

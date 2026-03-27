@@ -122,13 +122,6 @@ class GraphConfig(BaseModel):
         """Return stream edges whose source is the given node."""
         return [e for e in self.edges_from(node_id) if e.kind == "stream"]
 
-    def node_by_id(self, node_id: str) -> GraphNode | None:
-        """Return the node with the given id."""
-        for n in self.nodes:
-            if n.id == node_id:
-                return n
-        return None
-
     def validate_structure(self) -> list[str]:
         """Validate the graph structure and return a list of error messages.
 

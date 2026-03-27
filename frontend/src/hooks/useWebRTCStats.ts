@@ -28,7 +28,7 @@ export function useWebRTCStats({
     {}
   );
 
-  const statsIntervalRef = useRef<number | null>(null);
+  const statsIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const previousPerTrackRef = useRef<Record<string, PerTrackPrev>>({});
   const fpsHistoryPerTrackRef = useRef<Record<string, number[]>>({});
   const bitrateHistoryPerTrackRef = useRef<Record<string, number[]>>({});

@@ -671,13 +671,14 @@ export function StreamPage() {
   useEffect(() => {
     if (!isStreaming) return;
     const interval = setInterval(() => {
+      const primaryStats = Object.values(perSinkStats)[0];
       trackEvent("fps_reported", {
-        fps: webrtcStats.fps,
+        fps: primaryStats?.fps ?? 0,
         surface: graphMode ? "graph_mode" : "performance_mode",
       });
     }, 60_000);
     return () => clearInterval(interval);
-  }, [isStreaming, webrtcStats.fps, graphMode]);
+  }, [isStreaming, perSinkStats, graphMode]);
 
   // Video container ref for controller input pointer lock
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -1380,17 +1381,6 @@ export function StreamPage() {
     if (isStreaming) {
       sendParameterUpdate({
         output_sinks: updated,
-      });
-    }
-  };
-
-  const handleOutputSinkBulkChange = (
-    sinks: Record<string, { enabled: boolean; name: string }>
-  ) => {
-    updateSettings({ outputSinks: sinks });
-    if (isStreaming) {
-      sendParameterUpdate({
-        output_sinks: sinks,
       });
     }
   };
@@ -3051,7 +3041,6 @@ export function StreamPage() {
             onNdiSourceChange={handleNdiSourceChange}
             onSyphonSourceChange={handleSyphonSourceChange}
             onOutputSinkChange={handleOutputSinkChange}
-            onOutputSinkBulkChange={handleOutputSinkBulkChange}
             spoutOutputAvailable={spoutAvailable}
             ndiOutputAvailable={ndiOutputAvailable}
             syphonOutputAvailable={syphonOutputAvailable}

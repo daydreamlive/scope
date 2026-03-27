@@ -186,7 +186,6 @@ class RecordingManager:
 
         # Max length tracking
         self.first_recording_start_time = None
-        self.max_length_reached = False
 
     def set_relay(self, relay: MediaRelay):
         """Set the MediaRelay instance for creating video recording track."""
@@ -258,10 +257,6 @@ class RecordingManager:
             if self.recording_started:
                 return
 
-            # Check if max length has been reached
-            if self.max_length_reached:
-                return
-
         recording_file = None
         media_recorder = None
         recording_track = None
@@ -313,41 +308,6 @@ class RecordingManager:
                 audio_recording_track,
             )
             raise
-
-    def check_max_length(self) -> bool:
-        """
-        Check if recording has exceeded max length and stop if necessary.
-        This should be called periodically during recording.
-
-        Returns:
-            True if max length was reached and recording should be stopped, False otherwise
-        """
-        if self.max_length_reached:
-            return False
-
-        with self.recording_lock:
-            if not self.recording_started:
-                return False
-
-            # Calculate total duration from start time
-            if self.first_recording_start_time is not None:
-                total_duration = time.time() - self.first_recording_start_time
-
-                if total_duration >= RECORDING_MAX_LENGTH_SECONDS:
-                    if not self.max_length_reached:
-                        # Only log once when max length is first reached
-                        logger.info(
-                            f"Recording max length reached (total: {total_duration:.2f}s, max: {RECORDING_MAX_LENGTH_SECONDS}s). Stopping recording."
-                        )
-                    self.max_length_reached = True
-                    return True
-
-        return False
-
-    async def stop_recording_if_max_length_reached(self):
-        """Stop current recording if max length has been reached."""
-        if self.max_length_reached and self.recording_started:
-            await self.stop_recording()
 
     async def _cleanup_recording(
         self,
@@ -442,12 +402,10 @@ class RecordingManager:
                 # Create a copy for download
                 download_file = self._copy_single_segment(recording_file)
 
-                # Continue recording if max length not reached
-                if restart_after and not self.max_length_reached:
+                # Continue recording after download
+                if restart_after:
                     await self.start_recording()
                     logger.info("Continued recording after download")
-                elif restart_after and self.max_length_reached:
-                    logger.info("Skipped starting new recording (max length reached)")
 
                 return download_file
 
@@ -515,10 +473,6 @@ class RecordingManager:
             if file_path and os.path.exists(file_path):
                 self._safe_remove_file(file_path)
                 logger.info(f"Deleted recording file: {file_path}")
-
-    def get_recording_path(self):
-        """Get the path to the recording file."""
-        return Path(self.recording_file) if self.recording_file else None
 
     @property
     def is_recording_started(self):

@@ -155,8 +155,6 @@ class FrameProcessor:
         self._playback_ready_emitted = False
         self._stream_start_time: float | None = None
 
-        self.paused = False
-
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
         if pipeline_ids is not None:
@@ -497,6 +495,14 @@ class FrameProcessor:
         pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
         return pinned_buffer.cuda(non_blocking=False)
 
+    def _frame_array_to_tensor(self, frame_array) -> torch.Tensor:
+        """Convert a numpy frame array to a batched tensor (CPU or GPU)."""
+        if torch.cuda.is_available():
+            t = self._frame_array_to_gpu(frame_array)
+        else:
+            t = torch.as_tensor(frame_array, dtype=torch.uint8)
+        return t.unsqueeze(0)
+
     def _maybe_emit_frame_heartbeat(self) -> None:
         """Log stats periodically when frames flow (shared by put() paths)."""
         now = time.time()
@@ -555,22 +561,7 @@ class FrameProcessor:
             only_id = next(iter(self._source_queues_by_node))
             return self.put_to_source(frame, only_id, count_frame=False)
 
-        frame_array = frame.to_ndarray(format="rgb24")
-
-        if torch.cuda.is_available():
-            frame_tensor = self._frame_array_to_gpu(frame_array)
-        else:
-            frame_tensor = torch.as_tensor(frame_array, dtype=torch.uint8)
-
-        frame_tensor = frame_tensor.unsqueeze(0)
-
-        for sq in self._graph_source_queues:
-            try:
-                sq.put_nowait(frame_tensor)
-            except queue.Full:
-                logger.debug("Graph source queue full, dropping frame")
-
-        return True
+        return False
 
     def put_to_source(
         self,
@@ -590,14 +581,7 @@ class FrameProcessor:
         if count_frame:
             self._frames_in += 1
 
-        frame_array = frame.to_ndarray(format="rgb24")
-
-        if torch.cuda.is_available():
-            frame_tensor = self._frame_array_to_gpu(frame_array)
-        else:
-            frame_tensor = torch.as_tensor(frame_array, dtype=torch.uint8)
-
-        frame_tensor = frame_tensor.unsqueeze(0)
+        frame_tensor = self._frame_array_to_tensor(frame.to_ndarray(format="rgb24"))
 
         for sq in queues:
             try:
@@ -685,10 +669,6 @@ class FrameProcessor:
             if sid not in self._output_sinks_by_node
         ]
 
-    def get_source_node_ids(self) -> list[str]:
-        """Return the list of source node IDs available for writing."""
-        return list(self._source_queues_by_node.keys())
-
     def get_record_node_ids(self) -> list[str]:
         """Return the list of record node IDs in the graph."""
         return list(self._record_queues_by_node.keys())
@@ -741,11 +721,6 @@ class FrameProcessor:
         path = await entry["manager"].finalize_and_get_recording(restart_after=False)
         self._recording_managers_by_node.pop(node_id, None)
         return path
-
-    def get_node_recording_manager(self, node_id: str):
-        """Return the RecordingManager for a record node, or None."""
-        entry = self._recording_managers_by_node.get(node_id)
-        return entry["manager"] if entry else None
 
     def get(self) -> torch.Tensor | None:
         if not self.running:
@@ -1380,12 +1355,7 @@ class FrameProcessor:
                             if self.cloud_manager.send_frame(rgb_frame):
                                 self._frames_to_cloud += 1
                     elif self._graph_source_queues:
-                        if torch.cuda.is_available():
-                            frame_tensor = self._frame_array_to_gpu(rgb_frame)
-                        else:
-                            frame_tensor = torch.as_tensor(rgb_frame, dtype=torch.uint8)
-
-                        frame_tensor = frame_tensor.unsqueeze(0)
+                        frame_tensor = self._frame_array_to_tensor(rgb_frame)
 
                         for sq in self._graph_source_queues:
                             try:
@@ -1590,8 +1560,6 @@ class FrameProcessor:
             try:
                 rgb_frame = source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
-                    last_frame_time = time.time()
-
                     if self._cloud_mode:
                         # Cloud mode: forward frames to cloud manager
                         # Route to the correct input track for this source node
@@ -1610,15 +1578,7 @@ class FrameProcessor:
                     else:
                         queues = self._source_queues_by_node.get(node_id)
                         if queues:
-                            if torch.cuda.is_available():
-                                frame_tensor = self._frame_array_to_gpu(rgb_frame)
-                            else:
-                                frame_tensor = torch.as_tensor(
-                                    rgb_frame, dtype=torch.uint8
-                                )
-
-                            frame_tensor = frame_tensor.unsqueeze(0)
-
+                            frame_tensor = self._frame_array_to_tensor(rgb_frame)
                             for sq in queues:
                                 try:
                                     sq.put_nowait(frame_tensor)
@@ -1763,14 +1723,3 @@ class FrameProcessor:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
-
-    @staticmethod
-    def _is_recoverable(error: Exception) -> bool:
-        """
-        Check if an error is recoverable (i.e., processing can continue).
-        Non-recoverable errors will cause the stream to stop.
-        """
-        if isinstance(error, torch.cuda.OutOfMemoryError):
-            return False
-        # Add more non-recoverable error types here as needed
-        return True

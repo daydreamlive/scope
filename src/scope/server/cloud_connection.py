@@ -653,21 +653,8 @@ class CloudConnectionManager:
             logger.info("WebRTC connection stopped")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
-        """Send a video frame to cloud.ai for processing.
-
-        Args:
-            frame: VideoFrame or numpy array (RGB24 format)
-
-        Returns:
-            True if frame was queued, False if not connected or queue full
-        """
-        if self._webrtc_client is None or not self._webrtc_client.is_connected:
-            return False
-
-        success = self._webrtc_client.send_frame(frame)
-        if success:
-            self._stats["frames_sent_to_cloud"] += 1
-        return success
+        """Send a frame to the primary (index 0) cloud input track."""
+        return self.send_frame_to_track(frame, 0)
 
     def send_frame_to_track(
         self, frame: VideoFrame | np.ndarray, track_index: int

@@ -567,21 +567,8 @@ class CloudWebRTCClient:
             logger.debug(f"Could not send PLI: {e}")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
-        """Send a frame to cloud for processing.
-
-        Args:
-            frame: VideoFrame or numpy array (RGB24)
-
-        Returns:
-            True if frame was queued, False if queue is full
-        """
-        if not self.is_connected or self.input_track is None:
-            return False
-
-        success = self.input_track.put_frame(frame)
-        if success:
-            self._stats["frames_sent"] += 1
-        return success
+        """Send a frame to the primary (index 0) cloud input track."""
+        return self.send_frame_to_track(frame, 0)
 
     def send_frame_to_track(
         self, frame: VideoFrame | np.ndarray, track_index: int

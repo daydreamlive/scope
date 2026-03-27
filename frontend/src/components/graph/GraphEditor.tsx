@@ -86,7 +86,7 @@ import { useGraphState } from "./hooks/graph/useGraphState";
 import { useConnectionLogic } from "./hooks/connection/useConnectionLogic";
 import { useNodeFactories } from "./hooks/node/useNodeFactories";
 import { useValueForwarding } from "./hooks/value/useValueForwarding";
-import { useOutputSinkSync } from "./hooks/value/useOutputSinkSync";
+
 import { useKeyboardShortcuts } from "./hooks/graph/useKeyboardShortcuts";
 import { useGraphNavigation } from "./hooks/subgraph/useGraphNavigation";
 import { useParentValueBridge } from "./hooks/value/useParentValueBridge";
@@ -180,9 +180,7 @@ interface GraphEditorProps {
     sinkType: string,
     config: { enabled: boolean; name: string }
   ) => void;
-  onOutputSinkBulkChange?: (
-    sinks: Record<string, { enabled: boolean; name: string }>
-  ) => void;
+
   spoutOutputAvailable?: boolean;
   ndiOutputAvailable?: boolean;
   syphonOutputAvailable?: boolean;
@@ -228,7 +226,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onNdiSourceChange,
       onSyphonSourceChange,
       onOutputSinkChange,
-      onOutputSinkBulkChange,
       spoutOutputAvailable = false,
       ndiOutputAvailable = false,
       syphonOutputAvailable = false,
@@ -272,7 +269,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       handleEdgeDelete,
       resolveBackendId,
       onNodeParamChangeRef,
-      onOutputSinkBulkChangeRef,
       handleClear,
       handleSave,
       handleImport,
@@ -301,7 +297,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onNdiSourceChange,
         onSyphonSourceChange,
         onOutputSinkChange,
-        onOutputSinkBulkChange,
         onStartRecording,
         onStopRecording,
         onEnableTempo,
@@ -571,7 +566,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setNodes
     );
 
-    useOutputSinkSync(nodes, onOutputSinkBulkChangeRef);
     useKeyboardShortcuts(
       reactFlowInstanceRef,
       setPendingNodePosition,
