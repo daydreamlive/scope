@@ -413,8 +413,13 @@ class RecordingManager:
                 self.media_recorder = None
                 self.recording_started = False
 
-    async def finalize_and_get_recording(self):
-        """Finalize the current recording and return a copy for download."""
+    async def finalize_and_get_recording(self, restart_after: bool = True):
+        """Finalize the current recording and return a copy for download.
+
+        When restart_after is True (session-level recording), a new recording
+        segment is started after the copy. Per-node queue-based recording
+        passes restart_after=False so the caller can replace the track.
+        """
         try:
             with self.recording_lock:
                 has_active_recording = self.recording_started and self.media_recorder
@@ -438,10 +443,10 @@ class RecordingManager:
                 download_file = self._copy_single_segment(recording_file)
 
                 # Continue recording if max length not reached
-                if not self.max_length_reached:
+                if restart_after and not self.max_length_reached:
                     await self.start_recording()
                     logger.info("Continued recording after download")
-                else:
+                elif restart_after and self.max_length_reached:
                     logger.info("Skipped starting new recording (max length reached)")
 
                 return download_file

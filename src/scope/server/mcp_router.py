@@ -89,18 +89,21 @@ async def get_session_parameters(
 async def capture_frame(
     webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
     quality: int = Query(default=85, ge=1, le=100),
+    sink_node_id: str | None = Query(default=None),
 ):
     """Capture the current pipeline output frame as a JPEG image.
 
     Returns the most recent rendered frame from the active session
-    (WebRTC or headless).
+    (WebRTC or headless). When sink_node_id is provided, captures from
+    that specific sink node in a multi-sink graph.
     """
-    frame = webrtc_manager.get_last_frame()
+    frame = webrtc_manager.get_last_frame(sink_node_id=sink_node_id)
     if frame is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No frame available (no active session or pipeline not running)",
-        )
+        detail = "No frame available"
+        if sink_node_id:
+            detail += f" for sink node '{sink_node_id}'"
+        detail += " (no active session or pipeline not running)"
+        raise HTTPException(status_code=404, detail=detail)
 
     try:
         from PIL import Image
@@ -171,10 +174,11 @@ async def get_session_metrics(
 
 
 class StartStreamRequest(BaseModel):
-    pipeline_id: str
+    pipeline_id: str | None = None
     input_mode: str = "text"
     prompts: list[dict] | None = None
     input_source: dict | None = None
+    graph: dict | None = None
 
 
 @router.post("/session/start")
@@ -188,15 +192,59 @@ async def start_stream(
     Creates a FrameProcessor directly and begins generating frames.
     Use capture_frame to see output, update_parameters to control it,
     and POST /api/v1/session/stop to tear it down.
+
+    Supports two modes:
+    - Simple: provide pipeline_id for a single-pipeline session
+    - Graph: provide a graph dict with nodes/edges for multi-source/multi-sink
     """
     from .frame_processor import FrameProcessor
     from .headless import HeadlessSession
 
-    # Build initial parameters
-    initial_params: dict = {
-        "pipeline_ids": [request.pipeline_id],
-        "input_mode": request.input_mode,
-    }
+    if request.graph is not None:
+        # Graph mode: extract pipeline_ids from graph nodes
+        from .graph_schema import GraphConfig
+
+        graph_config = GraphConfig.model_validate(request.graph)
+        errors = graph_config.validate_structure()
+        if errors:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid graph: {'; '.join(errors)}",
+            )
+        pipeline_ids = graph_config.get_pipeline_node_ids()
+        if not pipeline_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Graph must contain at least one pipeline node",
+            )
+        # Load pipelines keyed by node_id so the graph executor can look them
+        # up via node.id (consistent with the WebRTC/frontend flow).
+        pipeline_tuples = [
+            (node.id, node.pipeline_id, None)
+            for node in graph_config.nodes
+            if node.type == "pipeline" and node.pipeline_id
+        ]
+        await pipeline_manager.load_pipelines(pipeline_tuples)
+
+        pipeline_id_list = [t[1] for t in pipeline_tuples]
+
+        initial_params: dict = {
+            "pipeline_ids": pipeline_id_list,
+            "input_mode": request.input_mode,
+            "graph": request.graph,
+        }
+    elif request.pipeline_id is not None:
+        # Simple single-pipeline mode
+        initial_params = {
+            "pipeline_ids": [request.pipeline_id],
+            "input_mode": request.input_mode,
+        }
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Either pipeline_id or graph must be provided",
+        )
+
     if request.prompts is not None:
         initial_params["prompts"] = request.prompts
     if request.input_source is not None:
@@ -221,12 +269,22 @@ async def start_stream(
         session.start_frame_consumer()
         webrtc_manager.add_headless_session(session)
 
-        logger.info(f"Started headless session with pipeline {request.pipeline_id}")
-        return {
+        pipeline_id = request.pipeline_id or ",".join(pipeline_id_list)
+        logger.info(f"Started headless session with pipeline(s) {pipeline_id}")
+        response: dict = {
             "status": "ok",
-            "pipeline_id": request.pipeline_id,
             "input_mode": request.input_mode,
         }
+        if request.graph is not None:
+            response["graph"] = True
+            response["pipeline_ids"] = pipeline_id_list
+            sink_ids = graph_config.get_sink_node_ids()
+            response["sink_node_ids"] = sink_ids
+            source_ids = graph_config.get_source_node_ids()
+            response["source_node_ids"] = source_ids
+        else:
+            response["pipeline_id"] = request.pipeline_id
+        return response
     except HTTPException:
         raise
     except Exception as e:
@@ -247,3 +305,66 @@ async def stop_stream(
     except Exception as e:
         logger.error(f"Error stopping headless session: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ---------------------------------------------------------------------------
+# Recording (headless sessions)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/session/recording/start")
+async def start_headless_recording(
+    webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
+):
+    """Start recording the headless session output to MP4."""
+    session = webrtc_manager.headless_session
+    if not session:
+        raise HTTPException(status_code=404, detail="No active headless session")
+    if session.is_recording:
+        return {"status": "already_recording"}
+    session.start_recording()
+    return {"status": "started"}
+
+
+@router.post("/session/recording/stop")
+async def stop_headless_recording(
+    webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
+):
+    """Stop recording the headless session and return the recording file path."""
+    import asyncio
+
+    session = webrtc_manager.headless_session
+    if not session:
+        raise HTTPException(status_code=404, detail="No active headless session")
+    if not session.is_recording:
+        return {"status": "not_recording"}
+    file_path = await asyncio.to_thread(session.stop_recording)
+    return {"status": "stopped", "file_path": file_path}
+
+
+@router.get("/session/recording/download")
+async def download_headless_recording(
+    webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
+):
+    """Stop recording (if active) and download the MP4 file."""
+    from datetime import datetime
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+
+    session = webrtc_manager.headless_session
+    if not session:
+        raise HTTPException(status_code=404, detail="No active headless session")
+
+    download_file = session.download_recording()
+    if not download_file or not Path(download_file).exists():
+        raise HTTPException(status_code=404, detail="No recording available")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"recording-{timestamp}.mp4"
+
+    return FileResponse(
+        download_file,
+        media_type="video/mp4",
+        filename=filename,
+    )

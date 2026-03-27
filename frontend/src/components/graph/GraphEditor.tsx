@@ -160,13 +160,16 @@ interface GraphEditorProps {
   onGraphChange?: () => void;
   onGraphClear?: () => void;
   localStream?: MediaStream | null;
+  localStreams?: Record<string, MediaStream>;
   remoteStream?: MediaStream | null;
-  onVideoFileUpload?: (file: File) => Promise<boolean>;
+  remoteStreams?: Record<string, MediaStream>;
+  sinkStats?: Record<string, { fps: number; bitrate: number }>;
+  onVideoFileUpload?: (file: File, nodeId?: string) => Promise<boolean>;
   isPlaying?: boolean;
   onStartStream?: () => void;
   onStopStream?: () => void;
   onPlayPauseToggle?: () => void;
-  onSourceModeChange?: (mode: string) => void;
+  onSourceModeChange?: (mode: string, nodeId?: string) => void;
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
   syphonAvailable?: boolean;
@@ -183,8 +186,8 @@ interface GraphEditorProps {
   spoutOutputAvailable?: boolean;
   ndiOutputAvailable?: boolean;
   syphonOutputAvailable?: boolean;
-  onStartRecording?: () => void;
-  onStopRecording?: () => void;
+  onStartRecording?: (nodeId?: string) => void;
+  onStopRecording?: (nodeId?: string) => void;
   onOpenSettings?: () => void;
   onOpenPlugins?: () => void;
   tempoState?: import("../../hooks/useTempoSync").TempoState;
@@ -208,7 +211,10 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onGraphChange,
       onGraphClear,
       localStream,
+      localStreams,
       remoteStream,
+      remoteStreams,
+      sinkStats,
       onVideoFileUpload,
       isPlaying = true,
       onStartStream,
@@ -303,7 +309,16 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onSetTempo,
         onRefreshTempoSources,
       },
-      { localStream, remoteStream, isStreaming, isPlaying, onPlayPauseToggle },
+      {
+        localStream,
+        localStreams,
+        remoteStream,
+        remoteStreams,
+        sinkStats,
+        isStreaming,
+        isPlaying,
+        onPlayPauseToggle,
+      },
       {
         spoutAvailable,
         ndiAvailable,

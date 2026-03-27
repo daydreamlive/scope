@@ -1,40 +1,24 @@
-import { useEffect, useRef } from "react";
 import type { Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 
+/**
+ * Previously this hook synced OutputNode configs to the backend via the
+ * generic `output_sinks` parameter. That path only supports one sink per
+ * type, so multiple Syphon/Spout/NDI outputs were collapsed.
+ *
+ * OutputNodes are now emitted as proper backend sink nodes (with sink_mode
+ * and sink_name) inside flowToGraphConfig(). The backend's multi-sink
+ * system (_setup_multi_output_sinks) handles them, supporting multiple
+ * outputs of the same type with correct per-node frame routing.
+ *
+ * This hook is kept as a no-op to avoid breaking callers.
+ */
 export function useOutputSinkSync(
-  nodes: Node<FlowNodeData>[],
-  onOutputSinkBulkChangeRef: React.RefObject<
+  _nodes: Node<FlowNodeData>[],
+  _onOutputSinkBulkChangeRef: React.RefObject<
     | ((sinks: Record<string, { enabled: boolean; name: string }>) => void)
     | undefined
   >
 ) {
-  const prevOutputConfigsRef = useRef<string>("");
-
-  useEffect(() => {
-    const outputNodes = nodes.filter(n => n.data.nodeType === "output");
-    const configs = outputNodes.map(n => ({
-      type: (n.data.outputSinkType as string) || "spout",
-      enabled: (n.data.outputSinkEnabled as boolean) ?? false,
-      name: (n.data.outputSinkName as string) || "Scope",
-    }));
-    const configKey = JSON.stringify(configs);
-    if (configKey === prevOutputConfigsRef.current) return;
-    prevOutputConfigsRef.current = configKey;
-
-    if (!onOutputSinkBulkChangeRef.current) return;
-
-    const allSinkTypes = ["spout", "ndi", "syphon"];
-    const sinkConfigs: Record<string, { enabled: boolean; name: string }> = {};
-    for (const c of configs) {
-      sinkConfigs[c.type] = { enabled: c.enabled, name: c.name };
-    }
-    for (const sinkType of allSinkTypes) {
-      if (!sinkConfigs[sinkType]) {
-        sinkConfigs[sinkType] = { enabled: false, name: "" };
-      }
-    }
-
-    onOutputSinkBulkChangeRef.current(sinkConfigs);
-  }, [nodes, onOutputSinkBulkChangeRef]);
+  // No-op: output sinks are now handled via the graph's sink nodes.
 }

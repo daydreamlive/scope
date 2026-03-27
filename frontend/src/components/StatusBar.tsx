@@ -7,6 +7,7 @@ interface StatusBarProps {
   onLogToggle?: () => void;
   isLogOpen?: boolean;
   logUnreadCount?: number;
+  hideMetrics?: boolean;
 }
 
 export function StatusBar({
@@ -16,6 +17,7 @@ export function StatusBar({
   onLogToggle,
   isLogOpen,
   logUnreadCount = 0,
+  hideMetrics = false,
 }: StatusBarProps) {
   const MetricItem = ({
     label,
@@ -76,10 +78,12 @@ export function StatusBar({
       </div>
 
       {/* Right: Metrics */}
-      <div className="flex items-center gap-6 ml-auto">
-        <MetricItem label="FPS" value={fpsValue} />
-        <MetricItem label="Bitrate" value={bitrateValue} />
-      </div>
+      {!hideMetrics && (
+        <div className="flex items-center gap-6 ml-auto">
+          <MetricItem label="FPS" value={fpsValue} />
+          <MetricItem label="Bitrate" value={bitrateValue} />
+        </div>
+      )}
     </div>
   );
 }

@@ -669,6 +669,32 @@ class CloudConnectionManager:
             self._stats["frames_sent_to_cloud"] += 1
         return success
 
+    def send_frame_to_track(
+        self, frame: VideoFrame | np.ndarray, track_index: int
+    ) -> bool:
+        """Send a video frame to a specific cloud input track.
+
+        Args:
+            frame: VideoFrame or numpy array (RGB24 format)
+            track_index: Index into input_tracks on the WebRTC client
+
+        Returns:
+            True if frame was queued, False if not connected or queue full
+        """
+        if self._webrtc_client is None or not self._webrtc_client.is_connected:
+            return False
+
+        success = self._webrtc_client.send_frame_to_track(frame, track_index)
+        if success:
+            self._stats["frames_sent_to_cloud"] += 1
+        return success
+
+    def get_source_track_index(self, node_id: str) -> int | None:
+        """Return the cloud input track index for a given source node ID."""
+        if self._webrtc_client is None:
+            return None
+        return self._webrtc_client.source_node_to_track_index.get(node_id)
+
     def send_parameters(self, params: dict) -> None:
         """Send parameter update to cloud.ai via WebRTC data channel.
 
