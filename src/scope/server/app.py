@@ -20,7 +20,14 @@ from typing import TYPE_CHECKING
 
 import click
 import uvicorn
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
+from fastapi import (
+    BackgroundTasks,
+    Depends,
+    FastAPI,
+    HTTPException,
+    Query,
+    Request,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -51,7 +58,6 @@ from .cloud_proxy import (
     cloud_proxy,
     get_hardware_info_from_cloud,
     proxy_with_body,
-    recording_download_cloud_path,
     upload_asset_to_cloud,
 )
 from .download_models import download_models
@@ -512,6 +518,16 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Local cloud WebSocket endpoint — enabled by SCOPE_CLOUD_WS=1
+if os.environ.get("SCOPE_CLOUD_WS") == "1":
+    from fastapi import WebSocket as _WebSocket
+
+    from .cloud_ws_endpoint import cloud_ws_handler
+
+    @app.websocket("/ws")
+    async def cloud_ws(ws: _WebSocket):
+        await cloud_ws_handler(ws)
 
 
 @app.get("/health", response_model=HealthResponse)
@@ -1205,19 +1221,18 @@ async def close_webrtc_session(
 
 
 @app.get("/api/v1/recordings/{session_id}")
-@cloud_proxy(recording_download_cloud_path, timeout=120.0)
 async def download_recording(
     http_request: Request,
     session_id: str,
     background_tasks: BackgroundTasks,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    node_id: str | None = Query(
+        None, description="Record node ID for per-node recording"
+    ),
 ):
     """Download the recording file for the specified session.
     This will finalize the current recording and create a copy for download,
     then continue recording with a new file.
-
-    In cloud mode, this proxies the download request to cloud.
     """
     try:
         session = webrtc_manager.get_session(session_id)
@@ -1227,15 +1242,21 @@ async def download_recording(
                 detail=f"Session {session_id} not found",
             )
 
-        # Check if session has a recording manager
-        if not session.recording_manager:
+        download_file = None
+
+        # Per-node recording via FrameProcessor
+        if node_id and session.frame_processor:
+            download_file = await session.frame_processor.download_node_recording(
+                node_id
+            )
+        elif session.recording_manager:
+            download_file = await session.recording_manager.finalize_and_get_recording()
+        else:
             raise HTTPException(
                 status_code=404,
                 detail=f"Recording not available for session {session_id}",
             )
 
-        # Finalize the recording and get the download file
-        download_file = await session.recording_manager.finalize_and_get_recording()
         if not download_file or not Path(download_file).exists():
             raise HTTPException(
                 status_code=404,
@@ -1247,7 +1268,8 @@ async def download_recording(
 
         # Generate filename with datetime
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"recording-{timestamp}.mp4"
+        suffix = f"-{node_id}" if node_id else ""
+        filename = f"recording{suffix}-{timestamp}.mp4"
 
         # Return the file for download
         return FileResponse(
@@ -1266,10 +1288,14 @@ async def download_recording(
 async def start_recording(
     session_id: str,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    node_id: str | None = Query(
+        None, description="Record node ID for per-node recording"
+    ),
 ):
     """Start recording for the specified session.
 
     Creates a RecordingManager if one does not already exist.
+    When node_id is provided, starts per-node recording via FrameProcessor.
     """
     try:
         session = webrtc_manager.get_session(session_id)
@@ -1278,6 +1304,21 @@ async def start_recording(
                 status_code=404, detail=f"Session {session_id} not found"
             )
 
+        # Per-node recording via FrameProcessor
+        if node_id:
+            if not session.frame_processor:
+                raise HTTPException(
+                    status_code=400, detail="Session has no frame processor"
+                )
+            if node_id not in session.frame_processor.get_record_node_ids():
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Record node {node_id} not found in graph",
+                )
+            ok = await session.frame_processor.start_node_recording(node_id)
+            return {"status": "started" if ok else "failed"}
+
+        # Legacy session-level recording
         if not session.recording_manager:
             if not session.video_track:
                 raise HTTPException(
@@ -1304,6 +1345,9 @@ async def start_recording(
 async def stop_recording(
     session_id: str,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    node_id: str | None = Query(
+        None, description="Record node ID for per-node recording"
+    ),
 ):
     """Stop recording for the specified session without downloading."""
     try:
@@ -1312,6 +1356,17 @@ async def stop_recording(
             raise HTTPException(
                 status_code=404, detail=f"Session {session_id} not found"
             )
+
+        # Per-node recording via FrameProcessor
+        if node_id:
+            if not session.frame_processor:
+                raise HTTPException(
+                    status_code=400, detail="Session has no frame processor"
+                )
+            ok = await session.frame_processor.stop_node_recording(node_id)
+            return {"status": "stopped" if ok else "not_recording"}
+
+        # Legacy session-level recording
         if not session.recording_manager:
             raise HTTPException(
                 status_code=404,

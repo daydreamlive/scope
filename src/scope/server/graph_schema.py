@@ -41,9 +41,9 @@ class GraphNode(BaseModel):
         ...,
         description="Unique node id (e.g. 'input', 'yolo_plugin', 'longlive', 'output')",
     )
-    type: Literal["source", "pipeline", "sink"] = Field(
+    type: Literal["source", "pipeline", "sink", "record"] = Field(
         ...,
-        description="source = external input, pipeline = pipeline instance, sink = output",
+        description="source = external input, pipeline = pipeline instance, sink = output, record = file recorder",
     )
     pipeline_id: str | None = Field(
         default=None,
@@ -60,6 +60,14 @@ class GraphNode(BaseModel):
     tempo_sync: bool = Field(
         default=False,
         description="When true, this pipeline receives beat state injection, modulation, and beat cache resets.",
+    )
+    sink_mode: str | None = Field(
+        default=None,
+        description="Output sink mode for sink nodes: 'spout', 'ndi', 'syphon'. When set, frames are sent to the specified output sink instead of (or in addition to) WebRTC.",
+    )
+    sink_name: str | None = Field(
+        default=None,
+        description="Sink name/identifier for Spout/NDI/Syphon output sinks (sender name for Spout, source identifier for NDI/Syphon)",
     )
 
 
@@ -98,6 +106,10 @@ class GraphConfig(BaseModel):
         """Return node ids that are sink nodes."""
         return [n.id for n in self.nodes if n.type == "sink"]
 
+    def get_record_node_ids(self) -> list[str]:
+        """Return node ids that are record nodes."""
+        return [n.id for n in self.nodes if n.type == "record"]
+
     def edges_from(self, node_id: str) -> list[GraphEdge]:
         """Return edges whose source is the given node."""
         return [e for e in self.edges if e.from_node == node_id]
@@ -109,13 +121,6 @@ class GraphConfig(BaseModel):
     def stream_edges_from(self, node_id: str) -> list[GraphEdge]:
         """Return stream edges whose source is the given node."""
         return [e for e in self.edges_from(node_id) if e.kind == "stream"]
-
-    def node_by_id(self, node_id: str) -> GraphNode | None:
-        """Return the node with the given id."""
-        for n in self.nodes:
-            if n.id == node_id:
-                return n
-        return None
 
     def validate_structure(self) -> list[str]:
         """Validate the graph structure and return a list of error messages.
