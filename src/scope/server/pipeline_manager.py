@@ -421,12 +421,16 @@ class PipelineManager:
             # The ERROR status is sufficient for the frontend
             combined_error = None
 
-            # Determine media modalities from the loaded pipeline chain
+            # Determine media modalities from the loaded pipeline chain.
+            # Use registry IDs (not instance keys) so the lookup works in
+            # graph mode where instance keys are node IDs like "pipeline_1".
             from scope.core.pipelines.registry import PipelineRegistry
 
-            loaded_ids = list(self._pipelines.keys())
-            produces_video = PipelineRegistry.chain_produces_video(loaded_ids)
-            produces_audio = PipelineRegistry.chain_produces_audio(loaded_ids)
+            registry_ids = [
+                self._pipeline_registry_ids.get(key, key) for key in self._pipelines
+            ]
+            produces_video = PipelineRegistry.chain_produces_video(registry_ids)
+            produces_audio = PipelineRegistry.chain_produces_audio(registry_ids)
 
             # Return the captured state (with error status if it was an error)
             return {

@@ -9,6 +9,7 @@ import midiCcScaler from "./midi-cc-scaler.json";
 import lfoRangeOscillator from "./lfo-range-oscillator.json";
 import knobsPanel from "./knobs-panel.json";
 import timedPromptCycler from "./timed-prompt-cycler.json";
+import bouncingPromptWeights from "./bouncing-prompt-weights.json";
 
 export type { Blueprint };
 
@@ -23,4 +24,5 @@ export const BLUEPRINTS: Blueprint[] = [
   xyToMath as Blueprint,
   intControlMath as Blueprint,
   lfoBoolGate as Blueprint,
+  bouncingPromptWeights as Blueprint,
 ];

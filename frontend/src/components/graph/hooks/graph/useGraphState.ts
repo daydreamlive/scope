@@ -3,7 +3,10 @@ import { useNodesState, useEdgesState } from "@xyflow/react";
 import type { Edge, Node } from "@xyflow/react";
 import { buildPipelinePortsMap } from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
-import type { PipelineSchemaInfo } from "../../../../lib/api";
+import type {
+  PipelineSchemaInfo,
+  TempoEnableRequest,
+} from "../../../../lib/api";
 import { useState } from "react";
 import { useApi } from "../../../../hooks/useApi";
 import { useCloudStatus } from "../../../../hooks/useCloudStatus";
@@ -75,12 +78,35 @@ export interface GraphEditorCallbacks {
   ) => void;
   onStartRecording?: () => void;
   onStopRecording?: () => void;
+  onEnableTempo?: (req: TempoEnableRequest) => void;
+  onDisableTempo?: () => void;
+  onSetTempo?: (bpm: number) => void;
+  onRefreshTempoSources?: () => void;
 }
 
 export interface GraphEditorStreams {
   localStream?: MediaStream | null;
   remoteStream?: MediaStream | null;
   isStreaming: boolean;
+  isPlaying?: boolean;
+  onPlayPauseToggle?: () => void;
+}
+
+export interface GraphEditorTempo {
+  tempoState?: {
+    enabled: boolean;
+    bpm: number | null;
+    beatPhase: number;
+    barPosition: number;
+    beatCount: number;
+    isPlaying: boolean;
+    sourceType: string | null;
+    numPeers: number | null;
+    beatsPerBar: number;
+  };
+  tempoSources?: unknown;
+  tempoLoading?: boolean;
+  tempoError?: string | null;
 }
 
 export interface GraphEditorAvailability {
@@ -96,6 +122,7 @@ export function useGraphState(
   callbacks: GraphEditorCallbacks,
   streams: GraphEditorStreams,
   availability: GraphEditorAvailability,
+  tempo: GraphEditorTempo,
   resolveRootGraphRef: React.RefObject<
     (
       nodes: Node<FlowNodeData>[],
@@ -201,6 +228,21 @@ export function useGraphState(
   const onStopRecordingRef = useRef(callbacks.onStopRecording);
   onStopRecordingRef.current = callbacks.onStopRecording;
 
+  const onEnableTempoRef = useRef(callbacks.onEnableTempo);
+  onEnableTempoRef.current = callbacks.onEnableTempo;
+
+  const onDisableTempoRef = useRef(callbacks.onDisableTempo);
+  onDisableTempoRef.current = callbacks.onDisableTempo;
+
+  const onSetTempoRef = useRef(callbacks.onSetTempo);
+  onSetTempoRef.current = callbacks.onSetTempo;
+
+  const onRefreshTempoSourcesRef = useRef(callbacks.onRefreshTempoSources);
+  onRefreshTempoSourcesRef.current = callbacks.onRefreshTempoSources;
+
+  const onPlayPauseToggleRef = useRef(streams.onPlayPauseToggle);
+  onPlayPauseToggleRef.current = streams.onPlayPauseToggle;
+
   const handleEdgeDelete = useCallback(
     (edgeId: string) => {
       setEdges(eds => eds.filter(e => e.id !== edgeId));
@@ -242,8 +284,18 @@ export function useGraphState(
     syphonOutputAvailable: availability.syphonOutputAvailable,
     handleEdgeDelete,
     isStreaming: streams.isStreaming,
+    isPlaying: streams.isPlaying,
+    onPlayPauseToggleRef,
     onStartRecordingRef,
     onStopRecordingRef,
+    tempoState: tempo.tempoState,
+    tempoSources: tempo.tempoSources,
+    tempoLoading: tempo.tempoLoading,
+    tempoError: tempo.tempoError,
+    onEnableTempoRef,
+    onDisableTempoRef,
+    onSetTempoRef,
+    onRefreshTempoSourcesRef,
   };
 
   const enrichDepsRef = useRef(enrichDeps);
@@ -265,12 +317,15 @@ export function useGraphState(
     streams.localStream,
     streams.remoteStream,
     streams.isStreaming,
+    streams.isPlaying,
     availability.spoutAvailable,
     availability.ndiAvailable,
     availability.syphonAvailable,
     availability.spoutOutputAvailable,
     availability.ndiOutputAvailable,
     availability.syphonOutputAvailable,
+    tempo.tempoState,
+    tempo.tempoSources,
   ]);
 
   // Re-color edges only when node types change (not positions/selections)

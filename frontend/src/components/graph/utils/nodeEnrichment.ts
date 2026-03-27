@@ -38,8 +38,30 @@ export interface EnrichNodesDeps {
   syphonOutputAvailable: boolean;
   handleEdgeDelete: (edgeId: string) => void;
   isStreaming: boolean;
+  isPlaying?: boolean;
+  onPlayPauseToggleRef: React.RefObject<(() => void) | undefined>;
   onStartRecordingRef: React.RefObject<(() => void) | undefined>;
   onStopRecordingRef: React.RefObject<(() => void) | undefined>;
+  tempoState?: {
+    enabled: boolean;
+    bpm: number | null;
+    beatPhase: number;
+    barPosition: number;
+    beatCount: number;
+    isPlaying: boolean;
+    sourceType: string | null;
+    numPeers: number | null;
+    beatsPerBar: number;
+  };
+  tempoSources?: unknown;
+  tempoLoading?: boolean;
+  tempoError?: string | null;
+  onEnableTempoRef: React.RefObject<
+    ((req: import("../../../lib/api").TempoEnableRequest) => void) | undefined
+  >;
+  onDisableTempoRef: React.RefObject<(() => void) | undefined>;
+  onSetTempoRef: React.RefObject<((bpm: number) => void) | undefined>;
+  onRefreshTempoSourcesRef: React.RefObject<(() => void) | undefined>;
 }
 
 const FIXED_SIZE_NODE_TYPES = new Set(["source", "sink", "image"]);
@@ -140,7 +162,15 @@ export function enrichNodes(
       };
     }
     if (n.data.nodeType === "sink") {
-      return { ...n, data: { ...n.data, remoteStream: deps.remoteStream } };
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          remoteStream: deps.remoteStream,
+          isPlaying: deps.isPlaying,
+          onPlayPauseToggle: () => deps.onPlayPauseToggleRef.current?.(),
+        },
+      };
     }
     if (n.data.nodeType === "record") {
       return {
@@ -161,6 +191,33 @@ export function enrichNodes(
           spoutAvailable: deps.spoutOutputAvailable,
           ndiAvailable: deps.ndiOutputAvailable,
           syphonAvailable: deps.syphonOutputAvailable,
+        },
+      };
+    }
+    if (n.data.nodeType === "tempo") {
+      const ts = deps.tempoState;
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          tempoEnabled: ts?.enabled ?? false,
+          tempoBpm: ts?.bpm ?? null,
+          tempoBeatPhase: ts?.beatPhase ?? 0,
+          tempoBeatCount: ts?.beatCount ?? 0,
+          tempoBarPosition: ts?.barPosition ?? 0,
+          tempoIsPlaying: ts?.isPlaying ?? false,
+          tempoSourceType: ts?.sourceType ?? null,
+          tempoNumPeers: ts?.numPeers ?? null,
+          tempoBeatsPerBar: ts?.beatsPerBar ?? 4,
+          tempoSources: deps.tempoSources,
+          isStreaming: deps.isStreaming,
+          tempoLoading: deps.tempoLoading ?? false,
+          tempoError: deps.tempoError ?? null,
+          onEnableTempo: deps.onEnableTempoRef.current,
+          onDisableTempo: () => deps.onDisableTempoRef.current?.(),
+          onSetTempo: (bpm: number) => deps.onSetTempoRef.current?.(bpm),
+          onRefreshTempoSources: () =>
+            deps.onRefreshTempoSourcesRef.current?.(),
         },
       };
     }

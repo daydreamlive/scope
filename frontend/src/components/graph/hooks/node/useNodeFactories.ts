@@ -39,7 +39,10 @@ type NodeTypeKey =
   | "subgraph"
   | "subgraph_input"
   | "subgraph_output"
-  | "record";
+  | "record"
+  | "tempo"
+  | "prompt_list"
+  | "prompt_blend";
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -372,6 +375,66 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       ],
     },
   },
+  tempo: {
+    type: "tempo",
+    idPrefix: "tempo",
+    defaultX: 50,
+    data: {
+      label: "Tempo",
+      nodeType: "tempo",
+      tempoBpm: null,
+      tempoBeatPhase: 0,
+      tempoBeatCount: 0,
+      tempoBarPosition: 0,
+      tempoEnabled: false,
+      tempoSourceType: null,
+      tempoBeatsPerBar: 4,
+      tempoQuantizeMode: "none",
+      tempoLookaheadMs: 0,
+      tempoBeatResetRate: "none",
+      parameterOutputs: [
+        { name: "bpm", type: "number", defaultValue: 0 },
+        { name: "beat_phase", type: "number", defaultValue: 0 },
+        { name: "beat_count", type: "number", defaultValue: 0 },
+        { name: "bar_position", type: "number", defaultValue: 0 },
+        { name: "is_playing", type: "number", defaultValue: 0 },
+      ],
+    },
+  },
+  prompt_list: {
+    type: "prompt_list",
+    idPrefix: "prompt_list",
+    defaultX: 50,
+    data: {
+      label: "Prompt Cycle",
+      nodeType: "prompt_list",
+      promptListItems: ["prompt 1", "prompt 2"],
+      promptListActiveIndex: 0,
+      promptListActiveText: "prompt 1",
+      promptListCycleValue: -1,
+      parameterInputs: [{ name: "cycle", type: "number", defaultValue: 0 }],
+      parameterOutputs: [{ name: "prompt", type: "string", defaultValue: "" }],
+    },
+  },
+  prompt_blend: {
+    type: "prompt_blend",
+    idPrefix: "prompt_blend",
+    defaultX: 50,
+    data: {
+      label: "Prompt List",
+      nodeType: "prompt_blend",
+      promptBlendItems: [
+        { text: "prompt 1", weight: 50 },
+        { text: "prompt 2", weight: 50 },
+      ],
+      promptBlendMethod: "linear",
+      parameterInputs: [
+        { name: "prompt_0", type: "string", defaultValue: "" },
+        { name: "prompt_1", type: "string", defaultValue: "" },
+      ],
+      parameterOutputs: [{ name: "prompts", type: "string", defaultValue: "" }],
+    },
+  },
 };
 
 interface UseNodeFactoriesArgs {
@@ -462,7 +525,10 @@ export function useNodeFactories({
         | "bool"
         | "trigger"
         | "subgraph"
-        | "record",
+        | "record"
+        | "tempo"
+        | "prompt_list"
+        | "prompt_blend",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;

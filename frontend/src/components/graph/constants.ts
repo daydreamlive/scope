@@ -71,6 +71,15 @@ export function getEdgeColor(
     if (sourceNode.data.nodeType === "trigger") {
       return COLOR_BOOLEAN;
     }
+    if (sourceNode.data.nodeType === "tempo") {
+      return COLOR_NUMBER;
+    }
+    if (sourceNode.data.nodeType === "prompt_list") {
+      return COLOR_STRING;
+    }
+    if (sourceNode.data.nodeType === "prompt_blend") {
+      return COLOR_STRING;
+    }
     if (sourceNode.data.nodeType === "subgraph") {
       const port = sourceNode.data.subgraphOutputs?.find(
         p => p.name === parsed.name

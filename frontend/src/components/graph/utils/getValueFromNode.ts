@@ -55,6 +55,24 @@ export function getNumberFromNode(
     if (typeof val === "boolean") return val ? 1 : 0;
     return null;
   }
+  if (t === "tempo") {
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    if (parsed.name === "bpm") return (node.data.tempoBpm as number) ?? null;
+    if (parsed.name === "beat_phase")
+      return (node.data.tempoBeatPhase as number) ?? 0;
+    if (parsed.name === "beat_count")
+      return (
+        ((node.data.tempoBeatCount as number) ?? 0) -
+        ((node.data.tempoBeatCountOffset as number) ?? 0)
+      );
+    if (parsed.name === "bar_position")
+      return (node.data.tempoBarPosition as number) ?? 0;
+    if (parsed.name === "is_playing")
+      return (node.data.tempoIsPlaying as boolean) ? 1 : 0;
+    return null;
+  }
   // Boundary input / subgraph — read from portValues
   if (t === "subgraph_input" || t === "subgraph") {
     const pv = node.data.portValues as Record<string, unknown> | undefined;
@@ -82,6 +100,15 @@ export function getStringFromNode(
   if (t === "control") {
     const val = node.data.currentValue;
     return typeof val === "string" ? val : null;
+  }
+  if (t === "prompt_list") {
+    return (node.data.promptListActiveText as string) ?? null;
+  }
+  if (t === "prompt_blend") {
+    const items = node.data.promptBlendItems as
+      | { text: string; weight: number }[]
+      | undefined;
+    return items?.[0]?.text ?? null;
   }
   if (t === "subgraph_input" || t === "subgraph") {
     const pv = node.data.portValues as Record<string, unknown> | undefined;
@@ -145,6 +172,36 @@ export function getAnyValueFromNode(
     const idx = parseInt(parsed.name.replace("midi_", ""), 10);
     if (isNaN(idx) || idx >= channels.length) return null;
     return channels[idx].value;
+  }
+  if (t === "tempo") {
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    if (parsed.name === "bpm") return node.data.tempoBpm ?? 0;
+    if (parsed.name === "beat_phase") return node.data.tempoBeatPhase ?? 0;
+    if (parsed.name === "beat_count")
+      return (
+        ((node.data.tempoBeatCount as number) ?? 0) -
+        ((node.data.tempoBeatCountOffset as number) ?? 0)
+      );
+    if (parsed.name === "bar_position") return node.data.tempoBarPosition ?? 0;
+    if (parsed.name === "is_playing")
+      return (node.data.tempoIsPlaying as boolean) ? 1 : 0;
+    return null;
+  }
+  if (t === "prompt_list") {
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    if (parsed.name === "prompt") return node.data.promptListActiveText ?? "";
+    return null;
+  }
+  if (t === "prompt_blend") {
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    if (parsed.name === "prompts") return node.data.promptBlendItems ?? [];
+    return null;
   }
   if (t === "tuple") {
     if (!sourceHandleId) return null;

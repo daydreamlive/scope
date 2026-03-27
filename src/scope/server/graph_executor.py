@@ -93,9 +93,16 @@ def build_graph(
     node_processors: dict[str, PipelineProcessor] = {}
     pipeline_ids: list[str] = []
 
+    # Per-pipeline tempo: if any node explicitly opts in via tempo_sync=True,
+    # only those nodes get beat injection. Otherwise fall back to global
+    # behaviour (all get tempo) for backwards compatibility with perform mode
+    # and older saved workflows.
+    any_node_has_tempo = any(n.tempo_sync for n in graph.nodes if n.type == "pipeline")
+
     for node in graph.nodes:
         if node.type != "pipeline" or node.pipeline_id is None:
             continue
+        node_gets_tempo = node.tempo_sync or not any_node_has_tempo
         pipeline = pipeline_manager.get_pipeline_by_id(node.id)
         processor = PipelineProcessor(
             pipeline=pipeline,
@@ -105,8 +112,8 @@ def build_graph(
             user_id=user_id,
             connection_id=connection_id,
             connection_info=connection_info,
-            tempo_sync=tempo_sync,
-            modulation_engine=modulation_engine,
+            tempo_sync=tempo_sync if node_gets_tempo else None,
+            modulation_engine=modulation_engine if node_gets_tempo else None,
             node_id=node.id,
         )
         node_processors[node.id] = processor

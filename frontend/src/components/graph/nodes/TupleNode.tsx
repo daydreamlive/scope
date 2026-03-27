@@ -5,13 +5,11 @@ import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
-import { useConnectedNumber } from "../hooks/node/useConnectedValue";
 import {
   NodeCard,
   NodeHeader,
   NodeBody,
   NodePillToggle,
-  NodePill,
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
@@ -20,9 +18,7 @@ type TupleNodeType = Node<FlowNodeData, "tuple">;
 
 const COLOR = "#fb923c";
 
-/** Row height for handle positioning. */
 const ROW_HEIGHT = 22;
-/** Settings section above value rows. */
 const SETTINGS_HEIGHT = 48;
 const HEADER_HEIGHT = 28;
 const BODY_PAD = 6;
@@ -33,16 +29,11 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
 
   const values =
     data.tupleValues && data.tupleValues.length > 0 ? data.tupleValues : [0];
-  const rawMin = data.tupleMin ?? 0;
-  const rawMax = data.tupleMax ?? 1000;
+  const tMin = data.tupleMin ?? 0;
+  const tMax = data.tupleMax ?? 1000;
   const tStep = data.tupleStep ?? 1;
   const enforceOrder = data.tupleEnforceOrder ?? true;
   const orderDir = data.tupleOrderDirection ?? "desc";
-
-  const minIn = useConnectedNumber(id, "min", rawMin);
-  const maxIn = useConnectedNumber(id, "max", rawMax);
-  const tMin = minIn.value;
-  const tMax = maxIn.value;
 
   const updateValues = useCallback(
     (newValues: number[]) => {
@@ -123,37 +114,21 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
             {/* Min / Max / Step row */}
             <div className="flex items-center gap-1">
               <span className={`${NODE_TOKENS.labelText} shrink-0`}>Min</span>
-              {minIn.connected ? (
-                <NodePill className="opacity-50 !text-[8px] !px-1 !py-0">
-                  {tMin}
-                </NodePill>
-              ) : (
-                <input
-                  className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-1 !py-0`}
-                  type="number"
-                  value={rawMin}
-                  onChange={e =>
-                    updateData({ tupleMin: Number(e.target.value) })
-                  }
-                  onMouseDown={e => e.stopPropagation()}
-                />
-              )}
+              <input
+                className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-1 !py-0`}
+                type="number"
+                value={tMin}
+                onChange={e => updateData({ tupleMin: Number(e.target.value) })}
+                onMouseDown={e => e.stopPropagation()}
+              />
               <span className={`${NODE_TOKENS.labelText} shrink-0`}>Max</span>
-              {maxIn.connected ? (
-                <NodePill className="opacity-50 !text-[8px] !px-1 !py-0">
-                  {tMax}
-                </NodePill>
-              ) : (
-                <input
-                  className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-1 !py-0`}
-                  type="number"
-                  value={rawMax}
-                  onChange={e =>
-                    updateData({ tupleMax: Number(e.target.value) })
-                  }
-                  onMouseDown={e => e.stopPropagation()}
-                />
-              )}
+              <input
+                className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-1 !py-0`}
+                type="number"
+                value={tMax}
+                onChange={e => updateData({ tupleMax: Number(e.target.value) })}
+                onMouseDown={e => e.stopPropagation()}
+              />
               <span className={`${NODE_TOKENS.labelText} shrink-0`}>Step</span>
               <input
                 className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputNumber} !w-[36px] !text-[8px] !px-1 !py-0`}
@@ -283,11 +258,11 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
         </NodeBody>
       )}
 
-      {/* Min / Max handles */}
+      {/* Tuple-level input (receives entire list_number) */}
       <Handle
         type="target"
         position={Position.Left}
-        id={buildHandleId("param", "min")}
+        id={buildHandleId("param", "value")}
         className={
           collapsed
             ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
@@ -299,43 +274,7 @@ export function TupleNode({ id, data, selected }: NodeProps<TupleNodeType>) {
             : {
                 top: HEADER_HEIGHT + BODY_PAD + 8,
                 left: 0,
-                backgroundColor: "#38bdf8",
-              }
-        }
-      />
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={buildHandleId("param", "max")}
-        className={
-          collapsed
-            ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
-            : "!w-2.5 !h-2.5 !border-0"
-        }
-        style={
-          collapsed
-            ? { ...collapsedHandleStyle("left"), opacity: 0 }
-            : {
-                top: HEADER_HEIGHT + BODY_PAD + 22,
-                left: 0,
-                backgroundColor: "#38bdf8",
-              }
-        }
-      />
-
-      {/* Array input */}
-      <Handle
-        type="target"
-        position={Position.Left}
-        id={buildHandleId("param", "value")}
-        className="!w-2.5 !h-2.5 !border-0"
-        style={
-          collapsed
-            ? collapsedHandleStyle("left")
-            : {
-                top: HEADER_HEIGHT + BODY_PAD + SETTINGS_HEIGHT + 4,
-                left: 0,
-                backgroundColor: "#38bdf8",
+                backgroundColor: COLOR,
               }
         }
       />

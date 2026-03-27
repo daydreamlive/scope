@@ -47,6 +47,9 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "trigger",
   "subgraph_input",
   "subgraph",
+  "tempo",
+  "prompt_list",
+  "prompt_blend",
 ]);
 
 const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
@@ -59,6 +62,8 @@ const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
   "vace",
   "pipeline",
   "record",
+  "prompt_list",
+  "prompt_blend",
 ]);
 
 function resolveSubgraphTarget(
@@ -255,6 +260,39 @@ export function useValueForwarding(
         node.data.nodeType === "trigger"
       ) {
         valuesToForward.push({ handleName: "value", value: node.data.value });
+      } else if (node.data.nodeType === "tempo") {
+        valuesToForward.push({
+          handleName: "bpm",
+          value: node.data.tempoBpm ?? 0,
+        });
+        valuesToForward.push({
+          handleName: "beat_phase",
+          value: node.data.tempoBeatPhase ?? 0,
+        });
+        valuesToForward.push({
+          handleName: "beat_count",
+          value:
+            ((node.data.tempoBeatCount as number) ?? 0) -
+            ((node.data.tempoBeatCountOffset as number) ?? 0),
+        });
+        valuesToForward.push({
+          handleName: "bar_position",
+          value: node.data.tempoBarPosition ?? 0,
+        });
+        valuesToForward.push({
+          handleName: "is_playing",
+          value: (node.data.tempoIsPlaying as boolean) ? 1 : 0,
+        });
+      } else if (node.data.nodeType === "prompt_list") {
+        valuesToForward.push({
+          handleName: "prompt",
+          value: node.data.promptListActiveText ?? "",
+        });
+      } else if (node.data.nodeType === "prompt_blend") {
+        valuesToForward.push({
+          handleName: "prompts",
+          value: node.data.promptBlendItems ?? [],
+        });
       } else if (
         node.data.nodeType === "subgraph_input" ||
         node.data.nodeType === "subgraph"
@@ -266,7 +304,9 @@ export function useValueForwarding(
       }
 
       const isAnimated =
-        node.data.nodeType === "control" || node.data.nodeType === "math";
+        node.data.nodeType === "control" ||
+        node.data.nodeType === "math" ||
+        node.data.nodeType === "tempo";
       if (isAnimated) {
         const now = Date.now();
         const lastTime = lastForwardTimeRef.current[node.id] || 0;
@@ -332,11 +372,46 @@ export function useValueForwarding(
         if (!entry || entry.value === undefined) continue;
 
         if (resolvedParamName === "__prompt") {
-          sendParam(resolvedBackendId, "prompts", [
-            { text: String(entry.value), weight: 100 },
-          ]);
+          if (Array.isArray(entry.value)) {
+            sendParam(resolvedBackendId, "prompts", entry.value);
+            const srcNode = nodes.find(n => n.id === edge.source);
+            if (srcNode?.data.nodeType === "prompt_blend") {
+              sendParam(
+                resolvedBackendId,
+                "prompt_interpolation_method",
+                srcNode.data.promptBlendMethod ?? "linear"
+              );
+            }
+          } else {
+            sendParam(resolvedBackendId, "prompts", [
+              { text: String(entry.value), weight: 100 },
+            ]);
+          }
         } else {
           sendParam(resolvedBackendId, resolvedParamName, entry.value);
+        }
+
+        // Auto-forward tempo meta-settings to connected pipelines
+        if (
+          node.data.nodeType === "tempo" &&
+          (targetNode.data.nodeType === "pipeline" ||
+            targetNode.data.nodeType === "subgraph")
+        ) {
+          sendParam(
+            resolvedBackendId,
+            "quantize_mode",
+            node.data.tempoQuantizeMode ?? "none"
+          );
+          sendParam(
+            resolvedBackendId,
+            "lookahead_ms",
+            node.data.tempoLookaheadMs ?? 0
+          );
+          sendParam(
+            resolvedBackendId,
+            "beat_cache_reset_rate",
+            node.data.tempoBeatResetRate ?? "none"
+          );
         }
       }
     }
@@ -430,7 +505,7 @@ export function useValueForwarding(
           }
         } else if (targetNode.data.nodeType === "tuple") {
           if (targetParsed.name === "value" && Array.isArray(sourceValue)) {
-            nodeUpdates["tupleValues"] = sourceValue;
+            nodeUpdates["tupleValues"] = sourceValue as number[];
           } else if (
             targetParsed.name.startsWith("row_") &&
             typeof sourceValue === "number"
@@ -467,6 +542,71 @@ export function useValueForwarding(
           targetParsed.name === "trigger"
         ) {
           nodeUpdates["triggerValue"] = Boolean(sourceValue);
+        } else if (
+          targetNode.data.nodeType === "prompt_list" &&
+          targetParsed.name === "cycle"
+        ) {
+          const newIntVal = Math.floor(Number(sourceValue));
+          const prevIntVal = Math.floor(
+            Number(targetNode.data.promptListCycleValue ?? -1)
+          );
+          if (newIntVal !== prevIntVal && prevIntVal >= 0) {
+            const items = (targetNode.data.promptListItems as string[]) ?? [""];
+            const nextIdx =
+              (((targetNode.data.promptListActiveIndex as number) ?? 0) + 1) %
+              items.length;
+            nodeUpdates["promptListActiveIndex"] = nextIdx;
+            nodeUpdates["promptListActiveText"] = items[nextIdx] ?? "";
+          }
+          nodeUpdates["promptListCycleValue"] = newIntVal;
+        } else if (targetNode.data.nodeType === "prompt_blend") {
+          const items = [
+            ...((targetNode.data.promptBlendItems as Array<{
+              text: string;
+              weight: number;
+            }>) ?? []),
+          ];
+          if (targetParsed.name.startsWith("prompt_")) {
+            const idx = parseInt(targetParsed.name.replace("prompt_", ""), 10);
+            if (!isNaN(idx) && idx < items.length) {
+              items[idx] = { ...items[idx], text: String(sourceValue) };
+              nodeUpdates["promptBlendItems"] = items;
+            }
+          } else if (targetParsed.name.startsWith("weight_")) {
+            const idx = parseInt(targetParsed.name.replace("weight_", ""), 10);
+            if (!isNaN(idx) && idx < items.length) {
+              const clamped = Math.max(
+                0,
+                Math.min(100, Math.round(Number(sourceValue) || 0))
+              );
+              const remaining = 100 - clamped;
+              const otherSum = items.reduce(
+                (sum, p, j) => (j === idx ? sum : sum + p.weight),
+                0
+              );
+              items[idx] = { ...items[idx], weight: clamped };
+              if (otherSum > 0) {
+                for (let j = 0; j < items.length; j++) {
+                  if (j !== idx) {
+                    items[j] = {
+                      ...items[j],
+                      weight: Math.round(
+                        (items[j].weight / otherSum) * remaining
+                      ),
+                    };
+                  }
+                }
+              } else if (items.length > 1) {
+                const even = Math.round(remaining / (items.length - 1));
+                for (let j = 0; j < items.length; j++) {
+                  if (j !== idx) {
+                    items[j] = { ...items[j], weight: even };
+                  }
+                }
+              }
+              nodeUpdates["promptBlendItems"] = items;
+            }
+          }
         } else if (targetNode.data.nodeType === "pipeline") {
           // Update parameterValues so the greyed-out pill shows live values
           const prevParams = (nodeUpdates["parameterValues"] as Record<

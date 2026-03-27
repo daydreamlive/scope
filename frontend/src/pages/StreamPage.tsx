@@ -2818,8 +2818,10 @@ export function StreamPage() {
             localStream={localStream}
             remoteStream={remoteStream}
             onVideoFileUpload={handleVideoFileUpload}
+            isPlaying={!settings.paused}
             onStartStream={() => handleStartStream()}
             onStopStream={stopStream}
+            onPlayPauseToggle={handlePlayPauseToggle}
             onSourceModeChange={mode =>
               handleModeChange(
                 mode as "video" | "camera" | "spout" | "ndi" | "syphon"
@@ -2840,6 +2842,14 @@ export function StreamPage() {
             onStopRecording={handleStopRecording}
             onOpenSettings={() => setOpenSettingsTab("general")}
             onOpenPlugins={() => setOpenSettingsTab("plugins")}
+            tempoState={tempoState}
+            tempoSources={tempoSources ?? null}
+            tempoLoading={tempoLoading}
+            tempoError={tempoError}
+            onEnableTempo={enableTempoSync}
+            onDisableTempo={disableTempoSync}
+            onSetTempo={setTempoSessionBpm}
+            onRefreshTempoSources={refreshTempoSources}
           />
         </div>
 

@@ -48,6 +48,9 @@ import { SubgraphNode } from "./nodes/SubgraphNode";
 import { SubgraphInputNode } from "./nodes/SubgraphInputNode";
 import { SubgraphOutputNode } from "./nodes/SubgraphOutputNode";
 import { RecordNode } from "./nodes/RecordNode";
+import { TempoNode } from "./nodes/TempoNode";
+import { PromptListNode } from "./nodes/PromptListNode";
+import { PromptBlendNode } from "./nodes/PromptBlendNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -114,6 +117,9 @@ const nodeTypes = {
   subgraph_input: SubgraphInputNode,
   subgraph_output: SubgraphOutputNode,
   record: RecordNode,
+  tempo: TempoNode,
+  prompt_list: PromptListNode,
+  prompt_blend: PromptBlendNode,
 };
 
 const edgeTypes = {
@@ -155,8 +161,10 @@ interface GraphEditorProps {
   localStream?: MediaStream | null;
   remoteStream?: MediaStream | null;
   onVideoFileUpload?: (file: File) => Promise<boolean>;
+  isPlaying?: boolean;
   onStartStream?: () => void;
   onStopStream?: () => void;
+  onPlayPauseToggle?: () => void;
   onSourceModeChange?: (mode: string) => void;
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
@@ -178,6 +186,14 @@ interface GraphEditorProps {
   onStopRecording?: () => void;
   onOpenSettings?: () => void;
   onOpenPlugins?: () => void;
+  tempoState?: import("../../hooks/useTempoSync").TempoState;
+  tempoSources?: import("../../lib/api").TempoSourcesResponse | null;
+  tempoLoading?: boolean;
+  tempoError?: string | null;
+  onEnableTempo?: (req: import("../../lib/api").TempoEnableRequest) => void;
+  onDisableTempo?: () => void;
+  onSetTempo?: (bpm: number) => void;
+  onRefreshTempoSources?: () => void;
 }
 
 export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
@@ -193,8 +209,10 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       localStream,
       remoteStream,
       onVideoFileUpload,
+      isPlaying = true,
       onStartStream,
       onStopStream,
+      onPlayPauseToggle,
       onSourceModeChange,
       spoutAvailable = false,
       ndiAvailable = false,
@@ -211,6 +229,14 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onStopRecording,
       onOpenSettings,
       onOpenPlugins,
+      tempoState,
+      tempoSources,
+      tempoLoading,
+      tempoError,
+      onEnableTempo,
+      onDisableTempo,
+      onSetTempo,
+      onRefreshTempoSources,
     },
     ref
   ) {
@@ -271,8 +297,12 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onOutputSinkBulkChange,
         onStartRecording,
         onStopRecording,
+        onEnableTempo,
+        onDisableTempo,
+        onSetTempo,
+        onRefreshTempoSources,
       },
-      { localStream, remoteStream, isStreaming },
+      { localStream, remoteStream, isStreaming, isPlaying, onPlayPauseToggle },
       {
         spoutAvailable,
         ndiAvailable,
@@ -280,6 +310,12 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         spoutOutputAvailable,
         ndiOutputAvailable,
         syphonOutputAvailable,
+      },
+      {
+        tempoState,
+        tempoSources,
+        tempoLoading,
+        tempoError,
       },
       resolveRootGraphRef,
       resetNavigationRef
