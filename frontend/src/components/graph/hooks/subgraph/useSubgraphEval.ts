@@ -230,8 +230,8 @@ function evaluateNode(
   switch (nodeType) {
     case "math": {
       const op = (data.mathOp as string) ?? "add";
-      const a = toNumber(inputs.get("a"));
-      const b = toNumber(inputs.get("b"));
+      const a = toNumber(inputs.get("a")) ?? (data.mathDefaultA as number) ?? 0;
+      const b = toNumber(inputs.get("b")) ?? (data.mathDefaultB as number) ?? 0;
       let result = computeResult(op, a, b);
       const outputType = data.mathOutputType as string | undefined;
       if (result !== null && outputType) {

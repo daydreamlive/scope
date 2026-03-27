@@ -98,7 +98,10 @@ export interface FlowNodeData {
     | "subgraph"
     | "subgraph_input"
     | "subgraph_output"
-    | "record";
+    | "record"
+    | "tempo"
+    | "prompt_list"
+    | "prompt_blend";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -310,6 +313,40 @@ export interface FlowNodeData {
   onPortRename?: (oldName: string, newName: string, portType: string) => void;
   /** Live port values for boundary / subgraph nodes (transient, not serialized). */
   portValues?: Record<string, unknown>;
+
+  /* ── Tempo node fields ── */
+  tempoBpm?: number | null;
+  tempoBeatPhase?: number;
+  tempoBeatCount?: number;
+  tempoBarPosition?: number;
+  tempoIsPlaying?: boolean;
+  tempoEnabled?: boolean;
+  tempoSourceType?: string | null;
+  tempoNumPeers?: number | null;
+  tempoBeatsPerBar?: number;
+  tempoLoading?: boolean;
+  tempoError?: string | null;
+  tempoSources?: unknown;
+  onEnableTempo?: (req: import("./api").TempoEnableRequest) => void;
+  onDisableTempo?: () => void;
+  onSetTempo?: (bpm: number) => void;
+  onRefreshTempoSources?: () => void;
+  tempoQuantizeMode?: string;
+  tempoLookaheadMs?: number;
+  tempoBeatResetRate?: string;
+
+  /* ── Prompt list node fields ── */
+  promptListItems?: string[];
+  promptListActiveIndex?: number;
+  promptListActiveText?: string;
+  promptListCycleValue?: number;
+
+  /* ── Prompt blend node fields ── */
+  promptBlendItems?: Array<{ text: string; weight: number }>;
+  promptBlendMethod?: "linear" | "slerp";
+
+  /* ── Tempo beat count offset ── */
+  tempoBeatCountOffset?: number;
 
   /* ── Node lock / pin / collapse ── */
   /** When true, parameter inputs on this node are disabled (read-only). */
@@ -762,6 +799,8 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "subgraph_input",
   "subgraph_output",
   "record",
+  "tempo",
+  "prompt_list",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
@@ -783,6 +822,11 @@ const NON_SERIALIZABLE_KEYS = new Set<string>([
   "onStartRecording",
   "onStopRecording",
   "triggerValue",
+  "onEnableTempo",
+  "onDisableTempo",
+  "onSetTempo",
+  "onRefreshTempoSources",
+  "tempoSources",
 ]);
 
 /**
@@ -987,6 +1031,39 @@ export function flowToGraphConfig(
     }
   }
 
+  // Determine which pipeline nodes are connected to a tempo node (directly
+  // or transitively through reroute nodes).  Only those pipelines will get
+  // backend-side beat injection (tempo_sync flag on GraphNode).
+  const tempoConnectedPipelineIds = new Set<string>();
+  const tempoNodeIds = flatNodes
+    .filter(n => n.data.nodeType === "tempo")
+    .map(n => n.id);
+  if (tempoNodeIds.length > 0) {
+    const flatNodeMap = new Map(flatNodes.map(n => [n.id, n]));
+    const edgesBySource = new Map<string, Edge[]>();
+    for (const e of flatEdges) {
+      const list = edgesBySource.get(e.source) ?? [];
+      list.push(e);
+      edgesBySource.set(e.source, list);
+    }
+    const traceToBackendNodes = (nodeId: string, visited: Set<string>) => {
+      if (visited.has(nodeId)) return;
+      visited.add(nodeId);
+      for (const edge of edgesBySource.get(nodeId) ?? []) {
+        const target = flatNodeMap.get(edge.target);
+        if (!target) continue;
+        if (target.data.nodeType === "pipeline") {
+          tempoConnectedPipelineIds.add(target.id);
+        } else if (target.data.nodeType === "reroute") {
+          traceToBackendNodes(target.id, visited);
+        }
+      }
+    };
+    for (const tid of tempoNodeIds) {
+      traceToBackendNodes(tid, new Set());
+    }
+  }
+
   const graphNodes: GraphNode[] = backendFlatNodes.map(n => {
     // Read dimensions: node.width/height (set by NodeResizer) > measured > style
     const w =
@@ -1017,6 +1094,7 @@ export function flowToGraphConfig(
         n.data.nodeType === "source" ? (n.data.sourceMode ?? null) : undefined,
       source_name:
         n.data.nodeType === "source" ? (n.data.sourceName ?? null) : undefined,
+      tempo_sync: tempoConnectedPipelineIds.has(n.id) || undefined,
     };
   });
 

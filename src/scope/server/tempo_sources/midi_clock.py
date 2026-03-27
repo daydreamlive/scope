@@ -107,7 +107,8 @@ class MIDIClockTempoSource(TempoSource):
             threading.Event().wait(0.001)
 
     def _on_clock_tick(self) -> None:
-        now = time.time()
+        now = time.monotonic()
+        self._tick_count += 1
 
         if self._last_tick_time is not None:
             interval = now - self._last_tick_time
@@ -118,9 +119,15 @@ class MIDIClockTempoSource(TempoSource):
                     self._ema_interval = (
                         EMA_ALPHA * interval + (1 - EMA_ALPHA) * self._ema_interval
                     )
+                logger.debug(
+                    "MIDI tick #%d: interval=%.6fs ema=%.6fs bpm=%.1f",
+                    self._tick_count,
+                    interval,
+                    self._ema_interval,
+                    60.0 / (self._ema_interval * PPQN),
+                )
 
         self._last_tick_time = now
-        self._tick_count += 1
 
         if self._ema_interval is not None and self._ema_interval > 0:
             bpm = 60.0 / (self._ema_interval * PPQN)
@@ -135,7 +142,7 @@ class MIDIClockTempoSource(TempoSource):
                 bar_position=bar_position,
                 beat_count=int(beat_float),
                 is_playing=self._is_playing,
-                timestamp=now,
+                timestamp=time.time(),
                 source="midi_clock",
             )
             with self._state_lock:

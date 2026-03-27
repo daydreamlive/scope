@@ -96,12 +96,24 @@ const TARGET_RULES: TargetRule[] = [
       return sourceType === "number";
     return undefined;
   },
-  // tuple
+  // tuple – per-row inputs accept number, value input accepts list_number
   ({ sourceType, targetParsedName, targetNode }) => {
     if (targetNode.data.nodeType !== "tuple") return undefined;
-    if (targetParsedName === "value")
-      return sourceType === "list_number" || sourceType === "number";
+    if (targetParsedName === "value") return sourceType === "list_number";
     if (targetParsedName.startsWith("row_")) return sourceType === "number";
+    return false;
+  },
+  // prompt_list – cycle input accepts number
+  ({ sourceType, targetParsedName, targetNode }) => {
+    if (targetNode.data.nodeType !== "prompt_list") return undefined;
+    if (targetParsedName === "cycle") return sourceType === "number";
+    return false;
+  },
+  // prompt_blend – weight_N accepts number, prompt_N accepts string
+  ({ sourceType, targetParsedName, targetNode }) => {
+    if (targetNode.data.nodeType !== "prompt_blend") return undefined;
+    if (targetParsedName.startsWith("weight_")) return sourceType === "number";
+    if (targetParsedName.startsWith("prompt_")) return sourceType === "string";
     return false;
   },
 ];

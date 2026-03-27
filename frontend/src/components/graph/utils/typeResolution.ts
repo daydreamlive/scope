@@ -40,6 +40,9 @@ export function resolveSourceType(
   if (nt === "midi") return "number";
   if (nt === "bool") return "boolean";
   if (nt === "trigger") return "boolean";
+  if (nt === "tempo") return "number";
+  if (nt === "prompt_list") return "string";
+  if (nt === "prompt_blend") return "string";
   if (nt === "reroute") {
     // Walk upstream — reroutes have at most one input; use the first incoming edge.
     const incomingEdge = edges.find(e => e.target === node.id);

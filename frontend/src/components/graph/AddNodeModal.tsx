@@ -32,7 +32,10 @@ interface AddNodeModalProps {
       | "bool"
       | "trigger"
       | "subgraph"
-      | "record",
+      | "record"
+      | "tempo"
+      | "prompt_list"
+      | "prompt_blend",
     subType?: string
   ) => void;
 }
@@ -59,7 +62,10 @@ interface NodeCatalogItem {
     | "bool"
     | "trigger"
     | "subgraph"
-    | "record";
+    | "record"
+    | "tempo"
+    | "prompt_list"
+    | "prompt_blend";
   subType?: string;
   name: string;
   description: string;
@@ -251,6 +257,30 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     description: "Container node that groups nodes into a reusable sub-graph",
     color: "#06b6d4",
     category: "Utility",
+  },
+  {
+    type: "tempo",
+    name: "Tempo",
+    description:
+      "Beat clock with BPM, phase, and count outputs from Ableton Link or MIDI Clock",
+    color: "#f59e0b",
+    category: "Controls",
+  },
+  {
+    type: "prompt_list",
+    name: "Prompt Cycle",
+    description:
+      "Cycle through a list of prompts driven by an external signal (e.g. beat count)",
+    color: "#8b5cf6",
+    category: "Controls",
+  },
+  {
+    type: "prompt_blend",
+    name: "Prompt List",
+    description:
+      "Blend multiple weighted prompts with linear or SLERP interpolation",
+    color: "#fbbf24",
+    category: "Controls",
   },
 ];
 

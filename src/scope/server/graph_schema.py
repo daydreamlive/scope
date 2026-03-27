@@ -57,6 +57,10 @@ class GraphNode(BaseModel):
         default=None,
         description="Source name/identifier for Spout/NDI/Syphon sources (sender name for Spout, source identifier for NDI/Syphon)",
     )
+    tempo_sync: bool = Field(
+        default=False,
+        description="When true, this pipeline receives beat state injection, modulation, and beat cache resets.",
+    )
 
 
 class GraphEdge(BaseModel):

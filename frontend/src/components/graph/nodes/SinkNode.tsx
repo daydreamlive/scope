@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
+import { Pause, Play, Volume2, VolumeX } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
@@ -16,11 +17,20 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   const { updateData } = useNodeData(id);
   const { collapsed, toggleCollapse } = useNodeCollapse();
   const remoteStream = data.remoteStream as MediaStream | null | undefined;
+  const isPlaying = (data.isPlaying as boolean | undefined) ?? true;
+  const onPlayPauseToggle = data.onPlayPauseToggle as (() => void) | undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
   const [videoSize, setVideoSize] = useState<{
     width: number;
     height: number;
   } | null>(null);
+
+  const [isMuted, setIsMuted] = useState(true);
+  const [hasAudioTrack, setHasAudioTrack] = useState(false);
+  const [hasVideoTrack, setHasVideoTrack] = useState(false);
+  const [showOverlay, setShowOverlay] = useState(false);
+  const [isFadingOut, setIsFadingOut] = useState(false);
+  const overlayTimeoutRef = useRef<number | null>(null);
 
   const handleResize = useCallback(() => {
     const v = videoRef.current;
@@ -32,8 +42,60 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   useEffect(() => {
     if (videoRef.current && remoteStream instanceof MediaStream) {
       videoRef.current.srcObject = remoteStream;
+      setHasAudioTrack(remoteStream.getAudioTracks().length > 0);
+      setHasVideoTrack(remoteStream.getVideoTracks().length > 0);
+
+      const handleTrackAdded = () => {
+        setHasAudioTrack(remoteStream.getAudioTracks().length > 0);
+        setHasVideoTrack(remoteStream.getVideoTracks().length > 0);
+      };
+      remoteStream.addEventListener("addtrack", handleTrackAdded);
+      return () => {
+        remoteStream.removeEventListener("addtrack", handleTrackAdded);
+      };
     }
   }, [remoteStream]);
+
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isMuted;
+    }
+  }, [isMuted]);
+
+  useEffect(() => {
+    return () => {
+      if (overlayTimeoutRef.current) {
+        clearTimeout(overlayTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const toggleMute = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsMuted(prev => !prev);
+  }, []);
+
+  const handleVideoClick = useCallback(
+    (e: React.MouseEvent) => {
+      e.stopPropagation();
+      if (!onPlayPauseToggle || !remoteStream) return;
+      onPlayPauseToggle();
+
+      setShowOverlay(true);
+      setIsFadingOut(false);
+      if (overlayTimeoutRef.current) {
+        clearTimeout(overlayTimeoutRef.current);
+      }
+      requestAnimationFrame(() => {
+        setIsFadingOut(true);
+      });
+      overlayTimeoutRef.current = window.setTimeout(() => {
+        setShowOverlay(false);
+        setIsFadingOut(false);
+      }, 400);
+    },
+    [onPlayPauseToggle, remoteStream]
+  );
 
   const handleY = HEADER_H + BODY_PAD + PREVIEW_H / 2;
 
@@ -47,25 +109,72 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
       />
       {!collapsed && (
         <div className="p-2 flex-1 min-h-0 flex flex-col">
-          <div className="relative rounded-md overflow-hidden bg-black/50 flex-1 min-h-[60px]">
+          <div
+            className="relative rounded-md overflow-hidden bg-black/50 flex-1 min-h-[60px] cursor-pointer"
+            onClick={handleVideoClick}
+            onPointerDown={e => e.stopPropagation()}
+          >
             {remoteStream ? (
-              <video
-                ref={videoRef}
-                className="w-full h-full object-cover"
-                autoPlay
-                muted
-                playsInline
-                onResize={handleResize}
-              />
+              <>
+                <video
+                  ref={videoRef}
+                  className={
+                    hasVideoTrack
+                      ? "w-full h-full object-cover"
+                      : "absolute w-0 h-0 overflow-hidden"
+                  }
+                  autoPlay
+                  muted={isMuted}
+                  playsInline
+                  onResize={handleResize}
+                />
+                {!hasVideoTrack && (
+                  <div className="flex flex-col items-center justify-center h-full gap-1 text-[#8c8c8d]">
+                    <Volume2 className="h-5 w-5" />
+                    <span className="text-[10px]">Audio Only</span>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="flex items-center justify-center h-full text-[10px] text-[#8c8c8d]">
                 No output stream
               </div>
             )}
-            {videoSize && (
+            {showOverlay && (
+              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                <div
+                  className={`bg-black/50 rounded-full p-2 transition-all duration-400 ${
+                    isFadingOut
+                      ? "opacity-0 scale-150"
+                      : "opacity-100 scale-100"
+                  }`}
+                >
+                  {isPlaying ? (
+                    <Pause className="h-5 w-5 text-white" />
+                  ) : (
+                    <Play className="h-5 w-5 text-white" />
+                  )}
+                </div>
+              </div>
+            )}
+            {videoSize && hasVideoTrack && (
               <span className="absolute bottom-1 right-1 text-[9px] text-[#8c8c8d] bg-black/60 px-1 rounded">
                 {videoSize.width}&times;{videoSize.height}
               </span>
+            )}
+            {hasAudioTrack && (
+              <button
+                onClick={toggleMute}
+                onPointerDown={e => e.stopPropagation()}
+                className="absolute bottom-1 left-1 p-1 rounded bg-black/60 text-[#ccc] hover:text-white transition-colors"
+                title={isMuted ? "Unmute audio" : "Mute audio"}
+              >
+                {isMuted ? (
+                  <VolumeX className="h-3.5 w-3.5" />
+                ) : (
+                  <Volume2 className="h-3.5 w-3.5" />
+                )}
+              </button>
             )}
           </div>
         </div>

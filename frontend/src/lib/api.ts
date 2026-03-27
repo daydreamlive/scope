@@ -912,6 +912,7 @@ export interface GraphNode {
   h?: number | null;
   source_mode?: string | null;
   source_name?: string | null;
+  tempo_sync?: boolean;
 }
 
 export interface GraphEdge {

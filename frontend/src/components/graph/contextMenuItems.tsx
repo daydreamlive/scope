@@ -57,7 +57,10 @@ type NodeTypeSelectFn = (
     | "bool"
     | "trigger"
     | "subgraph"
-    | "record",
+    | "record"
+    | "tempo"
+    | "prompt_list"
+    | "prompt_blend",
   subType?: string
 ) => void;
 
@@ -200,6 +203,24 @@ export function buildPaneMenuItems(deps: {
           icon: <Zap />,
           onClick: () => handleNodeTypeSelect("trigger"),
           keywords: ["trigger", "pulse", "bang", "fire", "button"],
+        },
+        {
+          label: "Tempo",
+          icon: <Zap />,
+          onClick: () => handleNodeTypeSelect("tempo"),
+          keywords: ["tempo", "bpm", "beat", "clock", "sync", "link", "midi"],
+        },
+        {
+          label: "Prompt Cycle",
+          icon: <StickyNote />,
+          onClick: () => handleNodeTypeSelect("prompt_list"),
+          keywords: ["prompt", "cycle", "text", "rotate"],
+        },
+        {
+          label: "Prompt List",
+          icon: <StickyNote />,
+          onClick: () => handleNodeTypeSelect("prompt_blend"),
+          keywords: ["prompt", "list", "blend", "weight", "mix"],
         },
         {
           label: "Reroute",

@@ -24,8 +24,10 @@ interface GraphToolbarProps {
   isConnecting: boolean;
   isLoading: boolean;
   status: string;
+  isPlaying?: boolean;
   onStartStream?: () => void;
   onStopStream?: () => void;
+  onPlayPauseToggle?: () => void;
   onImport: (e: React.ChangeEvent<HTMLInputElement>) => void;
   onExport: () => void;
   onClear: () => void;
@@ -38,8 +40,10 @@ export function GraphToolbar({
   isConnecting,
   isLoading,
   status,
+  isPlaying,
   onStartStream,
   onStopStream,
+  onPlayPauseToggle,
   onImport,
   onExport,
   onClear,
