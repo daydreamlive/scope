@@ -436,6 +436,10 @@ class LivepeerClient:
                     self._runner_ready_event.set()
                     continue
 
+                if msg_type == "logs":
+                    _handle_cloud_logs(event)
+                    continue
+
                 logger.debug(f"Event: {event}")
         except asyncio.CancelledError:
             pass
@@ -750,3 +754,27 @@ class LivepeerClient:
                     RuntimeError(f"{reason} (pending request {request_id})")
                 )
         self._pending_requests.clear()
+
+
+# ---------------------------------------------------------------------------
+# Cloud log re-emission — forwards runner log lines into local logging
+# ---------------------------------------------------------------------------
+
+
+def _handle_cloud_logs(data: dict[str, Any]) -> None:
+    """Re-emit cloud runner log lines into local Python logging."""
+    cloud_logger = logging.getLogger("scope.cloud")
+    lines = data.get("lines", [])
+    if not isinstance(lines, list):
+        return
+    for line in lines:
+        if not isinstance(line, str):
+            continue
+        level = logging.INFO
+        if " - ERROR - " in line:
+            level = logging.ERROR
+        elif " - WARNING - " in line:
+            level = logging.WARNING
+        elif " - DEBUG - " in line:
+            level = logging.DEBUG
+        cloud_logger.log(level, "%s", line)

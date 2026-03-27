@@ -15,7 +15,9 @@ import fractions
 import json
 import logging
 import os
+import queue
 import shutil
+import threading
 import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
@@ -294,7 +296,7 @@ async def _handle_api_request(
     from urllib.parse import unquote, urlparse
 
     normalized_path = unquote(urlparse(path).path).rstrip("/")
-    logger.info(
+    logger.debug(
         "Processing API request id=%s method=%s path=%s", request_id, method, path
     )
 
@@ -403,7 +405,7 @@ async def _handle_api_request(
 
         if is_binary_response and response.status_code == 200:
             binary_content = response.content
-            logger.info(
+            logger.debug(
                 "Completed API request id=%s status=%s binary=true bytes=%s",
                 request_id,
                 response.status_code,
@@ -474,7 +476,7 @@ async def _handle_control_message(
             "timestamp": payload.get("timestamp"),
         }
     if msg_type == "api":
-        logger.info("Received API control message id=%s", request_id)
+        logger.debug("Received API control message id=%s", request_id)
         return await _handle_api_request(payload, session)
     if msg_type == "start_stream":
         params = payload.get("params") or {}
@@ -659,6 +661,31 @@ async def _subscribe_control(
     """Subscribe to control channel and publish responses to events channel."""
     logger.info("Subscribing to control channel: %s", control_url)
     events_writer = JSONLWriter(events_url)
+    logging_id = session.connection_id or f"logging_{uuid.uuid4()!s:.8}"
+
+    async def _forward_logs_to_events(log_queue: queue.Queue[str]) -> None:
+        log_batch_limit = 50
+        poll_interval = 0.5
+        try:
+            while not stop_event.is_set():
+                batch: list[str] = []
+                while len(batch) < log_batch_limit:
+                    try:
+                        batch.append(log_queue.get_nowait())
+                    except queue.Empty:
+                        break
+
+                if batch:
+                    await events_writer.write({"type": "logs", "lines": batch})
+                else:
+                    await asyncio.sleep(poll_interval)
+        except asyncio.CancelledError:
+            pass
+        except Exception as exc:
+            logger.warning("Failed to forward logs to events channel: %s", exc)
+
+    log_queue = log_broadcaster.subscribe(logging_id)
+    logs_task = asyncio.create_task(_forward_logs_to_events(log_queue))
 
     try:
         await events_writer.write({"type": "runner_ready"})
@@ -677,6 +704,12 @@ async def _subscribe_control(
     except Exception as exc:
         logger.error("Control channel subscription error: %s", exc)
     finally:
+        logs_task.cancel()
+        try:
+            await logs_task
+        except asyncio.CancelledError:
+            pass
+        log_broadcaster.unsubscribe(logging_id)
         await _stop_stream(session)
         try:
             await events_writer.close()
@@ -1006,6 +1039,101 @@ async def _download_content(
     return DownloadContentResult(content=resp.content)
 
 
+# ---------------------------------------------------------------------------
+# Trickle log forwarding — sends in-process log records to remote clients
+# ---------------------------------------------------------------------------
+
+_CLOUD_LOG_SKIP_LOGGERS_DEFAULT = {
+    "scope.server.kafka_publisher",
+    "livepeer_gateway.channel_writer",
+}
+_cloud_log_skip_loggers: set[str] = set()
+_trickle_log_handler: logging.Handler | None = None
+
+
+class LogBroadcaster:
+    """Thread-safe broadcaster that fans out log lines to subscribers."""
+
+    def __init__(self, max_queue_size: int = 200):
+        self._subscribers: dict[str, queue.Queue[str]] = {}
+        self._lock = threading.Lock()
+        self._max_queue_size = max_queue_size
+
+    def publish(self, line: str) -> None:
+        with self._lock:
+            for subscriber_queue in self._subscribers.values():
+                try:
+                    subscriber_queue.put_nowait(line)
+                except queue.Full:
+                    # Slow subscribers drop lines to avoid backpressure.
+                    pass
+
+    def subscribe(self, connection_id: str) -> queue.Queue[str]:
+        subscriber_queue: queue.Queue[str] = queue.Queue(maxsize=self._max_queue_size)
+        with self._lock:
+            self._subscribers[connection_id] = subscriber_queue
+        return subscriber_queue
+
+    def unsubscribe(self, connection_id: str) -> None:
+        with self._lock:
+            self._subscribers.pop(connection_id, None)
+
+
+class TrickleLogHandler(logging.Handler):
+    """Log handler that forwards selected records into LogBroadcaster."""
+
+    def emit(self, record: logging.LogRecord) -> None:
+        if not _should_forward_log_record(record):
+            return
+        try:
+            line = self.format(record)
+            if line:
+                log_broadcaster.publish(line)
+        except Exception:
+            self.handleError(record)
+
+
+log_broadcaster = LogBroadcaster()
+
+
+def _init_cloud_log_skip_loggers() -> set[str]:
+    skip = set(_CLOUD_LOG_SKIP_LOGGERS_DEFAULT)
+    extra = os.environ.get("CLOUD_LOG_SKIP_LOGGERS", "")
+    for name in extra.split(","):
+        name = name.strip()
+        if name:
+            skip.add(name)
+    return skip
+
+
+def _should_forward_log_record(record: logging.LogRecord) -> bool:
+    global _cloud_log_skip_loggers
+    if not _cloud_log_skip_loggers:
+        _cloud_log_skip_loggers = _init_cloud_log_skip_loggers()
+
+    if record.levelno >= logging.WARNING:
+        return True
+
+    return record.name not in _cloud_log_skip_loggers
+
+
+def _configure_trickle_log_handler(
+    level: int, formatter: logging.Formatter
+) -> logging.Handler:
+    """Attach a singleton trickle log handler to the root logger."""
+    global _trickle_log_handler
+    if _trickle_log_handler is not None:
+        _trickle_log_handler.setLevel(level)
+        _trickle_log_handler.setFormatter(formatter)
+        return _trickle_log_handler
+
+    handler = TrickleLogHandler(level=level)
+    handler.setFormatter(formatter)
+    logging.getLogger().addHandler(handler)
+    _trickle_log_handler = handler
+    return handler
+
+
 @click.command()
 @click.option("--host", default="0.0.0.0", show_default=True, help="Host to bind to")
 @click.option("--port", default=8001, show_default=True, help="Port to bind to")
@@ -1013,9 +1141,11 @@ async def _download_content(
 def main(host: str, port: int, reload: bool) -> None:
     """Run the Livepeer runner WebSocket server."""
     log_level = logging.DEBUG if os.getenv("LIVEPEER_DEBUG") else logging.INFO
-    logging.basicConfig(
+    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    logging.basicConfig(level=log_level, format=log_format)
+    _configure_trickle_log_handler(
         level=log_level,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        formatter=logging.Formatter(log_format),
     )
     if os.getenv("LIVEPEER_DEBUG"):
         logging.getLogger("livepeer_gateway").setLevel(logging.DEBUG)
