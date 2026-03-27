@@ -8,8 +8,9 @@
  * - Pre-disclosure event queuing (queue until user sees disclosure)
  * - Super properties attached to every event
  *
- * Swap between providers by setting VITE_ANALYTICS_PROVIDER to
- * "mixpanel" (default) or "posthog".
+ * Swap between providers by setting VITE_ANALYTICS_PROVIDER to "posthog",
+ * "mixpanel", or "noop". When unset, production builds default to PostHog;
+ * dev defaults to noop (no SDK).
  */
 
 import type {
@@ -53,11 +54,19 @@ function getProviderType(): AnalyticsProviderType {
     typeof import.meta !== "undefined"
       ? (import.meta.env?.VITE_ANALYTICS_PROVIDER as string | undefined)
       : undefined;
-  if (env === "posthog") return "posthog";
-  return "mixpanel";
+  const trimmed = env?.trim();
+  if (trimmed === "posthog") return "posthog";
+  if (trimmed === "mixpanel") return "mixpanel";
+  if (trimmed === "noop") return "noop";
+  // Preview / production builds without the env var should send to PostHog.
+  if (typeof import.meta !== "undefined" && import.meta.env.PROD) {
+    return "posthog";
+  }
+  return "noop";
 }
 
 function getToken(providerType: AnalyticsProviderType): string {
+  if (providerType === "noop") return "";
   if (providerType === "posthog") {
     const envToken =
       typeof import.meta !== "undefined"
@@ -86,6 +95,8 @@ function createProvider(
       return new PostHogProvider();
     case "mixpanel":
       return new MixpanelProvider();
+    case "noop":
+      return new NoopProvider();
     default:
       return new NoopProvider();
   }
@@ -200,17 +211,22 @@ export function initTelemetry(): void {
   if (_initialized) return;
 
   const providerType = getProviderType();
-  const token = getToken(providerType);
 
-  if (!token) {
+  if (providerType === "noop") {
     _provider = new NoopProvider();
-    _initialized = false;
-    return;
+    _provider.init({ token: "" });
+    _initialized = true;
+  } else {
+    const token = getToken(providerType);
+    if (!token) {
+      _provider = new NoopProvider();
+      _initialized = false;
+      return;
+    }
+    _provider = createProvider(providerType);
+    _provider.init({ token, apiHost: getApiHost() });
+    _initialized = true;
   }
-
-  _provider = createProvider(providerType);
-  _provider.init({ token, apiHost: getApiHost() });
-  _initialized = true;
 
   const deviceId = getDeviceId();
 
