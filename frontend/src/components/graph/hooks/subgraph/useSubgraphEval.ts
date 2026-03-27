@@ -22,6 +22,7 @@ import type {
 import { buildHandleId, parseHandleId } from "../../../../lib/graphUtils";
 import { getAnyValueFromNode } from "../../utils/getValueFromNode";
 import { computeResult } from "../../utils/computeResult";
+import { computePatternValue } from "../../utils/computePatternValue";
 
 /* ── Types ────────────────────────────────────────────────────────────────── */
 
@@ -305,9 +306,73 @@ function evaluateNode(
           out.set("value", latched ?? data.currentValue ?? null);
         }
       } else {
-        out.set("value", data.currentValue ?? null);
-        if (inputs.has("value") && inputs.get("value") !== undefined) {
-          out.set("value", inputs.get("value"));
+        const isPlaying = (data.isPlaying as boolean) ?? false;
+        const startKey = `${nodeId}:ctrl_start`;
+        const lastKey = `${nodeId}:ctrl_last`;
+        const playingKey = `${nodeId}:ctrl_was_playing`;
+
+        if (isPlaying) {
+          const pattern = ((data.controlPattern as string) ??
+            "sine") as Parameters<typeof computePatternValue>[0];
+          const speed =
+            toNumber(inputs.get("speed")) ??
+            (data.controlSpeed as number) ??
+            1.0;
+          const min =
+            toNumber(inputs.get("min")) ?? (data.controlMin as number) ?? 0;
+          const max =
+            toNumber(inputs.get("max")) ?? (data.controlMax as number) ?? 1.0;
+          const items = (data.controlItems as string[]) ?? [];
+
+          const wasPlaying = state.get(playingKey) as boolean | undefined;
+          if (!wasPlaying) {
+            state.set(startKey, Date.now());
+            const seed =
+              typeof data.currentValue === "number" ? data.currentValue : min;
+            state.set(lastKey, seed);
+          }
+          state.set(playingKey, true);
+
+          const animStart = (state.get(startKey) as number) ?? Date.now();
+          const last = (state.get(lastKey) as number) ?? min;
+          const elapsed = (Date.now() - animStart) / 1000;
+
+          if (ctrlType === "string") {
+            const raw = computePatternValue(
+              pattern,
+              elapsed,
+              speed,
+              0,
+              items.length - 1,
+              last
+            );
+            state.set(lastKey, raw);
+            const idx = Math.max(
+              0,
+              Math.min(items.length - 1, Math.floor(raw))
+            );
+            out.set("value", items[idx] ?? null);
+          } else {
+            const raw = computePatternValue(
+              pattern,
+              elapsed,
+              speed,
+              min,
+              max,
+              last
+            );
+            state.set(lastKey, raw);
+            out.set("value", ctrlType === "int" ? Math.round(raw) : raw);
+          }
+        } else {
+          state.delete(startKey);
+          state.delete(lastKey);
+          state.set(playingKey, false);
+
+          out.set("value", data.currentValue ?? null);
+          if (inputs.has("value") && inputs.get("value") !== undefined) {
+            out.set("value", inputs.get("value"));
+          }
         }
       }
       break;
@@ -371,7 +436,7 @@ function evaluateNode(
         nestedInputs,
         nestedOutputs,
         nestedInputVals,
-        undefined,
+        state,
         undefined,
         parentDepth + 1
       );
