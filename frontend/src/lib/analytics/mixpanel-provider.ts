@@ -37,7 +37,7 @@ export class MixpanelProvider implements AnalyticsProvider {
 
   identify(
     userId: string,
-    traits?: { displayName?: string | null; email?: string | null },
+    traits?: { displayName?: string | null; email?: string | null }
   ): void {
     mixpanel.identify(userId);
 

@@ -26,11 +26,7 @@ export function trackEvent(
  */
 export function createDebouncedTracker(delayMs = 2000) {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
-  return (
-    name: string,
-    properties?: Record<string, unknown>,
-    key?: string
-  ) => {
+  return (name: string, properties?: Record<string, unknown>, key?: string) => {
     const k = key ?? name;
     const prev = timers.get(k);
     if (prev) clearTimeout(prev);
@@ -58,7 +54,10 @@ export function trackBeacon(
   }
   // Attempt sendBeacon; fall back to synchronous track
   try {
-    const payload = JSON.stringify({ event: name, properties: properties ?? {} });
+    const payload = JSON.stringify({
+      event: name,
+      properties: properties ?? {},
+    });
     const sent = navigator.sendBeacon?.(
       "/api/telemetry",
       new Blob([payload], { type: "application/json" })

@@ -64,13 +64,17 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
     initTelemetry();
     const userId = getDaydreamUserId();
     if (userId) {
-      identifyUser(userId, getDaydreamUserDisplayName(), getDaydreamUserEmail());
+      identifyUser(
+        userId,
+        getDaydreamUserDisplayName(),
+        getDaydreamUserEmail()
+      );
     }
 
     // For existing users who completed onboarding before analytics was added,
     // show an opt-in toast (the onboarding flow handles its own disclosure).
     if (!checkDisclosed()) {
-      fetchOnboardingStatus().then((status) => {
+      fetchOnboardingStatus().then(status => {
         if (status.completed) {
           track("telemetry_disclosure_shown", { path: "existing_user_banner" });
           const shownAt = Date.now();
@@ -109,7 +113,7 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
                   });
                 },
               },
-            },
+            }
           );
         }
       });

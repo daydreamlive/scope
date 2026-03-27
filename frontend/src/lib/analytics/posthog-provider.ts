@@ -30,7 +30,10 @@ export class PostHogProvider implements AnalyticsProvider {
   trackBeacon(event: string, properties?: Record<string, unknown>): void {
     // PostHog uses sendBeacon automatically when the page is unloading.
     // capture() handles this internally, so we just call it normally.
-    posthog.capture(event, { ...properties, $set_once: { transport: "beacon" } });
+    posthog.capture(event, {
+      ...properties,
+      $set_once: { transport: "beacon" },
+    });
   }
 
   registerSuperProperties(properties: Record<string, unknown>): void {
@@ -39,7 +42,7 @@ export class PostHogProvider implements AnalyticsProvider {
 
   identify(
     userId: string,
-    traits?: { displayName?: string | null; email?: string | null },
+    traits?: { displayName?: string | null; email?: string | null }
   ): void {
     const props: Record<string, unknown> = {
       daydream_user_id: userId,

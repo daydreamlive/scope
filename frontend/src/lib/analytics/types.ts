@@ -27,7 +27,7 @@ export interface AnalyticsProvider {
   /** Associate future events with an authenticated user. */
   identify(
     userId: string,
-    traits?: { displayName?: string | null; email?: string | null },
+    traits?: { displayName?: string | null; email?: string | null }
   ): void;
 
   /** Revert to anonymous tracking (on logout). */

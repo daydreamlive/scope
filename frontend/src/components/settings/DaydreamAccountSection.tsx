@@ -163,7 +163,11 @@ export function DaydreamAccountSection({
   const handleToggle = async (checked: boolean) => {
     const fromMode = status.connected ? "cloud" : "local";
     const toMode = checked ? "cloud" : "local";
-    trackEvent("inference_mode_changed", { from_mode: fromMode, to_mode: toMode, surface: "settings" });
+    trackEvent("inference_mode_changed", {
+      from_mode: fromMode,
+      to_mode: toMode,
+      surface: "settings",
+    });
     if (checked) {
       await handleConnect();
     } else {

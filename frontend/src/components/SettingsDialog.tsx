@@ -55,7 +55,10 @@ export function SettingsDialog({
   useEffect(() => {
     if (open) {
       setActiveTab(initialTab);
-      trackEvent("settings_opened", { entry_point: "dialog", surface: "settings" });
+      trackEvent("settings_opened", {
+        entry_point: "dialog",
+        surface: "settings",
+      });
     }
   }, [open, initialTab]);
 
@@ -121,9 +124,12 @@ export function SettingsDialog({
       <DialogContent className="sm:max-w-[600px] lg:max-w-[800px] xl:max-w-[960px] p-0 gap-0">
         <Tabs
           value={activeTab}
-          onValueChange={(value) => {
+          onValueChange={value => {
             setActiveTab(value);
-            trackEvent("settings_section_viewed", { section: value, surface: "settings" });
+            trackEvent("settings_section_viewed", {
+              section: value,
+              surface: "settings",
+            });
           }}
           orientation="vertical"
           className="flex items-stretch"

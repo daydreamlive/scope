@@ -75,13 +75,19 @@ export function LoRAManager({
     };
     const newLoras = [...loras, newLora];
     onLorasChange(newLoras);
-    trackEvent("lora_applied", { lora_count: newLoras.length, surface: "performance_mode" });
+    trackEvent("lora_applied", {
+      lora_count: newLoras.length,
+      surface: "performance_mode",
+    });
   };
 
   const handleRemoveLora = (id: string) => {
     const newLoras = loras.filter(lora => lora.id !== id);
     onLorasChange(newLoras);
-    trackEvent("lora_removed", { lora_count: newLoras.length, surface: "performance_mode" });
+    trackEvent("lora_removed", {
+      lora_count: newLoras.length,
+      surface: "performance_mode",
+    });
   };
 
   const handleLoraChange = (id: string, updates: Partial<LoRAConfig>) => {

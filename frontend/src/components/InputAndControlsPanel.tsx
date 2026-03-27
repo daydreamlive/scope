@@ -358,7 +358,10 @@ export function InputAndControlsPanel({
               onValueChange={value => {
                 if (value) {
                   onModeChange(value as VideoSourceMode);
-                  trackEvent("input_source_changed", { source_type: value, surface: "performance_mode" });
+                  trackEvent("input_source_changed", {
+                    source_type: value,
+                    surface: "performance_mode",
+                  });
                 }
               }}
               className="justify-start"
@@ -820,8 +823,18 @@ export function InputAndControlsPanel({
                     prompts={prompts}
                     onPromptsChange={newPrompts => {
                       onPromptsChange(newPrompts);
-                      const totalLength = newPrompts.reduce((sum, p) => sum + (p.text?.length ?? 0), 0);
-                      debouncedTrack("prompt_edited", { prompt_length: totalLength, surface: "performance_mode" }, "prompt");
+                      const totalLength = newPrompts.reduce(
+                        (sum, p) => sum + (p.text?.length ?? 0),
+                        0
+                      );
+                      debouncedTrack(
+                        "prompt_edited",
+                        {
+                          prompt_length: totalLength,
+                          surface: "performance_mode",
+                        },
+                        "prompt"
+                      );
                     }}
                     onPromptsSubmit={onPromptsSubmit}
                     onTransitionSubmit={onTransitionSubmit}

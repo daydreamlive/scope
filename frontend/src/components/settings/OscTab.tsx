@@ -45,7 +45,12 @@ export function OscTab({ isActive }: OscTabProps) {
     try {
       const updated = await updateOscSettings({ log_all_messages: checked });
       setStatus(prev => (prev ? { ...prev, ...updated } : prev));
-      trackEvent("io_config_changed", { io_type: "osc", setting: "log_all_messages", value: checked, surface: "io_config" });
+      trackEvent("io_config_changed", {
+        io_type: "osc",
+        setting: "log_all_messages",
+        value: checked,
+        surface: "io_config",
+      });
     } catch (err) {
       console.error("Failed to update OSC logging setting:", err);
     } finally {

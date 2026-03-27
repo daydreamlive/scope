@@ -78,7 +78,9 @@ function getApiHost(): string | undefined {
   return import.meta.env?.VITE_POSTHOG_HOST as string | undefined;
 }
 
-function createProvider(providerType: AnalyticsProviderType): AnalyticsProvider {
+function createProvider(
+  providerType: AnalyticsProviderType
+): AnalyticsProvider {
   switch (providerType) {
     case "posthog":
       return new PostHogProvider();
@@ -216,10 +218,9 @@ export function initTelemetry(): void {
   _provider.registerSuperProperties({
     app_version:
       typeof import.meta !== "undefined"
-        ? (import.meta.env?.VITE_APP_VERSION as string | undefined) ?? ""
+        ? ((import.meta.env?.VITE_APP_VERSION as string | undefined) ?? "")
         : "",
-    platform:
-      typeof navigator !== "undefined" ? navigator.platform : "unknown",
+    platform: typeof navigator !== "undefined" ? navigator.platform : "unknown",
     session_id: getSessionId(),
     device_id: deviceId,
   });
@@ -246,7 +247,7 @@ export function initTelemetry(): void {
  */
 export function track(
   event: string,
-  properties?: Record<string, unknown>,
+  properties?: Record<string, unknown>
 ): void {
   const props: Record<string, unknown> = {
     ...properties,
@@ -273,7 +274,7 @@ export function track(
  */
 export function trackBeacon(
   event: string,
-  properties?: Record<string, unknown>,
+  properties?: Record<string, unknown>
 ): void {
   if (!getTelemetryEnabled() || !isDisclosed() || !_initialized) return;
   _provider.trackBeacon(event, {
@@ -293,7 +294,7 @@ export function trackBeacon(
 export function identifyUser(
   userId: string,
   displayName?: string | null,
-  email?: string | null,
+  email?: string | null
 ): void {
   if (!_initialized) return;
   _provider.identify(userId, { displayName, email });
@@ -324,13 +325,13 @@ export function getAppStartTime(): number {
  * Fires at most once per `delayMs` for a given event+key combo.
  */
 export function createDebouncedTracker(
-  delayMs: number = 2000,
+  delayMs: number = 2000
 ): (event: string, properties?: Record<string, unknown>, key?: string) => void {
   const timers = new Map<string, ReturnType<typeof setTimeout>>();
   return (
     event: string,
     properties?: Record<string, unknown>,
-    key?: string,
+    key?: string
   ) => {
     const timerKey = key ?? event;
     const existing = timers.get(timerKey);
@@ -340,7 +341,7 @@ export function createDebouncedTracker(
       setTimeout(() => {
         track(event, properties);
         timers.delete(timerKey);
-      }, delayMs),
+      }, delayMs)
     );
   };
 }

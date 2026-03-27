@@ -448,7 +448,14 @@ export function AddNodeModal({
                 onChange={e => {
                   setSearchText(e.target.value);
                   if (e.target.value) {
-                    debouncedTrack("node_registry_searched", { query_length: e.target.value.length, surface: "graph_mode" }, "node_search");
+                    debouncedTrack(
+                      "node_registry_searched",
+                      {
+                        query_length: e.target.value.length,
+                        surface: "graph_mode",
+                      },
+                      "node_search"
+                    );
                   }
                 }}
                 placeholder="Search for anything..."

@@ -176,7 +176,11 @@ export function Header({
               onClick={() => {
                 const fromMode = graphMode ? "graph" : "perform";
                 const toMode = graphMode ? "perform" : "graph";
-                trackEvent("mode_switched", { from_mode: fromMode, to_mode: toMode, surface: "app_chrome" });
+                trackEvent("mode_switched", {
+                  from_mode: fromMode,
+                  to_mode: toMode,
+                  surface: "app_chrome",
+                });
                 onGraphModeToggle();
               }}
               className="text-xs text-muted-foreground hover:text-foreground transition-colors gap-1.5"

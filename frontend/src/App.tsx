@@ -106,22 +106,22 @@ function App() {
 
   return (
     <TelemetryProvider>
-    <CloudStatusProvider>
-      <PipelinesProvider>
-        <LoRAsProvider>
-          <PluginsProvider>
-            <ServerInfoProvider>
-              <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
-                <OnboardingProvider>
-                  <StreamPage />
-                </OnboardingProvider>
-              </CloudProvider>
-            </ServerInfoProvider>
-          </PluginsProvider>
-          <Toaster />
-        </LoRAsProvider>
-      </PipelinesProvider>
-    </CloudStatusProvider>
+      <CloudStatusProvider>
+        <PipelinesProvider>
+          <LoRAsProvider>
+            <PluginsProvider>
+              <ServerInfoProvider>
+                <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
+                  <OnboardingProvider>
+                    <StreamPage />
+                  </OnboardingProvider>
+                </CloudProvider>
+              </ServerInfoProvider>
+            </PluginsProvider>
+            <Toaster />
+          </LoRAsProvider>
+        </PipelinesProvider>
+      </CloudStatusProvider>
     </TelemetryProvider>
   );
 }

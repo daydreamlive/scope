@@ -106,7 +106,11 @@ export function DiscoverTab({
       const data: DiscoverResponse = await response.json();
       setPlugins(data.plugins);
       if (debouncedSearch) {
-        debouncedTrack("hub_searched", { query_length: debouncedSearch.length, results_count: data.plugins.length, surface: "hub_browser" });
+        debouncedTrack("hub_searched", {
+          query_length: debouncedSearch.length,
+          results_count: data.plugins.length,
+          surface: "hub_browser",
+        });
       }
     } catch (err) {
       console.error("Failed to fetch discover plugins:", err);
@@ -226,7 +230,12 @@ export function DiscoverTab({
                       href={daydreamUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      onClick={() => trackEvent("hub_item_viewed", { plugin_type: plugin.pluginType, surface: "hub_browser" })}
+                      onClick={() =>
+                        trackEvent("hub_item_viewed", {
+                          plugin_type: plugin.pluginType,
+                          surface: "hub_browser",
+                        })
+                      }
                     >
                       <ExternalLink className="h-4 w-4" />
                     </a>
@@ -260,7 +269,10 @@ export function DiscoverTab({
                       title={`Install ${plugin.name}`}
                       disabled={disabled || isInstalling}
                       onClick={() => {
-                        trackEvent("hub_item_installed", { plugin_type: plugin.pluginType, surface: "hub_browser" });
+                        trackEvent("hub_item_installed", {
+                          plugin_type: plugin.pluginType,
+                          surface: "hub_browser",
+                        });
                         onInstall(`git+${plugin.repositoryUrl}`);
                       }}
                     >

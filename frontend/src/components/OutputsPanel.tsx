@@ -31,7 +31,11 @@ export function OutputsPanel({
     config: { enabled: boolean; name: string }
   ) => {
     onOutputSinkChange?.(sinkType, config);
-    trackEvent("output_configured", { output_type: sinkType, enabled: config.enabled, surface: "performance_mode" });
+    trackEvent("output_configured", {
+      output_type: sinkType,
+      enabled: config.enabled,
+      surface: "performance_mode",
+    });
   };
 
   return (

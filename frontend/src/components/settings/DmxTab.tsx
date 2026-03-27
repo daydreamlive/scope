@@ -125,7 +125,12 @@ export function DmxTab({ isActive }: DmxTabProps) {
       });
       setConfig(newConfig);
       setDirty(false);
-      trackEvent("io_config_changed", { io_type: "dmx", setting: "config_saved", mapping_count: localMappings.length, surface: "io_config" });
+      trackEvent("io_config_changed", {
+        io_type: "dmx",
+        setting: "config_saved",
+        mapping_count: localMappings.length,
+        surface: "io_config",
+      });
       toast.success("DMX configuration saved");
 
       const s = await getDmxStatus();

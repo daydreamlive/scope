@@ -24,7 +24,10 @@ export function ReportBugDialog({ open, onClose }: ReportBugDialogProps) {
   // Track when dialog opens
   useEffect(() => {
     if (open) {
-      trackEvent("error_dialog_shown", { error_category: "bug_report", surface: "app_chrome" });
+      trackEvent("error_dialog_shown", {
+        error_category: "bug_report",
+        surface: "app_chrome",
+      });
     }
   }, [open]);
 

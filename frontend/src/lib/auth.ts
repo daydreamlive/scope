@@ -1,4 +1,7 @@
-import { identifyUser as telemetryIdentify, track as telemetryTrack } from "./telemetry";
+import {
+  identifyUser as telemetryIdentify,
+  track as telemetryTrack,
+} from "./telemetry";
 
 /**
  * Check if running in Electron desktop app

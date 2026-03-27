@@ -442,7 +442,11 @@ export function SettingsPanel({
   const handlePipelineIdChange = (value: string) => {
     if (pipelines && value in pipelines) {
       onPipelineIdChange?.(value as PipelineId);
-      debouncedTrack("parameter_changed", { parameter_type: "dropdown", surface: "performance_mode" }, "pipeline_id");
+      debouncedTrack(
+        "parameter_changed",
+        { parameter_type: "dropdown", surface: "performance_mode" },
+        "pipeline_id"
+      );
     }
   };
 
@@ -903,7 +907,14 @@ export function SettingsPanel({
                               }
                               onValueCommit={v => {
                                 vaceContextScaleSlider.handleValueCommit(v);
-                                debouncedTrack("parameter_changed", { parameter_type: "slider", surface: "performance_mode" }, "vace_context_scale");
+                                debouncedTrack(
+                                  "parameter_changed",
+                                  {
+                                    parameter_type: "slider",
+                                    surface: "performance_mode",
+                                  },
+                                  "vace_context_scale"
+                                );
                               }}
                               min={0}
                               max={2}
@@ -1078,7 +1089,14 @@ export function SettingsPanel({
                           }
                           onValueCommit={v => {
                             kvCacheAttentionBiasSlider.handleValueCommit(v);
-                            debouncedTrack("parameter_changed", { parameter_type: "slider", surface: "performance_mode" }, "kv_cache_attention_bias");
+                            debouncedTrack(
+                              "parameter_changed",
+                              {
+                                parameter_type: "slider",
+                                surface: "performance_mode",
+                              },
+                              "kv_cache_attention_bias"
+                            );
                           }}
                           min={0.01}
                           max={1.0}
@@ -1195,7 +1213,14 @@ export function SettingsPanel({
                         onValueChange={noiseScaleSlider.handleValueChange}
                         onValueCommit={v => {
                           noiseScaleSlider.handleValueCommit(v);
-                          debouncedTrack("parameter_changed", { parameter_type: "slider", surface: "performance_mode" }, "noise_scale");
+                          debouncedTrack(
+                            "parameter_changed",
+                            {
+                              parameter_type: "slider",
+                              surface: "performance_mode",
+                            },
+                            "noise_scale"
+                          );
                         }}
                         min={0.0}
                         max={1.0}
