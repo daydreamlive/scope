@@ -801,6 +801,7 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "record",
   "tempo",
   "prompt_list",
+  "prompt_blend",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
