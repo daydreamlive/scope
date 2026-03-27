@@ -27,10 +27,6 @@ export class MixpanelProvider implements AnalyticsProvider {
     mixpanel.track(event, properties);
   }
 
-  trackBeacon(event: string, properties?: Record<string, unknown>): void {
-    mixpanel.track(event, properties, { transport: "sendBeacon" });
-  }
-
   registerSuperProperties(properties: Record<string, unknown>): void {
     mixpanel.register(properties);
   }

@@ -27,15 +27,6 @@ export class PostHogProvider implements AnalyticsProvider {
     posthog.capture(event, properties);
   }
 
-  trackBeacon(event: string, properties?: Record<string, unknown>): void {
-    // PostHog uses sendBeacon automatically when the page is unloading.
-    // capture() handles this internally, so we just call it normally.
-    posthog.capture(event, {
-      ...properties,
-      $set_once: { transport: "beacon" },
-    });
-  }
-
   registerSuperProperties(properties: Record<string, unknown>): void {
     posthog.register(properties);
   }

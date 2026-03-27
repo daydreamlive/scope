@@ -268,21 +268,6 @@ export function track(
   _provider.track(event, props);
 }
 
-/**
- * Track with sendBeacon transport (for beforeunload).
- * Falls back to regular track if sendBeacon isn't available.
- */
-export function trackBeacon(
-  event: string,
-  properties?: Record<string, unknown>
-): void {
-  if (!getTelemetryEnabled() || !isDisclosed() || !_initialized) return;
-  _provider.trackBeacon(event, {
-    ...properties,
-    timestamp: Date.now(),
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------

@@ -39,31 +39,3 @@ export function createDebouncedTracker(delayMs = 2000) {
     );
   };
 }
-
-/**
- * Fire-and-forget beacon for events that must survive page unload
- * (e.g. `app_closed`). Falls back to `trackEvent` when the Beacon API
- * is unavailable.
- */
-export function trackBeacon(
-  name: string,
-  properties?: Record<string, unknown>
-): void {
-  if (import.meta.env.DEV) {
-    console.debug("[analytics:beacon]", name, properties ?? {});
-  }
-  // Attempt sendBeacon; fall back to synchronous track
-  try {
-    const payload = JSON.stringify({
-      event: name,
-      properties: properties ?? {},
-    });
-    const sent = navigator.sendBeacon?.(
-      "/api/telemetry",
-      new Blob([payload], { type: "application/json" })
-    );
-    if (!sent) trackEvent(name, properties);
-  } catch {
-    trackEvent(name, properties);
-  }
-}

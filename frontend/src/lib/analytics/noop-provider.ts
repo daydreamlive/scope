@@ -11,7 +11,6 @@ export class NoopProvider implements AnalyticsProvider {
   readonly name = "noop";
   init(): void {}
   track(): void {}
-  trackBeacon(): void {}
   registerSuperProperties(): void {}
   identify(): void {}
   reset(): void {}

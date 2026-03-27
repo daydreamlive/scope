@@ -15,12 +15,6 @@ export interface AnalyticsProvider {
   /** Track a named event with optional properties. */
   track(event: string, properties?: Record<string, unknown>): void;
 
-  /**
-   * Track using sendBeacon transport (for beforeunload).
-   * Falls back to regular track if not supported.
-   */
-  trackBeacon(event: string, properties?: Record<string, unknown>): void;
-
   /** Register super properties attached to every subsequent event. */
   registerSuperProperties(properties: Record<string, unknown>): void;
 
