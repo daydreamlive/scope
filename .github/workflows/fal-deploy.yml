@@ -41,7 +41,7 @@ jobs:
       - name: Install fal
         run: pip install fal
 
-      - name: Deploy to fal
+      - name: Deploy Scope app to fal
         env:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
@@ -54,3 +54,21 @@ jobs:
 
           echo "Deploying to $ENV"
           fal deploy --env $ENV --auth public src/scope/cloud/fal_app.py
+
+      - name: Deploy Livepeer runner to fal staging app
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+        run: |
+          # Use input environment for manual dispatch, default to main for workflow_run
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          else
+            ENV="main"
+          fi
+
+          echo "Deploying Livepeer runner to $ENV as scope-livepeer-staging"
+          fal deploy \
+            --app-name scope-livepeer-staging \
+            --env $ENV \
+            --auth private \
+            src/scope/cloud/livepeer_fal_app.py

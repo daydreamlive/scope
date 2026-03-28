@@ -8,16 +8,28 @@ jobs:
   cleanup-on-close:
     runs-on: ubuntu-latest
     steps:
-      - name: Delete fal PR app
+      - name: Delete fal PR apps
         env:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
+          set -euo pipefail
           PR_NUMBER=${{ github.event.pull_request.number }}
-          echo "Deleting fal app scope-pr-${PR_NUMBER}..."
           pip install fal
-          output=$(fal apps delete --env preview scope-pr-${PR_NUMBER} 2>&1) || true
-          echo "$output"
-          if echo "$output" | grep -qi "not found"; then
-            echo "::error::Failed to delete fal app scope-pr-${PR_NUMBER}"
-            exit 1
-          fi
+
+          delete_preview_app() {
+            APP_NAME="$1"
+            echo "Deleting fal app ${APP_NAME}..."
+            rc=0
+            output=$(fal apps delete --env preview "${APP_NAME}" 2>&1) || rc=$?
+            echo "$output"
+
+            # Ignore missing apps to make cleanup idempotent.
+            lower_output=$(echo "$output" | tr '[:upper:]' '[:lower:]')
+            if [ "$rc" -ne 0 ] && [[ "$lower_output" != *"not found"* ]]; then
+              echo "::error::Failed to delete fal app ${APP_NAME}"
+              exit 1
+            fi
+          }
+
+          delete_preview_app "scope-pr-${PR_NUMBER}"
+          delete_preview_app "scope-livepeer-pr-${PR_NUMBER}"

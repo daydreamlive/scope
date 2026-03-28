@@ -25,8 +25,8 @@ from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamEr
 from av import VideoFrame
 
 if TYPE_CHECKING:
-    from .cloud_connection import CloudConnectionManager
     from .frame_processor import FrameProcessor
+    from .scope_cloud_types import ScopeCloudBackend
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ class CloudTrack(MediaStreamTrack):
 
     def __init__(
         self,
-        cloud_manager: CloudConnectionManager,
+        cloud_manager: ScopeCloudBackend,
         fps: int = 30,
         initial_parameters: dict | None = None,
         notification_callback: Callable | None = None,
