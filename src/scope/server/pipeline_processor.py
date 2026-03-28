@@ -3,6 +3,7 @@
 import logging
 import queue
 import random
+import sys
 import threading
 import time
 from collections import deque
@@ -273,7 +274,30 @@ class PipelineProcessor:
                 self.shutdown_event.wait(SLEEP_TIME)
                 continue
             except Exception as e:
-                if self._is_recoverable(e):
+                if self._is_fatal_cuda_hardware_error(e):
+                    logger.critical(
+                        f"Fatal CUDA hardware error in pipeline {self.pipeline_id} "
+                        f"(likely NVLink fault — container will restart): {e}",
+                        exc_info=True,
+                    )
+                    publish_event(
+                        event_type="error",
+                        session_id=self.session_id,
+                        connection_id=self.connection_id,
+                        pipeline_ids=[self.pipeline_id],
+                        user_id=self.user_id,
+                        error={
+                            "error_type": "cuda_hardware_error",
+                            "message": str(e),
+                            "exception_type": type(e).__name__,
+                            "recoverable": False,
+                        },
+                        connection_info=self.connection_info,
+                    )
+                    # Exit with code 1 so fal.ai (or any supervisor) respawns the
+                    # container instead of leaving it in an unusable state.
+                    sys.exit(1)
+                elif self._is_recoverable(e):
                     logger.error(
                         f"Error in worker loop for {self.pipeline_id}: {e}",
                         exc_info=True,
@@ -703,8 +727,26 @@ class PipelineProcessor:
         return min(MAX_FPS, output_fps)
 
     @staticmethod
+    def _is_fatal_cuda_hardware_error(error: Exception) -> bool:
+        """Check if an error is a fatal CUDA hardware error (e.g. NVLink fault).
+
+        These errors put the CUDA runtime into an unrecoverable state.  The
+        container must be restarted — there is no software-level recovery path.
+        """
+        if not isinstance(error, (torch.cuda.CudaError, Exception)):
+            return False
+        # torch.AcceleratorError was introduced in PyTorch 2.x and covers
+        # CUDA hardware / driver errors that cannot be recovered from.
+        if type(error).__name__ == "AcceleratorError":
+            return True
+        msg = str(error).lower()
+        return "nvlink" in msg or "hardware error" in msg
+
+    @staticmethod
     def _is_recoverable(error: Exception) -> bool:
         """Check if an error is recoverable."""
         if isinstance(error, torch.cuda.OutOfMemoryError):
+            return False
+        if PipelineProcessor._is_fatal_cuda_hardware_error(error):
             return False
         return True
