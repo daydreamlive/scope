@@ -280,7 +280,7 @@ class LivepeerClient:
             raise RuntimeError("stream_started response missing in/out channels")
 
         publisher = MediaPublish(input_url, config=MediaPublishConfig(fps=self._fps))
-        media_output = MediaOutput(output_url)
+        media_output = MediaOutput(output_url, start_seq=-1)
         self._media_connected = True
         subscriber = asyncio.create_task(self._receive_loop(media_output))
 
