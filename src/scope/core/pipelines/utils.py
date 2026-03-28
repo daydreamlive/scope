@@ -1,14 +1,76 @@
 import json
+import logging
 import os
 from pathlib import Path
+from typing import Any, Callable
 
 import torch
 from omegaconf import OmegaConf
 from safetensors.torch import load_file as load_safetensors
 
+logger = logging.getLogger(__name__)
+
 # Re-export enums for backwards compatibility
 from .enums import Quantization as Quantization  # noqa: PLC0414
 from .enums import VaeType as VaeType  # noqa: PLC0414
+
+
+def compile_with_inductor_fallback(
+    fn: Callable, *args: Any, eager_fallback: Callable | None = None, **kwargs: Any
+) -> Callable:
+    """Wrap ``torch.compile`` with a graceful eager fallback on ``InductorError``.
+
+    ``torch.inductor`` uses a subprocess worker pool for kernel compilation.  On
+    some hosting environments (e.g. fal.ai H100 workers) these subprocesses can
+    fail due to resource limits (FD exhaustion, memory pressure, or a locked
+    ``torch_compile_debug`` cache directory), raising ``SubprocException`` wrapped
+    in ``InductorError``.
+
+    This helper attempts ``torch.compile(fn, ...)`` and, if an ``InductorError``
+    is raised *at call time* (i.e. during JIT compilation on the first forward
+    pass), falls back to eager execution.  The actual inner exception message is
+    logged so the underlying cause can be diagnosed.
+
+    Args:
+        fn: The callable to compile.
+        *args: Positional arguments forwarded to ``torch.compile``.
+        eager_fallback: Optional replacement to use when compilation fails.
+            Defaults to the original ``fn`` (uncompiled eager execution).
+        **kwargs: Keyword arguments forwarded to ``torch.compile``.
+
+    Returns:
+        A compiled function that transparently falls back to eager execution on
+        ``InductorError`` / ``SubprocException``.
+    """
+    compiled_fn = torch.compile(fn, *args, **kwargs)
+    _fallback = eager_fallback if eager_fallback is not None else fn
+    _active: list[Callable] = [compiled_fn]  # mutable so the closure can swap it
+
+    def _wrapper(*call_args: Any, **call_kwargs: Any) -> Any:
+        try:
+            return _active[0](*call_args, **call_kwargs)
+        except Exception as exc:
+            # torch._inductor.exc.InductorError wraps SubprocException.
+            # Check by class name to avoid a hard import of the inductor module.
+            exc_type = type(exc).__name__
+            inner_exc = getattr(exc, "inner_exception", None)
+            if exc_type == "InductorError" or (
+                inner_exc is not None
+                and "SubprocException" in type(inner_exc).__name__
+            ):
+                inner_msg = str(inner_exc) if inner_exc is not None else str(exc)
+                logger.warning(
+                    "torch.inductor SubprocException during compilation of %s — "
+                    "falling back to eager execution.  Inner exception: %s",
+                    getattr(fn, "__name__", repr(fn)),
+                    inner_msg,
+                )
+                # Permanently swap to eager so subsequent calls skip compile entirely.
+                _active[0] = _fallback
+                return _fallback(*call_args, **call_kwargs)
+            raise  # re-raise unrelated errors unchanged
+
+    return _wrapper  # type: ignore[return-value]
 
 
 def load_state_dict(weights_path: str) -> dict:
