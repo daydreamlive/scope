@@ -441,6 +441,16 @@ class ScopeApp(fal.App, keep_alive=300):
             print(f"GPU check failed: {e}")
             raise
 
+        # Log CUDA environment so failures in plugin pipelines (e.g. flashvsr)
+        # that surface as "No CUDA GPUs are available" can be correlated with
+        # the worker configuration seen at startup time.
+        cvd = os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")
+        nv_vis = os.environ.get("NVIDIA_VISIBLE_DEVICES", "<not set>")
+        print(
+            f"CUDA env at startup: CUDA_VISIBLE_DEVICES={cvd!r} "
+            f"NVIDIA_VISIBLE_DEVICES={nv_vis!r}"
+        )
+
         # Environment for scope - whitelist only necessary variables (security)
         ENV_WHITELIST = [
             # Required for process execution
