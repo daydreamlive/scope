@@ -16,6 +16,7 @@ For conditioning inputs (depth, flow, etc.), follows original VACE architecture:
 """
 
 import logging
+import os
 from typing import Any
 
 import torch
@@ -71,12 +72,47 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         self._inactive_cache = None
         self._reactive_cache = None
         self._caches_initialized = False
+        # Track asset paths that have already been logged as missing to suppress
+        # per-chunk log storms (see #689: 150+ ERROR lines from a single stale path).
+        self._logged_missing_assets: set[str] = set()
 
     def clear_encoder_caches(self):
         """Clear encoder caches for a new video sequence."""
         self._inactive_cache = None
         self._reactive_cache = None
         self._caches_initialized = False
+
+    def _validate_image_paths(self, paths: list[str | None]) -> bool:
+        """
+        Validate that all provided image paths exist on disk.
+
+        Logs ERROR once per unique missing path; subsequent calls for the same missing
+        path are silent. This prevents per-chunk log storms when a saved workflow
+        references an asset that no longer exists on the current ephemeral worker
+        (e.g. fal.ai H100 workers that do not persist /home/rio/.daydream-scope/assets/).
+
+        Returns True if all paths are valid (or None), False if any are missing.
+
+        See: #689 — VaceEncodingBlock crashes on fal.ai: stale asset path not present on worker
+        See: #524 — VaceEncodingBlock failing on Windows-style asset paths
+        """
+        all_valid = True
+        for path in paths:
+            if path is None:
+                continue
+            if not os.path.exists(path):
+                all_valid = False
+                if path not in self._logged_missing_assets:
+                    self._logged_missing_assets.add(path)
+                    logger.error(
+                        f"VaceEncodingBlock: Asset not found: '{path}'. "
+                        f"This path may reference an asset from a previous fal.ai worker "
+                        f"session that is no longer available. Please re-upload the asset "
+                        f"or update the workflow configuration. "
+                        f"Skipping VACE conditioning for this stream. "
+                        f"(Subsequent missing-asset errors for this path will be suppressed.)"
+                    )
+        return all_valid
 
     @property
     def expected_components(self) -> list[ComponentSpec]:
@@ -179,6 +215,26 @@ class VaceEncodingBlock(ModularPipelineBlocks):
         has_extension = has_first_frame or has_last_frame
 
         if not has_ref_images and not has_input_frames and not has_extension:
+            block_state.vace_context = None
+            block_state.vace_ref_images = None
+            self.set_block_state(state, block_state)
+            return components, state
+
+        # Validate that all referenced image paths exist on disk before attempting
+        # to encode. Stale paths (e.g. from a previous fal.ai worker session) will
+        # cause FileNotFoundError on every chunk — log once and skip gracefully
+        # rather than crashing 150+ times per session. See #689.
+        image_paths_to_check: list[str | None] = []
+        if has_ref_images:
+            image_paths_to_check.extend(vace_ref_images)
+        if has_first_frame:
+            image_paths_to_check.append(first_frame_image)
+        if has_last_frame:
+            image_paths_to_check.append(last_frame_image)
+
+        if not self._validate_image_paths(image_paths_to_check):
+            # One or more asset paths are missing — error already logged once above.
+            # Skip VACE conditioning for this chunk to avoid per-chunk crash storm.
             block_state.vace_context = None
             block_state.vace_ref_images = None
             self.set_block_state(state, block_state)
