@@ -801,6 +801,16 @@ class PipelineManager:
             except Exception as e:
                 logger.warning(f"CUDA cleanup failed: {e}")
 
+        # Reset torch.compile compilation cache to prevent stale compiled graphs
+        # (especially those specialized for Float8Tensor weights) from leaking into
+        # subsequently loaded pipelines. Without this, longlive's FP8-compiled graph
+        # cache can corrupt Krea's compile attempt, causing as_strided dispatch errors.
+        try:
+            torch._dynamo.reset()
+            logger.info("torch._dynamo cache reset")
+        except Exception as e:
+            logger.warning(f"torch._dynamo reset failed: {e}")
+
         # Publish pipeline_unloaded event
         publish_event(
             event_type="pipeline_unloaded",
