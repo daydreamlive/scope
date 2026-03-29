@@ -110,3 +110,11 @@ Follow these guidelines for verifing work when implementation for a task is comp
 ### Frontend
 
 - Use `npm run build` to confirm that builds work properly.
+
+### Unit Tests
+
+Unit tests are not required for every change. When they are written, they should:
+- Cover both happy path and edge cases (boundary values, invalid input, overflow, etc.)
+- Test failure modes, not just success
+- Verify correctness of output, not just absence of errors
+- Approach test design adversarially: actively try to break the code under test
