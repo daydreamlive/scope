@@ -52,8 +52,11 @@ export const UV_DOWNLOAD_URLS = {
   },
 } as const;
 
-// Default port - using 52178 as it's less commonly used than 8000
-const DEFAULT_PORT = 52178;
+// Default port - using 18080 which is outside the Windows dynamic/excluded TCP ranges.
+// Port 52178 (and nearby ports) can fall inside Windows 11's excluded TCP range
+// (reportable via `netsh int ipv4 show excludedportrange protocol=tcp`), causing
+// startup failures on machines with a 5090 or other hardware that reserves those ports.
+const DEFAULT_PORT = 18080;
 const DEFAULT_HOST = '127.0.0.1';
 
 // Mutable server config - port may change if default is busy
