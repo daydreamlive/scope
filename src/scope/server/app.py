@@ -1602,7 +1602,9 @@ async def install_lora_file(
             )
 
         lora_dir = get_lora_dir()
-        dest_path = lora_dir / filename
+        dest_path = (lora_dir / filename).resolve()
+        if not dest_path.is_relative_to(lora_dir.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid filename")
 
         if dest_path.exists():
             raise HTTPException(
@@ -1967,7 +1969,10 @@ async def upload_asset(
         assets_dir.mkdir(parents=True, exist_ok=True)
 
         # Save file to assets directory
-        file_path = assets_dir / filename
+        file_path = (assets_dir / filename).resolve()
+        if not file_path.is_relative_to(assets_dir.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(content)
 
         # Return file info matching AssetFileInfo structure
@@ -3074,7 +3079,9 @@ async def serve_frontend(request: Request, path: str):
         raise HTTPException(status_code=404, detail="Frontend not built")
 
     # Check if requesting a specific file that exists
-    file_path = frontend_dist / path
+    file_path = (frontend_dist / path).resolve()
+    if not file_path.is_relative_to(frontend_dist.resolve()):
+        raise HTTPException(status_code=403, detail="Access denied")
     if file_path.exists() and file_path.is_file():
         # Determine media type based on extension to fix MIME type issues on Windows
         file_extension = file_path.suffix.lower()
@@ -3203,7 +3210,9 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
 @click.option(
     "--reload", is_flag=True, help="Enable auto-reload for development (default: False)"
 )
-@click.option("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+@click.option(
+    "--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)"
+)
 @click.option("--port", default=8000, help="Port to bind to (default: 8000)")
 @click.option(
     "-N",
