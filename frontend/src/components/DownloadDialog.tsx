@@ -1,6 +1,7 @@
 import {
   AlertCircle,
   Download,
+  Info,
   Loader2,
   RotateCcw,
   Settings,
@@ -175,6 +176,16 @@ export function DownloadDialog({
             {pipelineIds.length - 1} more pipeline(s) will be downloaded after
             this one.
           </p>
+        )}
+
+        {!error && (
+          <div className="flex items-start gap-2 rounded-md bg-muted/50 px-3 py-2.5 text-xs text-muted-foreground leading-relaxed">
+            <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />
+            <span>
+              After downloading, models load into GPU memory on the first run.
+              (~60s)
+            </span>
+          </div>
         )}
 
         <DialogFooter>

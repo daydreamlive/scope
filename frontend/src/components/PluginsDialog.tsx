@@ -247,16 +247,16 @@ export function PluginsDialog({
               Installed
             </TabsTrigger>
             <TabsTrigger
-              value="discover"
-              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
-            >
-              Nodes
-            </TabsTrigger>
-            <TabsTrigger
               value="workflows"
               className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
             >
               Workflows
+            </TabsTrigger>
+            <TabsTrigger
+              value="discover"
+              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+            >
+              Nodes
             </TabsTrigger>
           </TabsList>
           <div className="w-px bg-border self-stretch" />
@@ -278,6 +278,14 @@ export function PluginsDialog({
                 hideInstall={cloudConnected}
               />
             </TabsContent>
+            <TabsContent value="workflows" className="mt-0">
+              <WorkflowsTab
+                onLoad={data => {
+                  onLoadWorkflow?.(data);
+                  onClose();
+                }}
+              />
+            </TabsContent>
             <TabsContent value="discover" className="mt-0">
               <DiscoverTab
                 onInstall={handleInstallPlugin}
@@ -287,14 +295,6 @@ export function PluginsDialog({
                 isInstalling={isInstalling}
                 disabled={disabled}
                 cloudConnected={cloudConnected}
-              />
-            </TabsContent>
-            <TabsContent value="workflows" className="mt-0">
-              <WorkflowsTab
-                onLoad={data => {
-                  onLoadWorkflow?.(data);
-                  onClose();
-                }}
               />
             </TabsContent>
           </div>

@@ -88,6 +88,8 @@ export interface GraphEditorStreams {
   localStream?: MediaStream | null;
   remoteStream?: MediaStream | null;
   isStreaming: boolean;
+  isLoading?: boolean;
+  loadingStage?: string | null;
   isPlaying?: boolean;
   onPlayPauseToggle?: () => void;
 }
@@ -284,6 +286,8 @@ export function useGraphState(
     syphonOutputAvailable: availability.syphonOutputAvailable,
     handleEdgeDelete,
     isStreaming: streams.isStreaming,
+    isLoading: streams.isLoading ?? false,
+    loadingStage: streams.loadingStage,
     isPlaying: streams.isPlaying,
     onPlayPauseToggleRef,
     onStartRecordingRef,
@@ -317,6 +321,8 @@ export function useGraphState(
     streams.localStream,
     streams.remoteStream,
     streams.isStreaming,
+    streams.isLoading,
+    streams.loadingStage,
     streams.isPlaying,
     availability.spoutAvailable,
     availability.ndiAvailable,

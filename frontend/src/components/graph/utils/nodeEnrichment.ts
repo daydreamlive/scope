@@ -38,6 +38,8 @@ export interface EnrichNodesDeps {
   syphonOutputAvailable: boolean;
   handleEdgeDelete: (edgeId: string) => void;
   isStreaming: boolean;
+  isLoading: boolean;
+  loadingStage?: string | null;
   isPlaying?: boolean;
   onPlayPauseToggleRef: React.RefObject<(() => void) | undefined>;
   onStartRecordingRef: React.RefObject<(() => void) | undefined>;
@@ -168,6 +170,8 @@ export function enrichNodes(
           ...n.data,
           remoteStream: deps.remoteStream,
           isPlaying: deps.isPlaying,
+          isLoading: deps.isLoading,
+          loadingStage: deps.loadingStage,
           onPlayPauseToggle: () => deps.onPlayPauseToggleRef.current?.(),
         },
       };

@@ -135,6 +135,32 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
                   </div>
                 )}
               </>
+            ) : data.isLoading ? (
+              <div className="flex flex-col items-center justify-center h-full gap-1.5">
+                <span
+                  key={data.loadingStage as string}
+                  className="text-[10px] font-medium animate-fade-in"
+                  style={{
+                    background:
+                      "linear-gradient(90deg, #8c8c8d 0%, #c0c0c0 50%, #8c8c8d 100%)",
+                    backgroundSize: "200% 100%",
+                    WebkitBackgroundClip: "text",
+                    WebkitTextFillColor: "transparent",
+                    animation: "shimmer-text 2s ease-in-out infinite",
+                  }}
+                >
+                  {(data.loadingStage as string) || "Loading pipeline…"}
+                </span>
+                <span className="text-[8px] text-[#b0b0b0]">
+                  First run may take up to a minute
+                </span>
+                <style>{`
+                  @keyframes shimmer-text {
+                    0% { background-position: 200% 0; }
+                    100% { background-position: -200% 0; }
+                  }
+                `}</style>
+              </div>
             ) : (
               <div className="flex items-center justify-center h-full text-[10px] text-[#8c8c8d]">
                 No output stream

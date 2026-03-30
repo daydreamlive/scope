@@ -156,6 +156,7 @@ interface GraphEditorProps {
   isStreaming?: boolean;
   isConnecting?: boolean;
   isLoading?: boolean;
+  loadingStage?: string | null;
   onNodeParameterChange?: (nodeId: string, key: string, value: unknown) => void;
   onGraphChange?: () => void;
   onGraphClear?: () => void;
@@ -204,6 +205,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       isStreaming = false,
       isConnecting = false,
       isLoading = false,
+      loadingStage = null,
       onNodeParameterChange,
       onGraphChange,
       onGraphClear,
@@ -303,7 +305,15 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onSetTempo,
         onRefreshTempoSources,
       },
-      { localStream, remoteStream, isStreaming, isPlaying, onPlayPauseToggle },
+      {
+        localStream,
+        remoteStream,
+        isStreaming,
+        isLoading,
+        loadingStage,
+        isPlaying,
+        onPlayPauseToggle,
+      },
       {
         spoutAvailable,
         ndiAvailable,
@@ -872,6 +882,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             isStreaming={isStreaming}
             isConnecting={isConnecting}
             isLoading={isLoading}
+            loadingStage={loadingStage}
             status={status}
             onStartStream={onStartStream}
             onStopStream={onStopStream}
