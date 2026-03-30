@@ -41,4 +41,4 @@ export interface AnalyticsInitConfig {
   apiHost?: string;
 }
 
-export type AnalyticsProviderType = "mixpanel" | "posthog";
+export type AnalyticsProviderType = "mixpanel" | "posthog" | "noop";
