@@ -25,9 +25,6 @@ import { NoopProvider } from "./analytics/noop-provider";
 // Constants
 // ---------------------------------------------------------------------------
 
-const DEFAULT_MIXPANEL_TOKEN = "38368361cb9712dbf6078de41ec987f6";
-const DEFAULT_POSTHOG_TOKEN = "phc_swHQJ3zUstXRxYpQlRzvffACk4PrAjNHvlyr5c3HvrJ";
-
 const LS_TELEMETRY_ENABLED = "scope_telemetry_enabled";
 const LS_TELEMETRY_DISCLOSED = "scope_telemetry_disclosed";
 const LS_DEVICE_ID = "scope_device_id";
@@ -68,18 +65,17 @@ function getProviderType(): AnalyticsProviderType {
 function getToken(providerType: AnalyticsProviderType): string {
   if (providerType === "noop") return "";
   if (providerType === "posthog") {
-    const envToken =
-      typeof import.meta !== "undefined"
+    return (
+      (typeof import.meta !== "undefined"
         ? (import.meta.env?.VITE_POSTHOG_KEY as string | undefined)
-        : undefined;
-    return envToken || DEFAULT_POSTHOG_TOKEN;
+        : undefined) || ""
+    );
   }
-  // mixpanel
-  const envToken =
-    typeof import.meta !== "undefined"
+  return (
+    (typeof import.meta !== "undefined"
       ? (import.meta.env?.VITE_MIXPANEL_TOKEN as string | undefined)
-      : undefined;
-  return envToken || DEFAULT_MIXPANEL_TOKEN;
+      : undefined) || ""
+  );
 }
 
 function getApiHost(): string | undefined {
@@ -165,9 +161,7 @@ export function setTelemetryEnabled(enabled: boolean): void {
   if (!_initialized) return;
   if (enabled) {
     _provider.optIn();
-    _provider.track("telemetry_opt_in", { source: "settings" });
   } else {
-    _provider.track("telemetry_opt_out", { source: "settings" });
     _provider.optOut();
   }
 }
@@ -282,34 +276,6 @@ export function track(
   if (!getTelemetryEnabled()) return;
   if (!_initialized) return;
   _provider.track(event, props);
-}
-
-// ---------------------------------------------------------------------------
-// Identity
-// ---------------------------------------------------------------------------
-
-/**
- * Associate future events with a daydream.live user ID.
- * Sets people/user properties so users are identifiable in the analytics tool.
- */
-export function identifyUser(
-  userId: string,
-  displayName?: string | null,
-  email?: string | null
-): void {
-  if (!_initialized) return;
-  _provider.identify(userId, { displayName, email });
-}
-
-/** Revert to anonymous tracking (on logout). */
-export function resetIdentity(): void {
-  if (!_initialized) return;
-  _provider.reset();
-  // Re-register super properties that reset() cleared
-  _provider.registerSuperProperties({
-    device_id: getDeviceId(),
-    session_id: getSessionId(),
-  });
 }
 
 // ---------------------------------------------------------------------------

@@ -14,7 +14,6 @@ import {
   waitForServer,
 } from "@/lib/api";
 import { toast } from "sonner";
-import { trackEvent } from "@/lib/analytics";
 
 interface PluginsDialogProps {
   open: boolean;
@@ -92,7 +91,6 @@ export function PluginsDialog({
 
   useEffect(() => {
     if (open) {
-      trackEvent("hub_opened", { surface: "hub_browser" });
       refreshPlugins();
     }
   }, [open, refreshPlugins]);
@@ -133,7 +131,6 @@ export function PluginsDialog({
       }
     } catch (error) {
       console.error("Failed to install plugin:", error);
-      trackEvent("hub_item_install_failed", { surface: "hub_browser" });
       toast.error(
         error instanceof Error ? error.message : "Failed to install node",
         { id: toastId }

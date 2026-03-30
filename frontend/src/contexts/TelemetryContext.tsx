@@ -8,7 +8,6 @@ import {
 } from "react";
 import {
   initTelemetry,
-  identifyUser,
   getTelemetryEnabled,
   setTelemetryEnabled,
   isEnvTelemetryDisabled,
@@ -17,11 +16,6 @@ import {
   flushQueue as flushTelemetryQueue,
   dropQueue as dropTelemetryQueue,
 } from "../lib/telemetry";
-import {
-  getDaydreamUserId,
-  getDaydreamUserDisplayName,
-  getDaydreamUserEmail,
-} from "../lib/auth";
 import { fetchOnboardingStatus } from "../lib/onboardingStorage";
 
 // ---------------------------------------------------------------------------
@@ -56,18 +50,8 @@ export function TelemetryProvider({ children }: { children: ReactNode }) {
   const [isEnvDisabled] = useState(() => isEnvTelemetryDisabled());
   const [isDisclosed, setIsDisclosed] = useState(() => checkDisclosed());
 
-  // Initialize analytics SDK on mount, and if user is already logged in,
-  // identify them so events are associated with their daydream account.
   useEffect(() => {
     initTelemetry();
-    const userId = getDaydreamUserId();
-    if (userId) {
-      identifyUser(
-        userId,
-        getDaydreamUserDisplayName(),
-        getDaydreamUserEmail()
-      );
-    }
 
     // For existing users who completed onboarding before analytics was added,
     // silently mark disclosure as done and keep telemetry off (opt-in default).

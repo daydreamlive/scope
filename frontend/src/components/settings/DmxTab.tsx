@@ -11,7 +11,6 @@ import {
   SelectValue,
 } from "../ui/select";
 import { toast } from "sonner";
-import { trackEvent } from "../../lib/analytics";
 import {
   getDmxStatus,
   getDmxPaths,
@@ -109,7 +108,6 @@ export function DmxTab({ isActive }: DmxTabProps) {
 
   useEffect(() => {
     if (isActive) {
-      trackEvent("io_panel_opened", { io_type: "dmx", surface: "io_config" });
       fetchAll();
     }
   }, [isActive, fetchAll]);
@@ -125,12 +123,6 @@ export function DmxTab({ isActive }: DmxTabProps) {
       });
       setConfig(newConfig);
       setDirty(false);
-      trackEvent("io_config_changed", {
-        io_type: "dmx",
-        setting: "config_saved",
-        mapping_count: localMappings.length,
-        surface: "io_config",
-      });
       toast.success("DMX configuration saved");
 
       const s = await getDmxStatus();

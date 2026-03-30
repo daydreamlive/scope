@@ -34,8 +34,6 @@ import {
 } from "../lib/schemaSettings";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
 import { useCloudStatus } from "../hooks/useCloudStatus";
-import { trackEvent, createDebouncedTracker } from "../lib/analytics";
-
 interface InputAndControlsPanelProps {
   className?: string;
   pipelines: Record<string, PipelineInfo> | null;
@@ -176,9 +174,6 @@ export function InputAndControlsPanel({
   schemaFieldOverrides,
   onSchemaFieldOverrideChange,
 }: InputAndControlsPanelProps) {
-  // Debounced analytics tracker for continuous inputs
-  const [debouncedTrack] = useState(() => createDebouncedTracker(2000));
-
   // NDI source discovery
   const [ndiSources, setNdiSources] = useState<DiscoveredSource[]>([]);
   const [isDiscoveringNdi, setIsDiscoveringNdi] = useState(false);
@@ -358,10 +353,6 @@ export function InputAndControlsPanel({
               onValueChange={value => {
                 if (value) {
                   onModeChange(value as VideoSourceMode);
-                  trackEvent("input_source_changed", {
-                    source_type: value,
-                    surface: "performance_mode",
-                  });
                 }
               }}
               className="justify-start"
@@ -821,21 +812,7 @@ export function InputAndControlsPanel({
                 ) : (
                   <PromptInput
                     prompts={prompts}
-                    onPromptsChange={newPrompts => {
-                      onPromptsChange(newPrompts);
-                      const totalLength = newPrompts.reduce(
-                        (sum, p) => sum + (p.text?.length ?? 0),
-                        0
-                      );
-                      debouncedTrack(
-                        "prompt_edited",
-                        {
-                          prompt_length: totalLength,
-                          surface: "performance_mode",
-                        },
-                        "prompt"
-                      );
-                    }}
+                    onPromptsChange={onPromptsChange}
                     onPromptsSubmit={onPromptsSubmit}
                     onTransitionSubmit={onTransitionSubmit}
                     disabled={

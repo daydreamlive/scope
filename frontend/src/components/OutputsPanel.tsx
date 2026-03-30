@@ -2,8 +2,6 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { OutputSinkToggle } from "./OutputSinkToggle";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import type { SettingsState } from "../types";
-import { trackEvent } from "../lib/analytics";
-
 interface OutputsPanelProps {
   className?: string;
   outputSinks?: SettingsState["outputSinks"];
@@ -31,11 +29,6 @@ export function OutputsPanel({
     config: { enabled: boolean; name: string }
   ) => {
     onOutputSinkChange?.(sinkType, config);
-    trackEvent("output_configured", {
-      output_type: sinkType,
-      enabled: config.enabled,
-      surface: "performance_mode",
-    });
   };
 
   return (

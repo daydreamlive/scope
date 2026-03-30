@@ -31,23 +31,6 @@ export class PostHogProvider implements AnalyticsProvider {
     posthog.register(properties);
   }
 
-  identify(
-    userId: string,
-    traits?: { displayName?: string | null; email?: string | null }
-  ): void {
-    const props: Record<string, unknown> = {
-      daydream_user_id: userId,
-    };
-    if (traits?.displayName) props.name = traits.displayName;
-    if (traits?.email) props.email = traits.email;
-
-    posthog.identify(userId, props);
-  }
-
-  reset(): void {
-    posthog.reset();
-  }
-
   optIn(): void {
     posthog.opt_in_capturing();
   }

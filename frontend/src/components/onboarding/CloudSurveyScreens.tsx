@@ -1,7 +1,6 @@
 import { useState, useCallback } from "react";
 import { MessageCircle, GraduationCap, Zap, ArrowLeft } from "lucide-react";
 import { Button } from "../ui/button";
-import { trackEvent } from "../../lib/analytics";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -59,10 +58,6 @@ export function CloudSurveyScreens({
   const handleReferralSelect = useCallback(
     (option: string) => {
       setReferralSource(option);
-      trackEvent("onboarding_survey_answered", {
-        screen: "referral",
-        answer: option,
-      });
       advanceAfterDelay("use_case");
     },
     [advanceAfterDelay]
@@ -71,10 +66,6 @@ export function CloudSurveyScreens({
   const handleUseCaseSelect = useCallback(
     (option: string) => {
       setUseCase(option);
-      trackEvent("onboarding_survey_answered", {
-        screen: "use_case",
-        answer: option,
-      });
       advanceAfterDelay("onboarding_style");
     },
     [advanceAfterDelay]
@@ -98,7 +89,6 @@ export function CloudSurveyScreens({
   }, [screen, onBack]);
 
   const handleSkip = useCallback(() => {
-    trackEvent("onboarding_survey_skipped");
     setReferralSource(null);
     setUseCase(null);
     setScreen("onboarding_style");
@@ -106,10 +96,6 @@ export function CloudSurveyScreens({
 
   const handleStyleConfirm = useCallback(() => {
     if (!selectedStyle) return;
-    trackEvent("onboarding_survey_answered", {
-      screen: "onboarding_style",
-      answer: selectedStyle,
-    });
     onComplete({
       referralSource,
       useCase,
