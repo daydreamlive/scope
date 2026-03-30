@@ -101,12 +101,16 @@ This documentation can be used to understand the architecture of the project:
 
 ## Verifying Work
 
-Follow these guidelines for verifing work when implementation for a task is complete.
+Follow these guidelines for verifying work when implementation for a task is complete. **Always run lint checks before committing, pushing, or finalizing any changes.**
 
 ### Backend
 
+- Run `uv run ruff check src/` to lint Python code. Use `uv run ruff check --fix src/` to auto-fix issues.
+- Run `uv run ruff format --check src/` to verify formatting. Use `uv run ruff format src/` to auto-fix.
 - Use `uv run daydream-scope` to confirm that the server starts up without errors.
 
 ### Frontend
 
-- Use `npm run build` to confirm that builds work properly.
+- Run `npm run lint` (from `frontend/`) to check for lint errors. Use `npm run lint:fix` to auto-fix.
+- Run `npm run format:check` (from `frontend/`) to verify formatting. Use `npm run format` to auto-fix.
+- Use `npm run build` (from `frontend/`) to confirm that builds work properly.
