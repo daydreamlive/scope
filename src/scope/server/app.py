@@ -3210,7 +3210,9 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
 @click.option(
     "--reload", is_flag=True, help="Enable auto-reload for development (default: False)"
 )
-@click.option("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+@click.option(
+    "--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)"
+)
 @click.option("--port", default=8000, help="Port to bind to (default: 8000)")
 @click.option(
     "-N",
