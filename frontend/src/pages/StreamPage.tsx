@@ -296,7 +296,7 @@ export function StreamPage() {
   const [isCloudConnecting, setIsCloudConnecting] = useState(false);
 
   // Graph mode state
-  const [graphMode, setGraphMode] = useState(false);
+  const [graphMode, setGraphMode] = useState(true);
   const graphEditorRef = useRef<GraphEditorHandle>(null);
 
   // When true, pipeline controls are disabled in Perform Mode
