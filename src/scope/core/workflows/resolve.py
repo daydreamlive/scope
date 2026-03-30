@@ -93,11 +93,22 @@ def _resolve_builtin(pipeline_id: str) -> ResolutionItem:
 
     if PipelineRegistry.is_registered(pipeline_id):
         return ResolutionItem(kind="pipeline", name=pipeline_id, status="ok")
+
+    import torch
+
+    if not torch.cuda.is_available():
+        detail = (
+            f"Built-in pipeline '{pipeline_id}' not found. "
+            "Your hardware may not support this pipeline — a compatible GPU is required."
+        )
+    else:
+        detail = f"Built-in pipeline '{pipeline_id}' not found"
+
     return ResolutionItem(
         kind="pipeline",
         name=pipeline_id,
         status="missing",
-        detail=f"Built-in pipeline '{pipeline_id}' not found",
+        detail=detail,
     )
 
 
