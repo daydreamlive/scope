@@ -177,13 +177,6 @@ ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
 # Persistent shared directory for sample LoRAs (survives session cleanup)
 SHARED_LORA_DIR = "/data/models/lora"
 
-# LoRA filenames used by sample/onboarding workflows.
-# These are cached in SHARED_LORA_DIR so users don't re-download each session.
-SAMPLE_LORA_FILENAMES = {
-    "diffslime_acidzlime-000016.safetensors",
-    "daydream-scope-dissolve.safetensors",
-    "Wan2.1-1.3b-lora-highresfix-v1_new.safetensors",
-}
 
 # Gates the "ready" WebSocket message until the previous session's cleanup completes.
 # Initialized lazily to ensure an event loop is available.
@@ -287,76 +280,16 @@ MAX_CONNECTION_DURATION_SECONDS = (
 TIMEOUT_CHECK_INTERVAL_SECONDS = 60  # Check for timeout every 60 seconds
 
 
-def _cache_sample_loras():
-    """Copy sample LoRAs from the session directory to persistent shared storage."""
-    from pathlib import Path
-
-    session_lora_dir = Path(ASSETS_DIR_PATH) / "lora"
-    shared_lora_dir = Path(SHARED_LORA_DIR)
-
-    if not session_lora_dir.is_dir():
-        return
-
-    shared_lora_dir.mkdir(parents=True, exist_ok=True)
-
-    for filename in SAMPLE_LORA_FILENAMES:
-        src = session_lora_dir / filename
-        dst = shared_lora_dir / filename
-        if src.is_file() and not dst.exists():
-            try:
-                shutil.copy2(src, dst)
-                print(f"Cached sample LoRA to shared storage: {filename}")
-            except Exception as e:
-                print(f"Warning: Failed to cache sample LoRA {filename}: {e}")
-
-    # Also copy manifest entries for the cached LoRAs
-    session_manifest = session_lora_dir / "lora_manifest.json"
-    shared_manifest_path = shared_lora_dir / "lora_manifest.json"
-    if session_manifest.is_file():
-        try:
-            import json
-
-            session_data = json.loads(session_manifest.read_text())
-            session_entries = session_data.get("entries", {})
-
-            # Load existing shared manifest or start fresh
-            if shared_manifest_path.is_file():
-                shared_data = json.loads(shared_manifest_path.read_text())
-            else:
-                shared_data = {"version": "1.0", "entries": {}}
-
-            # Merge only sample LoRA entries
-            updated = False
-            for filename in SAMPLE_LORA_FILENAMES:
-                if filename in session_entries and filename not in shared_data.get(
-                    "entries", {}
-                ):
-                    shared_data.setdefault("entries", {})[filename] = session_entries[
-                        filename
-                    ]
-                    updated = True
-
-            if updated:
-                shared_manifest_path.write_text(json.dumps(shared_data, indent=2))
-        except Exception as e:
-            print(f"Warning: Failed to update shared LoRA manifest: {e}")
-
-
 def cleanup_session_data():
     """Clean up session-specific data when WebSocket disconnects.
 
     This prevents data leakage between users on fal.ai by clearing:
     - Assets directory (uploaded images, videos)
     - Recording files in temp directory
-
-    Sample/onboarding LoRAs are cached to shared persistent storage first.
     """
     from pathlib import Path
 
     try:
-        # Cache sample LoRAs before cleaning
-        _cache_sample_loras()
-
         # Clean assets directory (matches DAYDREAM_SCOPE_ASSETS_DIR set in setup)
         assets_dir = Path(ASSETS_DIR_PATH).expanduser()
         if assets_dir.exists():
