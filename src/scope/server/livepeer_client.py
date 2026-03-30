@@ -21,6 +21,7 @@ import numpy as np
 from av import AudioFrame, VideoFrame
 from livepeer_gateway.channel_reader import JSONLReader
 from livepeer_gateway.channel_writer import JSONLWriter
+from livepeer_gateway.errors import SkipPaymentCycle
 from livepeer_gateway.lv2v import StartJobRequest, start_lv2v
 from livepeer_gateway.media_output import MediaOutput
 from livepeer_gateway.media_publish import MediaPublish, MediaPublishConfig
@@ -28,10 +29,22 @@ from livepeer_gateway.media_publish import MediaPublish, MediaPublishConfig
 logger = logging.getLogger(__name__)
 LIVEPEER_ORCH_URL_ENV = "LIVEPEER_ORCH_URL"
 LIVEPEER_WS_URL_ENV = "LIVEPEER_WS_URL"
+LIVEPEER_SIGNER_ENV = "LIVEPEER_SIGNER"
+LIVEPEER_SIGNER_FALSY_VALUES = {
+    "",
+    "0",
+    "false",
+    "off",
+    "no",
+    "none",
+    "null",
+    "disabled",
+}
 STOP_STREAM_SEND_TIMEOUT_S = 1.0
 SHUTDOWN_TIMEOUT_S = 5.0
 TASK_DRAIN_TIMEOUT_S = 0.25
 RUNNER_RESTART_TIMEOUT_S = 30.0
+PAYMENT_SEND_INTERVAL_S = 10.0
 
 
 @dataclass(slots=True)
@@ -53,10 +66,12 @@ class LivepeerClient:
         token: str,
         model_id: str,
         app_id: str | None = None,
+        api_key: str | None = None,
         fps: float = 30.0,
     ):
         self._token = token
         self._model_id = model_id
+        self._api_key = api_key
         self._fps = fps
         self._orchestrator_url = self._normalize_orchestrator_url(
             os.getenv(LIVEPEER_ORCH_URL_ENV)
@@ -73,6 +88,7 @@ class LivepeerClient:
         self._media_subscriber_task: asyncio.Task | None = None
         self._events_task: asyncio.Task | None = None
         self._ping_task: asyncio.Task | None = None
+        self._payment_task: asyncio.Task | None = None
         self._pending_requests: dict[str, asyncio.Future] = {}
         self._callbacks: list[Callable[[VideoFrame], None]] = []
         self._audio_callbacks: list[Callable[[AudioFrame], None]] = []
@@ -122,17 +138,38 @@ class LivepeerClient:
         if self._ws_url and "ws_url" not in params:
             params["ws_url"] = self._ws_url
 
+        # Configure signer if needed
+        signer_env = os.environ.get(LIVEPEER_SIGNER_ENV)
+        if signer_env is None:
+            # Unset -> preserve default signer behavior.
+            signer_url = "signer.daydream.live" if self._api_key else None
+        elif signer_env.strip().lower() in LIVEPEER_SIGNER_FALSY_VALUES:
+            # Explicit falsy value -> disable signer URL override.
+            signer_url = None
+        else:
+            signer_url = signer_env
+        signer_headers = (
+            {"Authorization": f"Bearer {self._api_key}"}
+            if self._api_key and signer_url
+            else None
+        )
+
+        # Construct job parameters
         request = StartJobRequest(
             model_id=self._model_id,
             params=params or None,
         )
 
+        # start_lv2v is synchronous and may block on network I/O, so run it in
+        # a worker thread to avoid blocking the event loop.
         self._job = await asyncio.to_thread(
             start_lv2v,
             # If unset, orchestrator is discovered via token signer/discovery fields.
             self._orchestrator_url,
             request,
             token=self._token,
+            signer_url=signer_url,
+            signer_headers=signer_headers,
             timeout=300.0,
             use_tofu=bool(os.environ.get("LIVEPEER_DEV_MODE")),
         )
@@ -142,7 +179,17 @@ class LivepeerClient:
         # deferred async initialisers need to be kicked off now.
         if self._job.control_url:
             self._control_writer = JSONLWriter(self._job.control_url)
-        # self._job.start_payment_sender() TODO enable once remote signer is up
+
+        if self._job.signer_url:
+            self._payment_task = asyncio.create_task(
+                self._payment_loop(self._job, self._job.payment_session)
+            )
+            logger.info(
+                "Livepeer payment loop started (interval=%.1fs)",
+                PAYMENT_SEND_INTERVAL_S,
+            )
+        else:
+            logger.debug("Livepeer signer not configured; payment loop disabled")
 
         self._connected = True
         self._media_connected = False
@@ -478,6 +525,24 @@ class LivepeerClient:
         except asyncio.CancelledError:
             pass
 
+    async def _payment_loop(self, job: Any, payment_session: Any) -> None:
+        """Send periodic payments while this job remains active."""
+        try:
+            while not self._shutdown_started and self._job is job:
+                await asyncio.sleep(PAYMENT_SEND_INTERVAL_S)
+                if not self._connected or self._job is not job:
+                    break
+                try:
+                    await asyncio.to_thread(payment_session.send_payment)
+                except SkipPaymentCycle as e:
+                    logger.debug("Livepeer payment loop skipped cycle: %s", e)
+                except Exception as e:
+                    logger.warning("Livepeer periodic payment failed: %s", e)
+        except asyncio.CancelledError:
+            pass
+        finally:
+            logger.debug("Livepeer payment loop stopped")
+
     async def _send_control(self, message: dict[str, Any]) -> None:
         """Send a typed control message to the runner."""
         if self._control_writer is None:
@@ -637,10 +702,12 @@ class LivepeerClient:
             control_writer = self._control_writer
             events_task = self._events_task
             ping_task = self._ping_task
+            payment_task = self._payment_task
             job = self._job
 
             self._events_task = None
             self._ping_task = None
+            self._payment_task = None
             self._job = None
             self._control_writer = None
             self._connected = False
@@ -649,6 +716,7 @@ class LivepeerClient:
         await self._teardown_media_handles(media_handles, current_task=current_task)
         await self._drain_or_cancel_task("events loop", events_task, current_task)
         await self._drain_or_cancel_task("ping loop", ping_task, current_task)
+        await self._drain_or_cancel_task("payment loop", payment_task, current_task)
 
         self._fail_pending_requests(unexpected_reason or "Livepeer connection closed")
 

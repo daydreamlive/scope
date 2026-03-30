@@ -15,6 +15,7 @@ import {
   isAuthenticated,
   redirectToSignIn,
   clearDaydreamAuth,
+  getDaydreamAPIKey,
   getDaydreamUserId,
   getDaydreamUserDisplayName,
   refreshUserProfile,
@@ -103,11 +104,12 @@ export function DaydreamAccountSection({
 
     try {
       const userId = getDaydreamUserId();
+      const apiKey = getDaydreamAPIKey();
 
       const response = await fetch("/api/v1/cloud/connect", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId }),
+        body: JSON.stringify({ user_id: userId, api_key: apiKey }),
       });
 
       if (!response.ok) {
