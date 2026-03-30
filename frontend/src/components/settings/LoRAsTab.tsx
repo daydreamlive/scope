@@ -138,15 +138,17 @@ export function LoRAsTab({
                           {lora.size_mb.toFixed(1)} MB
                         </span>
                       </div>
-                      <Button
-                        onClick={() => onDelete(lora.name)}
-                        variant="ghost"
-                        size="icon"
-                        disabled={isDeleting}
-                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
+                      {!lora.read_only && (
+                        <Button
+                          onClick={() => onDelete(lora.name)}
+                          variant="ghost"
+                          size="icon"
+                          disabled={isDeleting}
+                          className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      )}
                     </div>
                   );
                 })}

@@ -1387,6 +1387,7 @@ class LoRAFileInfo(BaseModel):
     folder: str | None = None
     sha256: str | None = None
     provenance: LoRAProvenance | None = None
+    read_only: bool = False
 
 
 class LoRAFilesResponse(BaseModel):
@@ -1442,11 +1443,11 @@ async def list_lora_files(
             shared_manifest = load_manifest(shared_dir)
             for file_path in iter_files(shared_dir, LORA_EXTENSIONS):
                 if file_path.stem not in seen:
-                    lora_files.append(
-                        process_lora_file(
-                            file_path, shared_dir, shared_manifest.entries
-                        )
+                    info = process_lora_file(
+                        file_path, shared_dir, shared_manifest.entries
                     )
+                    info.read_only = True
+                    lora_files.append(info)
 
         lora_files.sort(key=lambda x: (x.folder or "", x.name))
         return LoRAFilesResponse(lora_files=lora_files)
