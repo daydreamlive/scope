@@ -1,8 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
-import { ExternalLink, Search, Loader2, Play, Download } from "lucide-react";
+import {
+  ExternalLink,
+  Search,
+  Loader2,
+  Play,
+  Download,
+  Camera,
+} from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { getWorkflowsForStyle } from "../onboarding/starterWorkflows";
+import { getHardwareInfo } from "../../lib/api";
 
 const DAYDREAM_API_BASE =
   (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
@@ -38,9 +46,29 @@ interface WorkflowsTabProps {
 }
 
 export function WorkflowsTab({ onLoad }: WorkflowsTabProps) {
-  // Always show simple-mode workflows in the tab — teaching workflows have
-  // notes and missing source nodes that only make sense during onboarding.
-  const starterWorkflows = getWorkflowsForStyle("simple");
+  const [hasGpu, setHasGpu] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getHardwareInfo()
+      .then(info => {
+        if (!cancelled) setHasGpu(info.vram_gb != null && info.vram_gb > 0);
+      })
+      .catch(() => {
+        if (!cancelled) setHasGpu(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // On non-GPU devices, show only CPU-compatible workflows (Camera Preview);
+  // otherwise show the simple-mode starter workflows (teaching workflows have
+  // notes and missing source nodes that only make sense during onboarding).
+  const starterWorkflows =
+    hasGpu === false
+      ? getWorkflowsForStyle("local")
+      : getWorkflowsForStyle("simple");
 
   const [workflows, setWorkflows] = useState<DaydreamWorkflow[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -105,11 +133,17 @@ export function WorkflowsTab({ onLoad }: WorkflowsTabProps) {
                 className="group relative rounded-lg border border-border bg-card overflow-hidden text-left hover:border-foreground/20 transition-colors"
               >
                 <div className="aspect-video w-full overflow-hidden bg-muted">
-                  <img
-                    src={sw.thumbnail}
-                    alt={sw.title}
-                    className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200"
-                  />
+                  {sw.thumbnail ? (
+                    <img
+                      src={sw.thumbnail}
+                      alt={sw.title}
+                      className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-200"
+                    />
+                  ) : (
+                    <div className="h-full w-full flex items-center justify-center bg-gradient-to-br from-slate-800 to-slate-900">
+                      <Camera className="h-8 w-8 text-slate-500" />
+                    </div>
+                  )}
                 </div>
                 <div className="p-2.5">
                   <p className="text-xs font-medium text-foreground truncate">
