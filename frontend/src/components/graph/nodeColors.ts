@@ -40,6 +40,18 @@ export const HANDLE_COLORS: Record<string, string> = {
   record: "#ef4444",
 };
 
+/** Color lookup for block node typed ports, keyed by type_hint string. */
+export const TYPE_HINT_COLORS: Record<string, string> = {
+  Tensor: "#4ade80", // green – matches stream color for tensor data
+  int: "#60a5fa", // blue
+  float: "#38bdf8", // light blue
+  str: "#facc15", // yellow/amber
+  bool: "#fb923c", // orange
+  list: "#a78bfa", // violet
+  dict: "#f472b6", // pink
+  Any: COLOR_DEFAULT,
+};
+
 /** Low-opacity background variant for reroute nodes. */
 export const TYPE_BG: Record<string, string> = {
   string: "rgba(251,191,36,0.12)",

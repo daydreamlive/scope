@@ -3,7 +3,8 @@ import { useNodesState, useEdgesState } from "@xyflow/react";
 import type { Edge, Node } from "@xyflow/react";
 import { buildPipelinePortsMap } from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
-import type { PipelineSchemaInfo } from "../../../../lib/api";
+import type { PipelineSchemaInfo, BlockSchemasResponse } from "../../../../lib/api";
+import { getBlockSchemas } from "../../../../lib/api";
 import { useState } from "react";
 import { useApi } from "../../../../hooks/useApi";
 import { useCloudStatus } from "../../../../hooks/useCloudStatus";
@@ -126,6 +127,9 @@ export function useGraphState(
   const [pipelineSchemas, setPipelineSchemas] = useState<
     Record<string, PipelineSchemaInfo>
   >({});
+  const [blockSchemas, setBlockSchemas] = useState<BlockSchemasResponse | null>(
+    null
+  );
 
   const { getPipelineSchemas, getHardwareInfo, isCloudMode, isReady } =
     useApi();
@@ -147,6 +151,15 @@ export function useGraphState(
       .catch(err => {
         if (!mounted) return;
         console.error("Failed to fetch pipeline schemas:", err);
+      });
+    getBlockSchemas()
+      .then(bs => {
+        if (!mounted) return;
+        setBlockSchemas(bs);
+      })
+      .catch(err => {
+        if (!mounted) return;
+        console.error("Failed to fetch block schemas:", err);
       });
     getHardwareInfo()
       .then(info => {
@@ -215,6 +228,7 @@ export function useGraphState(
     setNodes,
     portsMap,
     pipelineSchemas,
+    blockSchemas,
     isStreamingRef,
     nodesRef,
     onNodeParameterChange: callbacks.onNodeParameterChange,
@@ -325,6 +339,7 @@ export function useGraphState(
     availablePipelineIds,
     portsMap,
     pipelineSchemas,
+    blockSchemas,
     nodeParams: params.nodeParams,
     handlePipelineSelect: params.handlePipelineSelect,
     handleNodeParameterChange: params.handleNodeParameterChange,

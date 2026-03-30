@@ -12,6 +12,31 @@ import { resolveSourceType } from "./typeResolution";
 import { BOUNDARY_INPUT_ID, BOUNDARY_OUTPUT_ID } from "./subgraphSerialization";
 
 // ---------------------------------------------------------------------------
+// Block node type-hint compatibility
+// ---------------------------------------------------------------------------
+
+/**
+ * Check if two type_hint strings from block ports are compatible.
+ * Uses simple heuristic: same string, or one contains the other, or
+ * common numeric widening (int → float).
+ */
+function areTypeHintsCompatible(src: string, tgt: string): boolean {
+  if (src === tgt) return true;
+  // Normalize: strip whitespace
+  const s = src.replace(/\s/g, "");
+  const t = tgt.replace(/\s/g, "");
+  if (s === t) return true;
+  // Union types: if target includes all of source's types
+  if (t.includes(s) || s.includes(t)) return true;
+  // Numeric widening
+  if ((s === "int" && t === "float") || (s === "float" && t === "int"))
+    return true;
+  // Both tensor-like
+  if (s.includes("Tensor") && t.includes("Tensor")) return true;
+  return false;
+}
+
+// ---------------------------------------------------------------------------
 // Target-node rules (param → param).  Each entry maps a target nodeType (or
 // a special key) to a predicate that decides whether a given sourceType is
 // acceptable for that target handle.
@@ -247,9 +272,34 @@ export function validateConnection(
     return true;
   }
 
-  // Stream ↔ stream always ok
+  // Stream ↔ stream always ok (including block node stream ports)
   if (sourceParsed.kind === "stream" && targetParsed.kind === "stream")
     return true;
+
+  // Block ↔ block: match by type_hint compatibility
+  {
+    const sourceNode = nodes.find(n => n.id === connection.source);
+    const targetNode = nodes.find(n => n.id === connection.target);
+    if (sourceNode?.data.nodeType === "block" || targetNode?.data.nodeType === "block") {
+      // Block nodes always allow connections between matching port names
+      // (same state variable). For type validation, check type_hint overlap.
+      if (sourceNode?.data.nodeType === "block" && targetNode?.data.nodeType === "block") {
+        const srcSchema = sourceNode.data.blockSchema;
+        const tgtSchema = targetNode.data.blockSchema;
+        const srcPort = srcSchema?.outputs?.find(
+          (p: { name: string }) => p.name === sourceParsed.name
+        );
+        const tgtPort = tgtSchema?.inputs?.find(
+          (p: { name: string }) => p.name === targetParsed.name
+        );
+        if (srcPort && tgtPort) {
+          return areTypeHintsCompatible(srcPort.type_hint, tgtPort.type_hint);
+        }
+      }
+      // Allow block ↔ non-block connections (boundary ports, etc.)
+      return true;
+    }
+  }
 
   // Param ↔ param
   if (sourceParsed.kind === "param" && targetParsed.kind === "param") {

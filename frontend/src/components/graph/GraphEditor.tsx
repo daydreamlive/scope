@@ -48,6 +48,7 @@ import { SubgraphNode } from "./nodes/SubgraphNode";
 import { SubgraphInputNode } from "./nodes/SubgraphInputNode";
 import { SubgraphOutputNode } from "./nodes/SubgraphOutputNode";
 import { RecordNode } from "./nodes/RecordNode";
+import { BlockNode } from "./nodes/BlockNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -114,6 +115,7 @@ const nodeTypes = {
   subgraph_input: SubgraphInputNode,
   subgraph_output: SubgraphOutputNode,
   record: RecordNode,
+  block: BlockNode,
 };
 
 const edgeTypes = {

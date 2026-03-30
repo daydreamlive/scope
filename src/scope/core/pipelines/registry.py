@@ -233,6 +233,25 @@ def _register_pipelines():
             logger.debug(
                 f"Registered {pipeline_name} pipeline (ID: {config_class.pipeline_id})"
             )
+
+            # Register block nodes if the pipeline exposes them
+            if hasattr(pipeline_class, "get_block_definitions"):
+                try:
+                    from .block_registry import BlockRegistry
+
+                    block_params = None
+                    if hasattr(pipeline_class, "get_block_parameters"):
+                        block_params = pipeline_class.get_block_parameters()
+
+                    BlockRegistry.register_pipeline_blocks(
+                        config_class.pipeline_id,
+                        pipeline_class.get_block_definitions(),
+                        block_parameters=block_params,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"Failed to register blocks for {pipeline_name}: {e}"
+                    )
         except ImportError as e:
             logger.warning(
                 f"Could not import {pipeline_name} pipeline: {e}. "

@@ -39,7 +39,8 @@ type NodeTypeKey =
   | "subgraph"
   | "subgraph_input"
   | "subgraph_output"
-  | "record";
+  | "record"
+  | "block";
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -370,6 +371,16 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       parameterInputs: [
         { name: "trigger", type: "boolean", defaultValue: false },
       ],
+    },
+  },
+  block: {
+    type: "block",
+    idPrefix: "block",
+    defaultX: 400,
+    style: { width: 220 },
+    data: {
+      label: "Block",
+      nodeType: "block",
     },
   },
 };

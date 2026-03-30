@@ -5,14 +5,17 @@ import { extractParameterPorts } from "../../../../lib/graphUtils";
 import type {
   PipelineSchemaInfo,
   HardwareInfoResponse,
+  BlockSchemasResponse,
 } from "../../../../lib/api";
 import { getDefaultPromptForMode } from "../../../../data/pipelines";
 import type { InputMode } from "../../../../types";
+import { createBlockSubgraph } from "../../utils/blockSubgraphFactory";
 
 interface UsePipelineParamsArgs {
   setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>;
   portsMap: Record<string, { inputs: string[]; outputs: string[] }>;
   pipelineSchemas: Record<string, PipelineSchemaInfo>;
+  blockSchemas: BlockSchemasResponse | null;
   isStreamingRef: React.RefObject<boolean>;
   nodesRef: React.RefObject<Node<FlowNodeData>[]>;
   onNodeParameterChange?: (nodeId: string, key: string, value: unknown) => void;
@@ -23,6 +26,7 @@ export function usePipelineParams({
   setNodes,
   portsMap,
   pipelineSchemas,
+  blockSchemas,
   isStreamingRef,
   nodesRef,
   onNodeParameterChange,
@@ -81,6 +85,62 @@ export function usePipelineParams({
         }
       }
 
+      // Check if this pipeline has block definitions → auto-create subgraph
+      const hasBlocks =
+        newPipelineId &&
+        blockSchemas?.pipeline_blocks[newPipelineId]?.length;
+
+      if (hasBlocks && schema && blockSchemas) {
+        const subgraph = createBlockSubgraph(
+          newPipelineId,
+          blockSchemas,
+          schema
+        );
+        if (subgraph) {
+          setNodes(nds =>
+            nds.map(n => {
+              if (n.id !== nodeId) return n;
+              const ports =
+                newPipelineId && portsMap
+                  ? portsMap[newPipelineId]
+                  : null;
+              const parameterInputs = schema
+                ? extractParameterPorts(schema)
+                : [];
+              const newStyle = { ...n.style };
+              delete newStyle.height;
+              return {
+                ...n,
+                type: "subgraph",
+                style: newStyle,
+                height: undefined,
+                measured: undefined,
+                data: {
+                  ...n.data,
+                  nodeType: "subgraph",
+                  pipelineId: newPipelineId,
+                  label: schema.name || newPipelineId,
+                  streamInputs: ports?.inputs ?? ["video"],
+                  streamOutputs: ports?.outputs ?? ["video"],
+                  parameterInputs,
+                  supportsPrompts,
+                  supportsCacheManagement:
+                    schema?.supports_cache_management ?? false,
+                  supportsVace: schema?.supports_vace ?? false,
+                  supportsLoRA: schema?.supports_lora ?? false,
+                  // Subgraph-specific data
+                  subgraphNodes: subgraph.innerNodes,
+                  subgraphEdges: subgraph.innerEdges,
+                  subgraphInputs: subgraph.subgraphInputs,
+                  subgraphOutputs: subgraph.subgraphOutputs,
+                },
+              };
+            })
+          );
+          return;
+        }
+      }
+
       setNodes(nds =>
         nds.map(n => {
           if (n.id !== nodeId) return n;
@@ -114,7 +174,7 @@ export function usePipelineParams({
         })
       );
     },
-    [setNodes, portsMap, pipelineSchemas, hardwareInfo]
+    [setNodes, portsMap, pipelineSchemas, blockSchemas, hardwareInfo]
   );
 
   const handleNodeParameterChange = useCallback(

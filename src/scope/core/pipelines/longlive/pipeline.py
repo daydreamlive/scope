@@ -37,6 +37,93 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         return LongLiveConfig
 
+    @classmethod
+    def get_block_definitions(cls):
+        """Return the ordered block definitions for graph visualization."""
+        from .modular_blocks import ALL_BLOCKS
+
+        return ALL_BLOCKS
+
+    @classmethod
+    def get_block_parameters(cls):
+        """Declare parameter overrides and additional params for each block.
+
+        Returns a dict mapping block_name to a dict with:
+        - "overrides": dict mapping param_name to constraint overrides
+          (min_value, max_value, step, choices)
+        - "additional": list of extra BlockParameter dicts not derivable
+          from the block's InputParams (e.g., component configuration)
+        """
+        return {
+            "text_conditioning": {
+                "overrides": {},
+            },
+            "embedding_blending": {
+                "overrides": {
+                    "spatial_interpolation_method": {
+                        "choices": ["linear", "slerp"],
+                    },
+                },
+            },
+            "set_timesteps": {
+                "overrides": {
+                    "denoising_step_list": {
+                        "min_value": 100,
+                        "max_value": 1000,
+                    },
+                },
+            },
+            "setup_caches": {
+                "overrides": {},
+            },
+            "auto_prepare_latents": {
+                "overrides": {
+                    "base_seed": {"min_value": 0},
+                },
+            },
+            "denoise": {
+                "overrides": {
+                    "noise_scale": {
+                        "min_value": 0.0,
+                        "max_value": 1.0,
+                        "step": 0.01,
+                    },
+                    "kv_cache_attention_bias": {
+                        "min_value": 0.0,
+                        "max_value": 2.0,
+                        "step": 0.1,
+                    },
+                    "vace_context_scale": {
+                        "min_value": 0.0,
+                        "max_value": 2.0,
+                        "step": 0.1,
+                    },
+                },
+            },
+            "vace_encoding": {
+                "additional": [
+                    {
+                        "name": "vae_type",
+                        "type_hint": "str",
+                        "default": "wan",
+                        "choices": ["wan", "lightvae", "tae"],
+                        "description": "VAE type used for encoding VACE context",
+                    },
+                ],
+            },
+            "decode": {
+                "additional": [
+                    {
+                        "name": "vae_type",
+                        "type_hint": "str",
+                        "default": "wan",
+                        "choices": ["wan", "lightvae", "tae"],
+                        "description": "VAE type used for decoding latents to pixels",
+                    },
+                ],
+            },
+        }
+
     def __init__(
         self,
         config,

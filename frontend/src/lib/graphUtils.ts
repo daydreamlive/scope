@@ -98,7 +98,12 @@ export interface FlowNodeData {
     | "subgraph"
     | "subgraph_input"
     | "subgraph_output"
-    | "record";
+    | "record"
+    | "block";
+  /** For block nodes: the block schema from the backend */
+  blockId?: string;
+  /** For block nodes: full schema with typed ports */
+  blockSchema?: import("./api").BlockNodeSchema;
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -764,6 +769,7 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "subgraph_input",
   "subgraph_output",
   "record",
+  "block",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
@@ -845,6 +851,18 @@ export function flattenSubgraphs(
   for (const node of nodes) {
     if (node.data.nodeType !== "subgraph") {
       flatNodes.push(node);
+      continue;
+    }
+
+    // If this subgraph represents a pipeline (has pipelineId), collapse it
+    // back to a single pipeline node instead of flattening inner block nodes.
+    // This preserves identical backend execution.
+    if (node.data.pipelineId) {
+      flatNodes.push({
+        ...node,
+        type: "pipeline",
+        data: { ...node.data, nodeType: "pipeline" },
+      });
       continue;
     }
 

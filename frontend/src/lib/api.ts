@@ -623,6 +623,8 @@ export interface PipelineSchemaInfo {
   // Graph port declarations
   inputs?: string[];
   outputs?: string[];
+  // Block decomposition support
+  has_blocks?: boolean;
 }
 
 export interface PipelineSchemasResponse {
@@ -646,6 +648,45 @@ export const getPipelineSchemas =
     const result = await response.json();
     return result;
   };
+
+// Block schema types for pipeline block decomposition
+export interface TypedPort {
+  name: string;
+  type_hint: string;
+  required: boolean;
+  description: string;
+}
+
+export interface BlockNodeSchema {
+  block_id: string;
+  block_name: string;
+  description: string;
+  inputs: TypedPort[];
+  outputs: TypedPort[];
+  components: string[];
+  parent_pipeline_id: string;
+}
+
+export interface BlockSchemasResponse {
+  blocks: Record<string, BlockNodeSchema>;
+  pipeline_blocks: Record<string, string[]>;
+}
+
+export const getBlockSchemas = async (): Promise<BlockSchemasResponse> => {
+  const response = await fetch("/api/v1/pipelines/block-schemas", {
+    method: "GET",
+    headers: { "Content-Type": "application/json" },
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Get block schemas failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
 
 // Plugin types
 export interface PluginPipelineInfo {

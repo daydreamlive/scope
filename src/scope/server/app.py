@@ -760,6 +760,7 @@ async def get_pipeline_schemas(
     if _pipeline_schemas_cache is not None:
         return _pipeline_schemas_cache
 
+    from scope.core.pipelines.block_registry import BlockRegistry
     from scope.core.pipelines.registry import PipelineRegistry
     from scope.core.plugins import get_plugin_manager
 
@@ -775,11 +776,31 @@ async def get_pipeline_schemas(
             schema_data["plugin_name"] = plugin_manager.get_plugin_for_pipeline(
                 pipeline_id
             )
+            schema_data["has_blocks"] = BlockRegistry.has_blocks(pipeline_id)
             pipelines[pipeline_id] = schema_data
 
     response = PipelineSchemasResponse(pipelines=pipelines)
     _pipeline_schemas_cache = response
     return response
+
+
+@app.get("/api/v1/pipelines/block-schemas")
+async def get_block_schemas():
+    """Get block-level schemas for pipelines that expose modular blocks.
+
+    Returns block metadata (typed inputs/outputs, components, descriptions)
+    for each block within pipelines that support block decomposition.
+    The frontend uses this to build zoomable subgraph views of pipelines.
+    """
+    from scope.core.pipelines.block_registry import BlockRegistry
+
+    return {
+        "blocks": {
+            block_id: schema.model_dump()
+            for block_id, schema in BlockRegistry.get_all_schemas().items()
+        },
+        "pipeline_blocks": BlockRegistry.get_pipeline_block_ids(),
+    }
 
 
 # ---------------------------------------------------------------------------
