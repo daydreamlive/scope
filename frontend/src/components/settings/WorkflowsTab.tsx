@@ -1,5 +1,12 @@
 import { useState, useEffect, useCallback } from "react";
-import { ExternalLink, Search, Loader2, Play, Download, Camera } from "lucide-react";
+import {
+  ExternalLink,
+  Search,
+  Loader2,
+  Play,
+  Download,
+  Camera,
+} from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { getWorkflowsForStyle } from "../onboarding/starterWorkflows";
