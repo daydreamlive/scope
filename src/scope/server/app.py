@@ -1439,6 +1439,12 @@ async def list_lora_files(
         # This surfaces pre-cached sample LoRAs in cloud mode.
         shared_dir = get_shared_lora_dir()
         if shared_dir and shared_dir.is_dir():
+            shared_names = {f.stem for f in iter_files(shared_dir, LORA_EXTENSIONS)}
+            # Mark session-dir LoRAs as read_only if they also exist in
+            # the shared dir (i.e. they are sample/onboarding LoRAs).
+            for lf in lora_files:
+                if lf.name in shared_names:
+                    lf.read_only = True
             seen = {lf.name for lf in lora_files}
             shared_manifest = load_manifest(shared_dir)
             for file_path in iter_files(shared_dir, LORA_EXTENSIONS):
