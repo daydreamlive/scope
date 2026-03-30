@@ -32,6 +32,9 @@ ASSETS_DIR_ENV_VAR = "DAYDREAM_SCOPE_ASSETS_DIR"
 # Environment variable for overriding lora directory
 LORA_DIR_ENV_VAR = "DAYDREAM_SCOPE_LORA_DIR"
 
+# Environment variable for shared (persistent) lora directory (cloud mode)
+SHARED_LORA_DIR_ENV_VAR = "DAYDREAM_SCOPE_LORA_SHARED_DIR"
+
 # Environment variable for CivitAI API token
 CIVITAI_TOKEN_ENV_VAR = "CIVITAI_API_TOKEN"
 
@@ -134,6 +137,23 @@ def get_lora_dir() -> Path:
     models_dir = get_models_dir()
     lora_dir = models_dir / "lora"
     return lora_dir
+
+
+def get_shared_lora_dir() -> Path | None:
+    """
+    Get the shared (persistent) LoRA directory path, if configured.
+
+    This is used in cloud mode to persist sample/onboarding LoRAs across
+    sessions while keeping user-downloaded LoRAs in the session-specific
+    directory.
+
+    Returns:
+        Path | None: Absolute path to the shared LoRA directory, or None
+    """
+    env_dir = os.environ.get(SHARED_LORA_DIR_ENV_VAR)
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    return None
 
 
 def ensure_lora_dir() -> Path:

@@ -86,6 +86,7 @@ from .models_config import (
     ensure_models_dir,
     get_assets_dir,
     get_lora_dir,
+    get_shared_lora_dir,
     models_are_downloaded,
 )
 from .pipeline_manager import PipelineManager
@@ -1433,6 +1434,20 @@ async def list_lora_files(
         for file_path in iter_files(lora_dir, LORA_EXTENSIONS):
             lora_files.append(process_lora_file(file_path, lora_dir, manifest.entries))
 
+        # Also include LoRAs from the shared (persistent) directory if set.
+        # This surfaces pre-cached sample LoRAs in cloud mode.
+        shared_dir = get_shared_lora_dir()
+        if shared_dir and shared_dir.is_dir():
+            seen = {lf.name for lf in lora_files}
+            shared_manifest = load_manifest(shared_dir)
+            for file_path in iter_files(shared_dir, LORA_EXTENSIONS):
+                if file_path.stem not in seen:
+                    lora_files.append(
+                        process_lora_file(
+                            file_path, shared_dir, shared_manifest.entries
+                        )
+                    )
+
         lora_files.sort(key=lambda x: (x.folder or "", x.name))
         return LoRAFilesResponse(lora_files=lora_files)
 
@@ -1729,6 +1744,15 @@ async def delete_lora_file(
                 detail=f"LoRA file '{name}' not found",
             )
 
+        # In cloud mode, prevent deletion of sample/onboarding LoRAs that
+        # are cached in the shared persistent directory.
+        shared_dir = get_shared_lora_dir()
+        if shared_dir and (shared_dir / found_path.name).is_file():
+            raise HTTPException(
+                status_code=403,
+                detail=f"'{name}' is a sample LoRA and cannot be removed in cloud mode",
+            )
+
         # Delete the file
         found_path.unlink()
         logger.info(f"Deleted LoRA file: {found_path}")
@@ -1829,8 +1853,9 @@ async def resolve_workflow_endpoint(
     try:
         plugin_manager = get_plugin_manager()
         lora_dir = get_lora_dir()
+        shared_lora_dir = get_shared_lora_dir()
 
-        return resolve_workflow(workflow, plugin_manager, lora_dir)
+        return resolve_workflow(workflow, plugin_manager, lora_dir, shared_lora_dir)
     except Exception as e:
         logger.error("Error resolving workflow: %s", e, exc_info=True)
         raise HTTPException(

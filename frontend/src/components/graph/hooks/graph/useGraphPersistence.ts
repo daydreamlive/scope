@@ -383,6 +383,21 @@ export function useGraphPersistence({
             setPendingImportResolving(true);
             try {
               const plan = await resolveWorkflow(workflow);
+
+              // If all dependencies are already resolved, skip the review
+              // dialog and load the workflow directly.
+              if (
+                plan.items.every(i => i.status === "ok") &&
+                plan.warnings.length === 0
+              ) {
+                loadGraphFromParsed(
+                  workflow as unknown as Record<string, unknown>,
+                  workflow.metadata?.name ?? file.name
+                );
+                setPendingImportWorkflow(null);
+                return;
+              }
+
               setPendingResolutionPlan(plan);
             } catch (err) {
               console.error("Workflow resolution failed:", err);
