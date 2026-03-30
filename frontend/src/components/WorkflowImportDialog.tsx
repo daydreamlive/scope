@@ -379,8 +379,12 @@ export function WorkflowImportDialog({
     );
     if (!confirmed) return;
 
-    await loadWorkflowDirect(workflow);
-  }, [workflow, showConfirm, loadWorkflowDirect]);
+    // Close the dialog immediately so the user doesn't see the review
+    // content flash back while the async load is in progress.
+    const wf = workflow;
+    handleClose();
+    await loadWorkflowDirect(wf);
+  }, [workflow, showConfirm, loadWorkflowDirect, handleClose]);
 
   // -----------------------------------------------------------------------
   // File selection and validation
