@@ -51,6 +51,8 @@ import { RecordNode } from "./nodes/RecordNode";
 import { TempoNode } from "./nodes/TempoNode";
 import { PromptListNode } from "./nodes/PromptListNode";
 import { PromptBlendNode } from "./nodes/PromptBlendNode";
+import { BackendNode } from "./nodes/BackendNode";
+import { SchedulerNode } from "./nodes/SchedulerNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -120,6 +122,8 @@ const nodeTypes = {
   tempo: TempoNode,
   prompt_list: PromptListNode,
   prompt_blend: PromptBlendNode,
+  backend_node: BackendNode,
+  scheduler_node: SchedulerNode,
 };
 
 const edgeTypes = {
@@ -285,6 +289,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       cancelImport,
       reResolveImport,
       loadGraphFromParsed,
+      backendNodeSchemas,
     } = useGraphState(
       {
         onNodeParameterChange,
@@ -514,23 +519,27 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       [isStreaming, rawOnReconnect]
     );
 
-    const { handleNodeTypeSelect, handleDeleteNodes, insertBlueprint } =
-      useNodeFactories({
-        nodes,
-        setNodes,
-        setEdges,
-        availablePipelineIds,
-        portsMap,
-        handlePipelineSelect,
-        setSelectedNodeIds,
-        spoutOutputAvailable,
-        ndiOutputAvailable,
-        syphonOutputAvailable,
-        pendingNodePosition,
-        setPendingNodePosition,
-        handleEdgeDelete,
-        enrichDepsRef,
-      });
+    const {
+      handleNodeTypeSelect,
+      handleDeleteNodes,
+      insertBlueprint,
+      addBackendNode,
+    } = useNodeFactories({
+      nodes,
+      setNodes,
+      setEdges,
+      availablePipelineIds,
+      portsMap,
+      handlePipelineSelect,
+      setSelectedNodeIds,
+      spoutOutputAvailable,
+      ndiOutputAvailable,
+      syphonOutputAvailable,
+      pendingNodePosition,
+      setPendingNodePosition,
+      handleEdgeDelete,
+      enrichDepsRef,
+    });
 
     const { createSubgraphFromSelection, unpackSubgraph } =
       useSubgraphOperations({
@@ -930,6 +939,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                         edges,
                         createSubgraphFromSelection,
                         onOpenBlueprints: () => setShowBlueprintModal(true),
+                        backendNodeSchemas,
+                        addBackendNode,
                       })
                     : buildNodeMenuItems({
                         contextNodeId: contextMenu.nodeId!,
@@ -953,6 +964,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                 setPendingNodePosition(null);
               }}
               onSelectNodeType={handleNodeTypeSelect}
+              backendNodeSchemas={backendNodeSchemas}
+              addBackendNode={addBackendNode}
             />
 
             <BlueprintBrowserModal

@@ -1,6 +1,6 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
@@ -15,6 +15,8 @@ import {
   collapsedHandleStyle,
 } from "../ui";
 import { COLOR_STRING as COLOR } from "../nodeColors";
+
+const COLOR_TRIGGER = "#f97316";
 
 type PromptListNodeType = Node<FlowNodeData, "prompt_list">;
 
@@ -84,6 +86,33 @@ export function PromptListNode({
     activeIndex,
   ]);
 
+  const [triggerFlash, setTriggerFlash] = useState(false);
+  const triggerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevCounterRef = useRef(0);
+  const prevArmedRef = useRef(false);
+
+  const triggerCounters =
+    (data._promptTriggerCounters as Record<string, number>) ?? {};
+  const triggerCounterSum = Object.values(triggerCounters).reduce(
+    (a, b) => a + b,
+    0
+  );
+  const triggerArmed = Boolean(data.promptListTriggerArmed);
+
+  useEffect(() => {
+    const counterChanged =
+      triggerCounterSum > 0 && triggerCounterSum !== prevCounterRef.current;
+    const armedRising = triggerArmed && !prevArmedRef.current;
+    prevCounterRef.current = triggerCounterSum;
+    prevArmedRef.current = triggerArmed;
+
+    if (counterChanged || armedRising) {
+      setTriggerFlash(true);
+      if (triggerTimerRef.current) clearTimeout(triggerTimerRef.current);
+      triggerTimerRef.current = setTimeout(() => setTriggerFlash(false), 200);
+    }
+  }, [triggerCounterSum, triggerArmed]);
+
   return (
     <NodeCard
       selected={selected}
@@ -131,8 +160,21 @@ export function PromptListNode({
                   ›
                 </button>
               </div>
-              <span className={`${NODE_TOKENS.labelText} text-[8px]`}>
+              <span
+                className={`${NODE_TOKENS.labelText} text-[8px]`}
+                style={{ color: "#38bdf8" }}
+              >
                 cycle →
+              </span>
+            </div>
+
+            {/* Trigger input row */}
+            <div ref={setRowRef("trigger")} className="flex items-center">
+              <span
+                className={`${NODE_TOKENS.labelText} text-[8px]`}
+                style={{ color: COLOR_TRIGGER }}
+              >
+                ← next
               </span>
             </div>
 
@@ -204,6 +246,31 @@ export function PromptListNode({
                 top: rowPositions["nav"] ?? 0,
                 left: 0,
                 backgroundColor: "#38bdf8",
+              }
+        }
+      />
+
+      {/* Trigger input handle */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={buildHandleId("param", "trigger")}
+        className={
+          collapsed
+            ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+            : "!w-2.5 !h-2.5 !border-0"
+        }
+        style={
+          collapsed
+            ? { ...collapsedHandleStyle("left"), opacity: 0 }
+            : {
+                top: rowPositions["trigger"] ?? 0,
+                left: 0,
+                backgroundColor: triggerFlash ? "#ffffff" : COLOR_TRIGGER,
+                boxShadow: triggerFlash
+                  ? "0 0 6px 2px rgba(255,255,255,0.6)"
+                  : "none",
+                transition: "background-color 200ms, box-shadow 200ms",
               }
         }
       />

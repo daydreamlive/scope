@@ -14,6 +14,7 @@ from .manager import (
     get_plugin_manager,
     load_plugins,
     pm,
+    register_plugin_nodes,
     register_plugin_pipelines,
 )
 
@@ -22,6 +23,7 @@ __all__ = [
     "ensure_plugins_installed",
     "load_plugins",
     "pm",
+    "register_plugin_nodes",
     "register_plugin_pipelines",
     "get_plugin_manager",
     "FailedPluginInfo",

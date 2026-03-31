@@ -1,6 +1,9 @@
 import { useCallback, useMemo } from "react";
 import type { Node } from "@xyflow/react";
-import { generateNodeId } from "../../../../lib/graphUtils";
+import {
+  generateNodeId,
+  CUSTOM_NODE_COMPONENTS,
+} from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 import {
   deserializeNodes,
@@ -606,6 +609,31 @@ export function useNodeFactories({
     ]
   );
 
+  const addBackendNode = useCallback(
+    (
+      nodeTypeId: string,
+      nodeName: string,
+      position?: { x: number; y: number }
+    ) => {
+      const pos = position ??
+        pendingNodePosition ?? { x: 200, y: 50 + nodes.length * 100 };
+      const id = generateNodeId(nodeTypeId, existingIds);
+      const flowType = CUSTOM_NODE_COMPONENTS[nodeTypeId] ?? "backend_node";
+      const newNode: Node<FlowNodeData> = {
+        id,
+        type: flowType,
+        position: pos,
+        data: {
+          label: nodeName || nodeTypeId,
+          nodeType: "backend_node",
+          backendNodeTypeId: nodeTypeId,
+        } as FlowNodeData,
+      };
+      setNodes(nds => enrichNodes([...nds, newNode], enrichDepsRef.current));
+    },
+    [existingIds, nodes.length, pendingNodePosition, setNodes, enrichDepsRef]
+  );
+
   const handleDeleteNodes = useCallback(
     (nodeIds: string[]) => {
       // Never delete boundary nodes
@@ -615,7 +643,17 @@ export function useNodeFactories({
       ]);
       const idSet = new Set(nodeIds.filter(id => !PROTECTED.has(id)));
       if (idSet.size === 0) return;
-      setNodes(nds => nds.filter(n => !idSet.has(n.id)));
+      setNodes(nds => {
+        for (const id of idSet) {
+          const node = nds.find(n => n.id === id);
+          if (node?.data.nodeType === "backend_node") {
+            fetch(`/api/v1/nodes/instances/${id}`, { method: "DELETE" }).catch(
+              () => {}
+            );
+          }
+        }
+        return nds.filter(n => !idSet.has(n.id));
+      });
       setEdges(eds =>
         eds.filter(e => !idSet.has(e.source) && !idSet.has(e.target))
       );
@@ -698,5 +736,6 @@ export function useNodeFactories({
     handleNodeTypeSelect,
     handleDeleteNodes,
     insertBlueprint,
+    addBackendNode,
   };
 }

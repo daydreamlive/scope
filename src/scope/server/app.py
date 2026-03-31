@@ -89,6 +89,7 @@ from .models_config import (
     get_shared_lora_dir,
     models_are_downloaded,
 )
+from .node_router import router as node_router
 from .pipeline_manager import PipelineManager
 from .recording import (
     RecordingManager,
@@ -311,6 +312,8 @@ livepeer = None
 kafka_publisher = None
 # Global tempo sync manager instance
 tempo_sync = None
+# Global backend node manager instance
+node_manager = None
 # Global OSC server instance
 osc_server = None
 # Global DMX server instance
@@ -336,6 +339,7 @@ async def lifespan(app: FastAPI):
 
     from .cloud_connection import CloudConnectionManager
     from .livepeer import LivepeerConnection
+    from .node_manager import NodeManager
     from .pipeline_manager import PipelineManager
     from .tempo_sync import TempoSync
     from .webrtc import WebRTCManager
@@ -349,7 +353,8 @@ async def lifespan(app: FastAPI):
         livepeer, \
         tempo_sync, \
         osc_server, \
-        dmx_server
+        dmx_server, \
+        node_manager
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -389,6 +394,9 @@ async def lifespan(app: FastAPI):
 
     tempo_sync = TempoSync()
     logger.info("Tempo sync manager initialized")
+
+    node_manager = NodeManager()
+    logger.info("Node manager initialized")
 
     cloud_connection_manager = CloudConnectionManager()
     logger.info("Cloud connection manager initialized")
@@ -476,6 +484,11 @@ async def lifespan(app: FastAPI):
         await cloud_connection_manager.disconnect()
         logger.info("Cloud connection shutdown complete")
 
+    if node_manager:
+        logger.info("Shutting down node manager...")
+        node_manager.unload_graph()
+        logger.info("Node manager shutdown complete")
+
     if tempo_sync:
         logger.info("Shutting down tempo sync...")
         await tempo_sync.stop()
@@ -548,6 +561,8 @@ app = FastAPI(
 app.include_router(mcp_router)
 # Tempo sync endpoints (enable/disable, status, sources, BPM control)
 app.include_router(tempo_router)
+# Backend node endpoints (types, instances, input/config, WebSocket)
+app.include_router(node_router)
 
 # Add CORS middleware
 app.add_middleware(

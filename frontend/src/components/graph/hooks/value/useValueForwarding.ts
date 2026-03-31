@@ -50,6 +50,7 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "tempo",
   "prompt_list",
   "prompt_blend",
+  "backend_node",
 ]);
 
 const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
@@ -62,6 +63,7 @@ const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
   "vace",
   "pipeline",
   "record",
+  "control",
   "prompt_list",
   "prompt_blend",
 ]);
@@ -157,11 +159,15 @@ export function useValueForwarding(
     return 0;
   }, [isStreaming]);
 
+  const lastSessionTickRef = useRef(0);
+
   useEffect(() => {
     if (!isStreaming || !onNodeParamChangeRef.current) return;
 
-    // On new session start, clear dedup state so all params are re-sent.
-    if (sessionTick > 0) {
+    // On new session start, clear dedup state so all params are re-sent —
+    // but only once per session, not on every effect re-run.
+    if (sessionTick > 0 && sessionTick !== lastSessionTickRef.current) {
+      lastSessionTickRef.current = sessionTick;
       lastSentRef.current.clear();
       prevNodeDataRef.current.clear();
     }
@@ -199,7 +205,12 @@ export function useValueForwarding(
       if (!PRODUCER_TYPES.has(node.data.nodeType)) continue;
 
       const connected = findConnectedPipelineParams(node.id, edges, nodes);
-      if (connected.length === 0) continue;
+      const hasBackendNodeTargets = edges.some(
+        e =>
+          e.source === node.id &&
+          nodes.find(n => n.id === e.target)?.data.nodeType === "backend_node"
+      );
+      if (connected.length === 0 && !hasBackendNodeTargets) continue;
 
       const valuesToForward: Array<{
         handleName: string | null;
@@ -341,6 +352,25 @@ export function useValueForwarding(
         } else if (targetNode.data.nodeType === "pipeline") {
           resolvedBackendId = resolveBackendId(edge.target);
           resolvedParamName = targetParsed.name;
+        } else if (targetNode.data.nodeType === "backend_node") {
+          const entry = valuesToForward.find(v => {
+            if (v.handleName === null) return true;
+            return v.handleName === sourceParsed.name;
+          });
+          if (entry?.value !== undefined) {
+            const instanceId = edge.target;
+            const paramName = targetParsed.name;
+            const dedupKey = `bn:${instanceId}\0${paramName}`;
+            if (!valuesEqual(lastSentRef.current.get(dedupKey), entry.value)) {
+              lastSentRef.current.set(dedupKey, entry.value);
+              fetch(`/api/v1/nodes/instances/${instanceId}/input`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ name: paramName, value: entry.value }),
+              }).catch(() => {});
+            }
+          }
+          continue;
         } else continue;
 
         if (
@@ -543,6 +573,50 @@ export function useValueForwarding(
         ) {
           nodeUpdates["triggerValue"] = Boolean(sourceValue);
         } else if (
+          targetNode.data.nodeType === "control" &&
+          targetParsed.name === "trigger"
+        ) {
+          let shouldAdvance = false;
+          if (typeof sourceValue === "boolean") {
+            const wasArmed =
+              nodeUpdates["controlTriggerArmed"] !== undefined
+                ? Boolean(nodeUpdates["controlTriggerArmed"])
+                : Boolean(targetNode.data.controlTriggerArmed);
+            if (sourceValue && !wasArmed) shouldAdvance = true;
+            if (sourceValue) {
+              nodeUpdates["controlTriggerArmed"] = true;
+            } else if (nodeUpdates["controlTriggerArmed"] === undefined) {
+              nodeUpdates["controlTriggerArmed"] = false;
+            }
+          } else {
+            const counter = Number(sourceValue) || 0;
+            const counters = (nodeUpdates["_controlTriggerCounters"] as Record<
+              string,
+              number
+            >) ?? {
+              ...((targetNode.data._controlTriggerCounters as Record<
+                string,
+                number
+              >) ?? {}),
+            };
+            const lastSeen = counters[edge.id] ?? 0;
+            if (counter > 0 && counter !== lastSeen) shouldAdvance = true;
+            counters[edge.id] = counter;
+            nodeUpdates["_controlTriggerCounters"] = counters;
+          }
+          if (shouldAdvance) {
+            const items = (targetNode.data.controlItems as string[]) ?? [
+              "item1",
+            ];
+            const currentIdx =
+              nodeUpdates["controlSwitchIndex"] !== undefined
+                ? (nodeUpdates["controlSwitchIndex"] as number)
+                : ((targetNode.data.controlSwitchIndex as number) ?? 0);
+            const nextIdx = (currentIdx + 1) % items.length;
+            nodeUpdates["controlSwitchIndex"] = nextIdx;
+            nodeUpdates["currentValue"] = items[nextIdx] ?? "";
+          }
+        } else if (
           targetNode.data.nodeType === "prompt_list" &&
           targetParsed.name === "cycle"
         ) {
@@ -559,6 +633,50 @@ export function useValueForwarding(
             nodeUpdates["promptListActiveText"] = items[nextIdx] ?? "";
           }
           nodeUpdates["promptListCycleValue"] = newIntVal;
+        } else if (
+          targetNode.data.nodeType === "prompt_list" &&
+          targetParsed.name === "trigger"
+        ) {
+          let shouldAdvance = false;
+          if (typeof sourceValue === "boolean") {
+            const wasArmed =
+              nodeUpdates["promptListTriggerArmed"] !== undefined
+                ? Boolean(nodeUpdates["promptListTriggerArmed"])
+                : Boolean(targetNode.data.promptListTriggerArmed);
+            if (sourceValue && !wasArmed) shouldAdvance = true;
+            if (sourceValue) {
+              nodeUpdates["promptListTriggerArmed"] = true;
+            } else if (nodeUpdates["promptListTriggerArmed"] === undefined) {
+              nodeUpdates["promptListTriggerArmed"] = false;
+            }
+          } else {
+            const counter = Number(sourceValue) || 0;
+            const counters = (nodeUpdates["_promptTriggerCounters"] as Record<
+              string,
+              number
+            >) ?? {
+              ...((targetNode.data._promptTriggerCounters as Record<
+                string,
+                number
+              >) ?? {}),
+            };
+            const lastSeen = counters[edge.id] ?? 0;
+            if (counter > 0 && counter !== lastSeen) {
+              shouldAdvance = true;
+            }
+            counters[edge.id] = counter;
+            nodeUpdates["_promptTriggerCounters"] = counters;
+          }
+          if (shouldAdvance) {
+            const items = (targetNode.data.promptListItems as string[]) ?? [""];
+            const currentIdx =
+              nodeUpdates["promptListActiveIndex"] !== undefined
+                ? (nodeUpdates["promptListActiveIndex"] as number)
+                : ((targetNode.data.promptListActiveIndex as number) ?? 0);
+            const nextIdx = (currentIdx + 1) % items.length;
+            nodeUpdates["promptListActiveIndex"] = nextIdx;
+            nodeUpdates["promptListActiveText"] = items[nextIdx] ?? "";
+          }
         } else if (targetNode.data.nodeType === "prompt_blend") {
           const items = [
             ...((targetNode.data.promptBlendItems as Array<{

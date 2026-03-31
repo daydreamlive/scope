@@ -69,10 +69,13 @@ const TARGET_RULES: TargetRule[] = [
       (targetParsedName === "a" || targetParsedName === "b")
     );
   },
-  // bool node – number for input
+  // bool node – number or trigger for input
   ({ sourceType, targetParsedName, targetNode }) => {
     if (targetNode.data.nodeType !== "bool") return undefined;
-    return sourceType === "number" && targetParsedName === "input";
+    return (
+      (sourceType === "number" || sourceType === "trigger") &&
+      targetParsedName === "input"
+    );
   },
   // string-control in switch mode
   ({ sourceType, targetParsedName, targetNode }) => {
@@ -84,6 +87,12 @@ const TARGET_RULES: TargetRule[] = [
       return undefined;
     if (targetParsedName.startsWith("item_")) return sourceType === "number";
     if (targetParsedName.startsWith("str_")) return sourceType === "string";
+    if (targetParsedName === "trigger")
+      return (
+        sourceType === "trigger" ||
+        sourceType === "boolean" ||
+        sourceType === "number"
+      );
     return false;
   },
   // slider / knobs / xypad – number only
@@ -103,10 +112,27 @@ const TARGET_RULES: TargetRule[] = [
     if (targetParsedName.startsWith("row_")) return sourceType === "number";
     return false;
   },
-  // prompt_list – cycle input accepts number
+  // record – trigger input accepts trigger/boolean/number
+  ({ sourceType, targetParsedName, targetNode }) => {
+    if (targetNode.data.nodeType !== "record") return undefined;
+    if (targetParsedName === "trigger")
+      return (
+        sourceType === "trigger" ||
+        sourceType === "boolean" ||
+        sourceType === "number"
+      );
+    return false;
+  },
+  // prompt_list – cycle accepts number, trigger accepts trigger/boolean/number
   ({ sourceType, targetParsedName, targetNode }) => {
     if (targetNode.data.nodeType !== "prompt_list") return undefined;
     if (targetParsedName === "cycle") return sourceType === "number";
+    if (targetParsedName === "trigger")
+      return (
+        sourceType === "trigger" ||
+        sourceType === "boolean" ||
+        sourceType === "number"
+      );
     return false;
   },
   // prompt_blend – weight_N accepts number, prompt_N accepts string
@@ -115,6 +141,31 @@ const TARGET_RULES: TargetRule[] = [
     if (targetParsedName.startsWith("weight_")) return sourceType === "number";
     if (targetParsedName.startsWith("prompt_")) return sourceType === "string";
     return false;
+  },
+  // backend_node – check schema inputs for type compatibility
+  ({ sourceType, targetParsedName, targetNode }) => {
+    if (targetNode.data.nodeType !== "backend_node") return undefined;
+    const schema = targetNode.data.backendNodeSchema as
+      | { inputs?: { name: string; type: string }[] }
+      | undefined;
+    if (!schema?.inputs) return true;
+    const port = schema.inputs.find(i => i.name === targetParsedName);
+    if (!port) return true;
+    const typeMap: Record<string, string> = {
+      float: "number",
+      int: "number",
+      string: "string",
+      bool: "boolean",
+      trigger: "trigger",
+    };
+    const expected = typeMap[port.type] ?? port.type;
+    if (expected === "trigger")
+      return (
+        sourceType === "trigger" ||
+        sourceType === "boolean" ||
+        sourceType === "number"
+      );
+    return sourceType === expected;
   },
 ];
 

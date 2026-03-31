@@ -22,3 +22,17 @@ class ScopeHookSpec:
             def register_pipelines(register):
                 register(MyPipeline)
         """
+
+    @hookspec
+    def register_nodes(self, register):
+        """Register custom backend node implementations.
+
+        Args:
+            register: Callback to register node classes.
+                     Usage: register(MyNodeClass)
+
+        Example:
+            @scope.core.hookimpl
+            def register_nodes(register):
+                register(MyCustomNode)
+        """

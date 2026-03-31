@@ -28,10 +28,12 @@ import {
   Zap,
   Circle,
   Layers,
+  Puzzle,
 } from "lucide-react";
 import type { Node, Edge } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import type { ContextMenuItem } from "./ContextMenu";
+import type { NodeTypeSchema } from "../../hooks/useNodeSchemas";
 
 /* ── Pane (canvas) context menu ──────────────────────────────────────────── */
 
@@ -75,6 +77,12 @@ export function buildPaneMenuItems(deps: {
     selectedIds: string[]
   ) => void;
   onOpenBlueprints: () => void;
+  backendNodeSchemas?: NodeTypeSchema[];
+  addBackendNode?: (
+    nodeTypeId: string,
+    nodeName: string,
+    position?: { x: number; y: number }
+  ) => void;
 }): ContextMenuItem[] {
   const {
     handleNodeTypeSelect,
@@ -83,6 +91,8 @@ export function buildPaneMenuItems(deps: {
     edges,
     createSubgraphFromSelection,
     onOpenBlueprints,
+    backendNodeSchemas,
+    addBackendNode,
   } = deps;
 
   return [
@@ -229,6 +239,31 @@ export function buildPaneMenuItems(deps: {
           keywords: ["passthrough", "wire", "dot"],
         },
       ],
+    },
+    {
+      label: "Custom",
+      icon: <Puzzle />,
+      children:
+        backendNodeSchemas && backendNodeSchemas.length > 0 && addBackendNode
+          ? backendNodeSchemas.map(schema => ({
+              label: schema.node_name,
+              icon: <Puzzle />,
+              onClick: () =>
+                addBackendNode(schema.node_type_id, schema.node_name),
+              keywords: [
+                schema.node_type_id,
+                schema.node_category,
+                "custom",
+                "backend",
+                "plugin",
+              ],
+            }))
+          : [
+              {
+                label: "No custom nodes installed",
+                onClick: () => {},
+              },
+            ],
     },
     {
       label: "Media",

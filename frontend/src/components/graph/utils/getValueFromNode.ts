@@ -222,5 +222,14 @@ export function getAnyValueFromNode(
     if (!parsed) return null;
     return pv[parsed.name] ?? null;
   }
+  if (t === "backend_node") {
+    const state = node.data.backendNodeState as
+      | Record<string, unknown>
+      | undefined;
+    if (!state || !sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    return state[parsed.name] ?? null;
+  }
   return null;
 }
