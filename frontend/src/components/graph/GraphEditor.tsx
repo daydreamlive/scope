@@ -1049,13 +1049,13 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                           {
                             from: "input",
                             from_port: "video",
-                            to: "passthrough",
+                            to_node: "passthrough",
                             to_port: "video",
                           },
                           {
                             from: "passthrough",
                             from_port: "video",
-                            to: "output",
+                            to_node: "output",
                             to_port: "video",
                           },
                         ],
