@@ -905,7 +905,7 @@ export const deleteApiKey = async (
 
 export interface GraphNode {
   id: string;
-  type: "source" | "pipeline" | "sink";
+  type: "source" | "pipeline" | "sink" | "record";
   pipeline_id?: string | null;
   x?: number | null;
   y?: number | null;
@@ -914,6 +914,8 @@ export interface GraphNode {
   source_mode?: string | null;
   source_name?: string | null;
   tempo_sync?: boolean;
+  sink_mode?: string | null;
+  sink_name?: string | null;
 }
 
 export interface GraphEdge {
@@ -931,12 +933,16 @@ export interface GraphConfig {
   ui_state?: Record<string, unknown> | null;
 }
 
-export const downloadRecording = async (sessionId: string): Promise<void> => {
+export const downloadRecording = async (
+  sessionId: string,
+  nodeId?: string
+): Promise<void> => {
   if (!sessionId) {
     throw new Error("Session ID is required to download recording");
   }
 
-  const response = await fetch(`/api/v1/recordings/${sessionId}`, {
+  const params = nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : "";
+  const response = await fetch(`/api/v1/recordings/${sessionId}${params}`, {
     method: "GET",
   });
 
@@ -952,7 +958,8 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `recording-${new Date().toISOString().split("T")[0]}.mp4`;
+  const suffix = nodeId ? `-${nodeId}` : "";
+  link.download = `recording${suffix}-${new Date().toISOString().split("T")[0]}.mp4`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
@@ -960,11 +967,16 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
 };
 
 export const startRecording = async (
-  sessionId: string
+  sessionId: string,
+  nodeId?: string
 ): Promise<{ status: string }> => {
-  const response = await fetch(`/api/v1/recordings/${sessionId}/start`, {
-    method: "POST",
-  });
+  const params = nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : "";
+  const response = await fetch(
+    `/api/v1/recordings/${sessionId}/start${params}`,
+    {
+      method: "POST",
+    }
+  );
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`Start recording failed: ${response.status}: ${errorText}`);
@@ -973,11 +985,16 @@ export const startRecording = async (
 };
 
 export const stopRecording = async (
-  sessionId: string
+  sessionId: string,
+  nodeId?: string
 ): Promise<{ status: string }> => {
-  const response = await fetch(`/api/v1/recordings/${sessionId}/stop`, {
-    method: "POST",
-  });
+  const params = nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : "";
+  const response = await fetch(
+    `/api/v1/recordings/${sessionId}/stop${params}`,
+    {
+      method: "POST",
+    }
+  );
   if (!response.ok) {
     const errorText = await response.text();
     throw new Error(`Stop recording failed: ${response.status}: ${errorText}`);

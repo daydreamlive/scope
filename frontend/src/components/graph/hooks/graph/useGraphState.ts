@@ -65,8 +65,8 @@ export interface GraphEditorCallbacks {
   onNodeParameterChange?: (nodeId: string, key: string, value: unknown) => void;
   onGraphChange?: () => void;
   onGraphClear?: () => void;
-  onVideoFileUpload?: (file: File) => Promise<boolean>;
-  onSourceModeChange?: (mode: string) => void;
+  onVideoFileUpload?: (file: File, nodeId?: string) => Promise<boolean>;
+  onSourceModeChange?: (mode: string, nodeId?: string) => void;
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
@@ -74,11 +74,9 @@ export interface GraphEditorCallbacks {
     sinkType: string,
     config: { enabled: boolean; name: string }
   ) => void;
-  onOutputSinkBulkChange?: (
-    sinks: Record<string, { enabled: boolean; name: string }>
-  ) => void;
-  onStartRecording?: () => void;
-  onStopRecording?: () => void;
+
+  onStartRecording?: (nodeId?: string) => void;
+  onStopRecording?: (nodeId?: string) => void;
   onEnableTempo?: (req: TempoEnableRequest) => void;
   onDisableTempo?: () => void;
   onSetTempo?: (bpm: number) => void;
@@ -87,7 +85,10 @@ export interface GraphEditorCallbacks {
 
 export interface GraphEditorStreams {
   localStream?: MediaStream | null;
+  localStreams?: Record<string, MediaStream>;
   remoteStream?: MediaStream | null;
+  remoteStreams?: Record<string, MediaStream>;
+  sinkStats?: Record<string, { fps: number; bitrate: number }>;
   isStreaming: boolean;
   isPlaying?: boolean;
   onPlayPauseToggle?: () => void;
@@ -222,9 +223,6 @@ export function useGraphState(
   const onOutputSinkChangeRef = useRef(callbacks.onOutputSinkChange);
   onOutputSinkChangeRef.current = callbacks.onOutputSinkChange;
 
-  const onOutputSinkBulkChangeRef = useRef(callbacks.onOutputSinkBulkChange);
-  onOutputSinkBulkChangeRef.current = callbacks.onOutputSinkBulkChange;
-
   const onStartRecordingRef = useRef(callbacks.onStartRecording);
   onStartRecordingRef.current = callbacks.onStartRecording;
 
@@ -273,7 +271,10 @@ export function useGraphState(
     handlePromptSubmit: params.handlePromptSubmit,
     nodeParamsRef: params.nodeParamsRef,
     localStream: streams.localStream,
+    localStreams: streams.localStreams,
     remoteStream: streams.remoteStream,
+    remoteStreams: streams.remoteStreams,
+    sinkStats: streams.sinkStats,
     onVideoFileUploadRef,
     onSourceModeChangeRef,
     onSpoutSourceChangeRef,
@@ -318,7 +319,10 @@ export function useGraphState(
     pipelineSchemas,
     params.handleNodeParameterChange,
     streams.localStream,
+    streams.localStreams,
     streams.remoteStream,
+    streams.remoteStreams,
+    streams.sinkStats,
     streams.isStreaming,
     streams.isPlaying,
     availability.spoutAvailable,
@@ -383,7 +387,6 @@ export function useGraphState(
     isStreamingRef,
     onNodeParamChangeRef: params.onNodeParamChangeRef,
     onOutputSinkChangeRef,
-    onOutputSinkBulkChangeRef,
     enrichDepsRef,
     handleEdgeDelete,
     status: persistence.status,

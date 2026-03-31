@@ -130,6 +130,68 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
             )
 
     # -------------------------------------------------------------------------
+    # Cloud Connection
+    # -------------------------------------------------------------------------
+
+    @mcp.tool()
+    async def connect_to_cloud(
+        app_id: str | None = None,
+        api_key: str | None = None,
+    ) -> str:
+        """Connect to cloud for remote GPU inference.
+
+        For local dev testing, start two Scope instances:
+          Terminal 1 (cloud):  SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
+          Terminal 2 (local):  SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022
+
+        Then connect MCP to the local instance (port 8022) and call this tool.
+        When env vars SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_WS_URL are set,
+        app_id and api_key can be omitted.
+
+        Args:
+            app_id: Cloud app ID (optional if set via env var SCOPE_CLOUD_APP_ID)
+            api_key: Cloud API key (optional if set via env var or for local dev testing)
+        """
+        body: dict = {}
+        if app_id is not None:
+            body["app_id"] = app_id
+        if api_key is not None:
+            body["api_key"] = api_key
+        resp = await _client().post("/api/v1/cloud/connect", json=body)
+        resp.raise_for_status()
+        status = resp.json()
+
+        # Poll until connected (background connection)
+        if status.get("connecting"):
+            import asyncio
+
+            for _ in range(120):  # up to 120s
+                await asyncio.sleep(1)
+                poll = await _client().get("/api/v1/cloud/status")
+                poll.raise_for_status()
+                status = poll.json()
+                if status.get("connected"):
+                    return _fmt(status)
+                if status.get("error"):
+                    return _fmt(status)
+                if not status.get("connecting"):
+                    break
+
+        return _fmt(status)
+
+    @mcp.tool()
+    async def disconnect_from_cloud() -> str:
+        """Disconnect from cloud. Stops the WebSocket and WebRTC connections."""
+        resp = await _client().post("/api/v1/cloud/disconnect", json={})
+        return await _json(resp)
+
+    @mcp.tool()
+    async def get_cloud_status() -> str:
+        """Get current cloud connection status including WebRTC and stats."""
+        resp = await _client().get("/api/v1/cloud/status")
+        return await _json(resp)
+
+    # -------------------------------------------------------------------------
     # Pipeline Management
     # -------------------------------------------------------------------------
 
@@ -272,32 +334,49 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
         return await _json(resp)
 
     @mcp.tool()
-    async def capture_frame(quality: int = 85) -> str:
+    async def capture_frame(
+        quality: int = 85,
+        sink_node_id: str | None = None,
+    ) -> str:
         """Capture the current pipeline output frame as a JPEG screenshot.
         Saves the image to a temp file and returns the file path so you can
         read it. Requires an active stream (WebRTC or headless).
 
+        For multi-sink graph sessions, use sink_node_id to capture from a
+        specific output. The sink_node_ids are returned by start_stream when
+        using graph mode.
+
         Args:
             quality: JPEG quality (1-100, default 85)
+            sink_node_id: Optional sink node ID to capture from (for multi-sink graphs). If not provided, captures from the most recent frame of any sink.
         """
         import tempfile
 
-        resp = await _client().get("/api/v1/session/frame", params={"quality": quality})
+        params: dict = {"quality": quality}
+        if sink_node_id is not None:
+            params["sink_node_id"] = sink_node_id
+
+        resp = await _client().get("/api/v1/session/frame", params=params)
         resp.raise_for_status()
 
+        prefix_parts = ["scope_frame_"]
+        if sink_node_id:
+            prefix_parts.append(f"{sink_node_id}_")
+
         with tempfile.NamedTemporaryFile(
-            suffix=".jpg", prefix="scope_frame_", delete=False
+            suffix=".jpg", prefix="".join(prefix_parts), delete=False
         ) as f:
             f.write(resp.content)
             file_path = f.name
 
-        return json.dumps(
-            {
-                "file_path": file_path,
-                "size_bytes": len(resp.content),
-            },
-            indent=2,
-        )
+        result: dict = {
+            "file_path": file_path,
+            "size_bytes": len(resp.content),
+        }
+        if sink_node_id:
+            result["sink_node_id"] = sink_node_id
+
+        return json.dumps(result, indent=2)
 
     @mcp.tool()
     async def get_session_metrics() -> str:
@@ -313,26 +392,59 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
 
     @mcp.tool()
     async def start_stream(
-        pipeline_id: str,
+        pipeline_id: str | None = None,
         input_mode: str = "text",
         prompts: list[dict] | None = None,
         input_source: dict | None = None,
+        graph: dict | None = None,
     ) -> str:
         """Start a headless pipeline session (no browser needed).
-        The pipeline must already be loaded via load_pipeline.
+        The pipeline(s) must already be loaded via load_pipeline.
         Once started, use capture_frame, update_parameters,
         and stop_stream to control it.
 
+        Supports two modes:
+        - Simple: provide pipeline_id for a single-pipeline session
+        - Graph: provide a graph dict for multi-source/multi-sink workflows
+
+        Graph format example (two video file inputs, one pipeline each, two outputs):
+        {
+          "nodes": [
+            {"id": "source_1", "type": "source", "source_mode": "video_file", "source_name": "/path/to/video1.mp4"},
+            {"id": "source_2", "type": "source", "source_mode": "video_file", "source_name": "/path/to/video2.mp4"},
+            {"id": "pipeline_1", "type": "pipeline", "pipeline_id": "longlive"},
+            {"id": "pipeline_2", "type": "pipeline", "pipeline_id": "longlive"},
+            {"id": "output_1", "type": "sink"},
+            {"id": "output_2", "type": "sink"}
+          ],
+          "edges": [
+            {"from": "source_1", "from_port": "video", "to_node": "pipeline_1", "to_port": "video", "kind": "stream"},
+            {"from": "source_2", "from_port": "video", "to_node": "pipeline_2", "to_port": "video", "kind": "stream"},
+            {"from": "pipeline_1", "from_port": "video", "to_node": "output_1", "to_port": "video", "kind": "stream"},
+            {"from": "pipeline_2", "from_port": "video", "to_node": "output_2", "to_port": "video", "kind": "stream"}
+          ]
+        }
+
+        The response includes sink_node_ids when using graph mode, which can be
+        passed to capture_frame(sink_node_id=...) to capture from specific outputs.
+
         Args:
-            pipeline_id: Pipeline ID to run (must already be loaded)
+            pipeline_id: Pipeline ID to run (must already be loaded). Required unless graph is provided.
             input_mode: "text" for prompt-only generation, "video" for input source processing
             prompts: Initial prompts, e.g. [{"text": "a forest", "weight": 100}]
-            input_source: Server-side input source config for video mode. Format: {"enabled": true, "source_type": "<type>", "source_name": "<name>"}. For video_file, source_name can be a full file path or an asset name.
+            input_source: Server-side input source config for video mode (simple mode only). Format: {"enabled": true, "source_type": "<type>", "source_name": "<name>"}. For video_file, source_name can be a full file path or an asset name.
+            graph: Graph config for multi-source/multi-sink workflows. When provided, pipeline_id and input_source are ignored. Source nodes with source_mode="video_file" and source_name=<path> feed video files into the graph.
         """
-        body: dict = {"pipeline_id": pipeline_id, "input_mode": input_mode}
+        body: dict = {"input_mode": input_mode}
+        if graph is not None:
+            body["graph"] = graph
+        elif pipeline_id is not None:
+            body["pipeline_id"] = pipeline_id
+        else:
+            return json.dumps({"error": "Either pipeline_id or graph must be provided"})
         if prompts is not None:
             body["prompts"] = prompts
-        if input_source is not None:
+        if input_source is not None and graph is None:
             body["input_source"] = input_source
         resp = await _client().post("/api/v1/session/start", json=body)
         return await _json(resp)
@@ -342,6 +454,51 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
         """Stop the active headless pipeline session and free its resources."""
         resp = await _client().post("/api/v1/session/stop")
         return await _json(resp)
+
+    # -------------------------------------------------------------------------
+    # Recording
+    # -------------------------------------------------------------------------
+
+    @mcp.tool()
+    async def start_recording() -> str:
+        """Start recording the active headless session output to an MP4 file.
+        Requires an active headless stream (started via start_stream).
+        """
+        resp = await _client().post("/api/v1/session/recording/start")
+        return await _json(resp)
+
+    @mcp.tool()
+    async def stop_recording() -> str:
+        """Stop recording the active headless session.
+        Returns the path to the recording file.
+        """
+        resp = await _client().post("/api/v1/session/recording/stop")
+        return await _json(resp)
+
+    @mcp.tool()
+    async def download_recording() -> str:
+        """Download the recording from the active headless session as an MP4 file.
+        Stops recording if still active, then saves the MP4 to a temp file
+        and returns the file path so you can read/verify it.
+        """
+        import tempfile
+
+        resp = await _client().get("/api/v1/session/recording/download")
+        resp.raise_for_status()
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".mp4", prefix="scope_recording_", delete=False
+        ) as f:
+            f.write(resp.content)
+            file_path = f.name
+
+        return json.dumps(
+            {
+                "file_path": file_path,
+                "size_bytes": len(resp.content),
+            },
+            indent=2,
+        )
 
     # -------------------------------------------------------------------------
     # Asset Management
