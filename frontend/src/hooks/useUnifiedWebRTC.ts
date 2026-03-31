@@ -16,6 +16,7 @@ import {
 import { toast } from "sonner";
 
 interface InitialParameters {
+  input_mode?: "text" | "video";
   prompts?: string[] | PromptItem[];
   prompt_interpolation_method?: "linear" | "slerp";
   transition?: PromptTransition;
