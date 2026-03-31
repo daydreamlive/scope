@@ -341,3 +341,93 @@ class TestHelperMethods:
             "node_a", "longlive", {}, claimed_keys=set(), reserved_keys={"node_a"}
         )
         assert result == "node_a"
+
+
+# ---------------------------------------------------------------------------
+# Tests for _sanitize_lora_paths
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeLoRAPaths:
+    """Tests for PipelineManager._sanitize_lora_paths."""
+
+    def _call(self, loras, lora_dir="/data/models/lora"):
+        with patch(
+            "scope.server.pipeline_manager.PipelineManager."
+            "_sanitize_lora_paths.__func__",
+            wraps=PipelineManager._sanitize_lora_paths,
+        ):
+            with patch("scope.server.models_config.get_lora_dir") as mock_dir:
+                from pathlib import Path
+                mock_dir.return_value = Path(lora_dir)
+                return PipelineManager._sanitize_lora_paths(loras)
+
+    def test_windows_drive_path_is_rewritten(self):
+        from pathlib import Path
+        with patch("scope.server.models_config.get_lora_dir") as mock_dir:
+            mock_dir.return_value = Path("/data/models/lora")
+            loras = [
+                {
+                    "path": r"C:\Users\RONDO\.daydream-scope\models\lora\foo.safetensors",
+                    "scale": 0.7,
+                    "merge_mode": "permanent_merge",
+                }
+            ]
+            result = PipelineManager._sanitize_lora_paths(loras)
+        assert result[0]["path"] == "/data/models/lora/foo.safetensors"
+        assert result[0]["scale"] == 0.7
+        assert result[0]["merge_mode"] == "permanent_merge"
+
+    def test_windows_forward_slash_drive_path_rewritten(self):
+        from pathlib import Path
+        with patch("scope.server.models_config.get_lora_dir") as mock_dir:
+            mock_dir.return_value = Path("/data/models/lora")
+            loras = [{"path": "C:/Users/RONDO/.daydream-scope/models/lora/bar.safetensors", "scale": 1.0}]
+            result = PipelineManager._sanitize_lora_paths(loras)
+        assert result[0]["path"] == "/data/models/lora/bar.safetensors"
+
+    def test_unix_path_outside_lora_dir_is_rewritten(self):
+        from pathlib import Path
+        with patch("scope.server.models_config.get_lora_dir") as mock_dir:
+            mock_dir.return_value = Path("/data/models/lora")
+            loras = [{"path": "/home/user/.daydream-scope/models/lora/baz.safetensors", "scale": 1.0}]
+            result = PipelineManager._sanitize_lora_paths(loras)
+        assert result[0]["path"] == "/data/models/lora/baz.safetensors"
+
+    def test_relative_path_unchanged(self):
+        from pathlib import Path
+        with patch("scope.server.models_config.get_lora_dir") as mock_dir:
+            mock_dir.return_value = Path("/data/models/lora")
+            loras = [{"path": "my-lora.safetensors", "scale": 1.0}]
+            result = PipelineManager._sanitize_lora_paths(loras)
+        assert result[0]["path"] == "my-lora.safetensors"
+
+    def test_already_valid_abs_path_unchanged(self):
+        from pathlib import Path
+        with patch("scope.server.models_config.get_lora_dir") as mock_dir:
+            mock_dir.return_value = Path("/data/models/lora")
+            loras = [{"path": "/data/models/lora/good.safetensors", "scale": 1.0}]
+            result = PipelineManager._sanitize_lora_paths(loras)
+        assert result[0]["path"] == "/data/models/lora/good.safetensors"
+
+    def test_empty_path_passes_through(self):
+        from pathlib import Path
+        with patch("scope.server.models_config.get_lora_dir") as mock_dir:
+            mock_dir.return_value = Path("/data/models/lora")
+            loras = [{"path": "", "scale": 1.0}]
+            result = PipelineManager._sanitize_lora_paths(loras)
+        assert result[0]["path"] == ""
+
+    def test_multiple_loras_mixed(self):
+        from pathlib import Path
+        with patch("scope.server.models_config.get_lora_dir") as mock_dir:
+            mock_dir.return_value = Path("/data/models/lora")
+            loras = [
+                {"path": r"C:\Users\x\models\lora\a.safetensors", "scale": 0.5},
+                {"path": "b.safetensors", "scale": 1.5},
+                {"path": "/data/models/lora/c.safetensors", "scale": 1.0},
+            ]
+            result = PipelineManager._sanitize_lora_paths(loras)
+        assert result[0]["path"] == "/data/models/lora/a.safetensors"
+        assert result[1]["path"] == "b.safetensors"
+        assert result[2]["path"] == "/data/models/lora/c.safetensors"

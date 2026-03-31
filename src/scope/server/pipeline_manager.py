@@ -3,9 +3,11 @@
 import asyncio
 import gc
 import logging
+import re
 import threading
 import time
 from enum import Enum
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 import torch
@@ -685,6 +687,82 @@ class PipelineManager:
                     f"vace_context_scale={config.get('vace_context_scale', 1.0)}"
                 )
 
+    @staticmethod
+    def _sanitize_lora_paths(loras: list[dict]) -> list[dict]:
+        """Normalize LoRA paths so they are resolvable on the current system.
+
+        When a Windows client sends ``load_params`` to a Linux cloud worker,
+        the ``path`` fields may contain Windows absolute paths such as::
+
+            C:\\Users\\RONDO\\.daydream-scope\\models\\lora\\foo.safetensors
+
+        These paths are meaningless on Linux. This method:
+
+        1. Detects platform-foreign absolute paths (Windows ``X:\\...`` or
+           Unix paths that start outside the known LoRA directory).
+        2. Extracts the bare filename (e.g. ``foo.safetensors``).
+        3. Rebuilds the path relative to ``get_lora_dir()`` so the cloud
+           worker can locate the file.
+
+        Relative paths and already-valid absolute paths are left unchanged.
+
+        Args:
+            loras: List of LoRA config dicts.  Each dict must have a ``path``
+                   key; other keys (``scale``, ``merge_mode``, …) are passed
+                   through unchanged.
+
+        Returns:
+            A new list of LoRA config dicts with normalised ``path`` values.
+        """
+        from .models_config import get_lora_dir
+
+        lora_dir = get_lora_dir()
+        sanitized: list[dict] = []
+
+        # Matches Windows absolute paths: optional drive letter + backslash, or
+        # UNC paths (\\server\share).
+        _windows_abs_re = re.compile(r"^(?:[A-Za-z]:[/\\]|\\\\)", re.ASCII)
+
+        for lora in loras:
+            path_str = lora.get("path")
+            if not path_str:
+                sanitized.append(lora)
+                continue
+
+            needs_rewrite = False
+
+            # Case 1: Windows-style absolute path sent to any OS.
+            if _windows_abs_re.match(path_str):
+                needs_rewrite = True
+                # PureWindowsPath correctly parses the path on any OS.
+                filename = PureWindowsPath(path_str).name
+
+            # Case 2: Unix absolute path that does not live inside lora_dir.
+            elif path_str.startswith("/"):
+                try:
+                    abs_path = Path(path_str).resolve()
+                    if not abs_path.is_relative_to(lora_dir.resolve()):
+                        needs_rewrite = True
+                        filename = Path(path_str).name
+                except Exception:
+                    needs_rewrite = True
+                    filename = Path(path_str).name
+
+            if needs_rewrite:
+                new_path = str(lora_dir / filename)
+                logger.warning(
+                    "_sanitize_lora_paths: LoRA path '%s' appears to be a "
+                    "local absolute path from a different OS or filesystem. "
+                    "Rewriting to '%s'.",
+                    path_str,
+                    new_path,
+                )
+                sanitized.append({**lora, "path": new_path})
+            else:
+                sanitized.append(lora)
+
+        return sanitized
+
     def _apply_load_params(
         self,
         config: dict,
@@ -722,7 +800,7 @@ class PipelineManager:
         config["base_seed"] = base_seed
         config["vae_type"] = vae_type
         if loras:
-            config["loras"] = loras
+            config["loras"] = self._sanitize_lora_paths(loras)
         # Pass merge_mode directly to mixin, not via config
         config["_lora_merge_mode"] = lora_merge_mode
 
