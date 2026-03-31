@@ -122,6 +122,7 @@ class HeadlessSession:
 
         self.frame_processor: FrameProcessor = frame_processor
         self._last_frame = None
+        self._last_frames_by_sink: dict = {}
         self._frame_lock = threading.Lock()
         self._frame_consumer_running = False
         self._frame_consumer_task: asyncio.Task | None = None
@@ -137,23 +138,59 @@ class HeadlessSession:
         self._frame_consumer_task = asyncio.create_task(self._consume_frames())
 
     async def _consume_frames(self):
-        """Pull frames from FrameProcessor so pipeline workers don't stall."""
+        """Pull frames from FrameProcessor so pipeline workers don't stall.
+
+        Only drains sink queues that are NOT already consumed by per-node
+        output sink threads (Syphon/NDI/Spout).  This avoids competing
+        for frames on the same queue.
+        """
         from av import VideoFrame
 
-        while self._frame_consumer_running and self.frame_processor.running:
-            frame_tensor = self.frame_processor.get()
-            if frame_tensor is not None:
-                frame_np = frame_tensor.numpy()
-                vf = VideoFrame.from_ndarray(frame_np, format="rgb24")
-                with self._frame_lock:
-                    self._last_frame = vf
-                # Write to recorder if active
-                if self._recorder and self._recorder.is_recording:
-                    self._recorder.write_frame(vf)
-                # Yield to event loop so HTTP handlers can run
-                await asyncio.sleep(0)
+        fp = self.frame_processor
+
+        while self._frame_consumer_running and fp.running:
+            # Determine which sinks still need draining
+            unhandled = fp.get_unhandled_sink_node_ids()
+
+            if unhandled:
+                # Drain each unhandled sink queue
+                got_frame = False
+                for sink_id in unhandled:
+                    frame_tensor = fp.get_from_sink(sink_id)
+                    if frame_tensor is not None:
+                        got_frame = True
+                        frame_np = frame_tensor.numpy()
+                        vf = VideoFrame.from_ndarray(frame_np, format="rgb24")
+                        with self._frame_lock:
+                            self._last_frame = vf
+                            self._last_frames_by_sink[sink_id] = vf
+                        # Write to recorder if active
+                        if self._recorder and self._recorder.is_recording:
+                            self._recorder.write_frame(vf)
+                if not got_frame:
+                    await asyncio.sleep(0.01)
+                else:
+                    # Yield to event loop so HTTP handlers can run
+                    await asyncio.sleep(0)
+            elif fp.get_sink_node_ids():
+                # All sinks have output threads — nothing to drain.
+                # Just sleep; capture_frame can snapshot from output sinks.
+                await asyncio.sleep(0.05)
             else:
-                await asyncio.sleep(0.01)
+                # No multi-sink graph — use legacy get()
+                frame_tensor = fp.get()
+                if frame_tensor is not None:
+                    frame_np = frame_tensor.numpy()
+                    vf = VideoFrame.from_ndarray(frame_np, format="rgb24")
+                    with self._frame_lock:
+                        self._last_frame = vf
+                    # Write to recorder if active
+                    if self._recorder and self._recorder.is_recording:
+                        self._recorder.write_frame(vf)
+                    # Yield to event loop so HTTP handlers can run
+                    await asyncio.sleep(0)
+                else:
+                    await asyncio.sleep(0.01)
 
     def start_recording(self) -> bool:
         """Start recording frames to MP4.
@@ -225,9 +262,16 @@ class HeadlessSession:
         self.frame_processor.stop()
         logger.info("Headless session closed")
 
-    def get_last_frame(self):
-        """Return the most recently cached frame, or None."""
+    def get_last_frame(self, sink_node_id: str | None = None):
+        """Return the most recently cached frame, or None.
+
+        Args:
+            sink_node_id: If provided, return the last frame from this specific
+                sink node. If None, return the most recent frame from any sink.
+        """
         with self._frame_lock:
+            if sink_node_id is not None:
+                return self._last_frames_by_sink.get(sink_node_id)
             return self._last_frame
 
     def __str__(self):
