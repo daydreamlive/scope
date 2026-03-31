@@ -14,6 +14,7 @@ from .modulation import ModulationEngine
 from .parameter_scheduler import ParameterScheduler
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
+from .recording_coordinator import RecordingCoordinator
 
 if TYPE_CHECKING:
     from av import AudioFrame
@@ -94,9 +95,10 @@ class FrameProcessor:
 
         self.paused = False
 
-        # Pinned memory buffer cache for faster GPU transfers (local mode only)
-        self._pinned_buffer_cache = {}
-        self._pinned_buffer_lock = threading.Lock()
+        # Per-thread pinned buffers for H→D upload (local mode). Avoids sharing one
+        # buffer across WebRTC/NDI/Spout threads (race) without a global lock that
+        # serializes every frame.
+        self._thread_pin_local = threading.local()
 
         # Cloud mode: send frames to cloud instead of local processing
         self._cloud_mode = cloud_manager is not None
@@ -127,6 +129,20 @@ class FrameProcessor:
         # The processor whose output we read in graph mode
         self._sink_processor: PipelineProcessor | None = None
 
+        # Multi-source/sink support: per-node queue routing
+        self._source_queues_by_node: dict[str, list[queue.Queue]] = {}
+        self._sink_queues_by_node: dict[str, queue.Queue] = {}
+        # NDI/Spout/Syphon: duplicate fan-out queue (see graph_executor.GraphRun)
+        self._sink_hardware_queues_by_node: dict[str, queue.Queue] = {}
+        # Per-sink-node feeder processors for per-sink FPS
+        self._sink_processors_by_node: dict[str, PipelineProcessor] = {}
+        # Per-source-node input sources: node_id -> {source, thread, type}
+        self._input_sources_by_node: dict[str, dict] = {}
+        # Per-sink-node output sinks: node_id -> {sink, thread, type, name}
+        self._output_sinks_by_node: dict[str, dict] = {}
+        # Recording coordination (per-record-node queues and managers)
+        self.recording = RecordingCoordinator(get_fps=self.get_fps)
+
         # Frame counting for debug logging
         self._frames_in = 0
         self._frames_out = 0
@@ -134,8 +150,6 @@ class FrameProcessor:
         self._last_heartbeat_time = time.time()
         self._playback_ready_emitted = False
         self._stream_start_time: float | None = None
-
-        self.paused = False
 
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
@@ -153,10 +167,21 @@ class FrameProcessor:
             sinks_config = self.parameters.pop("output_sinks")
             self._update_output_sinks_from_config(sinks_config)
 
-        # Process generic input source settings
+        # Process generic input source settings.
+        # When a graph has source nodes, per-node input setup handles routing,
+        # so skip the global input_source mechanism.
         if "input_source" in self.parameters:
-            input_source_config = self.parameters.pop("input_source")
-            self._update_input_source(input_source_config)
+            graph_data = self.parameters.get("graph")
+            has_graph_sources = False
+            if graph_data and isinstance(graph_data, dict):
+                has_graph_sources = any(
+                    n.get("type") == "source" for n in graph_data.get("nodes", [])
+                )
+            if has_graph_sources:
+                self.parameters.pop("input_source")
+            else:
+                input_source_config = self.parameters.pop("input_source")
+                self._update_input_source(input_source_config)
 
         # Reset frame counters on start
         self._frames_in = 0
@@ -176,6 +201,18 @@ class FrameProcessor:
             if self.cloud_manager:
                 self.cloud_manager.add_frame_callback(self._on_frame_from_cloud)
                 self.cloud_manager.add_audio_callback(self._on_audio_from_cloud)
+
+            # Set up per-node input sources and record queues in cloud mode.
+            graph_data = self.parameters.get("graph")
+            if graph_data and isinstance(graph_data, dict):
+                from .graph_schema import GraphConfig
+
+                graph = GraphConfig(**graph_data)
+                self._setup_multi_input_sources(graph)
+
+                # Set up record queues so cloud record frames can be
+                # received locally for recording.
+                self.recording.setup_queues(graph.get_record_node_ids())
 
             logger.info("[FRAME-PROCESSOR] Started in cloud mode")
 
@@ -307,6 +344,43 @@ class FrameProcessor:
                 logger.error(f"Error closing input source: {e}")
             self.input_source = None
 
+        # Clean up per-node input sources (multi-source graph mode)
+        # Join threads first to avoid closing the source while the thread is
+        # still inside receive_frame() (causes segfault with PyAV/FFmpeg).
+        for node_id, entry in list(self._input_sources_by_node.items()):
+            thread = entry.get("thread")
+            if thread and thread.is_alive():
+                thread.join(timeout=3.0)
+                if thread.is_alive():
+                    logger.warning(
+                        f"Input source thread for node '{node_id}' "
+                        f"did not stop within 3s"
+                    )
+            try:
+                entry["source"].close()
+            except Exception as e:
+                logger.error(f"Error closing input source for node {node_id}: {e}")
+        self._input_sources_by_node.clear()
+
+        # Clean up per-node output sinks (multi-sink graph mode)
+        for node_id, entry in list(self._output_sinks_by_node.items()):
+            thread = entry.get("thread")
+            if thread and thread.is_alive():
+                thread.join(timeout=2.0)
+                if thread.is_alive():
+                    logger.warning(
+                        f"Output sink thread for node '{node_id}' "
+                        f"did not stop within 2s"
+                    )
+            try:
+                entry["sink"].close()
+            except Exception as e:
+                logger.error(f"Error closing output sink for node {node_id}: {e}")
+        self._output_sinks_by_node.clear()
+
+        # Clean up per-node recording
+        self.recording.cleanup()
+
         # Clean up cloud callbacks in cloud mode
         if self._cloud_mode and self.cloud_manager:
             self.cloud_manager.remove_frame_callback(self._on_frame_from_cloud)
@@ -371,74 +445,188 @@ class FrameProcessor:
             connection_info=self.connection_info,
         )
 
-    def _get_or_create_pinned_buffer(self, shape):
-        """Get or create a reusable pinned memory buffer for the given shape.
+    def _thread_local_pinned_buffer(self, shape: tuple[int, ...]) -> torch.Tensor:
+        """Pinned host tensor for the current thread and frame shape."""
+        if not hasattr(self._thread_pin_local, "buffers"):
+            self._thread_pin_local.buffers = {}
+        buf_map: dict[tuple[int, ...], torch.Tensor] = self._thread_pin_local.buffers
+        if shape not in buf_map:
+            buf_map[shape] = torch.empty(shape, dtype=torch.uint8, pin_memory=True)
+        return buf_map[shape]
 
-        This avoids repeated pinned memory allocations, which are expensive.
-        Pinned memory enables faster DMA transfers to GPU.
+    def _frame_array_to_gpu(self, frame_array) -> torch.Tensor:
+        """Convert a numpy frame array to a GPU tensor using pinned memory.
+
+        Uses a **per-thread** pinned buffer so WebRTC, NDI, and Spout threads can
+        upload concurrently (no shared buffer, no global lock). Within one thread,
+        ``non_blocking=False`` ensures the H→D copy finishes before the next
+        ``copy_`` overwrites the pinned buffer.
         """
-        with self._pinned_buffer_lock:
-            if shape not in self._pinned_buffer_cache:
-                self._pinned_buffer_cache[shape] = torch.empty(
-                    shape, dtype=torch.uint8, pin_memory=True
-                )
-            return self._pinned_buffer_cache[shape]
+        shape = tuple(frame_array.shape)
+        pinned_buffer = self._thread_local_pinned_buffer(shape)
+        pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
+        return pinned_buffer.cuda(non_blocking=False)
 
-    def put(self, frame: VideoFrame) -> bool:
-        if not self.running:
-            return False
+    def _frame_array_to_tensor(self, frame_array) -> torch.Tensor:
+        """Convert a numpy frame array to a batched tensor (CPU or GPU)."""
+        if torch.cuda.is_available():
+            t = self._frame_array_to_gpu(frame_array)
+        else:
+            t = torch.as_tensor(frame_array, dtype=torch.uint8)
+        return t.unsqueeze(0)
 
-        self._frames_in += 1
-
-        # Log stats and emit heartbeat every HEARTBEAT_INTERVAL_SECONDS
+    def _maybe_emit_frame_heartbeat(self) -> None:
+        """Log stats periodically when frames flow (shared by put() paths)."""
         now = time.time()
         if now - self._last_heartbeat_time >= HEARTBEAT_INTERVAL_SECONDS:
             self._log_frame_stats()
             self._last_heartbeat_time = now
 
+    def put(self, frame: VideoFrame) -> bool:
+        """Put a frame into the pipeline.
+
+        For single-source graphs, delegates to put_to_source() with the
+        sole source node.  For multi-source graphs, callers must use
+        put_to_source() directly — this method returns False.
+        """
+        if not self.running:
+            return False
+
+        # Single-source shortcut: delegate to put_to_source
+        if len(self._source_queues_by_node) == 1:
+            return self.put_to_source(
+                frame, next(iter(self._source_queues_by_node)), count_frame=True
+            )
+
         if self._cloud_mode:
-            # Cloud mode: send frame to cloud (only in video mode)
-            # In text mode, cloud generates video from prompts only - no input frames
+            self._frames_in += 1
+            self._maybe_emit_frame_heartbeat()
+            # Text mode: cloud generates from prompts only, ignore input
             if not self._video_mode:
-                return True  # Silently ignore frames in text mode
+                return True
+            # No graph sources — send directly to cloud track 0
             if self.cloud_manager:
                 frame_array = frame.to_ndarray(format="rgb24")
                 if self.cloud_manager.send_frame(frame_array):
                     self._frames_to_cloud += 1
                     return True
+            return False
+
+        # Local mode with no source queues
+        self._frames_in += 1
+        self._maybe_emit_frame_heartbeat()
+        return False
+
+    def put_to_source(
+        self,
+        frame: VideoFrame,
+        source_node_id: str,
+        *,
+        count_frame: bool = True,
+    ) -> bool:
+        """Route a frame to a specific source node (multi-source)."""
+        if not self.running:
+            return False
+
+        if count_frame:
+            self._frames_in += 1
+            self._maybe_emit_frame_heartbeat()
+
+        if self._cloud_mode:
+            # Cloud mode: forward to the correct cloud input track
+            if not self._video_mode:
+                return True
+            if self.cloud_manager:
+                frame_array = frame.to_ndarray(format="rgb24")
+                track_idx = self.cloud_manager.get_source_track_index(source_node_id)
+                if track_idx is not None:
+                    sent = self.cloud_manager.send_frame_to_track(
+                        frame_array, track_idx
+                    )
                 else:
-                    logger.debug("[FRAME-PROCESSOR] Failed to send frame to cloud")
-                    return False
+                    sent = self.cloud_manager.send_frame(frame_array)
+                if sent:
+                    self._frames_to_cloud += 1
+                    return True
             return False
 
-        # Local mode: put into graph source queues
-        if not self._graph_source_queues:
+        # Local mode: put into source node queues
+        queues = self._source_queues_by_node.get(source_node_id)
+        if not queues:
             return False
 
-        frame_array = frame.to_ndarray(format="rgb24")
+        frame_tensor = self._frame_array_to_tensor(frame.to_ndarray(format="rgb24"))
 
-        if torch.cuda.is_available():
-            shape = frame_array.shape
-            pinned_buffer = self._get_or_create_pinned_buffer(shape)
-            # Note: We reuse pinned buffers for performance. This assumes the copy_()
-            # operation completes before the next frame arrives.
-            # In practice, copy_() is very fast (~microseconds) and frames arrive at 60 FPS max
-            pinned_buffer.copy_(torch.as_tensor(frame_array, dtype=torch.uint8))
-            frame_tensor = pinned_buffer.cuda(non_blocking=True)
-        else:
-            frame_tensor = torch.as_tensor(frame_array, dtype=torch.uint8)
-
-        frame_tensor = frame_tensor.unsqueeze(0)
-
-        if self._graph_source_queues:
-            # Fan-out to all source queues (graph always active)
-            for sq in self._graph_source_queues:
-                try:
-                    sq.put_nowait(frame_tensor)
-                except queue.Full:
-                    logger.debug("Graph source queue full, dropping frame")
+        for sq in queues:
+            try:
+                sq.put_nowait(frame_tensor)
+            except queue.Full:
+                logger.debug(
+                    "Source node %s queue full, dropping frame", source_node_id
+                )
 
         return True
+
+    def get_from_sink(self, sink_node_id: str) -> torch.Tensor | None:
+        """Read a frame from a specific sink node's output queue (multi-sink)."""
+        if not self.running:
+            return None
+
+        sink_q = self._sink_queues_by_node.get(sink_node_id)
+        if sink_q is None:
+            return None
+
+        try:
+            frame = sink_q.get_nowait()
+            frame = frame.squeeze(0)
+            if frame.is_cuda:
+                frame = frame.cpu()
+            self._frames_out += 1
+            return frame
+        except queue.Empty:
+            return None
+
+    def get_from_record(self, record_node_id: str) -> torch.Tensor | None:
+        """Read a frame from a specific record node's output queue."""
+        if not self.running:
+            return None
+        return self.recording.get(record_node_id)
+
+    def put_to_record(self, record_node_id: str, frame) -> None:
+        """Put a VideoFrame into a record node's queue (cloud mode)."""
+        self.recording.put(record_node_id, frame)
+
+    def get_sink_node_ids(self) -> list[str]:
+        """Return the list of sink node IDs available for reading."""
+        return list(self._sink_queues_by_node.keys())
+
+    def get_unhandled_sink_node_ids(self) -> list[str]:
+        """Return sink node IDs that don't have their own output sink thread.
+
+        These sinks need external draining (e.g. by the headless consumer)
+        to prevent their queues from filling up and stalling the pipeline.
+        """
+        return [
+            sid
+            for sid in self._sink_queues_by_node
+            if sid not in self._output_sinks_by_node
+        ]
+
+    def get_record_node_ids(self) -> list[str]:
+        """Return the list of record node IDs in the graph."""
+        return self.recording.get_node_ids()
+
+    async def start_node_recording(self, node_id: str) -> bool:
+        """Start recording for a specific record node."""
+        return await self.recording.start_recording(node_id)
+
+    async def stop_node_recording(self, node_id: str) -> bool:
+        """Stop recording for a specific record node."""
+        return await self.recording.stop_recording(node_id)
+
+    async def download_node_recording(self, node_id: str) -> str | None:
+        """Finalize and return the recording file path for a record node."""
+        return await self.recording.download_recording(node_id)
 
     def get(self) -> torch.Tensor | None:
         if not self.running:
@@ -472,47 +660,7 @@ class FrameProcessor:
             except queue.Empty:
                 return None
 
-        # Common processing for both modes
-        self._frames_out += 1
-
-        # Emit playback_ready event on first frame output
-        if not self._playback_ready_emitted:
-            self._playback_ready_emitted = True
-            time_to_first_frame_ms = (
-                int((time.monotonic() - self._stream_start_time) * 1000)
-                if self._stream_start_time is not None
-                else None
-            )
-            publish_event(
-                event_type="playback_ready",
-                session_id=self.session_id,
-                connection_id=self.connection_id,
-                pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
-                user_id=self.user_id,
-                metadata={
-                    "mode": "cloud" if self._cloud_mode else "local",
-                    "ttff_ms": time_to_first_frame_ms,
-                },
-                connection_info=self.connection_info,
-            )
-            logger.info(
-                f"[FRAME-PROCESSOR] First frame produced, playback ready "
-                f"(session={self.session_id}, mode={'cloud' if self._cloud_mode else 'local'}, "
-                f"ttff={time_to_first_frame_ms}ms)"
-            )
-
-        # Fan out frame to all active output sinks
-        if self.output_sinks:
-            try:
-                frame_np = frame.numpy()
-                for _sink_type, entry in self.output_sinks.items():
-                    try:
-                        entry["queue"].put_nowait(frame_np)
-                    except queue.Full:
-                        pass
-            except Exception as e:
-                logger.error(f"Error enqueueing output sink frame: {e}")
-
+        self._on_frame_output(frame)
         return frame
 
     def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
@@ -621,6 +769,62 @@ class FrameProcessor:
         if self._sink_processor is None:
             return DEFAULT_FPS
         return self._sink_processor.get_fps()
+
+    def get_fps_for_sink(self, sink_node_id: str) -> float:
+        """Get FPS for a specific sink node from its feeder processor."""
+        proc = self._sink_processors_by_node.get(sink_node_id)
+        if proc is not None:
+            return proc.get_fps()
+        return self.get_fps()
+
+    def notify_primary_frame_output(self, frame: torch.Tensor) -> None:
+        """Handle side effects for frames from the primary output track.
+
+        Called by the primary track's recv() when using get_from_sink()
+        instead of get(). Emits the playback_ready event on first frame
+        and fans out to output sinks (NDI/Spout).
+        """
+        self._on_frame_output(frame)
+
+    def _on_frame_output(self, frame: torch.Tensor) -> None:
+        """Common post-output logic: increment counter, emit playback_ready, fan out to sinks."""
+        self._frames_out += 1
+
+        if not self._playback_ready_emitted:
+            self._playback_ready_emitted = True
+            time_to_first_frame_ms = (
+                int((time.monotonic() - self._stream_start_time) * 1000)
+                if self._stream_start_time is not None
+                else None
+            )
+            publish_event(
+                event_type="playback_ready",
+                session_id=self.session_id,
+                connection_id=self.connection_id,
+                pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
+                user_id=self.user_id,
+                metadata={
+                    "mode": "cloud" if self._cloud_mode else "local",
+                    "ttff_ms": time_to_first_frame_ms,
+                },
+                connection_info=self.connection_info,
+            )
+            logger.info(
+                f"[FRAME-PROCESSOR] First frame produced, playback ready "
+                f"(session={self.session_id}, mode={'cloud' if self._cloud_mode else 'local'}, "
+                f"ttff={time_to_first_frame_ms}ms)"
+            )
+
+        if self.output_sinks:
+            try:
+                frame_np = frame.numpy()
+                for _sink_type, entry in self.output_sinks.items():
+                    try:
+                        entry["queue"].put_nowait(frame_np)
+                    except queue.Full:
+                        pass
+            except Exception as e:
+                logger.error(f"Error enqueueing output sink frame: {e}")
 
     def _log_frame_stats(self):
         """Log frame processing statistics and emit heartbeat event."""
@@ -741,10 +945,14 @@ class FrameProcessor:
             sinks_config = parameters.pop("output_sinks")
             self._update_output_sinks_from_config(sinks_config)
 
-        # Handle generic input source settings
+        # Handle generic input source settings.
+        # Skip when per-node sources or graph source queues are active.
         if "input_source" in parameters:
-            input_source_config = parameters.pop("input_source")
-            self._update_input_source(input_source_config)
+            if self._input_sources_by_node or self._source_queues_by_node:
+                parameters.pop("input_source")
+            else:
+                input_source_config = parameters.pop("input_source")
+                self._update_input_source(input_source_config)
 
         if "modulations" in parameters:
             raw = parameters.pop("modulations")
@@ -773,7 +981,7 @@ class FrameProcessor:
         if node_id:
             if node_id in self._processors_by_node_id:
                 self._processors_by_node_id[node_id].update_parameters(parameters)
-            elif self._processors_by_node_id:
+            else:
                 logger.warning(
                     f"Unknown node_id '{node_id}', ignoring parameter update"
                 )
@@ -1036,17 +1244,7 @@ class FrameProcessor:
                             if self.cloud_manager.send_frame(rgb_frame):
                                 self._frames_to_cloud += 1
                     elif self._graph_source_queues:
-                        if torch.cuda.is_available():
-                            shape = rgb_frame.shape
-                            pinned_buffer = self._get_or_create_pinned_buffer(shape)
-                            pinned_buffer.copy_(
-                                torch.as_tensor(rgb_frame, dtype=torch.uint8)
-                            )
-                            frame_tensor = pinned_buffer.cuda(non_blocking=True)
-                        else:
-                            frame_tensor = torch.as_tensor(rgb_frame, dtype=torch.uint8)
-
-                        frame_tensor = frame_tensor.unsqueeze(0)
+                        frame_tensor = self._frame_array_to_tensor(rgb_frame)
 
                         for sq in self._graph_source_queues:
                             try:
@@ -1137,6 +1335,13 @@ class FrameProcessor:
         self.pipeline_processors = graph_run.processors
         self.pipeline_ids = graph_run.pipeline_ids
 
+        # Store per-node queue mappings for multi-source/sink/record
+        self._source_queues_by_node = graph_run.source_queues_by_node
+        self._sink_queues_by_node = graph_run.sink_queues_by_node
+        self._sink_hardware_queues_by_node = graph_run.sink_hardware_queues_by_node
+        self._sink_processors_by_node = graph_run.sink_processors_by_node
+        self.recording.record_queues = graph_run.record_queues_by_node
+
         # Index processors by node_id for per-node parameter routing
         for proc in self.pipeline_processors:
             self._processors_by_node_id[proc.node_id] = proc
@@ -1145,9 +1350,256 @@ class FrameProcessor:
         for processor in self.pipeline_processors:
             processor.start()
 
+        # Set up per-source-node input sources for non-WebRTC sources
+        self._setup_multi_input_sources(graph)
+
+        # Set up per-sink-node output sinks for non-WebRTC sinks
+        self._setup_multi_output_sinks(graph)
+
         logger.info(
             f"Created graph with {len(self.pipeline_processors)} processors, "
-            f"sink={graph_run.sink_node_id}"
+            f"sink={graph_run.sink_node_id}, "
+            f"sources={list(self._source_queues_by_node.keys())}, "
+            f"sinks={list(self._sink_queues_by_node.keys())}, "
+            f"records={self.recording.get_node_ids()}"
+        )
+
+    def _setup_multi_input_sources(self, graph):
+        """Set up per-source-node input sources for non-WebRTC graph sources.
+
+        For source nodes with source_mode in (spout, ndi, syphon), creates a
+        separate InputSource + receiver thread for each one.
+        """
+        from .graph_schema import GraphConfig
+
+        if not isinstance(graph, GraphConfig):
+            return
+
+        for node in graph.nodes:
+            if node.type != "source":
+                continue
+            source_mode = getattr(node, "source_mode", None)
+            if source_mode not in ("spout", "ndi", "syphon", "video_file"):
+                continue
+            source_name = getattr(node, "source_name", "") or ""
+            node_id = node.id
+
+            # In cloud mode we don't need local source queues — frames are
+            # forwarded to the cloud via send_frame_to_track. In local mode
+            # the node must have queues registered by the graph executor.
+            if not self._cloud_mode and node_id not in self._source_queues_by_node:
+                continue
+
+            from scope.core.inputs import get_input_source_classes
+
+            input_source_classes = get_input_source_classes()
+            source_class = input_source_classes.get(source_mode)
+            if source_class is None or not source_class.is_available():
+                logger.warning(
+                    f"Input source '{source_mode}' not available for node {node_id}"
+                )
+                continue
+
+            try:
+                source = source_class()
+                if source.connect(source_name):
+                    thread = threading.Thread(
+                        target=self._multi_input_source_loop,
+                        args=(node_id, source_mode),
+                        daemon=True,
+                    )
+                    self._input_sources_by_node[node_id] = {
+                        "source": source,
+                        "thread": thread,
+                        "type": source_mode,
+                    }
+                    thread.start()
+                    logger.info(
+                        f"Multi-source: started {source_mode} for node {node_id}"
+                    )
+                else:
+                    logger.error(
+                        f"Failed to connect input source {source_mode} "
+                        f"for node {node_id}"
+                    )
+                    source.close()
+            except Exception as e:
+                logger.error(
+                    f"Error creating input source '{source_mode}' "
+                    f"for node {node_id}: {e}"
+                )
+
+    def _multi_input_source_loop(self, node_id: str, source_type: str):
+        """Background thread that receives frames for a specific source node.
+
+        Receives as fast as the source provides frames, without throttling to
+        pipeline output FPS. Throttling on measured get_fps() created a feedback
+        loop: slower output → lower get_fps() → longer sleeps → starved inputs →
+        even slower output. Backpressure is queue full + drop, same as
+        :meth:`_input_source_receiver_loop`.
+        """
+        entry = self._input_sources_by_node.get(node_id)
+        if entry is None:
+            return
+
+        source = entry["source"]
+        frame_count = 0
+
+        while self.running and node_id in self._input_sources_by_node:
+            try:
+                rgb_frame = source.receive_frame(timeout_ms=100)
+                if rgb_frame is not None:
+                    if self._cloud_mode:
+                        # Cloud mode: forward to the correct cloud input track
+                        if self._video_mode and self.cloud_manager:
+                            track_idx = self.cloud_manager.get_source_track_index(
+                                node_id
+                            )
+                            if track_idx is not None:
+                                sent = self.cloud_manager.send_frame_to_track(
+                                    rgb_frame, track_idx
+                                )
+                            else:
+                                sent = self.cloud_manager.send_frame(rgb_frame)
+                            if sent:
+                                self._frames_to_cloud += 1
+                    else:
+                        queues = self._source_queues_by_node.get(node_id)
+                        if queues:
+                            frame_tensor = self._frame_array_to_tensor(rgb_frame)
+                            for sq in queues:
+                                try:
+                                    sq.put_nowait(frame_tensor)
+                                except queue.Full:
+                                    pass
+
+                    frame_count += 1
+                    if frame_count % 100 == 0:
+                        logger.debug(
+                            f"Multi-source ({source_type}) node {node_id}: "
+                            f"{frame_count} frames"
+                        )
+                else:
+                    time.sleep(0.001)
+
+            except Exception as e:
+                logger.error(f"Error in multi-source loop node {node_id}: {e}")
+                time.sleep(0.01)
+
+        logger.info(
+            f"Multi-source thread stopped ({source_type}) node {node_id} "
+            f"after {frame_count} frames"
+        )
+
+    def _setup_multi_output_sinks(self, graph):
+        """Set up per-sink-node output sinks for non-WebRTC graph sinks.
+
+        For sink nodes with sink_mode in (spout, ndi, syphon), creates a
+        separate OutputSink + sender thread for each one.
+        """
+        from .graph_schema import GraphConfig
+
+        if not isinstance(graph, GraphConfig):
+            return
+
+        for node in graph.nodes:
+            if node.type != "sink":
+                continue
+            sink_mode = getattr(node, "sink_mode", None)
+            if sink_mode not in ("spout", "ndi", "syphon"):
+                continue
+            sink_name = getattr(node, "sink_name", "") or ""
+            node_id = node.id
+
+            if node_id not in self._sink_queues_by_node:
+                continue
+
+            from scope.core.outputs import get_output_sink_classes
+
+            sink_classes = get_output_sink_classes()
+            sink_class = sink_classes.get(sink_mode)
+            if sink_class is None:
+                logger.warning(
+                    f"Output sink '{sink_mode}' not available for node {node_id}"
+                )
+                continue
+
+            try:
+                width, height = self._get_pipeline_dimensions()
+                sink = sink_class()
+                if sink.create(sink_name, width, height):
+                    thread = threading.Thread(
+                        target=self._multi_output_sink_loop,
+                        args=(node_id, sink_mode),
+                        daemon=True,
+                    )
+                    self._output_sinks_by_node[node_id] = {
+                        "sink": sink,
+                        "thread": thread,
+                        "type": sink_mode,
+                        "name": sink_name,
+                    }
+                    thread.start()
+                    logger.info(
+                        f"Multi-sink: started {sink_mode} '{sink_name}' "
+                        f"for node {node_id}"
+                    )
+                else:
+                    logger.error(
+                        f"Failed to create output sink {sink_mode} for node {node_id}"
+                    )
+                    sink.close()
+            except Exception as e:
+                logger.error(
+                    f"Error creating output sink '{sink_mode}' for node {node_id}: {e}"
+                )
+
+    def _multi_output_sink_loop(self, node_id: str, sink_type: str):
+        """Background thread that sends frames for a specific sink node."""
+        entry = self._output_sinks_by_node.get(node_id)
+        if entry is None:
+            return
+
+        sink = entry["sink"]
+        sink_q = self._sink_hardware_queues_by_node.get(node_id)
+        if sink_q is None:
+            sink_q = self._sink_queues_by_node.get(node_id)
+        if sink_q is None:
+            logger.error(f"No sink queue for node {node_id}")
+            return
+
+        frame_count = 0
+        logger.info(f"Multi-sink output thread started: {sink_type} node {node_id}")
+
+        while self.running and node_id in self._output_sinks_by_node:
+            try:
+                try:
+                    frame = sink_q.get(timeout=0.1)
+                except queue.Empty:
+                    continue
+
+                # Convert tensor to numpy for the output sink
+                frame_squeezed = frame.squeeze(0)
+                if frame_squeezed.is_cuda:
+                    frame_squeezed = frame_squeezed.cpu()
+                frame_np = frame_squeezed.numpy()
+
+                sink.send_frame(frame_np)
+                frame_count += 1
+
+                if frame_count % 300 == 0:
+                    logger.debug(
+                        f"Multi-sink ({sink_type}) node {node_id}: "
+                        f"{frame_count} frames sent"
+                    )
+
+            except Exception as e:
+                logger.error(f"Error in multi-sink output loop node {node_id}: {e}")
+                time.sleep(0.01)
+
+        logger.info(
+            f"Multi-sink output thread stopped ({sink_type}) node {node_id} "
+            f"after {frame_count} frames"
         )
 
     def __enter__(self):
@@ -1156,14 +1608,3 @@ class FrameProcessor:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.stop()
-
-    @staticmethod
-    def _is_recoverable(error: Exception) -> bool:
-        """
-        Check if an error is recoverable (i.e., processing can continue).
-        Non-recoverable errors will cause the stream to stop.
-        """
-        if isinstance(error, torch.cuda.OutOfMemoryError):
-            return False
-        # Add more non-recoverable error types here as needed
-        return True

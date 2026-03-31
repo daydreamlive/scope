@@ -8,7 +8,7 @@ import {
 } from "../../utils/subgraphSerialization";
 import { buildEdgeStyle } from "../../constants";
 import type { Blueprint } from "../../../../data/blueprints/types";
-import { toast } from "sonner";
+
 import type { EnrichNodesDeps } from "../graph/useGraphPersistence";
 import { enrichNodes } from "../graph/useGraphPersistence";
 
@@ -532,32 +532,6 @@ export function useNodeFactories({
       subType?: string
     ) => {
       if (!pendingNodePosition) return;
-
-      // Enforce single source and single sink
-      if (type === "source") {
-        const hasSource = nodes.some(n => n.data.nodeType === "source");
-        if (hasSource) {
-          toast.warning("Only one Source node is allowed");
-          setPendingNodePosition(null);
-          return;
-        }
-      }
-      if (type === "sink") {
-        const hasSink = nodes.some(n => n.data.nodeType === "sink");
-        if (hasSink) {
-          toast.warning("Only one Sink node is allowed");
-          setPendingNodePosition(null);
-          return;
-        }
-      }
-      if (type === "record") {
-        const hasRecord = nodes.some(n => n.data.nodeType === "record");
-        if (hasRecord) {
-          toast.warning("Only one Record node is allowed");
-          setPendingNodePosition(null);
-          return;
-        }
-      }
 
       if (type === "control") {
         if (subType === "float" || subType === "int" || subType === "string") {

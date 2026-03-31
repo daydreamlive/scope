@@ -342,21 +342,6 @@ async def upload_asset_to_cloud(
     )
 
 
-def recording_download_cloud_path(
-    _http_request: Request,
-    cloud_manager: CloudConnectionManager,
-) -> str:
-    """Resolve cloud path for recording download (uses cloud session ID)."""
-    webrtc_client = getattr(cloud_manager, "_webrtc_client", None)
-    session_id = getattr(webrtc_client, "session_id", None) if webrtc_client else None
-    if not session_id:
-        raise HTTPException(
-            status_code=404,
-            detail="No active cloud session for recording download",
-        )
-    return f"/api/v1/recordings/{session_id}"
-
-
 def cloud_proxy(
     path: str | PathResolver | None = None,
     *,

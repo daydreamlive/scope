@@ -3,10 +3,12 @@ from __future__ import annotations
 import asyncio
 import fractions
 import logging
+import queue
 import threading
 import time
 from typing import TYPE_CHECKING
 
+import torch
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import VideoFrame
@@ -17,6 +19,244 @@ if TYPE_CHECKING:
     from .frame_processor import FrameProcessor
 
 logger = logging.getLogger(__name__)
+
+# PipelineProcessor clamps measured throughput to MIN_FPS (1.0). Using that
+# value for WebRTC pacing sets frame_ptime≈1s and caps previews at ~1 FPS
+# even when the sink queue has frames. The clamp is a stats floor, not a
+# desired playback rate — use a normal cadence unless the pipeline reports
+# a clearly intentional native_fps (always > 1 when set).
+_WEBRTC_PLAYBACK_FPS_DEFAULT = 30.0
+
+
+def _webrtc_playback_fps(pipeline_fps: float) -> float:
+    """FPS for pacing outbound WebRTC video; avoid ~1 FPS from MIN_FPS clamp."""
+    if pipeline_fps <= 1.01:
+        return _WEBRTC_PLAYBACK_FPS_DEFAULT
+    return pipeline_fps
+
+
+class QueueVideoTrack(MediaStreamTrack):
+    """Track that reads video frames from a queue (torch.Tensor → VideoFrame).
+
+    Bridges a graph output queue to the aiortc MediaStreamTrack interface so it
+    can be consumed by RecordingManager / MediaRecorder.
+    """
+
+    kind = "video"
+
+    def __init__(self, frame_queue: queue.Queue, fps: float = 30.0):
+        super().__init__()
+        self._queue = frame_queue
+        self.fps = fps
+        self._pts: int = 0
+        self._frame_ptime = 1.0 / fps
+        self._last_send_time: float | None = None
+
+    async def recv(self) -> VideoFrame:
+        if self.readyState != "live":
+            raise MediaStreamError
+
+        while True:
+            try:
+                frame_tensor: torch.Tensor = self._queue.get_nowait()
+            except queue.Empty:
+                await asyncio.sleep(0.01)
+                if self.readyState != "live":
+                    raise MediaStreamError from None
+                continue
+
+            frame_squeezed = frame_tensor.squeeze(0)
+            if frame_squeezed.is_cuda:
+                frame_squeezed = frame_squeezed.cpu()
+            frame_np = frame_squeezed.numpy()
+
+            video_frame = VideoFrame.from_ndarray(frame_np, format="rgb24")
+
+            # Pace timestamps
+            if self._last_send_time is not None:
+                elapsed = time.time() - self._last_send_time
+                wait = self._frame_ptime - elapsed
+                if wait > 0:
+                    await asyncio.sleep(wait)
+                self._pts += int(self._frame_ptime * VIDEO_CLOCK_RATE)
+            self._last_send_time = time.time()
+
+            video_frame.pts = self._pts
+            video_frame.time_base = VIDEO_TIME_BASE
+            return video_frame
+
+
+class SinkOutputTrack(MediaStreamTrack):
+    """Track that outputs frames from a specific sink node in a multi-sink graph.
+
+    This is a lightweight wrapper: it waits for the primary VideoProcessingTrack's
+    FrameProcessor to be ready, then reads frames from a specific sink node's
+    output queue.
+    """
+
+    kind = "video"
+
+    def __init__(
+        self,
+        primary_track: VideoProcessingTrack,
+        sink_node_id: str,
+    ):
+        super().__init__()
+        self.primary_track = primary_track
+        self.sink_node_id = sink_node_id
+        self.fps = 30
+        self.frame_ptime = 1.0 / self.fps
+        self._last_send_time: float | None = None
+        self._pts: int = 0
+
+    async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
+        if self.readyState != "live":
+            raise MediaStreamError
+
+        if self._last_send_time is not None:
+            elapsed = time.time() - self._last_send_time
+            wait = self.frame_ptime - elapsed
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._pts += int(self.frame_ptime * VIDEO_CLOCK_RATE)
+
+        self._last_send_time = time.time()
+        return self._pts, VIDEO_TIME_BASE
+
+    async def recv(self) -> VideoFrame:
+        # Wait for primary track's frame_processor to be ready
+        while self.primary_track.frame_processor is None:
+            await asyncio.sleep(0.05)
+
+        fp = self.primary_track.frame_processor
+
+        while True:
+            # Update FPS from the specific sink's feeder processor
+            self.fps = _webrtc_playback_fps(fp.get_fps_for_sink(self.sink_node_id))
+            self.frame_ptime = 1.0 / self.fps
+
+            frame_tensor = fp.get_from_sink(self.sink_node_id)
+            if frame_tensor is not None:
+                frame = VideoFrame.from_ndarray(frame_tensor.numpy(), format="rgb24")
+                pts, time_base = await self.next_timestamp()
+                frame.pts = pts
+                frame.time_base = time_base
+                return frame
+
+            await asyncio.sleep(0.01)
+
+
+class RecordOutputTrack(MediaStreamTrack):
+    """Track that outputs frames from a specific record node in a multi-output graph.
+
+    Used on the cloud server side to send record node frames back to the client
+    via WebRTC, so that the client can record locally.  Structurally identical
+    to SinkOutputTrack but reads from the record queue instead of a sink queue.
+    """
+
+    kind = "video"
+
+    def __init__(
+        self,
+        primary_track: VideoProcessingTrack,
+        record_node_id: str,
+    ):
+        super().__init__()
+        self.primary_track = primary_track
+        self.record_node_id = record_node_id
+        self.fps = 30
+        self.frame_ptime = 1.0 / self.fps
+        self._last_send_time: float | None = None
+        self._pts: int = 0
+
+    async def next_timestamp(self) -> tuple[int, fractions.Fraction]:
+        if self.readyState != "live":
+            raise MediaStreamError
+
+        if self._last_send_time is not None:
+            elapsed = time.time() - self._last_send_time
+            wait = self.frame_ptime - elapsed
+            if wait > 0:
+                await asyncio.sleep(wait)
+            self._pts += int(self.frame_ptime * VIDEO_CLOCK_RATE)
+
+        self._last_send_time = time.time()
+        return self._pts, VIDEO_TIME_BASE
+
+    async def recv(self) -> VideoFrame:
+        while self.primary_track.frame_processor is None:
+            await asyncio.sleep(0.05)
+
+        fp = self.primary_track.frame_processor
+
+        while True:
+            frame_tensor = fp.get_from_record(self.record_node_id)
+            if frame_tensor is not None:
+                frame = VideoFrame.from_ndarray(frame_tensor.numpy(), format="rgb24")
+                pts, time_base = await self.next_timestamp()
+                frame.pts = pts
+                frame.time_base = time_base
+                return frame
+
+            await asyncio.sleep(0.01)
+
+
+class SourceInputHandler:
+    """Handles input from a WebRTC track and routes frames to a specific source node.
+
+    Used in multi-source mode: each WebRTC video track from the browser is
+    routed to a specific source node in the graph via put_to_source().
+    """
+
+    def __init__(
+        self,
+        frame_processor: FrameProcessor,
+        source_node_id: str,
+    ):
+        self.frame_processor = frame_processor
+        self.source_node_id = source_node_id
+        self._running = False
+        self._task: asyncio.Task | None = None
+        self._track: MediaStreamTrack | None = None
+
+    def start(self, track: MediaStreamTrack):
+        self._track = track
+        self._running = True
+        self._task = asyncio.create_task(self._input_loop())
+
+    async def _input_loop(self):
+        consecutive_errors = 0
+        max_consecutive_errors = 10
+        while self._running:
+            try:
+                input_frame = await self._track.recv()
+                consecutive_errors = 0
+                self.frame_processor.put_to_source(input_frame, self.source_node_id)
+            except asyncio.CancelledError:
+                break
+            except MediaStreamError:
+                logger.info(f"Source track ended for node {self.source_node_id}")
+                self._running = False
+                break
+            except Exception as e:
+                consecutive_errors += 1
+                if consecutive_errors >= max_consecutive_errors:
+                    logger.error(
+                        f"Input handler for {self.source_node_id} stopping "
+                        f"after {consecutive_errors} errors: {e}"
+                    )
+                    self._running = False
+                    break
+                await asyncio.sleep(0.01)
+
+    async def stop(self):
+        self._running = False
+        if self._task is not None:
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
 
 
 class VideoProcessingTrack(MediaStreamTrack):
@@ -34,6 +274,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         connection_info: dict | None = None,
         tempo_sync=None,
         frame_processor: FrameProcessor | None = None,
+        sink_node_id: str | None = None,
     ):
         super().__init__()
         self.pipeline_manager = pipeline_manager
@@ -44,6 +285,8 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.connection_id = connection_id
         self.connection_info = connection_info
         self.tempo_sync = tempo_sync
+        # When set, this track reads from a specific sink node's queue
+        self.sink_node_id = sink_node_id
         # FPS variables (will be updated from FrameProcessor or input measurement)
         self.fps = fps
         self.frame_ptime = 1.0 / fps
@@ -51,6 +294,8 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.frame_processor = frame_processor
         self.input_task = None
         self.input_task_running = False
+        # True when input is handled externally (e.g. all sources via SourceInputHandler)
+        self._has_external_input = False
         self._paused = False
         self._paused_lock = threading.Lock()
         self._last_frame = None
@@ -138,11 +383,19 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.initialize_output_processing()
 
         # Keep running while any input source is active
-        while self.input_task_running or self._input_source_enabled:
+        while (
+            self.input_task_running
+            or self._input_source_enabled
+            or self._has_external_input
+        ):
             try:
-                # Update FPS: use the FPS from the pipeline chain
+                # Update FPS from the specific sink's feeder processor, or global
                 if self.frame_processor:
-                    self.fps = self.frame_processor.get_fps()
+                    if self.sink_node_id:
+                        raw = self.frame_processor.get_fps_for_sink(self.sink_node_id)
+                    else:
+                        raw = self.frame_processor.get_fps()
+                    self.fps = _webrtc_playback_fps(raw)
                     self.frame_ptime = 1.0 / self.fps
 
                 # If paused, wait for the appropriate frame interval before returning
@@ -154,8 +407,18 @@ class VideoProcessingTrack(MediaStreamTrack):
                     # When video is paused, return the last frame to freeze the playback video
                     frame = self._last_frame
                 else:
-                    # When video is not paused, get the next frame from the frame processor
-                    frame_tensor = self.frame_processor.get()
+                    # Read from specific sink node or fall back to legacy get()
+                    if self.sink_node_id:
+                        frame_tensor = self.frame_processor.get_from_sink(
+                            self.sink_node_id
+                        )
+                        if frame_tensor is not None:
+                            self.frame_processor.notify_primary_frame_output(
+                                frame_tensor
+                            )
+                    else:
+                        frame_tensor = self.frame_processor.get()
+
                     if frame_tensor is not None:
                         frame = VideoFrame.from_ndarray(
                             frame_tensor.numpy(), format="rgb24"
@@ -198,6 +461,7 @@ class VideoProcessingTrack(MediaStreamTrack):
     async def stop(self):
         self.input_task_running = False
         self._input_source_enabled = False
+        self._has_external_input = False
 
         if self.input_task is not None:
             self.input_task.cancel()
