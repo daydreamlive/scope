@@ -162,6 +162,7 @@ interface GraphEditorProps {
   localStream?: MediaStream | null;
   remoteStream?: MediaStream | null;
   onVideoFileUpload?: (file: File) => Promise<boolean>;
+  onCycleSampleVideo?: () => void;
   isPlaying?: boolean;
   onStartStream?: () => void;
   onStopStream?: () => void;
@@ -211,6 +212,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       localStream,
       remoteStream,
       onVideoFileUpload,
+      onCycleSampleVideo,
       isPlaying = true,
       onStartStream,
       onStopStream,
@@ -291,6 +293,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onGraphChange,
         onGraphClear,
         onVideoFileUpload,
+        onCycleSampleVideo,
         onSourceModeChange,
         onSpoutSourceChange,
         onNdiSourceChange,

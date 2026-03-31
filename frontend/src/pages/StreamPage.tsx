@@ -689,6 +689,7 @@ export function StreamPage() {
     videoResolution,
     switchMode,
     handleVideoFileUpload,
+    cycleSampleVideo,
   } = useVideoSource({
     onStreamUpdate: updateVideoTrack,
     onStopStream: stopStream,
@@ -2876,6 +2877,7 @@ export function StreamPage() {
             localStream={localStream}
             remoteStream={remoteStream}
             onVideoFileUpload={handleVideoFileUpload}
+            onCycleSampleVideo={cycleSampleVideo}
             isPlaying={!settings.paused}
             onStartStream={() => handleStartStream()}
             onStopStream={stopStream}
@@ -2937,6 +2939,7 @@ export function StreamPage() {
                 onStartStream={handleStartStream}
                 onStopStream={stopStream}
                 onVideoFileUpload={handleVideoFileUpload}
+                onCycleSampleVideo={cycleSampleVideo}
                 pipelineId={settings.pipelineId}
                 prompts={promptItems}
                 onPromptsChange={setPromptItems}

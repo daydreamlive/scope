@@ -2,6 +2,12 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 export type VideoSourceMode = "video" | "camera" | "spout" | "ndi" | "syphon";
 
+export const SAMPLE_VIDEOS = [
+  "/assets/test.mp4",
+  "/assets/test1.mp4",
+  "/assets/test2.mp4",
+];
+
 interface UseVideoSourceProps {
   onStreamUpdate?: (stream: MediaStream) => Promise<boolean>;
   onStopStream?: () => void;
@@ -311,6 +317,38 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     [localStream, createVideoFileStreamFromFile, props]
   );
 
+  const cycleSampleVideo = useCallback(async () => {
+    const currentUrl =
+      typeof selectedVideoFile === "string" ? selectedVideoFile : null;
+    const currentIndex = currentUrl ? SAMPLE_VIDEOS.indexOf(currentUrl) : -1;
+    const nextUrl = SAMPLE_VIDEOS[(currentIndex + 1) % SAMPLE_VIDEOS.length];
+
+    setError(null);
+    setSelectedVideoFile(nextUrl);
+
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+    }
+    if (videoElementRef.current) {
+      videoElementRef.current.pause();
+      videoElementRef.current = null;
+    }
+
+    try {
+      setIsInitializing(true);
+      const { stream: newStream } = await createVideoFileStreamFromFile(
+        nextUrl,
+        FPS
+      );
+      setLocalStream(newStream);
+    } catch (error) {
+      console.error("Failed to cycle sample video:", error);
+      setError("Failed to load sample video");
+    } finally {
+      setIsInitializing(false);
+    }
+  }, [selectedVideoFile, localStream, createVideoFileStreamFromFile]);
+
   const stopVideo = useCallback(() => {
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop());
@@ -410,6 +448,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     switchMode,
     stopVideo,
     handleVideoFileUpload,
+    cycleSampleVideo,
     reinitializeVideoSource,
   };
 }
