@@ -10,6 +10,7 @@ import type {
 import { useState } from "react";
 import { useApi } from "../../../../hooks/useApi";
 import { useCloudStatus } from "../../../../hooks/useCloudStatus";
+import { usePipelinesContext } from "../../../../contexts/PipelinesContext";
 import type { HardwareInfoResponse } from "../../../../lib/api";
 
 import { usePipelineParams } from "../node/usePipelineParams";
@@ -154,6 +155,7 @@ export function useGraphState(
   const { getPipelineSchemas, getHardwareInfo, isCloudMode, isReady } =
     useApi();
   const { isConnected: isCloudConnected } = useCloudStatus();
+  const { pipelinesVersion } = usePipelinesContext();
   const [hardwareInfo, setHardwareInfo] = useState<HardwareInfoResponse | null>(
     null
   );
@@ -190,6 +192,7 @@ export function useGraphState(
     isCloudMode,
     isReady,
     isCloudConnected,
+    pipelinesVersion,
   ]);
 
   const nodesRef = useRef(nodes);
