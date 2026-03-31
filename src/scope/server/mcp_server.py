@@ -130,6 +130,68 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
             )
 
     # -------------------------------------------------------------------------
+    # Cloud Connection
+    # -------------------------------------------------------------------------
+
+    @mcp.tool()
+    async def connect_to_cloud(
+        app_id: str | None = None,
+        api_key: str | None = None,
+    ) -> str:
+        """Connect to cloud for remote GPU inference.
+
+        For local dev testing, start two Scope instances:
+          Terminal 1 (cloud):  SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
+          Terminal 2 (local):  SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022
+
+        Then connect MCP to the local instance (port 8022) and call this tool.
+        When env vars SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_WS_URL are set,
+        app_id and api_key can be omitted.
+
+        Args:
+            app_id: Cloud app ID (optional if set via env var SCOPE_CLOUD_APP_ID)
+            api_key: Cloud API key (optional if set via env var or for local dev testing)
+        """
+        body: dict = {}
+        if app_id is not None:
+            body["app_id"] = app_id
+        if api_key is not None:
+            body["api_key"] = api_key
+        resp = await _client().post("/api/v1/cloud/connect", json=body)
+        resp.raise_for_status()
+        status = resp.json()
+
+        # Poll until connected (background connection)
+        if status.get("connecting"):
+            import asyncio
+
+            for _ in range(120):  # up to 120s
+                await asyncio.sleep(1)
+                poll = await _client().get("/api/v1/cloud/status")
+                poll.raise_for_status()
+                status = poll.json()
+                if status.get("connected"):
+                    return _fmt(status)
+                if status.get("error"):
+                    return _fmt(status)
+                if not status.get("connecting"):
+                    break
+
+        return _fmt(status)
+
+    @mcp.tool()
+    async def disconnect_from_cloud() -> str:
+        """Disconnect from cloud. Stops the WebSocket and WebRTC connections."""
+        resp = await _client().post("/api/v1/cloud/disconnect", json={})
+        return await _json(resp)
+
+    @mcp.tool()
+    async def get_cloud_status() -> str:
+        """Get current cloud connection status including WebRTC and stats."""
+        resp = await _client().get("/api/v1/cloud/status")
+        return await _json(resp)
+
+    # -------------------------------------------------------------------------
     # Pipeline Management
     # -------------------------------------------------------------------------
 
@@ -342,6 +404,51 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
         """Stop the active headless pipeline session and free its resources."""
         resp = await _client().post("/api/v1/session/stop")
         return await _json(resp)
+
+    # -------------------------------------------------------------------------
+    # Recording
+    # -------------------------------------------------------------------------
+
+    @mcp.tool()
+    async def start_recording() -> str:
+        """Start recording the active headless session output to an MP4 file.
+        Requires an active headless stream (started via start_stream).
+        """
+        resp = await _client().post("/api/v1/session/recording/start")
+        return await _json(resp)
+
+    @mcp.tool()
+    async def stop_recording() -> str:
+        """Stop recording the active headless session.
+        Returns the path to the recording file.
+        """
+        resp = await _client().post("/api/v1/session/recording/stop")
+        return await _json(resp)
+
+    @mcp.tool()
+    async def download_recording() -> str:
+        """Download the recording from the active headless session as an MP4 file.
+        Stops recording if still active, then saves the MP4 to a temp file
+        and returns the file path so you can read/verify it.
+        """
+        import tempfile
+
+        resp = await _client().get("/api/v1/session/recording/download")
+        resp.raise_for_status()
+
+        with tempfile.NamedTemporaryFile(
+            suffix=".mp4", prefix="scope_recording_", delete=False
+        ) as f:
+            f.write(resp.content)
+            file_path = f.name
+
+        return json.dumps(
+            {
+                "file_path": file_path,
+                "size_bytes": len(resp.content),
+            },
+            indent=2,
+        )
 
     # -------------------------------------------------------------------------
     # Asset Management
