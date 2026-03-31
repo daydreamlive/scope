@@ -256,6 +256,16 @@ export function WorkflowImportDialog({
 
         const resolution = await resolveWorkflow(initialWorkflow);
         if (cancelled) return;
+
+        // If all dependencies are already resolved, skip the review dialog
+        if (
+          resolution.items.every(i => i.status === "ok") &&
+          resolution.warnings.length === 0
+        ) {
+          await loadWorkflowDirect(initialWorkflow);
+          return;
+        }
+
         setPlan(resolution);
 
         initializeLoras(
@@ -293,6 +303,88 @@ export function WorkflowImportDialog({
     // Only re-run when the dialog opens with a new initialWorkflow reference
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, initialWorkflow]);
+
+  // -----------------------------------------------------------------------
+  // Load workflow into the interface
+  // -----------------------------------------------------------------------
+
+  /** Load a workflow directly (no confirmation dialog). */
+  const loadWorkflowDirect = useCallback(
+    async (wf: ScopeWorkflow) => {
+      if (onLoadToGraph) {
+        const freshLoraFiles = await refreshLoRAs();
+        const patchedWorkflow = {
+          ...wf,
+          pipelines: wf.pipelines.map(p => ({
+            ...p,
+            loras: p.loras.map(l => {
+              const resolved = freshLoraFiles.find(
+                f =>
+                  extractFilename(f.path).toLowerCase() ===
+                  l.filename.toLowerCase()
+              );
+              return resolved ? { ...l, filename: resolved.path } : l;
+            }),
+          })),
+        };
+        onLoadToGraph(patchedWorkflow);
+        trackEvent("workflow_imported", {
+          node_count: wf.graph?.nodes?.length ?? wf.pipelines.length,
+          source: "file",
+          surface: "app_chrome",
+        });
+        toast.success("Workflow loaded into graph", {
+          description: `"${wf.metadata.name}" loaded into the graph editor`,
+        });
+        handleClose();
+        return;
+      }
+
+      // Fetch fresh LoRA files to avoid stale closure after downloads
+      const freshLoraFiles = await refreshLoRAs();
+      const importedSettings = workflowToSettings(wf, freshLoraFiles);
+      const timelinePrompts = workflowTimelineToPrompts(wf.timeline);
+      const promptState = workflowToPromptState(wf);
+
+      // Persist the workflow's graph to localStorage so the graph editor can
+      // pick it up when refreshGraph() is called after import.
+      if (wf.graph?.nodes && wf.graph?.edges) {
+        try {
+          localStorage.setItem("scope:graph:backup", JSON.stringify(wf.graph));
+        } catch {
+          /* ignore */
+        }
+      }
+
+      onLoad(importedSettings, timelinePrompts, promptState);
+      trackEvent("workflow_imported", {
+        node_count: wf.graph?.nodes?.length ?? wf.pipelines.length,
+        source: "file",
+        surface: "app_chrome",
+      });
+      toast.success("Workflow loaded", {
+        description: `"${wf.metadata.name}" loaded into the interface`,
+      });
+      handleClose();
+    },
+    [onLoad, onLoadToGraph, handleClose, refreshLoRAs]
+  );
+
+  const handleLoad = useCallback(async () => {
+    if (!workflow) return;
+
+    const confirmed = await showConfirm(
+      "Load Workflow",
+      "Loading this workflow will replace your current settings and timeline. Continue?"
+    );
+    if (!confirmed) return;
+
+    // Close the dialog immediately so the user doesn't see the review
+    // content flash back while the async load is in progress.
+    const wf = workflow;
+    handleClose();
+    await loadWorkflowDirect(wf);
+  }, [workflow, showConfirm, loadWorkflowDirect, handleClose]);
 
   // -----------------------------------------------------------------------
   // File selection and validation
@@ -333,6 +425,16 @@ export function WorkflowImportDialog({
         setWorkflow(parsed);
 
         const resolution = await resolveWorkflow(parsed);
+
+        // If all dependencies are already resolved, skip the review dialog
+        if (
+          resolution.items.every(i => i.status === "ok") &&
+          resolution.warnings.length === 0
+        ) {
+          await loadWorkflowDirect(parsed);
+          return;
+        }
+
         setPlan(resolution);
 
         // Initialize dependency states from resolution items
@@ -362,7 +464,7 @@ export function WorkflowImportDialog({
         setValidating(false);
       }
     },
-    [initializeLoras, initializePlugins]
+    [initializeLoras, initializePlugins, loadWorkflowDirect]
   );
 
   const handleDrop = useCallback(
@@ -383,79 +485,6 @@ export function WorkflowImportDialog({
     },
     [handleFileSelect]
   );
-
-  // -----------------------------------------------------------------------
-  // Load workflow into the interface
-  // -----------------------------------------------------------------------
-
-  const handleLoad = useCallback(async () => {
-    if (!workflow) return;
-
-    const confirmed = await showConfirm(
-      "Load Workflow",
-      "Loading this workflow will replace your current settings and timeline. Continue?"
-    );
-    if (!confirmed) return;
-
-    if (onLoadToGraph) {
-      const freshLoraFiles = await refreshLoRAs();
-      const patchedWorkflow = {
-        ...workflow,
-        pipelines: workflow.pipelines.map(p => ({
-          ...p,
-          loras: p.loras.map(l => {
-            const resolved = freshLoraFiles.find(
-              f =>
-                extractFilename(f.path).toLowerCase() ===
-                l.filename.toLowerCase()
-            );
-            return resolved ? { ...l, filename: resolved.path } : l;
-          }),
-        })),
-      };
-      onLoadToGraph(patchedWorkflow);
-      trackEvent("workflow_imported", {
-        node_count: workflow.graph?.nodes?.length ?? workflow.pipelines.length,
-        source: "file",
-        surface: "app_chrome",
-      });
-      toast.success("Workflow loaded into graph", {
-        description: `"${workflow.metadata.name}" loaded into the graph editor`,
-      });
-      handleClose();
-      return;
-    }
-
-    // Fetch fresh LoRA files to avoid stale closure after downloads
-    const freshLoraFiles = await refreshLoRAs();
-    const importedSettings = workflowToSettings(workflow, freshLoraFiles);
-    const timelinePrompts = workflowTimelineToPrompts(workflow.timeline);
-    const promptState = workflowToPromptState(workflow);
-
-    // Persist the workflow's graph to localStorage so the graph editor can
-    // pick it up when refreshGraph() is called after import.
-    if (workflow.graph?.nodes && workflow.graph?.edges) {
-      try {
-        localStorage.setItem(
-          "scope:graph:backup",
-          JSON.stringify(workflow.graph)
-        );
-      } catch {
-        /* ignore */
-      }
-    }
-
-    onLoad(importedSettings, timelinePrompts, promptState);
-    trackEvent("workflow_imported", {
-      node_count: workflow.graph?.nodes?.length ?? workflow.pipelines.length,
-      source: "file",
-      surface: "app_chrome",
-    });
-    toast.success("Workflow loaded", {
-      description: `"${workflow.metadata.name}" loaded into the interface`,
-    });
-    handleClose();
-  }, [workflow, onLoad, onLoadToGraph, handleClose, showConfirm, refreshLoRAs]);
 
   // -----------------------------------------------------------------------
   // Derived state

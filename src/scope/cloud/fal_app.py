@@ -174,6 +174,10 @@ kafka_publisher: KafkaPublisher | None = None
 
 ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
 
+# Persistent shared directory for sample LoRAs (survives session cleanup)
+SHARED_LORA_DIR = "/data/models/lora"
+
+
 # Gates the "ready" WebSocket message until the previous session's cleanup completes.
 # Initialized lazily to ensure an event loop is available.
 _cleanup_event: asyncio.Event | None = None
@@ -474,6 +478,7 @@ class ScopeApp(fal.App, keep_alive=300):
         scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = ASSETS_DIR_PATH + "/logs"
         scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
         scope_env["DAYDREAM_SCOPE_LORA_DIR"] = ASSETS_DIR_PATH + "/lora"
+        scope_env["DAYDREAM_SCOPE_LORA_SHARED_DIR"] = "/data/models/lora"
         scope_env["UV_CACHE_DIR"] = "/tmp/uv-cache"
 
         # Ensure VERBOSE_LOGGING is not set so noisy third-party loggers

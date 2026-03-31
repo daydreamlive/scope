@@ -376,6 +376,7 @@ export interface LoRAFileInfo {
   folder?: string | null;
   sha256?: string | null;
   provenance?: LoRAProvenance | null;
+  read_only?: boolean;
 }
 
 export interface LoRAFilesResponse {

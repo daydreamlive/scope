@@ -195,7 +195,11 @@ def _check_plugin_version(
         )
 
 
-def _resolve_lora(lora: WorkflowLoRA, lora_dir: Path) -> ResolutionItem:
+def _resolve_lora(
+    lora: WorkflowLoRA,
+    lora_dir: Path,
+    shared_lora_dir: Path | None = None,
+) -> ResolutionItem:
     # Guard against path traversal: ensure the resolved path stays within lora_dir
     target = (lora_dir / lora.filename).resolve()
     if not target.is_relative_to(lora_dir.resolve()):
@@ -208,6 +212,15 @@ def _resolve_lora(lora: WorkflowLoRA, lora_dir: Path) -> ResolutionItem:
 
     if target.exists():
         return ResolutionItem(kind="lora", name=lora.filename, status="ok")
+
+    # Check the shared (persistent) LoRA directory as a fallback
+    if shared_lora_dir is not None:
+        shared_target = (shared_lora_dir / lora.filename).resolve()
+        if (
+            shared_target.is_relative_to(shared_lora_dir.resolve())
+            and shared_target.exists()
+        ):
+            return ResolutionItem(kind="lora", name=lora.filename, status="ok")
 
     prov = lora.provenance
     has_provenance = prov is not None and prov.source != "local"
@@ -261,6 +274,7 @@ def resolve_workflow(
     workflow: WorkflowRequest,
     plugin_manager: PluginManager,
     lora_dir: Path,
+    shared_lora_dir: Path | None = None,
 ) -> WorkflowResolutionPlan:
     """Resolve all dependencies for *workflow*.
 
@@ -292,7 +306,7 @@ def resolve_workflow(
             all_pipelines_ok = False
 
         for lora in wp.loras:
-            items.append(_resolve_lora(lora, lora_dir))
+            items.append(_resolve_lora(lora, lora_dir, shared_lora_dir))
 
     if workflow.min_scope_version:
         _check_min_scope_version(workflow.min_scope_version, warnings)
