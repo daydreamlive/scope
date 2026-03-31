@@ -99,8 +99,10 @@ class LivepeerClient:
         return (
             self.is_connected
             and self._media_connected
-            and self._media_publisher is not None
-            and self._media_subscriber_task is not None
+            and (
+                self._media_publisher is not None
+                or self._media_subscriber_task is not None
+            )
         )
 
     @property
@@ -276,18 +278,31 @@ class LivepeerClient:
             elif direction == "out":
                 output_url = url
 
-        if input_url is None or output_url is None:
-            raise RuntimeError("stream_started response missing in/out channels")
+        if input_url is None and output_url is None:
+            raise RuntimeError("stream_started response missing usable channels")
 
-        publisher = MediaPublish(input_url, config=MediaPublishConfig(fps=self._fps))
-        media_output = MediaOutput(output_url, start_seq=-1)
+        publisher: MediaPublish | None = None
+        if input_url is not None:
+            publisher = MediaPublish(
+                input_url, config=MediaPublishConfig(fps=self._fps)
+            )
+
+        media_output: MediaOutput | None = None
+        subscriber: asyncio.Task | None = None
+        if output_url is not None:
+            media_output = MediaOutput(output_url, start_seq=-1)
+            subscriber = asyncio.create_task(self._receive_loop(media_output))
+
         self._media_connected = True
-        subscriber = asyncio.create_task(self._receive_loop(media_output))
 
         self._media_publisher = publisher
         self._media_output = media_output
         self._media_subscriber_task = subscriber
-        logger.info("Media channels started")
+        logger.info(
+            "Media channels started (input=%s output=%s)",
+            bool(input_url),
+            bool(output_url),
+        )
 
     async def stop_media(self, current_task: asyncio.Task | None = None) -> None:
         """Stop media I/O while keeping signaling channels alive."""

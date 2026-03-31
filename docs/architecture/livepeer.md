@@ -80,14 +80,16 @@ The WebSocket application protocol uses three message categories:
 
 #### `create_channels` (runner → orchestrator)
 
-Sent when the runner receives a `start_stream` control message:
+Sent when the runner receives a `start_stream` control message.
+For video input mode, direction is bidirectional; for text input mode,
+direction is output-only:
 
 ```json
 {
   "type": "create_channels",
   "request_id": "<uuid>",
   "mime_type": "video/MP2T",
-  "direction": "bidirectional"
+  "direction": "bidirectional|out"
 }
 ```
 
@@ -130,10 +132,13 @@ Sent when the runner stops a stream:
 
 Directions are defined from the **Scope client** perspective:
 
-| Direction | Client behavior                | Runner behavior                 |
-| --------- | ------------------------------ | ------------------------------- |
-| `in`      | Publishes frames to this URL   | Reads / subscribes from this URL |
-| `out`     | Subscribes / receives from URL | Writes / publishes to this URL   |
+| Direction | Client behavior                | Runner behavior                   |
+| --------- | ------------------------------ | --------------------------------- |
+| `in`      | Publishes frames to this URL   | Reads / subscribes from this URL  |
+| `out`     | Subscribes / receives from URL | Writes / publishes to this URL    |
+
+Text-mode output-only startup can return only an `out` channel. Video-mode
+startup returns both `in` and `out`.
 
 ## Control Messages
 

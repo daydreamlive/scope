@@ -425,7 +425,7 @@ async def _handle_api_request(
         except Exception:
             data = response.text
 
-        logger.info(
+        logger.debug(
             "Completed API request id=%s status=%s binary=false",
             request_id,
             response.status_code,
@@ -520,14 +520,18 @@ async def _handle_control_message(
         new_channels_future: asyncio.Future[dict[str, Any]] = loop.create_future()
         session.ws_pending_responses[ws_request_id] = new_channels_future
 
-        # Ask the orchestrator to create stream channels. request_id is echoed back
-        # on a generic response so we can resolve the correct pending future.
+        # Ask the orchestrator to create stream channels. Text mode only needs
+        # output media, while video mode keeps bidirectional media.
+        input_mode = params.get("input_mode")
+        channels_direction = "out" if input_mode == "text" else "bidirectional"
+        # request_id is echoed back on a generic response so we can resolve the
+        # correct pending future.
         await session.ws.send_json(
             {
                 "type": "create_channels",
                 "request_id": ws_request_id,
                 "mime_type": "video/MP2T",
-                "direction": "bidirectional",
+                "direction": channels_direction,
             }
         )
 
@@ -586,13 +590,21 @@ async def _handle_control_message(
             elif direction == "in":
                 inbound_url = url
 
-        # Bidirectional streaming requires both in and out channels.
-        if not outbound_url or not inbound_url:
-            return {
-                "type": "error",
-                "request_id": request_id,
-                "error": "response did not include in and out URLs",
-            }
+        if input_mode == "text":
+            if not outbound_url:
+                return {
+                    "type": "error",
+                    "request_id": request_id,
+                    "error": "response did not include out URL",
+                }
+        else:
+            # Bidirectional streaming requires both in and out channels.
+            if not outbound_url or not inbound_url:
+                return {
+                    "type": "error",
+                    "request_id": request_id,
+                    "error": "response did not include in and out URLs",
+                }
 
         # Persist URLs so _stop_stream can send full URLs back in stop_stream and
         # so media loops know where to read/write frames for this stream session.
@@ -606,7 +618,10 @@ async def _handle_control_message(
         )
         session.frame_processor.start()
         session.media_stop_event.clear()
-        session.media_input_task = asyncio.create_task(_media_input_loop(session))
+        if input_mode != "text":
+            session.media_input_task = asyncio.create_task(_media_input_loop(session))
+        else:
+            session.media_input_task = None
         fps = float(params.get("fps", 30.0))
         session.media_output_task = asyncio.create_task(
             _media_output_loop(
@@ -615,7 +630,11 @@ async def _handle_control_message(
             )
         )
         session.media_stats_task = asyncio.create_task(_media_stats_loop(session))
-        logger.info("Started stream with pipeline_ids=%s", pipeline_ids)
+        logger.info(
+            "Started stream with pipeline_ids=%s direction=%s",
+            pipeline_ids,
+            channels_direction,
+        )
         return {
             "type": "stream_started",
             "request_id": request_id,
