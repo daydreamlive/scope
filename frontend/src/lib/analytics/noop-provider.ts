@@ -12,8 +12,6 @@ export class NoopProvider implements AnalyticsProvider {
   init(): void {}
   track(): void {}
   registerSuperProperties(): void {}
-  identify(): void {}
-  reset(): void {}
   optIn(): void {}
   optOut(): void {}
 }

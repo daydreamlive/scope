@@ -7,7 +7,6 @@ import { GeneralTab } from "./settings/GeneralTab";
 import { ReportBugDialog } from "./ReportBugDialog";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
 import { useLoRAsContext } from "@/contexts/LoRAsContext";
-import { trackEvent } from "@/lib/analytics";
 import { LoRAsTab } from "./settings/LoRAsTab";
 import { OscTab } from "./settings/OscTab";
 import { DmxTab } from "./settings/DmxTab";
@@ -55,10 +54,6 @@ export function SettingsDialog({
   useEffect(() => {
     if (open) {
       setActiveTab(initialTab);
-      trackEvent("settings_opened", {
-        entry_point: "dialog",
-        surface: "settings",
-      });
     }
   }, [open, initialTab]);
 
@@ -126,10 +121,6 @@ export function SettingsDialog({
           value={activeTab}
           onValueChange={value => {
             setActiveTab(value);
-            trackEvent("settings_section_viewed", {
-              section: value,
-              surface: "settings",
-            });
           }}
           orientation="vertical"
           className="flex items-stretch"

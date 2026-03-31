@@ -60,7 +60,6 @@ import {
   type SchemaComplexFieldContext,
 } from "./ComplexFields";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
-import { trackEvent, createDebouncedTracker } from "../lib/analytics";
 
 // Minimum dimension for most pipelines (will be overridden by pipeline-specific minDimension from schema)
 const DEFAULT_MIN_DIMENSION = 1;
@@ -412,9 +411,6 @@ export function SettingsPanel({
   nonLinearGraph = false,
   onClearGraph,
 }: SettingsPanelProps) {
-  // Debounced analytics tracker for continuous parameter changes
-  const [debouncedTrack] = useState(() => createDebouncedTracker(2000));
-
   // Local slider state management hooks
   const noiseScaleSlider = useLocalSliderValue(noiseScale, onNoiseScaleChange);
   const kvCacheAttentionBiasSlider = useLocalSliderValue(
@@ -442,11 +438,6 @@ export function SettingsPanel({
   const handlePipelineIdChange = (value: string) => {
     if (pipelines && value in pipelines) {
       onPipelineIdChange?.(value as PipelineId);
-      debouncedTrack(
-        "parameter_changed",
-        { parameter_type: "dropdown", surface: "performance_mode" },
-        "pipeline_id"
-      );
     }
   };
 
@@ -482,16 +473,9 @@ export function SettingsPanel({
     }
 
     // Always update the value (even if invalid)
-    const fromResolution = `${resolution.width}x${resolution.height}`;
     onResolutionChange?.({
       ...resolution,
       [dimension]: value,
-    });
-    const newRes = { ...resolution, [dimension]: value };
-    trackEvent("resolution_changed", {
-      from_resolution: fromResolution,
-      to_resolution: `${newRes.width}x${newRes.height}`,
-      surface: "performance_mode",
     });
   };
 
@@ -907,14 +891,6 @@ export function SettingsPanel({
                               }
                               onValueCommit={v => {
                                 vaceContextScaleSlider.handleValueCommit(v);
-                                debouncedTrack(
-                                  "parameter_changed",
-                                  {
-                                    parameter_type: "slider",
-                                    surface: "performance_mode",
-                                  },
-                                  "vace_context_scale"
-                                );
                               }}
                               min={0}
                               max={2}
@@ -1089,14 +1065,6 @@ export function SettingsPanel({
                           }
                           onValueCommit={v => {
                             kvCacheAttentionBiasSlider.handleValueCommit(v);
-                            debouncedTrack(
-                              "parameter_changed",
-                              {
-                                parameter_type: "slider",
-                                surface: "performance_mode",
-                              },
-                              "kv_cache_attention_bias"
-                            );
                           }}
                           min={0.01}
                           max={1.0}
@@ -1213,14 +1181,6 @@ export function SettingsPanel({
                         onValueChange={noiseScaleSlider.handleValueChange}
                         onValueCommit={v => {
                           noiseScaleSlider.handleValueCommit(v);
-                          debouncedTrack(
-                            "parameter_changed",
-                            {
-                              parameter_type: "slider",
-                              surface: "performance_mode",
-                            },
-                            "noise_scale"
-                          );
                         }}
                         min={0.0}
                         max={1.0}

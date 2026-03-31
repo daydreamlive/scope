@@ -1,32 +1,19 @@
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState, useCallback } from "react";
 import { BarChart3 } from "lucide-react";
-import { trackEvent } from "../../lib/analytics";
 
 interface TelemetryDisclosureProps {
   onAccept: () => void;
   onDecline: () => void;
   /** If set, auto-advances (accepts) after this many seconds. */
   autoAdvanceSeconds?: number;
-  /** Disclosure path for tracking. */
-  path: "cloud_wait" | "local_interstitial" | "existing_user_banner";
 }
 
 export function TelemetryDisclosure({
   onAccept,
   onDecline,
   autoAdvanceSeconds,
-  path,
 }: TelemetryDisclosureProps) {
   const [secondsLeft, setSecondsLeft] = useState(autoAdvanceSeconds ?? 0);
-  const shownTimeRef = useRef(Date.now());
-  const trackedShown = useRef(false);
-
-  // Track disclosure shown once
-  useEffect(() => {
-    if (trackedShown.current) return;
-    trackedShown.current = true;
-    trackEvent("telemetry_disclosure_shown", { path });
-  }, [path]);
 
   // Auto-advance countdown
   useEffect(() => {
@@ -46,12 +33,6 @@ export function TelemetryDisclosure({
   // Fire auto-advance when countdown hits 0 (defaults to decline for opt-in)
   useEffect(() => {
     if (autoAdvanceSeconds && secondsLeft === 0) {
-      trackEvent("telemetry_disclosure_responded", {
-        action: "declined",
-        path,
-        time_to_respond_ms: Date.now() - shownTimeRef.current,
-        auto_advanced: true,
-      });
       onDecline();
     }
     // Only run when secondsLeft changes to 0
@@ -59,24 +40,12 @@ export function TelemetryDisclosure({
   }, [secondsLeft]);
 
   const handleAccept = useCallback(() => {
-    trackEvent("telemetry_disclosure_responded", {
-      action: "accepted",
-      path,
-      time_to_respond_ms: Date.now() - shownTimeRef.current,
-      auto_advanced: false,
-    });
     onAccept();
-  }, [onAccept, path]);
+  }, [onAccept]);
 
   const handleDecline = useCallback(() => {
-    trackEvent("telemetry_disclosure_responded", {
-      action: "disabled",
-      path,
-      time_to_respond_ms: Date.now() - shownTimeRef.current,
-      auto_advanced: false,
-    });
     onDecline();
-  }, [onDecline, path]);
+  }, [onDecline]);
 
   const progressPct = autoAdvanceSeconds
     ? ((autoAdvanceSeconds - secondsLeft) / autoAdvanceSeconds) * 100

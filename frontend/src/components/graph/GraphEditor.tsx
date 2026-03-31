@@ -69,7 +69,6 @@ import { createDaydreamImportSession } from "../../lib/daydreamExport";
 import { openExternalUrl } from "../../lib/openExternal";
 import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
 import type { FlowNodeData } from "../../lib/graphUtils";
-import { trackEvent } from "../../lib/analytics";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -482,13 +481,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             c => c.type !== "remove" && c.type !== "add"
           );
         }
-        const removals = changes.filter(c => c.type === "remove");
-        if (removals.length > 0) {
-          trackEvent("node_removed", {
-            count: removals.length,
-            surface: "graph_mode",
-          });
-        }
         onNodesChange(changes);
       },
       [isStreaming, onNodesChange]
@@ -501,13 +493,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             c => c.type !== "remove" && c.type !== "add"
           );
         }
-        const removals = changes.filter(c => c.type === "remove");
-        if (removals.length > 0) {
-          trackEvent("connection_removed", {
-            count: removals.length,
-            surface: "graph_mode",
-          });
-        }
         onEdgesChange(changes);
       },
       [isStreaming, onEdgesChange]
@@ -517,7 +502,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       (...args: Parameters<typeof rawOnConnect>) => {
         if (isStreaming) return;
         rawOnConnect(...args);
-        trackEvent("connection_created", { surface: "graph_mode" });
       },
       [isStreaming, rawOnConnect]
     );
@@ -594,26 +578,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
 
     useParentValueBridge(navStackRef, navDepth, setNodes);
     useSubgraphEval(nodes, edges, setNodes, visible);
-
-    // Track graph mode enter/exit
-    const enteredAtRef = useRef<number | null>(null);
-    useEffect(() => {
-      if (visible) {
-        enteredAtRef.current = Date.now();
-        trackEvent("graph_mode_entered", {
-          node_count: nodes.length,
-          connection_count: edges.length,
-          surface: "graph_mode",
-        });
-      } else if (enteredAtRef.current) {
-        trackEvent("graph_mode_exited", {
-          duration_ms: Date.now() - enteredAtRef.current,
-          surface: "graph_mode",
-        });
-        enteredAtRef.current = null;
-      }
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [visible]);
 
     resolveRootGraphRef.current = getRootGraph;
     resetNavigationRef.current = resetStack;

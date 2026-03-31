@@ -6,7 +6,6 @@ import {
   workflowToGraphConfig,
   parseHandleId,
 } from "../../../../lib/graphUtils";
-import { trackEvent } from "../../../../lib/analytics";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 import type { PluginInfo } from "../../../../lib/api";
 import { resolveWorkflow } from "../../../../lib/api";
@@ -244,11 +243,6 @@ export function useGraphPersistence({
       const graphJson = JSON.stringify(graphConfig);
       lastSavedJsonRef.current = graphJson;
       saveGraphToLocalStorage(graphJson);
-      trackEvent("workflow_saved", {
-        node_count: graphConfig.nodes.length,
-        edge_count: graphConfig.edges.length,
-        surface: "graph_mode",
-      });
       setStatus(
         `Saved: ${graphConfig.nodes.length} nodes, ${graphConfig.edges.length} edges`
       );

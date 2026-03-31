@@ -6,7 +6,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "../ui/dialog";
-import { trackEvent, createDebouncedTracker } from "../../lib/analytics";
 
 interface AddNodeModalProps {
   open: boolean;
@@ -379,14 +378,6 @@ export function AddNodeModal({
 }: AddNodeModalProps) {
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
-  const [debouncedTrack] = useState(() => createDebouncedTracker(2000));
-
-  // Track when modal opens
-  useEffect(() => {
-    if (open) {
-      trackEvent("node_registry_opened", { surface: "graph_mode" });
-    }
-  }, [open]);
 
   const filteredItems = useMemo(() => {
     const lowerSearch = searchText.toLowerCase();
@@ -403,7 +394,6 @@ export function AddNodeModal({
 
   const handleSelect = (item: NodeCatalogItem) => {
     onSelectNodeType(item.type, item.subType);
-    trackEvent("node_added", { node_type: item.type, surface: "graph_mode" });
     onClose();
     setSearchText("");
     setActiveCategory("All");
@@ -447,16 +437,6 @@ export function AddNodeModal({
                 value={searchText}
                 onChange={e => {
                   setSearchText(e.target.value);
-                  if (e.target.value) {
-                    debouncedTrack(
-                      "node_registry_searched",
-                      {
-                        query_length: e.target.value.length,
-                        surface: "graph_mode",
-                      },
-                      "node_search"
-                    );
-                  }
                 }}
                 placeholder="Search for anything..."
                 className="flex-1 bg-transparent text-xs text-[#fafafa] placeholder:text-[#555] focus:outline-none"

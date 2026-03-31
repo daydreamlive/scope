@@ -18,15 +18,6 @@ export interface AnalyticsProvider {
   /** Register super properties attached to every subsequent event. */
   registerSuperProperties(properties: Record<string, unknown>): void;
 
-  /** Associate future events with an authenticated user. */
-  identify(
-    userId: string,
-    traits?: { displayName?: string | null; email?: string | null }
-  ): void;
-
-  /** Revert to anonymous tracking (on logout). */
-  reset(): void;
-
   /** Opt the user in to tracking. */
   optIn(): void;
 

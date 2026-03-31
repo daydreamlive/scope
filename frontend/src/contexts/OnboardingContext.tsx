@@ -72,7 +72,6 @@ function reducer(
   switch (action.type) {
     case "SELECT_INFERENCE_MODE":
       persistInferenceMode(action.mode);
-      trackEvent("onboarding_inference_selected", { mode: action.mode });
       // Set a sessionStorage flag so we can resume after a full-page auth
       // redirect. This is consumed exactly once in the LOADED handler.
       try {
@@ -95,11 +94,9 @@ function reducer(
       return { ...state, phase: "workflow" };
 
     case "COMPLETE_AUTH":
-      trackEvent("onboarding_auth_completed");
       return { ...state, phase: "cloud_connecting" };
 
     case "CLOUD_CONNECTED":
-      trackEvent("onboarding_cloud_connected");
       return { ...state, phase: "workflow" };
 
     case "SET_ONBOARDING_STYLE":
@@ -109,16 +106,9 @@ function reducer(
       return { ...state, selectedWorkflowId: action.workflowId };
 
     case "START_DOWNLOADING":
-      trackEvent("onboarding_workflow_selected", {
-        workflowId: state.selectedWorkflowId,
-      });
       return { ...state, phase: "downloading" };
 
     case "DOWNLOAD_FAILED":
-      trackEvent("onboarding_workflow_download_failed", {
-        workflowId: state.selectedWorkflowId,
-        failure_count: state.downloadFailures + 1,
-      });
       return {
         ...state,
         phase: "workflow",
@@ -126,21 +116,16 @@ function reducer(
       };
 
     case "WORKFLOW_READY":
-      trackEvent("onboarding_workflow_downloaded", {
-        workflowId: state.selectedWorkflowId,
-      });
       trackEvent("onboarding_completed");
       markOnboardingCompleted();
       return { ...state, phase: "idle" };
 
     case "START_FROM_SCRATCH":
-      trackEvent("onboarding_started_from_scratch");
       trackEvent("onboarding_completed");
       markOnboardingCompleted();
       return { ...state, phase: "idle", selectedWorkflowId: null };
 
     case "IMPORT_WORKFLOW_READY":
-      trackEvent("onboarding_imported_workflow");
       trackEvent("onboarding_completed");
       markOnboardingCompleted();
       return { ...state, phase: "idle" };
@@ -246,9 +231,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         completed: status.completed,
         onboardingStyle: status.onboarding_style ?? null,
       });
-      if (!status.completed) {
-        trackEvent("onboarding_started", { is_first_launch: true });
-      }
     });
   }, []);
 

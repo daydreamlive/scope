@@ -665,18 +665,6 @@ export function StreamPage() {
     isStreaming,
   });
 
-  // Periodic fps_reported event every 60s during active generation
-  useEffect(() => {
-    if (!isStreaming) return;
-    const interval = setInterval(() => {
-      trackEvent("fps_reported", {
-        fps: webrtcStats.fps,
-        surface: graphMode ? "graph_mode" : "performance_mode",
-      });
-    }, 60_000);
-    return () => clearInterval(interval);
-  }, [isStreaming, webrtcStats.fps, graphMode]);
-
   // Video container ref for controller input pointer lock
   const videoContainerRef = useRef<HTMLDivElement>(null);
 
@@ -2854,13 +2842,7 @@ export function StreamPage() {
               }
             }
             // Graph → Perform: just switch mode (modes are independent)
-            setGraphMode(prev => {
-              const newMode = !prev;
-              trackEvent("mode_switched", {
-                to_mode: newMode ? "graph_mode" : "performance_mode",
-              });
-              return newMode;
-            });
+            setGraphMode(prev => !prev);
           }}
           onLoadWorkflow={data => {
             setPreloadedWorkflow(data as ScopeWorkflow);

@@ -158,7 +158,6 @@ export function OnboardingOverlay({
           <TelemetryDisclosure
             onAccept={handleTelemetryAccept}
             onDecline={handleTelemetryDecline}
-            path="local_interstitial"
           />
         )}
 

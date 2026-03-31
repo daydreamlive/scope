@@ -1,8 +1,3 @@
-import {
-  identifyUser as telemetryIdentify,
-  track as telemetryTrack,
-} from "./telemetry";
-
 /**
  * Check if running in Electron desktop app
  */
@@ -174,10 +169,6 @@ export async function saveDaydreamAuth(
       ...profile,
     };
     setAuthData(authData);
-    if (userId) {
-      telemetryIdentify(userId, authData.displayName, authData.email);
-      telemetryTrack("user_logged_in", { source: "scope" });
-    }
   } catch (e) {
     // If profile fetch fails, save auth with defaults
     console.error("Failed to fetch user profile during auth:", e);
@@ -211,7 +202,6 @@ export async function refreshUserProfile(): Promise<void> {
  * Clear the stored Daydream auth credentials
  */
 export function clearDaydreamAuth(): void {
-  telemetryTrack("user_logged_out", { source: "scope" });
   localStorage.removeItem(AUTH_STORAGE_KEY);
   window.dispatchEvent(new CustomEvent("daydream-auth-change"));
 }

@@ -4,7 +4,6 @@ import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
 import { openExternalUrl } from "@/lib/openExternal";
 import { updateOscSettings, type OscStatusResponse } from "@/lib/api";
-import { trackEvent } from "../../lib/analytics";
 
 interface OscTabProps {
   isActive: boolean;
@@ -31,7 +30,6 @@ export function OscTab({ isActive }: OscTabProps) {
 
   useEffect(() => {
     if (isActive) {
-      trackEvent("io_panel_opened", { io_type: "osc", surface: "io_config" });
       fetchStatus();
     }
   }, [isActive, fetchStatus]);
@@ -45,12 +43,6 @@ export function OscTab({ isActive }: OscTabProps) {
     try {
       const updated = await updateOscSettings({ log_all_messages: checked });
       setStatus(prev => (prev ? { ...prev, ...updated } : prev));
-      trackEvent("io_config_changed", {
-        io_type: "osc",
-        setting: "log_all_messages",
-        value: checked,
-        surface: "io_config",
-      });
     } catch (err) {
       console.error("Failed to update OSC logging setting:", err);
     } finally {
