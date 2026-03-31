@@ -749,7 +749,7 @@ class PipelineManager:
                     filename = Path(path_str).name
 
             if needs_rewrite:
-                new_path = str(lora_dir / filename)
+                new_path = f"{lora_dir.as_posix()}/{filename}"
                 logger.warning(
                     "_sanitize_lora_paths: LoRA path '%s' appears to be a "
                     "local absolute path from a different OS or filesystem. "

@@ -359,11 +359,13 @@ class TestSanitizeLoRAPaths:
         ):
             with patch("scope.server.models_config.get_lora_dir") as mock_dir:
                 from pathlib import Path
+
                 mock_dir.return_value = Path(lora_dir)
                 return PipelineManager._sanitize_lora_paths(loras)
 
     def test_windows_drive_path_is_rewritten(self):
         from pathlib import Path
+
         with patch("scope.server.models_config.get_lora_dir") as mock_dir:
             mock_dir.return_value = Path("/data/models/lora")
             loras = [
@@ -380,22 +382,35 @@ class TestSanitizeLoRAPaths:
 
     def test_windows_forward_slash_drive_path_rewritten(self):
         from pathlib import Path
+
         with patch("scope.server.models_config.get_lora_dir") as mock_dir:
             mock_dir.return_value = Path("/data/models/lora")
-            loras = [{"path": "C:/Users/RONDO/.daydream-scope/models/lora/bar.safetensors", "scale": 1.0}]
+            loras = [
+                {
+                    "path": "C:/Users/RONDO/.daydream-scope/models/lora/bar.safetensors",
+                    "scale": 1.0,
+                }
+            ]
             result = PipelineManager._sanitize_lora_paths(loras)
         assert result[0]["path"] == "/data/models/lora/bar.safetensors"
 
     def test_unix_path_outside_lora_dir_is_rewritten(self):
         from pathlib import Path
+
         with patch("scope.server.models_config.get_lora_dir") as mock_dir:
             mock_dir.return_value = Path("/data/models/lora")
-            loras = [{"path": "/home/user/.daydream-scope/models/lora/baz.safetensors", "scale": 1.0}]
+            loras = [
+                {
+                    "path": "/home/user/.daydream-scope/models/lora/baz.safetensors",
+                    "scale": 1.0,
+                }
+            ]
             result = PipelineManager._sanitize_lora_paths(loras)
         assert result[0]["path"] == "/data/models/lora/baz.safetensors"
 
     def test_relative_path_unchanged(self):
         from pathlib import Path
+
         with patch("scope.server.models_config.get_lora_dir") as mock_dir:
             mock_dir.return_value = Path("/data/models/lora")
             loras = [{"path": "my-lora.safetensors", "scale": 1.0}]
@@ -404,6 +419,7 @@ class TestSanitizeLoRAPaths:
 
     def test_already_valid_abs_path_unchanged(self):
         from pathlib import Path
+
         with patch("scope.server.models_config.get_lora_dir") as mock_dir:
             mock_dir.return_value = Path("/data/models/lora")
             loras = [{"path": "/data/models/lora/good.safetensors", "scale": 1.0}]
@@ -412,6 +428,7 @@ class TestSanitizeLoRAPaths:
 
     def test_empty_path_passes_through(self):
         from pathlib import Path
+
         with patch("scope.server.models_config.get_lora_dir") as mock_dir:
             mock_dir.return_value = Path("/data/models/lora")
             loras = [{"path": "", "scale": 1.0}]
@@ -420,6 +437,7 @@ class TestSanitizeLoRAPaths:
 
     def test_multiple_loras_mixed(self):
         from pathlib import Path
+
         with patch("scope.server.models_config.get_lora_dir") as mock_dir:
             mock_dir.return_value = Path("/data/models/lora")
             loras = [
