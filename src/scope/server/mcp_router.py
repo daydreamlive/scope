@@ -247,3 +247,66 @@ async def stop_stream(
     except Exception as e:
         logger.error(f"Error stopping headless session: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+# ---------------------------------------------------------------------------
+# Recording (headless sessions)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/session/recording/start")
+async def start_headless_recording(
+    webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
+):
+    """Start recording the headless session output to MP4."""
+    session = webrtc_manager.headless_session
+    if not session:
+        raise HTTPException(status_code=404, detail="No active headless session")
+    if session.is_recording:
+        return {"status": "already_recording"}
+    session.start_recording()
+    return {"status": "started"}
+
+
+@router.post("/session/recording/stop")
+async def stop_headless_recording(
+    webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
+):
+    """Stop recording the headless session and return the recording file path."""
+    import asyncio
+
+    session = webrtc_manager.headless_session
+    if not session:
+        raise HTTPException(status_code=404, detail="No active headless session")
+    if not session.is_recording:
+        return {"status": "not_recording"}
+    file_path = await asyncio.to_thread(session.stop_recording)
+    return {"status": "stopped", "file_path": file_path}
+
+
+@router.get("/session/recording/download")
+async def download_headless_recording(
+    webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
+):
+    """Stop recording (if active) and download the MP4 file."""
+    from datetime import datetime
+    from pathlib import Path
+
+    from fastapi.responses import FileResponse
+
+    session = webrtc_manager.headless_session
+    if not session:
+        raise HTTPException(status_code=404, detail="No active headless session")
+
+    download_file = session.download_recording()
+    if not download_file or not Path(download_file).exists():
+        raise HTTPException(status_code=404, detail="No recording available")
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"recording-{timestamp}.mp4"
+
+    return FileResponse(
+        download_file,
+        media_type="video/mp4",
+        filename=filename,
+    )
