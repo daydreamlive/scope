@@ -25,6 +25,7 @@ interface GraphToolbarProps {
   isStreaming: boolean;
   isConnecting: boolean;
   isLoading: boolean;
+  loadingStage?: string | null;
   status: string;
   onStartStream?: () => void;
   onStopStream?: () => void;
@@ -40,6 +41,7 @@ export function GraphToolbar({
   isStreaming,
   isConnecting,
   isLoading,
+  loadingStage,
   status,
   onStartStream,
   onStopStream,
@@ -116,8 +118,25 @@ export function GraphToolbar({
       {/* ── Spacer ── */}
       <div className="flex-1" />
 
+      {/* ── Loading stage ── */}
+      {isLoading && (
+        <div className="flex items-center gap-2 mr-3 self-center">
+          <span
+            className="text-xs text-[#8c8c8d] animate-fade-in"
+            key={loadingStage}
+          >
+            {loadingStage || "Loading pipeline…"}
+          </span>
+          <span className="text-[10px] text-[#b0b0b0]">
+            Models may take up to a minute to load, only on the first run.
+          </span>
+        </div>
+      )}
+
       {/* ── Status text ── */}
-      {status && <span className={NODE_TOKENS.toolbarStatus}>{status}</span>}
+      {!isLoading && status && (
+        <span className={NODE_TOKENS.toolbarStatus}>{status}</span>
+      )}
 
       {/* ── Right: Hero Play / Stop button ── */}
       <button

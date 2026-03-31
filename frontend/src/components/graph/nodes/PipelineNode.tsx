@@ -325,7 +325,9 @@ export function PipelineNode({
             );
           })}
 
-          {/* List-number parameters as individual sliders */}
+          {/* List-number parameters as individual sliders.
+             These are always editable during streaming (e.g. denoising_steps
+             is runtime-modifiable despite is_load_param in the schema). */}
           {listParams.map(param => {
             const isConnected = isParamConnected(param.name);
             const rawValue = parameterValues[param.name] ?? param.defaultValue;
@@ -334,8 +336,6 @@ export function PipelineNode({
               : Array.isArray(param.defaultValue)
                 ? param.defaultValue
                 : [];
-            const isLoadParam = param.isLoadParam === true;
-            const disabled = isStreaming && isLoadParam;
 
             return (
               <div
@@ -370,7 +370,6 @@ export function PipelineNode({
                           }}
                           min={0}
                           max={1000}
-                          disabled={disabled}
                         />
                       </NodeParamRow>
                     ))}

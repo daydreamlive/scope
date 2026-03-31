@@ -2885,6 +2885,7 @@ export function StreamPage() {
             isStreaming={isStreaming}
             isConnecting={isConnecting || isCloudConnecting}
             isLoading={isPipelineLoading || isDownloading}
+            loadingStage={pipelineLoadingStage}
             onNodeParameterChange={(nodeId, key, value) => {
               sendParameterUpdate({ node_id: nodeId, [key]: value });
             }}
@@ -3425,6 +3426,7 @@ export function StreamPage() {
           onLoad={handleWorkflowLoad}
           onLoadToGraph={graphMode ? handleWorkflowLoadToGraph : undefined}
           initialWorkflow={preloadedWorkflow}
+          cloudConnected={isCloudMode}
         />
 
         {/* Onboarding overlay (full-screen, shown on first launch) */}

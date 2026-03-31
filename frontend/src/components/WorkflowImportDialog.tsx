@@ -74,6 +74,8 @@ interface WorkflowImportDialogProps {
   /** When set, the dialog calls this instead of onLoad (used for graph-mode import). */
   onLoadToGraph?: (workflow: ScopeWorkflow) => void;
   initialWorkflow?: ScopeWorkflow | null;
+  /** When true, API key warnings for LoRA downloads are hidden (cloud handles auth). */
+  cloudConnected?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -86,6 +88,7 @@ export function WorkflowImportDialog({
   onLoad,
   onLoadToGraph,
   initialWorkflow,
+  cloudConnected = false,
 }: WorkflowImportDialogProps) {
   const [step, setStep] = useState<ImportStep>("select");
   const [workflow, setWorkflow] = useState<ScopeWorkflow | null>(null);
@@ -169,15 +172,17 @@ export function WorkflowImportDialog({
     }
   }, []);
 
-  // Fetch API keys when entering review step
+  // Fetch API keys when entering review step (skip for cloud — cloud handles auth)
   useEffect(() => {
-    if (step === "review") {
+    if (step === "review" && !cloudConnected) {
       fetchApiKeys();
     }
-  }, [step, fetchApiKeys]);
+  }, [step, fetchApiKeys, cloudConnected]);
 
-  // Services that need a key: missing LoRAs hosted on a service without a key
+  // Services that need a key: missing LoRAs hosted on a service without a key.
+  // On cloud inference the server manages credentials, so skip the warning.
   const missingKeyServices = useMemo(() => {
+    if (cloudConnected) return [];
     if (!plan || !workflow || apiKeys.length === 0) return [];
     const neededSources = new Set<string>();
     for (const item of plan.items) {
@@ -193,7 +198,7 @@ export function WorkflowImportDialog({
       }
     }
     return apiKeys.filter(k => neededSources.has(k.id) && !k.is_set);
-  }, [plan, workflow, apiKeys]);
+  }, [cloudConnected, plan, workflow, apiKeys]);
 
   const handleSaveApiKey = useCallback(
     async (keyInfo: ApiKeyInfo) => {

@@ -274,10 +274,13 @@ export function VideoOutput({
             </p>
           </div>
         ) : isPipelineLoading ? (
-          <div className="text-center text-muted-foreground text-lg">
+          <div className="text-center text-muted-foreground">
             <Spinner size={24} className="mx-auto mb-3" />
-            <p key={pipelineLoadingStage} className="animate-fade-in">
+            <p key={pipelineLoadingStage} className="animate-fade-in text-lg">
               {pipelineLoadingStage || "Loading pipeline..."}
+            </p>
+            <p className="text-xs text-muted-foreground/80 mt-3 max-w-[280px] mx-auto leading-relaxed">
+              Models may take up to a minute to load, only on the first run.
             </p>
           </div>
         ) : isConnecting ? (
