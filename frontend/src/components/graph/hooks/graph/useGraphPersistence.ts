@@ -307,6 +307,7 @@ export function useGraphPersistence({
         } else {
           const result = workflowToGraphConfig(workflow, {
             availableLoRAs: loraFiles,
+            portsMap,
           });
           graphConfig = result.graphConfig as Parameters<
             typeof graphConfigToFlow

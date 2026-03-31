@@ -1268,12 +1268,16 @@ export function stripUIFields(graph: GraphConfig): GraphConfig {
 // Import: ScopeWorkflow (without graph field) -> GraphConfig
 // ---------------------------------------------------------------------------
 
+const VACE_PORTS = ["vace_input_frames", "vace_input_masks"];
+
 /**
- * Build a linear GraphConfig from a ScopeWorkflow that has no embedded graph.
+ * Build a GraphConfig from a ScopeWorkflow that has no embedded graph.
  *
- * Creates: source -> pipeline1 -> pipeline2 -> ... -> sink
- * with automatic horizontal layout. Pipeline params and prompts are stored
- * in the returned `nodeParams` map (keyed by node ID).
+ * For simple chains this produces: source -> pipeline1 -> pipeline2 -> ... -> sink.
+ * When a preprocessor declares VACE-specific output ports (e.g. yolo_mask with
+ * vace_input_frames + vace_input_masks), the topology fans out so the source
+ * feeds both the preprocessor and the main pipeline, and the preprocessor
+ * connects to the main pipeline via its VACE ports.
  */
 export function workflowToGraphConfig(
   workflow: {
@@ -1290,7 +1294,10 @@ export function workflowToGraphConfig(
     prompts?: Array<{ text: string; weight: number }> | null;
     timeline?: { entries: Array<{ prompts: Array<{ text: string }> }> } | null;
   },
-  options?: { availableLoRAs?: LoRAFileInfo[] }
+  options?: {
+    availableLoRAs?: LoRAFileInfo[];
+    portsMap?: Record<string, { inputs: string[]; outputs: string[] }>;
+  }
 ): {
   graphConfig: GraphConfig;
   nodeParams: Record<string, Record<string, unknown>>;
@@ -1309,43 +1316,150 @@ export function workflowToGraphConfig(
   nodes.push({ id: sourceId, type: "source", source_mode: "video", x, y: Y });
   x += COLUMN_GAP;
 
-  let prevNodeId = sourceId;
-  let loraIdx = 0;
   const usedIds = new Set<string>([sourceId]);
 
   // Determine main pipeline before the loop so we can track its generated nodeId
   const mainPipeline =
     workflow.pipelines.find(p => p.role === "main") ?? workflow.pipelines[0];
-  let mainPipelineNodeId: string | undefined;
+
+  const mainIsVaceTarget =
+    mainPipeline.params?.vace_enabled === true &&
+    mainPipeline.params?.vace_use_input_video === true;
+
+  // -- Pass 1: create all pipeline nodes and collect metadata ----------------
+  interface PipelineNodeMeta {
+    wp: (typeof workflow.pipelines)[number];
+    nodeId: string;
+    x: number;
+    y: number;
+    isMain: boolean;
+    isVaceTarget: boolean;
+    outputPorts: string[];
+  }
+  const pipelineMetas: PipelineNodeMeta[] = [];
 
   for (const wp of workflow.pipelines) {
     const nodeId = generateNodeId(wp.pipeline_id, usedIds);
     usedIds.add(nodeId);
 
-    if (wp === mainPipeline) {
-      mainPipelineNodeId = nodeId;
-    }
-    nodes.push({
-      id: nodeId,
-      type: "pipeline",
-      pipeline_id: wp.pipeline_id,
-      x,
-      y: Y,
-    });
-
+    const isMain = wp === mainPipeline;
     const isVaceTarget =
       wp.params?.vace_enabled === true &&
       wp.params?.vace_use_input_video === true;
-    edges.push({
-      from: prevNodeId,
-      from_port: "video",
-      to_node: nodeId,
-      to_port: isVaceTarget ? "vace_input_frames" : "video",
-      kind: "stream",
+    const outputPorts = options?.portsMap?.[wp.pipeline_id]?.outputs ?? [
+      "video",
+    ];
+
+    pipelineMetas.push({
+      wp,
+      nodeId,
+      x,
+      y: Y,
+      isMain,
+      isVaceTarget,
+      outputPorts,
+    });
+    x += COLUMN_GAP;
+  }
+
+  // Identify preprocessors that should use VACE multi-port routing:
+  // the preprocessor must declare VACE output ports AND the main pipeline
+  // must be a VACE target.
+  const vaceRoutedPreprocessors = new Set<string>();
+  if (mainIsVaceTarget) {
+    for (const meta of pipelineMetas) {
+      if (
+        meta.wp.role === "preprocessor" &&
+        VACE_PORTS.some(p => meta.outputPorts.includes(p))
+      ) {
+        vaceRoutedPreprocessors.add(meta.nodeId);
+      }
+    }
+  }
+
+  const mainMeta = pipelineMetas.find(m => m.isMain);
+  // When VACE multi-port preprocessors are present, offset them below the main
+  // pipeline row so the fan-out layout is visually clear.
+  if (vaceRoutedPreprocessors.size > 0) {
+    for (const meta of pipelineMetas) {
+      if (vaceRoutedPreprocessors.has(meta.nodeId)) {
+        meta.y = Y + 300;
+      }
+    }
+  }
+
+  // -- Pass 1b: create GraphNode entries ------------------------------------
+  for (const meta of pipelineMetas) {
+    nodes.push({
+      id: meta.nodeId,
+      type: "pipeline",
+      pipeline_id: meta.wp.pipeline_id,
+      x: meta.x,
+      y: meta.y,
     });
 
-    if (wp.params && Object.keys(wp.params).length > 0) {
-      nodeParams[nodeId] = { ...wp.params };
+    if (meta.wp.params && Object.keys(meta.wp.params).length > 0) {
+      nodeParams[meta.nodeId] = { ...meta.wp.params };
+    }
+  }
+
+  // -- Pass 2: create edges with full topology context ----------------------
+  let prevNodeId = sourceId;
+  let loraIdx = 0;
+
+  // Track whether we already added a source -> main edge (to avoid duplicates
+  // when multiple preprocessors use VACE routing).
+  let addedSourceToMain = false;
+
+  for (const meta of pipelineMetas) {
+    const { wp, nodeId } = meta;
+
+    if (vaceRoutedPreprocessors.has(nodeId) && mainMeta) {
+      // VACE multi-port preprocessor: fan-out topology
+      // 1) source -> preprocessor (video -> video)
+      edges.push({
+        from: sourceId,
+        from_port: "video",
+        to_node: nodeId,
+        to_port: "video",
+        kind: "stream",
+      });
+      // 2) source -> main pipeline (video -> video) -- only once
+      if (!addedSourceToMain) {
+        edges.push({
+          from: sourceId,
+          from_port: "video",
+          to_node: mainMeta.nodeId,
+          to_port: "video",
+          kind: "stream",
+        });
+        addedSourceToMain = true;
+      }
+      // 3) preprocessor -> main pipeline for each VACE output port
+      for (const port of VACE_PORTS) {
+        if (meta.outputPorts.includes(port)) {
+          edges.push({
+            from: nodeId,
+            from_port: port,
+            to_node: mainMeta.nodeId,
+            to_port: port,
+            kind: "stream",
+          });
+        }
+      }
+      // Don't update prevNodeId -- the main pipeline is fed by source + preprocessor,
+      // not linearly from this preprocessor's video output.
+    } else {
+      // Standard linear edge from the previous node
+      const toPort = meta.isVaceTarget ? "vace_input_frames" : "video";
+      edges.push({
+        from: prevNodeId,
+        from_port: "video",
+        to_node: nodeId,
+        to_port: toPort,
+        kind: "stream",
+      });
+      prevNodeId = nodeId;
     }
 
     // Create LoRA node for pipelines that have LoRAs configured
@@ -1363,7 +1477,7 @@ export function workflowToGraphConfig(
       uiNodes.push({
         id: loraNodeId,
         type: "lora",
-        position: { x: x - 180, y: Y - 160 },
+        position: { x: meta.x - 180, y: meta.y - 160 },
         data: {
           label: "LoRA",
           nodeType: "lora",
@@ -1381,9 +1495,6 @@ export function workflowToGraphConfig(
         targetHandle: buildHandleId("param", "__loras"),
       });
     }
-
-    prevNodeId = nodeId;
-    x += COLUMN_GAP;
   }
 
   // Sink node
@@ -1398,6 +1509,7 @@ export function workflowToGraphConfig(
   });
 
   // Assign prompt to the main pipeline node (using tracked nodeId, not pipeline_id)
+  const mainPipelineNodeId = mainMeta?.nodeId;
   if (mainPipelineNodeId) {
     const promptText =
       workflow.timeline?.entries?.[0]?.prompts?.[0]?.text ??
