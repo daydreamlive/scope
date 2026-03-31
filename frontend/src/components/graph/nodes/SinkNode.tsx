@@ -28,9 +28,6 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   const [isMuted, setIsMuted] = useState(true);
   const [hasAudioTrack, setHasAudioTrack] = useState(false);
   const [hasVideoTrack, setHasVideoTrack] = useState(false);
-  const [showOverlay, setShowOverlay] = useState(false);
-  const [isFadingOut, setIsFadingOut] = useState(false);
-  const overlayTimeoutRef = useRef<number | null>(null);
 
   const handleResize = useCallback(() => {
     const v = videoRef.current;
@@ -62,39 +59,17 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
     }
   }, [isMuted]);
 
-  useEffect(() => {
-    return () => {
-      if (overlayTimeoutRef.current) {
-        clearTimeout(overlayTimeoutRef.current);
-      }
-    };
-  }, []);
-
   const toggleMute = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setIsMuted(prev => !prev);
   }, []);
 
-  const handleVideoClick = useCallback(
+  const handlePlayPause = useCallback(
     (e: React.MouseEvent) => {
       e.stopPropagation();
-      if (!onPlayPauseToggle || !remoteStream) return;
-      onPlayPauseToggle();
-
-      setShowOverlay(true);
-      setIsFadingOut(false);
-      if (overlayTimeoutRef.current) {
-        clearTimeout(overlayTimeoutRef.current);
-      }
-      requestAnimationFrame(() => {
-        setIsFadingOut(true);
-      });
-      overlayTimeoutRef.current = window.setTimeout(() => {
-        setShowOverlay(false);
-        setIsFadingOut(false);
-      }, 400);
+      if (onPlayPauseToggle) onPlayPauseToggle();
     },
-    [onPlayPauseToggle, remoteStream]
+    [onPlayPauseToggle]
   );
 
   const handleY = HEADER_H + BODY_PAD + PREVIEW_H / 2;
@@ -110,8 +85,7 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
       {!collapsed && (
         <div className="p-2 flex-1 min-h-0 flex flex-col">
           <div
-            className="relative rounded-md overflow-hidden bg-black/50 flex-1 min-h-[60px] cursor-pointer"
-            onClick={handleVideoClick}
+            className="relative rounded-md overflow-hidden bg-black/50 flex-1 min-h-[60px]"
             onPointerDown={e => e.stopPropagation()}
           >
             {remoteStream ? (
@@ -166,27 +140,36 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
                 No output stream
               </div>
             )}
-            {showOverlay && (
-              <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-                <div
-                  className={`bg-black/50 rounded-full p-2 transition-all duration-400 ${
-                    isFadingOut
-                      ? "opacity-0 scale-150"
-                      : "opacity-100 scale-100"
-                  }`}
-                >
-                  {isPlaying ? (
-                    <Pause className="h-5 w-5 text-white" />
-                  ) : (
-                    <Play className="h-5 w-5 text-white" />
-                  )}
-                </div>
+            {hasVideoTrack && (
+              <div className="absolute bottom-1 right-1 flex items-center gap-0.5">
+                {remoteStream && onPlayPauseToggle && (
+                  <button
+                    onClick={handlePlayPause}
+                    onPointerDown={e => e.stopPropagation()}
+                    className="flex items-center justify-center bg-black/60 px-1 rounded cursor-pointer"
+                    style={{ height: 16 }}
+                    title={isPlaying ? "Pause" : "Play"}
+                  >
+                    {isPlaying ? (
+                      <Pause className="h-2.5 w-2.5 text-white" />
+                    ) : (
+                      <Play className="h-2.5 w-2.5 text-white" />
+                    )}
+                  </button>
+                )}
+                {videoSize && (
+                  <span
+                    className="text-[9px] text-[#8c8c8d] bg-black/60 px-1 rounded leading-none"
+                    style={{
+                      height: 16,
+                      display: "flex",
+                      alignItems: "center",
+                    }}
+                  >
+                    {videoSize.width}&times;{videoSize.height}
+                  </span>
+                )}
               </div>
-            )}
-            {videoSize && hasVideoTrack && (
-              <span className="absolute bottom-1 right-1 text-[9px] text-[#8c8c8d] bg-black/60 px-1 rounded">
-                {videoSize.width}&times;{videoSize.height}
-              </span>
             )}
             {hasAudioTrack && (
               <button
