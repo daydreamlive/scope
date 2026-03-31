@@ -62,6 +62,7 @@ dependencies = [
     "mcp>=1.0.0",
     "livepeer-gateway",
     "protobuf>=5.27.0",
+    "websockets>=15.0",
 ]
 
 [project.optional-dependencies]
