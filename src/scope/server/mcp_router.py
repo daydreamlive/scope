@@ -13,6 +13,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
+    from .cloud_connection import CloudConnectionManager
     from .pipeline_manager import PipelineManager
     from .webrtc import WebRTCManager
 
@@ -38,6 +39,12 @@ def _get_pipeline_manager() -> "PipelineManager":
     from .app import pipeline_manager
 
     return pipeline_manager
+
+
+def _get_cloud_manager() -> "CloudConnectionManager":
+    from .app import cloud_connection_manager
+
+    return cloud_connection_manager
 
 
 # ---------------------------------------------------------------------------
@@ -89,18 +96,21 @@ async def get_session_parameters(
 async def capture_frame(
     webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
     quality: int = Query(default=85, ge=1, le=100),
+    sink_node_id: str | None = Query(default=None),
 ):
     """Capture the current pipeline output frame as a JPEG image.
 
     Returns the most recent rendered frame from the active session
-    (WebRTC or headless).
+    (WebRTC or headless). When sink_node_id is provided, captures from
+    that specific sink node in a multi-sink graph.
     """
-    frame = webrtc_manager.get_last_frame()
+    frame = webrtc_manager.get_last_frame(sink_node_id=sink_node_id)
     if frame is None:
-        raise HTTPException(
-            status_code=404,
-            detail="No frame available (no active session or pipeline not running)",
-        )
+        detail = "No frame available"
+        if sink_node_id:
+            detail += f" for sink node '{sink_node_id}'"
+        detail += " (no active session or pipeline not running)"
+        raise HTTPException(status_code=404, detail=detail)
 
     try:
         from PIL import Image
@@ -171,10 +181,120 @@ async def get_session_metrics(
 
 
 class StartStreamRequest(BaseModel):
-    pipeline_id: str
+    pipeline_id: str | None = None
     input_mode: str = "text"
     prompts: list[dict] | None = None
     input_source: dict | None = None
+    graph: dict | None = None
+
+
+def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
+    """Wire cloud WebRTC extra output handlers to FrameProcessor queues.
+
+    In headless cloud mode there is no CloudTrack to do this wiring, so we
+    do it here after start_webrtc + FrameProcessor.start().
+
+    The cloud sends multiple video tracks:
+    - Track 0: primary sink (goes to cloud_manager's main callback → FP._cloud_output_queue)
+    - Track 1..N: extra sinks → FP._sink_queues_by_node
+    - Track N+1..M: record nodes → FP.recording.record_queues
+    """
+    import queue
+
+    from av import VideoFrame
+
+    webrtc_client = cloud_manager._webrtc_client
+    if webrtc_client is None:
+        return
+
+    sink_ids = graph_config.get_sink_node_ids()
+    record_ids = graph_config.get_record_node_ids()
+
+    # Create per-sink queues in the FrameProcessor so HeadlessSession
+    # can read from them via get_from_sink()
+    for sid in sink_ids:
+        if sid not in frame_processor._sink_queues_by_node:
+            frame_processor._sink_queues_by_node[sid] = queue.Queue(maxsize=2)
+
+    # The first sink is the primary (track 0) — its frames come through
+    # the main cloud callback → _cloud_output_queue. We need to also
+    # put them into the per-sink queue so HeadlessSession._consume_frames
+    # can find them.
+    if sink_ids:
+        primary_sink_id = sink_ids[0]
+        primary_q = frame_processor._sink_queues_by_node[primary_sink_id]
+
+        import torch
+
+        original_callback = frame_processor._on_frame_from_cloud
+
+        def _primary_sink_callback(frame: VideoFrame) -> None:
+            original_callback(frame)
+            try:
+                frame_np = frame.to_ndarray(format="rgb24")
+                t = torch.as_tensor(frame_np, dtype=torch.uint8).unsqueeze(0)
+                try:
+                    primary_q.put_nowait(t)
+                except queue.Full:
+                    try:
+                        primary_q.get_nowait()
+                        primary_q.put_nowait(t)
+                    except queue.Empty:
+                        pass
+            except Exception as e:
+                logger.error(f"Error in primary sink callback: {e}")
+
+        cloud_manager.remove_frame_callback(frame_processor._on_frame_from_cloud)
+        cloud_manager.add_frame_callback(_primary_sink_callback)
+        # Store ref so stop() can deregister
+        frame_processor._on_frame_from_cloud = _primary_sink_callback
+
+    # Wire extra sink output handlers (track index 1+)
+    for i, sid in enumerate(sink_ids[1:], start=1):
+        handler = webrtc_client.extra_output_handlers.get(i)
+        if handler is None:
+            continue
+        sink_q = frame_processor._sink_queues_by_node[sid]
+
+        def _make_sink_cb(q, sink_id):
+            import torch
+
+            def cb(frame: VideoFrame) -> None:
+                try:
+                    frame_np = frame.to_ndarray(format="rgb24")
+                    t = torch.as_tensor(frame_np, dtype=torch.uint8).unsqueeze(0)
+                    try:
+                        q.put_nowait(t)
+                    except queue.Full:
+                        try:
+                            q.get_nowait()
+                            q.put_nowait(t)
+                        except queue.Empty:
+                            pass
+                except Exception as e:
+                    logger.error(f"Error in sink {sink_id} callback: {e}")
+
+            return cb
+
+        handler.add_callback(_make_sink_cb(sink_q, sid))
+        logger.info(f"Wired cloud output track {i} to sink {sid}")
+
+    # Wire record node output handlers
+    num_extra_sinks = max(0, len(sink_ids) - 1)
+    for i, rec_id in enumerate(record_ids):
+        handler_index = num_extra_sinks + 1 + i
+        handler = webrtc_client.extra_output_handlers.get(handler_index)
+        if handler is None:
+            continue
+
+        def _make_rec_cb(fp, rid):
+            def cb(frame: VideoFrame) -> None:
+                fp.sink_manager.put_to_record(rid, frame)
+
+            return cb
+
+        handler.add_callback(_make_rec_cb(frame_processor, rec_id))
+        logger.info(f"Wired cloud output track {handler_index} to record {rec_id}")
 
 
 @router.post("/session/start")
@@ -182,32 +302,103 @@ async def start_stream(
     request: StartStreamRequest,
     webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
     pipeline_manager: "PipelineManager" = Depends(_get_pipeline_manager),
+    cloud_manager: "CloudConnectionManager" = Depends(_get_cloud_manager),
 ):
     """Start a headless pipeline session without WebRTC.
 
     Creates a FrameProcessor directly and begins generating frames.
     Use capture_frame to see output, update_parameters to control it,
     and POST /api/v1/session/stop to tear it down.
+
+    Supports two modes:
+    - Simple: provide pipeline_id for a single-pipeline session
+    - Graph: provide a graph dict with nodes/edges for multi-source/multi-sink
+
+    When cloud is connected, runs in cloud relay mode (frames sent to cloud
+    for processing).
     """
     from .frame_processor import FrameProcessor
     from .headless import HeadlessSession
 
-    # Build initial parameters
-    initial_params: dict = {
-        "pipeline_ids": [request.pipeline_id],
-        "input_mode": request.input_mode,
-    }
+    # Determine if we should use cloud mode
+    use_cloud = cloud_manager is not None and cloud_manager.is_connected
+
+    if request.graph is not None:
+        # Graph mode: extract pipeline_ids from graph nodes
+        from .graph_schema import GraphConfig
+
+        graph_config = GraphConfig.model_validate(request.graph)
+        errors = graph_config.validate_structure()
+        if errors:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid graph: {'; '.join(errors)}",
+            )
+        pipeline_ids = graph_config.get_pipeline_node_ids()
+        if not pipeline_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="Graph must contain at least one pipeline node",
+            )
+
+        pipeline_tuples = [
+            (node.id, node.pipeline_id, None)
+            for node in graph_config.nodes
+            if node.type == "pipeline" and node.pipeline_id
+        ]
+        pipeline_id_list = [t[1] for t in pipeline_tuples]
+
+        if not use_cloud:
+            # Local mode: load pipelines locally
+            await pipeline_manager.load_pipelines(pipeline_tuples)
+
+        initial_params: dict = {
+            "pipeline_ids": pipeline_id_list,
+            "input_mode": request.input_mode,
+            "graph": request.graph,
+        }
+    elif request.pipeline_id is not None:
+        # Simple single-pipeline mode
+        pipeline_id_list = [request.pipeline_id]
+        initial_params = {
+            "pipeline_ids": pipeline_id_list,
+            "input_mode": request.input_mode,
+        }
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Either pipeline_id or graph must be provided",
+        )
+
     if request.prompts is not None:
         initial_params["prompts"] = request.prompts
     if request.input_source is not None:
         initial_params["input_source"] = request.input_source
 
     try:
-        frame_processor = FrameProcessor(
-            pipeline_manager=pipeline_manager,
-            initial_parameters=initial_params,
-        )
+        if use_cloud:
+            # Cloud mode: start WebRTC relay to cloud, then create
+            # FrameProcessor in cloud mode (no local pipeline_manager)
+            await cloud_manager.start_webrtc(initial_params)
+            frame_processor = FrameProcessor(
+                pipeline_manager=None,
+                initial_parameters=initial_params,
+                cloud_manager=cloud_manager,
+            )
+        else:
+            frame_processor = FrameProcessor(
+                pipeline_manager=pipeline_manager,
+                initial_parameters=initial_params,
+            )
         frame_processor.start()
+
+        # In cloud graph mode, wire cloud extra output handlers to
+        # FrameProcessor's sink/record queues so that HeadlessSession
+        # can capture per-sink frames and per-record-node recordings.
+        if use_cloud and request.graph is not None:
+            _wire_cloud_outputs(cloud_manager, frame_processor, graph_config)
+        elif use_cloud:
+            graph_config = None  # no graph in simple mode
 
         if not frame_processor.running:
             raise HTTPException(
@@ -221,12 +412,24 @@ async def start_stream(
         session.start_frame_consumer()
         webrtc_manager.add_headless_session(session)
 
-        logger.info(f"Started headless session with pipeline {request.pipeline_id}")
-        return {
+        pipeline_id = request.pipeline_id or ",".join(pipeline_id_list)
+        mode = "cloud" if use_cloud else "local"
+        logger.info(f"Started headless session ({mode}) with pipeline(s) {pipeline_id}")
+        response: dict = {
             "status": "ok",
-            "pipeline_id": request.pipeline_id,
             "input_mode": request.input_mode,
+            "cloud_mode": use_cloud,
         }
+        if request.graph is not None:
+            response["graph"] = True
+            response["pipeline_ids"] = pipeline_id_list
+            sink_ids = graph_config.get_sink_node_ids()
+            response["sink_node_ids"] = sink_ids
+            source_ids = graph_config.get_source_node_ids()
+            response["source_node_ids"] = source_ids
+        else:
+            response["pipeline_id"] = request.pipeline_id
+        return response
     except HTTPException:
         raise
     except Exception as e:
