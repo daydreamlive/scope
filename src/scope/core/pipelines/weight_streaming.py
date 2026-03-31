@@ -328,6 +328,14 @@ def _create_forward_hook(
         if not state.block_on_gpu[block_idx]:
             state.move_block_to_gpu(block_idx, sync=True)
 
+        # After a streaming reload, non-blocking transfers via a side CUDA stream
+        # may not be visible to the default compute stream yet.  A full device
+        # synchronization here guarantees that FP8-quantized weight tensors (which
+        # use scaled_mm) are fully resident on the GPU before any matmul kernel
+        # is launched, preventing "mat2 is on cpu" / "mat1 is on cuda:0" errors.
+        if torch.cuda.is_available() and block_idx >= state.streaming_start_idx:
+            torch.cuda.synchronize()
+
         # Prefetch next blocks
         for i in range(1, state.config.prefetch_blocks + 1):
             next_idx = block_idx + i
