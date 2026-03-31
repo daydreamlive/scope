@@ -11,7 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { Upload, ArrowUp, RefreshCw } from "lucide-react";
+import { Upload, ArrowUp, RefreshCw, ArrowLeftRight } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type {
@@ -49,6 +49,7 @@ interface InputAndControlsPanelProps {
   onStartStream: () => void;
   onStopStream: () => void;
   onVideoFileUpload?: (file: File) => Promise<boolean>;
+  onCycleSampleVideo?: () => void;
   pipelineId: string;
   prompts: PromptItem[];
   onPromptsChange: (prompts: PromptItem[]) => void;
@@ -127,6 +128,7 @@ export function InputAndControlsPanel({
   onStartStream: _onStartStream,
   onStopStream: _onStopStream,
   onVideoFileUpload,
+  onCycleSampleVideo,
   pipelineId,
   prompts,
   onPromptsChange,
@@ -604,28 +606,48 @@ export function InputAndControlsPanel({
                   </div>
                 )}
 
-                {/* Upload button - only show in video mode */}
-                {mode === "video" && onVideoFileUpload && (
-                  <>
-                    <input
-                      type="file"
-                      accept="video/*"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                      id="video-upload"
-                      disabled={isStreaming || isConnecting}
-                    />
-                    <label
-                      htmlFor="video-upload"
-                      className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                        isStreaming || isConnecting
-                          ? "opacity-50 cursor-not-allowed"
-                          : "hover:bg-black/70 cursor-pointer"
-                      }`}
-                    >
-                      <Upload className="h-4 w-4 text-white" />
-                    </label>
-                  </>
+                {/* Video file buttons - only show in video mode */}
+                {mode === "video" && (
+                  <div className="absolute bottom-2 right-2 flex gap-1.5">
+                    {onCycleSampleVideo && (
+                      <button
+                        type="button"
+                        onClick={onCycleSampleVideo}
+                        disabled={isStreaming || isConnecting}
+                        className={`p-2 rounded-full bg-black/50 transition-colors ${
+                          isStreaming || isConnecting
+                            ? "opacity-50 cursor-not-allowed"
+                            : "hover:bg-black/70 cursor-pointer"
+                        }`}
+                        title="Cycle sample video"
+                      >
+                        <ArrowLeftRight className="h-4 w-4 text-white" />
+                      </button>
+                    )}
+                    {onVideoFileUpload && (
+                      <>
+                        <input
+                          type="file"
+                          accept="video/*"
+                          onChange={handleFileUpload}
+                          className="hidden"
+                          id="video-upload"
+                          disabled={isStreaming || isConnecting}
+                        />
+                        <label
+                          htmlFor="video-upload"
+                          className={`p-2 rounded-full bg-black/50 transition-colors ${
+                            isStreaming || isConnecting
+                              ? "opacity-50 cursor-not-allowed"
+                              : "hover:bg-black/70 cursor-pointer"
+                          }`}
+                          title="Upload video file"
+                        >
+                          <Upload className="h-4 w-4 text-white" />
+                        </label>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             )}

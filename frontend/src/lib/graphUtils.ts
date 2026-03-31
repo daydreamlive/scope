@@ -189,6 +189,8 @@ export interface FlowNodeData {
   onNdiSourceChange?: (identifier: string) => void;
   /** For source nodes: callback when Syphon source changes */
   onSyphonSourceChange?: (identifier: string) => void;
+  /** For source nodes: callback to cycle through sample videos */
+  onCycleSampleVideo?: () => void;
   /** For sink nodes: remote output stream */
   remoteStream?: MediaStream | null;
   /** For pipeline nodes: whether the selected pipeline supports prompts */

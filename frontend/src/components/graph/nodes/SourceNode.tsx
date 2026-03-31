@@ -53,6 +53,10 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const onSyphonSourceChange = data.onSyphonSourceChange as
     | ((identifier: string) => void)
     | undefined;
+  const onCycleSampleVideo = data.onCycleSampleVideo as
+    | (() => void)
+    | undefined;
+  const isStreaming = data.isStreaming ?? false;
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -310,13 +314,49 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                 </div>
               )}
               {showFilePicker && (
-                <>
+                <div className="absolute bottom-1 right-1 flex gap-0.5">
+                  <button
+                    type="button"
+                    onClick={() => onCycleSampleVideo?.()}
+                    disabled={isStreaming}
+                    className="w-5 h-5 flex items-center justify-center bg-[#2a2a2a]/80 hover:bg-[#2a2a2a] text-[#fafafa] rounded border border-[rgba(119,119,119,0.35)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Cycle sample video"
+                  >
+                    <svg
+                      className="h-2.5 w-2.5"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M16 3l4 4-4 4" />
+                      <path d="M20 7H4" />
+                      <path d="M8 21l-4-4 4-4" />
+                      <path d="M4 17h16" />
+                    </svg>
+                  </button>
                   <button
                     type="button"
                     onClick={handleFileClick}
-                    className="absolute bottom-1 right-1 bg-[#2a2a2a]/80 hover:bg-[#2a2a2a] text-[#fafafa] text-[9px] px-2 py-0.5 rounded border border-[rgba(119,119,119,0.35)] transition-colors"
+                    disabled={isStreaming}
+                    className="w-5 h-5 flex items-center justify-center bg-[#2a2a2a]/80 hover:bg-[#2a2a2a] text-[#fafafa] rounded border border-[rgba(119,119,119,0.35)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    title="Upload video file"
                   >
-                    Choose file
+                    <svg
+                      className="h-2.5 w-2.5"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                      <polyline points="17 8 12 3 7 8" />
+                      <line x1="12" y1="3" x2="12" y2="15" />
+                    </svg>
                   </button>
                   <input
                     ref={fileInputRef}
@@ -325,7 +365,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                     className="hidden"
                     onChange={handleFileChange}
                   />
-                </>
+                </div>
               )}
             </div>
           )}
