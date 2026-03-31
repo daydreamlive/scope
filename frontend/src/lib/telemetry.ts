@@ -152,10 +152,7 @@ export function getTelemetryEnabled(): boolean {
   return false;
 }
 
-/**
- * Persist the telemetry preference and update provider state.
- * Fires `telemetry_opt_in` when re-enabling so we know someone actively chose it.
- */
+/** Persist the telemetry preference and update provider state. */
 export function setTelemetryEnabled(enabled: boolean): void {
   localStorage.setItem(LS_TELEMETRY_ENABLED, String(enabled));
   if (!_initialized) return;
