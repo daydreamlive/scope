@@ -5,6 +5,7 @@ import os
 import uuid
 
 # Type checking imports
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from aiortc import (
@@ -30,7 +31,12 @@ from .kafka_publisher import publish_event
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
-from .tracks import VideoProcessingTrack
+from .tracks import (
+    RecordOutputTrack,
+    SinkOutputTrack,
+    SourceInputHandler,
+    VideoProcessingTrack,
+)
 
 if TYPE_CHECKING:
     from .scope_cloud_types import ScopeCloudBackend
@@ -50,6 +56,52 @@ vpx.MAX_FRAME_RATE = 8
 vpx.DEFAULT_BITRATE = 7000000
 vpx.MIN_BITRATE = 5000000
 vpx.MAX_BITRATE = 10000000
+
+
+def _parse_graph_node_ids(
+    initial_parameters: dict,
+) -> tuple[list[str], list[str], list[str], list[str], bool]:
+    """Extract sink, source, and record node IDs from graph initial parameters.
+
+    Returns:
+        (webrtc_sink_node_ids, webrtc_source_node_ids,
+         all_sink_node_ids, record_node_ids, has_non_webrtc_sources)
+
+    ``webrtc_sink_node_ids`` excludes sink nodes that have a non-WebRTC
+    ``sink_mode`` (spout/ndi/syphon) since those are handled by per-node
+    output sinks in FrameProcessor.
+    ``all_sink_node_ids`` includes every sink node regardless of mode.
+    ``record_node_ids`` contains IDs of record-type nodes that need
+    dedicated output tracks in cloud mode.
+    """
+    webrtc_sink_node_ids: list[str] = []
+    all_sink_node_ids: list[str] = []
+    webrtc_source_node_ids: list[str] = []
+    record_node_ids: list[str] = []
+    has_non_webrtc_sources = False
+    graph_data = initial_parameters.get("graph")
+    if graph_data and isinstance(graph_data, dict):
+        for node in graph_data.get("nodes", []):
+            if node.get("type") == "sink":
+                all_sink_node_ids.append(node["id"])
+                sm = node.get("sink_mode")
+                if sm not in ("spout", "ndi", "syphon"):
+                    webrtc_sink_node_ids.append(node["id"])
+            elif node.get("type") == "source":
+                sm = node.get("source_mode", "video")
+                if sm not in ("spout", "ndi", "syphon"):
+                    webrtc_source_node_ids.append(node["id"])
+                else:
+                    has_non_webrtc_sources = True
+            elif node.get("type") == "record":
+                record_node_ids.append(node["id"])
+    return (
+        webrtc_sink_node_ids,
+        webrtc_source_node_ids,
+        all_sink_node_ids,
+        record_node_ids,
+        has_non_webrtc_sources,
+    )
 
 
 class Session:
@@ -81,6 +133,9 @@ class Session:
         self.connection_info = connection_info
         self.notification_sender = None
         self.tempo_sync = None
+        # Multi-sink/source support
+        self.additional_tracks: list[SinkOutputTrack] = []
+        self.input_handlers: list[SourceInputHandler] = []
 
     async def close(self):
         """Close this session and cleanup resources."""
@@ -89,6 +144,14 @@ class Session:
                 self.tempo_sync.unregister_notification_session(
                     self.notification_sender
                 )
+
+            # Stop additional sink tracks
+            for track in self.additional_tracks:
+                track.stop()
+
+            # Stop additional input handlers
+            for handler in self.input_handlers:
+                await handler.stop()
 
             # Stop tracks first
             if self.video_track is not None:
@@ -260,6 +323,45 @@ class WebRTCManager:
             pipeline_ids = initial_parameters.get("pipeline_ids", [])
             produces_video = PipelineRegistry.chain_produces_video(pipeline_ids)
 
+            # Parse graph from initial parameters to find sink/source/record node IDs
+            (
+                sink_node_ids,
+                webrtc_source_node_ids,
+                all_sink_node_ids,
+                record_node_ids,
+                has_non_webrtc_sources,
+            ) = _parse_graph_node_ids(initial_parameters)
+
+            # Primary track reads from the first WebRTC sink (or first sink overall)
+            primary_sink_node_id = (
+                sink_node_ids[0]
+                if sink_node_ids
+                else (all_sink_node_ids[0] if all_sink_node_ids else None)
+            )
+
+            # If the graph has pipeline nodes, ensure they are loaded keyed by
+            # node_id so build_graph can find them via node.id.  The pipeline
+            # may already be loaded under its pipeline_id (e.g. from the
+            # load_pipeline API), so we re-register it under the node_id key.
+            graph_data = initial_parameters.get("graph")
+            if graph_data and isinstance(graph_data, dict):
+                for node in graph_data.get("nodes", []):
+                    if (
+                        node.get("type") == "pipeline"
+                        and node.get("pipeline_id")
+                        and node["id"] not in pipeline_manager._pipelines
+                    ):
+                        pid = node["pipeline_id"]
+                        existing = pipeline_manager._pipelines.get(pid)
+                        if existing is not None:
+                            pipeline_manager._pipelines[node["id"]] = existing
+                            pipeline_manager._pipeline_statuses[node["id"]] = (
+                                pipeline_manager._pipeline_statuses.get(pid, "loaded")
+                            )
+                            logger.info(
+                                f"Re-keyed pipeline {pid} as {node['id']} for graph"
+                            )
+
             # Create FrameProcessor (owned by session, shared between tracks)
             frame_processor = FrameProcessor(
                 pipeline_manager=pipeline_manager,
@@ -289,6 +391,7 @@ class WebRTCManager:
                     connection_id=request.connection_id,
                     connection_info=request.connection_info,
                     frame_processor=frame_processor,
+                    sink_node_id=primary_sink_node_id,
                 )
                 session.video_track = video_track
 
@@ -298,6 +401,25 @@ class WebRTCManager:
 
                 # Add the relayed video track to WebRTC connection
                 pc.addTrack(relayed_track)
+
+                # Extra sink tracks are added AFTER setRemoteDescription (below)
+                # so they can be placed on the correct recvonly transceivers.
+
+                # Eagerly initialize frame processor when graph has sources,
+                # multiple sinks, or record nodes, so SourceInputHandler /
+                # SinkOutputTrack / RecordOutputTrack can reference it immediately.
+                if (
+                    webrtc_source_node_ids
+                    or has_non_webrtc_sources
+                    or len(all_sink_node_ids) > 1
+                    or record_node_ids
+                ):
+                    video_track.initialize_output_processing()
+                # When graph sources are handled externally (SourceInputHandler
+                # for WebRTC multi-source, or _setup_multi_input_sources for
+                # Syphon/NDI/Spout), signal recv() to keep running.
+                if webrtc_source_node_ids or has_non_webrtc_sources:
+                    video_track._has_external_input = True
 
                 # Store relay for cleanup
                 session.relay = relay
@@ -361,11 +483,30 @@ class WebRTCManager:
 
             logger.info(f"Created new session: {session}")
 
+            # Counter for matching incoming video tracks to source nodes
+            received_video_count = [0]
+
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
                 logger.info(f"Track received: {track.kind} for session {session.id}")
                 if track.kind == "video" and video_track is not None:
-                    video_track.initialize_input_processing(track)
+                    if webrtc_source_node_ids:
+                        # Multi-source: route each track via SourceInputHandler
+                        idx = received_video_count[0]
+                        received_video_count[0] += 1
+                        if idx < len(webrtc_source_node_ids):
+                            handler = SourceInputHandler(
+                                frame_processor=video_track.frame_processor,
+                                source_node_id=webrtc_source_node_ids[idx],
+                            )
+                            handler.start(track)
+                            session.input_handlers.append(handler)
+                            logger.info(
+                                f"Added input handler for source node "
+                                f"{webrtc_source_node_ids[idx]}"
+                            )
+                    else:
+                        video_track.initialize_input_processing(track)
 
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
@@ -485,6 +626,79 @@ class WebRTCManager:
                         )
                         break
 
+            # Attach extra sink video tracks to the recvonly transceivers
+            # that the browser created for additional sinks.  This must happen
+            # AFTER setRemoteDescription so the offer's transceivers exist.
+            # We identify the right transceivers by: kind=video, no sender
+            # track, and no receiver track (browser declared recvonly, so the
+            # server only sends — no RemoteStreamTrack was created).
+            if len(sink_node_ids) > 1 and video_track is not None and relay is not None:
+                recv_only_video = [
+                    t
+                    for t in pc.getTransceivers()
+                    if t.kind == "video"
+                    and t.sender.track is None
+                    and t.receiver.track is None
+                ]
+                logger.info(
+                    f"Found {len(recv_only_video)} recv-only video "
+                    f"transceivers for {len(sink_node_ids) - 1} extra sink(s)"
+                )
+                for i, sink_id in enumerate(sink_node_ids[1:]):
+                    extra_track = SinkOutputTrack(
+                        primary_track=video_track,
+                        sink_node_id=sink_id,
+                    )
+                    session.additional_tracks.append(extra_track)
+                    relayed = relay.subscribe(extra_track)
+                    if i < len(recv_only_video):
+                        t = recv_only_video[i]
+                        t.sender.replaceTrack(relayed)
+                        t.direction = "sendonly"
+                        logger.info(
+                            f"Added extra sink track for node {sink_id} "
+                            f"on transceiver mid={t.mid}"
+                        )
+                    else:
+                        pc.addTrack(relayed)
+                        logger.info(
+                            f"Added extra sink track for node {sink_id} "
+                            f"via addTrack fallback"
+                        )
+
+            # Attach record output tracks to remaining recv-only transceivers.
+            # These are requested by CloudWebRTCClient for record nodes;
+            # browser clients don't create transceivers for them.
+            if record_node_ids and video_track is not None and relay is not None:
+                remaining_recv_only = [
+                    t
+                    for t in pc.getTransceivers()
+                    if t.kind == "video"
+                    and t.sender.track is None
+                    and t.receiver.track is None
+                ]
+                if remaining_recv_only:
+                    logger.info(
+                        f"Found {len(remaining_recv_only)} recv-only video "
+                        f"transceivers for {len(record_node_ids)} record node(s)"
+                    )
+                    for i, rec_id in enumerate(record_node_ids):
+                        if i >= len(remaining_recv_only):
+                            break
+                        rec_track = RecordOutputTrack(
+                            primary_track=video_track,
+                            record_node_id=rec_id,
+                        )
+                        session.additional_tracks.append(rec_track)
+                        relayed = relay.subscribe(rec_track)
+                        t = remaining_recv_only[i]
+                        t.sender.replaceTrack(relayed)
+                        t.direction = "sendonly"
+                        logger.info(
+                            f"Added record output track for {rec_id} "
+                            f"on transceiver mid={t.mid}"
+                        )
+
             # Create answer
             answer = await pc.createAnswer()
             await pc.setLocalDescription(answer)
@@ -560,6 +774,15 @@ class WebRTCManager:
                 connection_info=request.connection_info,
             )
             self.sessions[session.id] = session
+
+            # Parse graph from initial parameters for multi-source/sink/record
+            (
+                sink_node_ids,
+                webrtc_source_node_ids,
+                _,  # all_sink_node_ids
+                record_node_ids,
+                _,  # has_non_webrtc_sources
+            ) = _parse_graph_node_ids(initial_parameters)
 
             # Determine media modalities from initial_parameters. These are
             # set by the frontend from the pipeline/status endpoint, which is
@@ -654,11 +877,30 @@ class WebRTCManager:
 
             logger.info(f"Created session: {session.id}")
 
+            video_track_index = [0]
+
             @pc.on("track")
             def on_track(track: MediaStreamTrack):
                 logger.info(f"Track received: {track.kind} for session {session.id}")
                 if track.kind == "video" and cloud_track is not None:
-                    cloud_track.set_source_track(track)
+                    idx = video_track_index[0]
+                    video_track_index[0] += 1
+                    if idx == 0 or not webrtc_source_node_ids:
+                        # Primary source → existing CloudTrack input path
+                        cloud_track.set_source_track(track)
+                    else:
+                        # Extra source → buffer for wiring after cloud connects.
+                        # Map the browser track index to the cloud input track
+                        # index, which may differ when the graph contains
+                        # non-WebRTC sources (Syphon/NDI/Spout) that occupy
+                        # their own cloud input tracks.
+                        cloud_track_idx = idx
+                        if idx < len(webrtc_source_node_ids):
+                            node_id = webrtc_source_node_ids[idx]
+                            mapped = cloud_manager.get_source_track_index(node_id)
+                            if mapped is not None:
+                                cloud_track_idx = mapped
+                        cloud_track.add_extra_source_track(cloud_track_idx, track)
 
             @pc.on("connectionstatechange")
             async def on_connectionstatechange():
@@ -735,6 +977,64 @@ class WebRTCManager:
                             f"Audio track attached to transceiver (mid={t.mid})"
                         )
                         break
+
+            # Attach extra sink video tracks to the browser's recvonly
+            # transceivers (same pattern as the local-mode handler).
+            if len(sink_node_ids) > 1 and cloud_track is not None and relay is not None:
+                from .cloud_track import CloudSinkOutputTrack
+
+                extra_sink_tracks: list[CloudSinkOutputTrack] = []
+                recv_only_video = [
+                    t
+                    for t in pc.getTransceivers()
+                    if t.kind == "video"
+                    and t.sender.track is None
+                    and t.receiver.track is None
+                ]
+                logger.info(
+                    f"Cloud relay: {len(recv_only_video)} recv-only video "
+                    f"transceivers for {len(sink_node_ids) - 1} extra sink(s)"
+                )
+                for i, sink_id in enumerate(sink_node_ids[1:]):
+                    extra_track = CloudSinkOutputTrack()
+                    extra_sink_tracks.append(extra_track)
+                    session.additional_tracks.append(extra_track)
+                    relayed = relay.subscribe(extra_track)
+                    if i < len(recv_only_video):
+                        tv = recv_only_video[i]
+                        tv.sender.replaceTrack(relayed)
+                        tv.direction = "sendonly"
+                        logger.info(
+                            f"Cloud relay: extra sink {sink_id} on mid={tv.mid}"
+                        )
+                    else:
+                        pc.addTrack(relayed)
+                        logger.info(f"Cloud relay: extra sink {sink_id} via addTrack")
+                # Tell CloudTrack to wire these after cloud connection starts
+                cloud_track.set_extra_sink_tracks(extra_sink_tracks)
+
+            # Set up record node callbacks so cloud record frames are
+            # received locally and fed into frame_processor record queues.
+            # Record tracks are NOT relayed to the browser — they stay
+            # server-side for local recording.
+            if record_node_ids and cloud_track is not None:
+                record_callbacks: list[tuple[str, Callable]] = []
+                for rec_id in record_node_ids:
+
+                    def _make_record_cb(node_id: str, fp: FrameProcessor) -> Callable:
+                        def _cb(frame) -> None:
+                            fp.sink_manager.put_to_record(node_id, frame)
+
+                        return _cb
+
+                    record_callbacks.append(
+                        (rec_id, _make_record_cb(rec_id, frame_processor))
+                    )
+                cloud_track.set_record_callbacks(record_callbacks)
+                logger.info(
+                    f"Cloud relay: registered {len(record_callbacks)} "
+                    f"record callback(s)"
+                )
 
             # Create answer
             answer = await pc.createAnswer()
@@ -888,15 +1188,24 @@ class WebRTCManager:
             return "headless", self.headless_session.frame_processor, True
         return None
 
-    def get_last_frame(self):
-        """Return the most recent frame from the active session, or None."""
-        for session in self.sessions.values():
-            if session.video_track and hasattr(session.video_track, "get_last_frame"):
-                frame = session.video_track.get_last_frame()
-                if frame is not None:
-                    return frame
+    def get_last_frame(self, sink_node_id: str | None = None):
+        """Return the most recent frame from the active session, or None.
+
+        Args:
+            sink_node_id: If provided, return the last frame from this specific
+                sink node (multi-sink graph mode). If None, return the most
+                recent frame from any sink.
+        """
+        if sink_node_id is None:
+            for session in self.sessions.values():
+                if session.video_track and hasattr(
+                    session.video_track, "get_last_frame"
+                ):
+                    frame = session.video_track.get_last_frame()
+                    if frame is not None:
+                        return frame
         if self.headless_session:
-            frame = self.headless_session.get_last_frame()
+            frame = self.headless_session.get_last_frame(sink_node_id=sink_node_id)
             if frame is not None:
                 return frame
         return None
