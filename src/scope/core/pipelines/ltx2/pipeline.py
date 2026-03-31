@@ -377,6 +377,11 @@ class LTX2Pipeline(Pipeline):
         if cached_prompt == prompt_text and hasattr(self, "_cached_context"):
             # Reuse cached encoding - no need to load text encoder
             video_context, audio_context = self._cached_context
+            # Ensure context tensors are on the compute device — they may have
+            # landed on CPU if the text encoder was mid-offload during encoding,
+            # or if the cached tensors were moved inadvertently between calls.
+            video_context = video_context.to(self.device)
+            audio_context = audio_context.to(self.device)
             logger.debug("Reusing cached prompt encoding")
         else:
             # Prompt changed - need to re-encode
@@ -392,6 +397,12 @@ class LTX2Pipeline(Pipeline):
 
             context_p = encode_text(self._cached_text_encoder, prompts=[prompt_text])[0]
             video_context, audio_context = context_p
+
+            # Ensure context tensors are on the compute device before caching.
+            # encode_text() may produce CPU tensors if the text encoder was
+            # partially offloaded at encode time.
+            video_context = video_context.to(self.device)
+            audio_context = audio_context.to(self.device)
 
             # Cache the encoded prompt
             self._cached_prompt_text = prompt_text
@@ -413,7 +424,16 @@ class LTX2Pipeline(Pipeline):
         # Use cached transformer for generation
         sigmas = torch.Tensor(DISTILLED_SIGMA_VALUES).to(self.device)
 
-        # Define denoising loop
+        # Define denoising loop.
+        # Re-pin context tensors to the compute device here as a belt-and-suspenders
+        # guard: weight streaming may temporarily offload transformer blocks to CPU
+        # before VAE decode and reload them afterward.  If the block-streaming
+        # CUDA-stream synchronization is incomplete, subsequent FP8 / addmm ops will
+        # see mixed-device inputs.  Forcing the context tensors to device here
+        # ensures the denoising function never passes CPU tensors into a CUDA kernel.
+        _video_context = video_context.to(self.device)
+        _audio_context = audio_context.to(self.device)
+
         def denoising_loop(sigmas, video_state, audio_state, stepper):
             return euler_denoising_loop(
                 sigmas=sigmas,
@@ -421,8 +441,8 @@ class LTX2Pipeline(Pipeline):
                 audio_state=audio_state,
                 stepper=stepper,
                 denoise_fn=simple_denoising_func(
-                    video_context=video_context,
-                    audio_context=audio_context,
+                    video_context=_video_context,
+                    audio_context=_audio_context,
                     transformer=self._cached_transformer,
                 ),
             )
@@ -462,10 +482,14 @@ class LTX2Pipeline(Pipeline):
         )
 
         # Convert decoded video iterator to tensor and postprocess
-        # LTX2 vae_decode_video returns an iterator of frame chunks
+        # LTX2 vae_decode_video returns an iterator of frame chunks.
+        # Explicitly move each chunk to the compute device *and* cast to float32 in
+        # one operation: the VAE tiling decoder may return CPU tensors when block
+        # streaming has offloaded weights, and `.to(torch.float32)` alone would leave
+        # the tensor on CPU.
         video_frames = []
         for chunk in decoded_video:
-            video_frames.append(chunk.to(torch.float32))
+            video_frames.append(chunk.to(self.device, torch.float32))
 
         # Concatenate all chunks along time dimension -> [T, H, W, C]
         video_tensor = torch.cat(video_frames, dim=0)
