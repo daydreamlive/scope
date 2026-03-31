@@ -201,6 +201,12 @@ class SyphonReceiver:
     def receive(self, as_rgb: bool = False) -> np.ndarray | None:
         """Receive a frame from the Syphon server.
 
+        Always reads the current frame from the Syphon texture.  The
+        ``has_new_frame`` property is unreliable when the client is polled
+        from a thread different from the one that created it (common in
+        the uvicorn/asyncio server), so we skip that check and read the
+        texture directly.
+
         Args:
             as_rgb: If True, return RGB (3 channels) instead of RGBA (4 channels).
 
@@ -212,9 +218,6 @@ class SyphonReceiver:
             return None
 
         try:
-            if not self._client.has_new_frame:
-                return None
-
             texture = self._client.new_frame_image
             if texture is None:
                 return None
