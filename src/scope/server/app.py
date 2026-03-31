@@ -558,6 +558,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Local cloud WebSocket endpoint — enabled by SCOPE_CLOUD_WS=1
+if os.environ.get("SCOPE_CLOUD_WS") == "1":
+    from fastapi import WebSocket as _WebSocket
+
+    from .cloud_ws_endpoint import cloud_ws_handler
+
+    @app.websocket("/ws")
+    async def cloud_ws(ws: _WebSocket):
+        await cloud_ws_handler(ws)
+
 
 @app.get("/health", response_model=HealthResponse)
 @cloud_proxy()
