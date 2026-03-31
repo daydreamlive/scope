@@ -1786,7 +1786,7 @@ async def delete_lora_file(
 @app.post("/api/v1/lora/download")
 async def download_lora_endpoint(
     request: LoRADownloadRequest,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ) -> LoRADownloadResult:
     """Download a LoRA from HuggingFace, CivitAI, or a direct URL.
 

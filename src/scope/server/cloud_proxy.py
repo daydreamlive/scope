@@ -404,12 +404,6 @@ def cloud_proxy(
             if path is None:
                 actual_path = http_request.url.path
             elif callable(path):
-                if not isinstance(cloud_manager, CloudConnectionManager):
-                    # TODO support Livepeer cloud mode
-                    raise HTTPException(
-                        status_code=400,
-                        detail="This cloud proxy path is only supported in relay mode",
-                    )
                 actual_path = path(http_request, cloud_manager)
             else:
                 actual_path = path
