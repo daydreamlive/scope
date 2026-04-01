@@ -303,6 +303,10 @@ class SourceManager:
         if not isinstance(graph, GraphConfig):
             return
 
+        from scope.core.inputs import get_input_source_classes
+
+        input_source_classes = get_input_source_classes()
+
         for node in graph.nodes:
             if node.type != "source":
                 continue
@@ -314,10 +318,6 @@ class SourceManager:
             # Skip nodes without registered queues (unless handled by callback)
             if node_id not in self._source_queues_by_node and self._on_frame is None:
                 continue
-
-            from scope.core.inputs import get_input_source_classes
-
-            input_source_classes = get_input_source_classes()
             source_class = input_source_classes.get(node.source_mode)
             if source_class is None or not source_class.is_available():
                 logger.warning(
