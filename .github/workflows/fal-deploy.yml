@@ -55,7 +55,7 @@ jobs:
           echo "Deploying to $ENV"
           fal deploy --env $ENV --auth public src/scope/cloud/fal_app.py
 
-      - name: Deploy Livepeer runner to fal staging app
+      - name: Deploy Livepeer runner to fal
         env:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
@@ -66,9 +66,9 @@ jobs:
             ENV="main"
           fi
 
-          echo "Deploying Livepeer runner to $ENV as scope-livepeer-staging"
+          echo "Deploying Livepeer runner to $ENV as scope-livepeer"
           fal deploy \
-            --app-name scope-livepeer-staging \
+            --app-name scope-livepeer \
             --env $ENV \
             --auth private \
             src/scope/cloud/livepeer_fal_app.py
