@@ -10,6 +10,7 @@ import {
 import {
   fetchCreditsBalance,
   sendTrialHeartbeat,
+  sendStreamHeartbeat,
   createCheckoutSession,
   createPortalSession,
   setOverageEnabled,
@@ -112,6 +113,14 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     expiresAt: number;
   } | null>(null);
 
+  // Stream heartbeat refs — deduct credits every 15s during active streaming
+  const streamHeartbeatRef = useRef<ReturnType<typeof setInterval> | null>(
+    null
+  );
+  const streamActiveRef = useRef(false);
+  const lastHeartbeatTimeRef = useRef<number>(0);
+  const streamKeyRef = useRef<string | null>(null);
+
   // Warning thresholds (tracked so we only toast once per threshold)
   const creditWarningShown = useRef<"none" | "low" | "critical">("none");
   const trialWarningShown = useRef<"none" | "2min" | "30sec">("none");
@@ -151,9 +160,10 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Poll balance every 15s when cloud-connected
+  // Poll balance every 15s when cloud-connected (skipped during active streaming,
+  // since the stream heartbeat already returns the updated balance)
   useEffect(() => {
-    if (isConnected) {
+    if (isConnected && !streamActiveRef.current) {
       refresh();
       pollRef.current = setInterval(refresh, 15_000);
     } else {
@@ -270,6 +280,87 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     return () =>
       window.removeEventListener("billing:credits-exhausted", handler);
   }, []);
+
+  // Stream heartbeat — deduct credits every 15s during active streaming (paid users only).
+  // Free trial users have their own 60s trial heartbeat above; these are separate paths.
+  const doStreamHeartbeat = useCallback(async () => {
+    const apiKey = getDaydreamAPIKey();
+    const key = streamKeyRef.current;
+    if (!apiKey || !key) return;
+
+    const now = Date.now();
+    const durationSeconds = (now - lastHeartbeatTimeRef.current) / 1000;
+    lastHeartbeatTimeRef.current = now;
+
+    try {
+      const result = await sendStreamHeartbeat(apiKey, key, durationSeconds);
+      setState(prev => ({
+        ...prev,
+        credits: prev.credits
+          ? { ...prev.credits, balance: result.balance }
+          : null,
+      }));
+      if (result.shouldTerminate) {
+        window.dispatchEvent(new CustomEvent("billing:credits-exhausted"));
+      }
+    } catch (err) {
+      // Log and continue — next heartbeat will catch up with a larger duration.
+      // JWT token expiry (5 min) is the hard backstop.
+      console.error("[Billing] Stream heartbeat failed:", err);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onStreamStart = (e: Event) => {
+      const { connectionId } = (e as CustomEvent).detail;
+      streamActiveRef.current = true;
+      streamKeyRef.current = connectionId;
+      lastHeartbeatTimeRef.current = Date.now();
+
+      // Only send heartbeats for paid users with credits
+      const apiKey = getDaydreamAPIKey();
+      if (!apiKey || state.tier === "free") return;
+
+      // Stop the regular balance poll (heartbeat response provides balance)
+      if (pollRef.current) {
+        clearInterval(pollRef.current);
+        pollRef.current = null;
+      }
+
+      streamHeartbeatRef.current = setInterval(doStreamHeartbeat, 15_000);
+    };
+
+    const onStreamStop = () => {
+      streamActiveRef.current = false;
+      if (streamHeartbeatRef.current) {
+        clearInterval(streamHeartbeatRef.current);
+        streamHeartbeatRef.current = null;
+      }
+      // Send final heartbeat for remaining partial duration
+      if (streamKeyRef.current && lastHeartbeatTimeRef.current > 0) {
+        doStreamHeartbeat();
+      }
+      streamKeyRef.current = null;
+      lastHeartbeatTimeRef.current = 0;
+
+      // Resume regular balance polling
+      if (isConnected) {
+        refresh();
+        pollRef.current = setInterval(refresh, 15_000);
+      }
+    };
+
+    window.addEventListener("billing:stream-started", onStreamStart);
+    window.addEventListener("billing:stream-stopped", onStreamStop);
+    return () => {
+      window.removeEventListener("billing:stream-started", onStreamStart);
+      window.removeEventListener("billing:stream-stopped", onStreamStop);
+      if (streamHeartbeatRef.current) {
+        clearInterval(streamHeartbeatRef.current);
+        streamHeartbeatRef.current = null;
+      }
+    };
+  }, [doStreamHeartbeat, state.tier, isConnected, refresh]);
 
   const getInferenceToken = useCallback(async (): Promise<string | null> => {
     // Return cached token if still valid (with 60s buffer)

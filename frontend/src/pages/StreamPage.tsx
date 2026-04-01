@@ -142,6 +142,7 @@ export function StreamPage() {
     isConnecting: isBackendCloudConnecting,
     connectStage: cloudConnectStage,
     refresh: refreshCloudStatus,
+    connectionId,
   } = useCloudStatus();
 
   const { loraFiles } = useLoRAsContext();
@@ -664,6 +665,22 @@ export function StreamPage() {
     peerConnectionRef,
     isStreaming,
   });
+
+  // Notify billing system of stream lifecycle for credit deduction
+  useEffect(() => {
+    if (isStreaming && connectionId) {
+      window.dispatchEvent(
+        new CustomEvent("billing:stream-started", {
+          detail: { connectionId },
+        })
+      );
+    } else {
+      window.dispatchEvent(new CustomEvent("billing:stream-stopped"));
+    }
+    return () => {
+      window.dispatchEvent(new CustomEvent("billing:stream-stopped"));
+    };
+  }, [isStreaming, connectionId]);
 
   // Video container ref for controller input pointer lock
   const videoContainerRef = useRef<HTMLDivElement>(null);

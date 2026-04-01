@@ -119,6 +119,32 @@ export interface RedeemCodeResponse {
   newBalance: number;
 }
 
+// ─── Stream heartbeat ────────────────────────────────────────────────────
+
+export interface StreamHeartbeatResponse {
+  balance: number;
+  shouldTerminate: boolean;
+}
+
+export async function sendStreamHeartbeat(
+  apiKey: string,
+  streamKey: string,
+  durationSeconds: number
+): Promise<StreamHeartbeatResponse> {
+  const res = await fetch(`${DAYDREAM_API_BASE}/credits/stream/heartbeat`, {
+    method: "POST",
+    headers: headers(apiKey),
+    body: JSON.stringify({ streamKey, durationSeconds }),
+  });
+  if (res.status === 402) {
+    return { balance: 0, shouldTerminate: true };
+  }
+  if (!res.ok) {
+    throw new Error(`Failed to send stream heartbeat: ${res.status}`);
+  }
+  return res.json();
+}
+
 // ─── Inference token ──────────────────────────────────────────────────────
 
 export interface InferenceTokenResponse {
