@@ -211,7 +211,14 @@ class SourceManager:
                 self._source_enabled = True
                 self._source_type = source_type
                 self._source_thread = threading.Thread(
-                    target=self._generic_receiver_loop, daemon=True
+                    target=self._receiver_loop,
+                    args=(
+                        self._source,
+                        source_type,
+                        None,
+                        lambda: self._source_enabled and self._source is not None,
+                    ),
+                    daemon=True,
                 )
                 self._source_thread.start()
                 logger.info(f"Input source enabled: {source_type} -> '{source_name}'")
@@ -231,8 +238,14 @@ class SourceManager:
                     pass
             self._source = None
 
-    def _generic_receiver_loop(self) -> None:
-        """Background thread that receives frames from a generic input source.
+    def _receiver_loop(
+        self,
+        source: "InputSource",
+        source_type: str,
+        node_id: str | None,
+        is_active: Callable[[], bool],
+    ) -> None:
+        """Background thread that receives frames from an input source.
 
         Receives frames as fast as the source provides them, without throttling
         based on pipeline FPS. Backpressure is handled by the downstream queues
@@ -240,35 +253,40 @@ class SourceManager:
         WebRTC camera input path and avoids a feedback loop where FPS-based
         throttling + receive latency causes a downward FPS spiral for sources
         with non-trivial receive overhead (NDI, Syphon).
+
+        Args:
+            source: The input source to receive from.
+            source_type: Source type label for logging.
+            node_id: Graph source node ID, or None for the generic source.
+            is_active: Callable returning False when the loop should stop.
         """
-        logger.info(f"Input source thread started ({self._source_type})")
+        label = (
+            f"multi-source ({source_type}) node {node_id}"
+            if node_id
+            else f"input source ({source_type})"
+        )
+        logger.info(f"{label}: thread started")
 
         frame_count = 0
 
-        while self._running and self._source_enabled and self._source is not None:
+        while self._running and is_active():
             try:
-                rgb_frame = self._source.receive_frame(timeout_ms=100)
+                rgb_frame = source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
                     if self._on_frame is not None:
-                        self._on_frame(None, rgb_frame)
+                        self._on_frame(node_id, rgb_frame)
 
                     frame_count += 1
                     if frame_count % 100 == 0:
-                        logger.debug(
-                            f"Input source ({self._source_type}) "
-                            f"received {frame_count} frames"
-                        )
+                        logger.debug(f"{label}: received {frame_count} frames")
                 else:
                     time.sleep(0.001)  # Small sleep when no frame available
 
             except Exception as e:
-                logger.error(f"Error in input source loop: {e}")
+                logger.error(f"{label}: error in receive loop: {e}")
                 time.sleep(0.01)
 
-        logger.info(
-            f"Input source thread stopped ({self._source_type}) "
-            f"after {frame_count} frames"
-        )
+        logger.info(f"{label}: thread stopped after {frame_count} frames")
 
     # ------------------------------------------------------------------
     # Per-node input sources (multi-source graph mode)
@@ -288,10 +306,9 @@ class SourceManager:
         for node in graph.nodes:
             if node.type != "source":
                 continue
-            source_mode = getattr(node, "source_mode", None)
-            if source_mode not in ("spout", "ndi", "syphon", "video_file"):
+            if node.source_mode not in ("spout", "ndi", "syphon", "video_file"):
                 continue
-            source_name = getattr(node, "source_name", "") or ""
+            source_name = node.source_name or ""
             node_id = node.id
 
             # Skip nodes without registered queues (unless handled by callback)
@@ -301,10 +318,10 @@ class SourceManager:
             from scope.core.inputs import get_input_source_classes
 
             input_source_classes = get_input_source_classes()
-            source_class = input_source_classes.get(source_mode)
+            source_class = input_source_classes.get(node.source_mode)
             if source_class is None or not source_class.is_available():
                 logger.warning(
-                    f"Input source '{source_mode}' not available for node {node_id}"
+                    f"Input source '{node.source_mode}' not available for node {node_id}"
                 )
                 continue
 
@@ -312,71 +329,35 @@ class SourceManager:
                 source = source_class()
                 if source.connect(source_name):
                     thread = threading.Thread(
-                        target=self._per_node_receiver_loop,
-                        args=(node_id, source_mode),
+                        target=self._receiver_loop,
+                        args=(
+                            source,
+                            node.source_mode,
+                            node_id,
+                            lambda nid=node_id: nid in self._sources_by_node,
+                        ),
                         daemon=True,
                     )
                     self._sources_by_node[node_id] = {
                         "source": source,
                         "thread": thread,
-                        "type": source_mode,
+                        "type": node.source_mode,
                     }
                     thread.start()
                     logger.info(
-                        f"Multi-source: started {source_mode} for node {node_id}"
+                        f"Multi-source: started {node.source_mode} for node {node_id}"
                     )
                 else:
                     logger.error(
-                        f"Failed to connect input source {source_mode} "
+                        f"Failed to connect input source {node.source_mode} "
                         f"for node {node_id}"
                     )
                     source.close()
             except Exception as e:
                 logger.error(
-                    f"Error creating input source '{source_mode}' "
+                    f"Error creating input source '{node.source_mode}' "
                     f"for node {node_id}: {e}"
                 )
-
-    def _per_node_receiver_loop(self, node_id: str, source_type: str) -> None:
-        """Background thread that receives frames for a specific source node.
-
-        Receives as fast as the source provides frames, without throttling to
-        pipeline output FPS. Throttling on measured get_fps() created a feedback
-        loop: slower output -> lower get_fps() -> longer sleeps -> starved inputs ->
-        even slower output. Backpressure is queue full + drop, same as
-        :meth:`_generic_receiver_loop`.
-        """
-        entry = self._sources_by_node.get(node_id)
-        if entry is None:
-            return
-
-        source = entry["source"]
-        frame_count = 0
-
-        while self._running and node_id in self._sources_by_node:
-            try:
-                rgb_frame = source.receive_frame(timeout_ms=100)
-                if rgb_frame is not None:
-                    if self._on_frame is not None:
-                        self._on_frame(node_id, rgb_frame)
-
-                    frame_count += 1
-                    if frame_count % 100 == 0:
-                        logger.debug(
-                            f"Multi-source ({source_type}) node {node_id}: "
-                            f"{frame_count} frames"
-                        )
-                else:
-                    time.sleep(0.001)
-
-            except Exception as e:
-                logger.error(f"Error in multi-source loop node {node_id}: {e}")
-                time.sleep(0.01)
-
-        logger.info(
-            f"Multi-source thread stopped ({source_type}) node {node_id} "
-            f"after {frame_count} frames"
-        )
 
     # ------------------------------------------------------------------
     # Lifecycle

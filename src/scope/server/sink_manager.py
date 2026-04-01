@@ -10,7 +10,6 @@ import logging
 import queue
 import threading
 import time
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -37,11 +36,7 @@ class SinkManager:
     - Recording coordination (per-record-node queues and managers)
     """
 
-    def __init__(
-        self,
-        *,
-        get_fps: "Callable[[], float]",
-    ):
+    def __init__(self):
         self._running = False
 
         # Per-node sink queues from graph executor
@@ -58,7 +53,7 @@ class SinkManager:
         self._sinks_by_node: dict[str, dict] = {}
 
         # Recording coordination (per-record-node queues and managers)
-        self._recording = RecordingCoordinator(get_fps=get_fps)
+        self._recording = RecordingCoordinator()
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -83,7 +78,7 @@ class SinkManager:
         self._sink_queues_by_node = sink_queues_by_node
         self._sink_hardware_queues_by_node = sink_hardware_queues_by_node
         self._sink_processors_by_node = sink_processors_by_node
-        self._recording.record_queues = record_queues_by_node
+        self._recording.setup_queues(record_queues_by_node)
 
     # ------------------------------------------------------------------
     # Sink queue routing
@@ -449,13 +444,9 @@ class SinkManager:
         """Read a frame from a record node's output queue."""
         return self._recording.get(record_node_id)
 
-    def put_to_record(self, record_node_id: str, frame) -> None:
-        """Put a VideoFrame into a record node's queue (cloud mode)."""
-        self._recording.put(record_node_id, frame)
-
-    async def start_recording(self, node_id: str) -> bool:
+    async def start_recording(self, node_id: str, fps: float) -> bool:
         """Start recording for a specific record node."""
-        return await self._recording.start_recording(node_id)
+        return await self._recording.start_recording(node_id, fps)
 
     async def stop_recording(self, node_id: str) -> bool:
         """Stop recording for a specific record node."""
