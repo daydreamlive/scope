@@ -20,6 +20,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 import uuid
 from collections.abc import Callable
@@ -266,8 +267,6 @@ class CloudConnectionManager:
 
     def _build_ws_url(self) -> str:
         """Build WebSocket URL with JWT token."""
-        import os
-
         # Allow overriding the full WS URL for local cloud testing
         override = os.environ.get("SCOPE_CLOUD_WS_URL")
         if override:
@@ -659,11 +658,22 @@ class CloudConnectionManager:
             self._webrtc_client = None
             logger.info("WebRTC connection stopped")
 
+    def get_webrtc_client(self):
+        """Return the underlying WebRTC client, or None if not connected."""
+        return self._webrtc_client
+
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
-        """Send a video frame to cloud.ai for processing.
+        """Send a frame to cloud input track index 0."""
+        return self.send_frame_to_track(frame, 0)
+
+    def send_frame_to_track(
+        self, frame: VideoFrame | np.ndarray, track_index: int
+    ) -> bool:
+        """Send a video frame to a specific cloud input track.
 
         Args:
             frame: VideoFrame or numpy array (RGB24 format)
+            track_index: Index into input_tracks on the WebRTC client
 
         Returns:
             True if frame was queued, False if not connected or queue full
@@ -671,10 +681,16 @@ class CloudConnectionManager:
         if self._webrtc_client is None or not self._webrtc_client.is_connected:
             return False
 
-        success = self._webrtc_client.send_frame(frame)
+        success = self._webrtc_client.send_frame_to_track(frame, track_index)
         if success:
             self._stats["frames_sent_to_cloud"] += 1
         return success
+
+    def get_source_track_index(self, node_id: str) -> int | None:
+        """Return the cloud input track index for a given source node ID."""
+        if self._webrtc_client is None:
+            return None
+        return self._webrtc_client.source_node_to_track_index.get(node_id)
 
     def send_parameters(self, params: dict) -> None:
         """Send parameter update to cloud.ai via WebRTC data channel.
