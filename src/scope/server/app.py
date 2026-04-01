@@ -1272,7 +1272,6 @@ async def download_recording(
     Local-first: if the session has a local recording, serve it directly.
     Falls back to cloud proxy only when there is no local recording and
     cloud is connected (pure cloud mode where recording happens remotely).
-    Use session_id="headless" for the active headless session.
     """
     try:
         session = webrtc_manager.get_session(session_id)
@@ -1322,7 +1321,6 @@ async def start_recording(
     """Start recording for the specified session.
 
     Creates a RecordingManager if one does not already exist.
-    Use session_id="headless" for the active headless session.
     """
     try:
         session = webrtc_manager.get_session(session_id)
@@ -1358,10 +1356,7 @@ async def stop_recording(
     session_id: str,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
 ):
-    """Stop recording for the specified session without downloading.
-
-    Use session_id="headless" for the active headless session.
-    """
+    """Stop recording for the specified session without downloading."""
     try:
         session = webrtc_manager.get_session(session_id)
         if not session:
