@@ -9,6 +9,7 @@ import numpy as np
 import torch
 from aiortc.mediastreams import VideoFrame
 
+from .cloud_relay import CloudRelay
 from .kafka_publisher import publish_event
 from .modulation import ModulationEngine
 from .parameter_scheduler import ParameterScheduler
@@ -18,8 +19,6 @@ from .sink_manager import SinkManager
 from .source_manager import SourceManager
 
 if TYPE_CHECKING:
-    from av import AudioFrame
-
     from .cloud_connection import CloudConnectionManager
 
 logger = logging.getLogger(__name__)
@@ -35,7 +34,7 @@ HEARTBEAT_INTERVAL_SECONDS = 10.0
 class FrameProcessor:
     """Processes video frames through pipelines or cloud relay.
 
-    Supports two modes:
+    Supports two modes (selected by presence of a CloudConnectionManager):
     1. Local mode: Frames processed through local GPU pipelines
     2. Cloud mode: Frames sent to cloud for processing
 
@@ -58,7 +57,6 @@ class FrameProcessor:
         tempo_sync: Any | None = None,
     ):
         self.pipeline_manager = pipeline_manager
-        self.cloud_manager = cloud_manager
         self.tempo_sync = tempo_sync
 
         # Parameter scheduler for beat-synced parameter changes
@@ -99,15 +97,16 @@ class FrameProcessor:
         # serializes every frame.
         self._thread_pin_local = threading.local()
 
-        # Cloud mode: send frames to cloud instead of local processing
-        self._cloud_mode = cloud_manager is not None
-        self._cloud_output_queue: queue.Queue = queue.Queue(maxsize=2)
-        self._cloud_audio_queue: queue.Queue = queue.Queue(maxsize=50)
-        self._frames_to_cloud = 0
-        self._frames_from_cloud = 0
+        # Cloud relay (None in local mode)
+        video_mode = (initial_parameters or {}).get("input_mode") == "video"
+        self._cloud_relay: CloudRelay | None = (
+            CloudRelay(cloud_manager, video_mode=video_mode)
+            if cloud_manager is not None
+            else None
+        )
 
         # Input mode: video waits for frames, text generates immediately
-        self._video_mode = (initial_parameters or {}).get("input_mode") == "video"
+        self._video_mode = video_mode
 
         # Pipeline processors and IDs (populated by _setup_graph)
         self.pipeline_processors: list[PipelineProcessor] = []
@@ -172,21 +171,16 @@ class FrameProcessor:
         # Reset frame counters on start
         self._frames_in = 0
         self._frames_out = 0
-        self._frames_to_cloud = 0
-        self._frames_from_cloud = 0
         self._last_heartbeat_time = time.time()
         self._playback_ready_emitted = False
         self._stream_start_time = time.monotonic()
         self._last_stats_time = time.time()
 
-        if self._cloud_mode:
+        if self._cloud_relay is not None:
             # Cloud mode: frames go to cloud instead of local pipelines
             logger.info("[FRAME-PROCESSOR] Starting in CLOUD mode (cloud)")
 
-            # Register callbacks to receive frames from cloud
-            if self.cloud_manager:
-                self.cloud_manager.add_frame_callback(self._on_frame_from_cloud)
-                self.cloud_manager.add_audio_callback(self._on_audio_from_cloud)
+            self._cloud_relay.start()
 
             # Set up per-node input sources and record queues in cloud mode.
             graph_data = self.parameters.get("graph")
@@ -301,17 +295,16 @@ class FrameProcessor:
         # Clean up all input sources
         self._source_manager.stop()
 
-        # Clean up cloud callbacks in cloud mode
-        if self._cloud_mode and self.cloud_manager:
-            self.cloud_manager.remove_frame_callback(self._on_frame_from_cloud)
-            self.cloud_manager.remove_audio_callback(self._on_audio_from_cloud)
+        # Clean up cloud relay
+        if self._cloud_relay is not None:
+            self._cloud_relay.stop()
 
         # Log final frame stats
-        if self._cloud_mode:
+        if self._cloud_relay is not None:
             logger.info(
                 f"[FRAME-PROCESSOR] Stopped (cloud mode). "
-                f"Frames: in={self._frames_in}, to_cloud={self._frames_to_cloud}, "
-                f"from_cloud={self._frames_from_cloud}, out={self._frames_out}"
+                f"Frames: in={self._frames_in}, to_cloud={self._cloud_relay.frames_to_cloud}, "
+                f"from_cloud={self._cloud_relay.frames_from_cloud}, out={self._frames_out}"
             )
         else:
             logger.info(
@@ -343,7 +336,7 @@ class FrameProcessor:
                     "recoverable": False,
                 },
                 metadata={
-                    "mode": "cloud" if self._cloud_mode else "local",
+                    "mode": "cloud" if self._cloud_relay is not None else "local",
                     "frames_in": self._frames_in,
                     "frames_out": self._frames_out,
                 },
@@ -358,7 +351,7 @@ class FrameProcessor:
             pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
             user_id=self.user_id,
             metadata={
-                "mode": "cloud" if self._cloud_mode else "local",
+                "mode": "cloud" if self._cloud_relay is not None else "local",
                 "frames_in": self._frames_in,
                 "frames_out": self._frames_out,
             },
@@ -403,19 +396,11 @@ class FrameProcessor:
         Routes the frame to cloud or to local source queues depending on mode.
         source_node_id is None for the generic (non-graph) input source.
         """
-        if self._cloud_mode:
-            if not self._video_mode or self.cloud_manager is None:
-                return
+        if self._cloud_relay is not None:
             if source_node_id is not None:
-                track_idx = self.cloud_manager.get_source_track_index(source_node_id)
-                if track_idx is not None:
-                    sent = self.cloud_manager.send_frame_to_track(rgb_frame, track_idx)
-                else:
-                    sent = self.cloud_manager.send_frame(rgb_frame)
+                self._cloud_relay.send_frame_to_source(rgb_frame, source_node_id)
             else:
-                sent = self.cloud_manager.send_frame(rgb_frame)
-            if sent:
-                self._frames_to_cloud += 1
+                self._cloud_relay.send_frame(rgb_frame)
             return
 
         # Local mode: convert to tensor and route to source queues
@@ -447,19 +432,14 @@ class FrameProcessor:
         if single_id is not None:
             return self.put_to_source(frame, single_id, count_frame=True)
 
-        if self._cloud_mode:
+        if self._cloud_relay is not None:
             self._frames_in += 1
             self._maybe_emit_frame_heartbeat()
-            # Text mode: cloud generates from prompts only, ignore input
             if not self._video_mode:
                 return True
-            # No graph sources — send directly to cloud track 0
-            if self.cloud_manager:
-                frame_array = frame.to_ndarray(format="rgb24")
-                if self.cloud_manager.send_frame(frame_array):
-                    self._frames_to_cloud += 1
-                    return True
-            return False
+            frame_array = frame.to_ndarray(format="rgb24")
+            self._cloud_relay.send_frame(frame_array)
+            return True
 
         # Local mode with no source queues
         self._frames_in += 1
@@ -481,23 +461,12 @@ class FrameProcessor:
             self._frames_in += 1
             self._maybe_emit_frame_heartbeat()
 
-        if self._cloud_mode:
-            # Cloud mode: forward to the correct cloud input track
+        if self._cloud_relay is not None:
             if not self._video_mode:
                 return True
-            if self.cloud_manager:
-                frame_array = frame.to_ndarray(format="rgb24")
-                track_idx = self.cloud_manager.get_source_track_index(source_node_id)
-                if track_idx is not None:
-                    sent = self.cloud_manager.send_frame_to_track(
-                        frame_array, track_idx
-                    )
-                else:
-                    sent = self.cloud_manager.send_frame(frame_array)
-                if sent:
-                    self._frames_to_cloud += 1
-                    return True
-            return False
+            frame_array = frame.to_ndarray(format="rgb24")
+            self._cloud_relay.send_frame_to_source(frame_array, source_node_id)
+            return True
 
         # Local mode: convert and route to source node queues
         frame_tensor = self._frame_array_to_tensor(frame.to_ndarray(format="rgb24"))
@@ -531,12 +500,9 @@ class FrameProcessor:
         # Get frame based on mode
         frame: torch.Tensor | None = None
 
-        if self._cloud_mode:
-            # Cloud mode: get frame from cloud output queue
-            try:
-                frame_np = self._cloud_output_queue.get_nowait()
-                frame = torch.from_numpy(frame_np)
-            except queue.Empty:
+        if self._cloud_relay is not None:
+            frame = self._cloud_relay.get_frame()
+            if frame is None:
                 return None
         else:
             # Local mode: get from pipeline processor
@@ -563,8 +529,7 @@ class FrameProcessor:
         """Get the next audio chunk and its sample rate.
 
         In local mode, reads from the sink processor's audio output queue.
-        In cloud mode, reads from the cloud audio queue (populated by
-        _on_audio_from_cloud).
+        In cloud mode, reads from the CloudRelay audio queue.
 
         Returns:
             Tuple of (audio_tensor, sample_rate) or (None, None) if no audio available.
@@ -573,12 +538,8 @@ class FrameProcessor:
         if not self.running:
             return None, None
 
-        if self._cloud_mode:
-            try:
-                audio, sample_rate = self._cloud_audio_queue.get_nowait()
-                return audio, sample_rate
-            except queue.Empty:
-                return None, None
+        if self._cloud_relay is not None:
+            return self._cloud_relay.get_audio()
 
         if self._sink_processor is None:
             return None, None
@@ -589,68 +550,6 @@ class FrameProcessor:
             return audio, sample_rate
         except queue.Empty:
             return None, None
-
-    def _on_frame_from_cloud(self, frame: "VideoFrame") -> None:
-        """Callback when a processed frame is received from cloud (cloud mode)."""
-        self._frames_from_cloud += 1
-
-        try:
-            # Convert to numpy and queue for output
-            frame_np = frame.to_ndarray(format="rgb24")
-            try:
-                self._cloud_output_queue.put_nowait(frame_np)
-            except queue.Full:
-                # Drop oldest frame to make room
-                try:
-                    self._cloud_output_queue.get_nowait()
-                    self._cloud_output_queue.put_nowait(frame_np)
-                except queue.Empty:
-                    pass
-        except Exception as e:
-            logger.error(f"[FRAME-PROCESSOR] Error processing frame from cloud: {e}")
-
-    def _on_audio_from_cloud(self, frame: "AudioFrame") -> None:
-        """Callback when an audio frame is received from cloud (cloud mode).
-
-        Converts the AudioFrame to a torch tensor and queues it for
-        AudioProcessingTrack to consume via get_audio().
-
-        Packed formats (s16) store interleaved channels in a single plane,
-        so to_ndarray() returns (1, samples*channels).  We de-interleave
-        into (channels, samples) so AudioProcessingTrack sees the correct
-        channel count and doesn't erroneously duplicate data.
-        """
-        try:
-            n_channels = len(frame.layout.channels)
-            audio_np = frame.to_ndarray()
-            if audio_np.ndim == 1:
-                audio_np = audio_np.reshape(1, -1)
-
-            # Packed formats (e.g. s16) have 1 plane with interleaved channels:
-            # [L0, R0, L1, R1, ...].  De-interleave into (channels, samples).
-            if audio_np.shape[0] == 1 and n_channels > 1:
-                flat = audio_np.ravel()
-                audio_np = flat.reshape(-1, n_channels).T
-
-            audio_tensor = torch.from_numpy(audio_np.astype(np.float32))
-
-            # Normalise int16 range to [-1, 1] float if needed
-            if frame.format.name in ("s16", "s16p"):
-                audio_tensor = audio_tensor / 32768.0
-
-            try:
-                self._cloud_audio_queue.put_nowait((audio_tensor, frame.sample_rate))
-            except queue.Full:
-                # Drop oldest to keep latency low
-                try:
-                    self._cloud_audio_queue.get_nowait()
-                    self._cloud_audio_queue.put_nowait(
-                        (audio_tensor, frame.sample_rate)
-                    )
-                except queue.Empty:
-                    pass
-        except Exception as e:
-            logger.error(f"[FRAME-PROCESSOR] Error processing audio from cloud: {e}")
 
     def get_fps(self) -> float:
         """Get the playback FPS for the video track.
@@ -700,14 +599,14 @@ class FrameProcessor:
                 pipeline_ids=self.pipeline_ids if self.pipeline_ids else None,
                 user_id=self.user_id,
                 metadata={
-                    "mode": "cloud" if self._cloud_mode else "local",
+                    "mode": "cloud" if self._cloud_relay is not None else "local",
                     "ttff_ms": time_to_first_frame_ms,
                 },
                 connection_info=self.connection_info,
             )
             logger.info(
                 f"[FRAME-PROCESSOR] First frame produced, playback ready "
-                f"(session={self.session_id}, mode={'cloud' if self._cloud_mode else 'local'}, "
+                f"(session={self.session_id}, mode={'cloud' if self._cloud_relay is not None else 'local'}, "
                 f"ttff={time_to_first_frame_ms}ms)"
             )
 
@@ -726,13 +625,14 @@ class FrameProcessor:
         if elapsed > 0:
             fps_in = self._frames_in / elapsed if self._frames_in > 0 else 0
             fps_out = self._frames_out / elapsed if self._frames_out > 0 else 0
-            pipeline_fps = self.get_fps() if not self._cloud_mode else None
+            cloud = self._cloud_relay
+            pipeline_fps = self.get_fps() if cloud is None else None
 
-            if self._cloud_mode:
+            if cloud is not None:
                 logger.info(
                     f"[FRAME-PROCESSOR] RELAY MODE | "
-                    f"Frames: in={self._frames_in}, to_cloud={self._frames_to_cloud}, "
-                    f"from_cloud={self._frames_from_cloud}, out={self._frames_out} | "
+                    f"Frames: in={self._frames_in}, to_cloud={cloud.frames_to_cloud}, "
+                    f"from_cloud={cloud.frames_from_cloud}, out={self._frames_out} | "
                     f"Rate: {fps_in:.1f} fps in, {fps_out:.1f} fps out"
                 )
             else:
@@ -744,7 +644,7 @@ class FrameProcessor:
 
             # Emit stream_heartbeat Kafka event
             heartbeat_metadata = {
-                "mode": "cloud" if self._cloud_mode else "local",
+                "mode": "cloud" if cloud is not None else "local",
                 "frames_in": self._frames_in,
                 "frames_out": self._frames_out,
                 "fps_in": round(fps_in, 1),
@@ -754,9 +654,9 @@ class FrameProcessor:
                     (now - self._last_heartbeat_time) * 1000
                 ),
             }
-            if self._cloud_mode:
-                heartbeat_metadata["frames_to_cloud"] = self._frames_to_cloud
-                heartbeat_metadata["frames_from_cloud"] = self._frames_from_cloud
+            if cloud is not None:
+                heartbeat_metadata["frames_to_cloud"] = cloud.frames_to_cloud
+                heartbeat_metadata["frames_from_cloud"] = cloud.frames_from_cloud
             else:
                 heartbeat_metadata["pipeline_fps"] = (
                     round(pipeline_fps, 1) if pipeline_fps else None
@@ -777,6 +677,7 @@ class FrameProcessor:
         now = time.time()
         elapsed = now - self._last_stats_time
 
+        cloud = self._cloud_relay
         stats = {
             "frames_in": self._frames_in,
             "frames_out": self._frames_out,
@@ -787,12 +688,12 @@ class FrameProcessor:
             "output_sinks": self.sink_manager.get_info(),
             "input_source_enabled": self._source_manager.enabled,
             "input_source_type": self._source_manager.source_type,
-            "relay_mode": self._cloud_mode,
+            "relay_mode": cloud is not None,
         }
 
-        if self._cloud_mode:
-            stats["frames_to_cloud"] = self._frames_to_cloud
-            stats["frames_from_cloud"] = self._frames_from_cloud
+        if cloud is not None:
+            stats["frames_to_cloud"] = cloud.frames_to_cloud
+            stats["frames_from_cloud"] = cloud.frames_from_cloud
 
         return stats
 
@@ -912,6 +813,8 @@ class FrameProcessor:
             if not api_graph.get_source_node_ids():
                 self.parameters["input_mode"] = "text"
                 self._video_mode = False
+                if self._cloud_relay is not None:
+                    self._cloud_relay.video_mode = False
         else:
             # Determine which pipelines should receive input as vace_input_frames
             vace_input_video_ids: set[str] = set()
