@@ -875,7 +875,7 @@ class FrameProcessor:
             f"sink={graph_run.sink_node_id}, "
             f"sources={self._source_manager.get_source_node_ids()}, "
             f"sinks={self.sink_manager.get_sink_node_ids()}, "
-            f"records={self.sink_manager.get_record_node_ids()}"
+            f"records={self.sink_manager.recording.get_node_ids()}"
         )
 
     def __enter__(self):

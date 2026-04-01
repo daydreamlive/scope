@@ -172,7 +172,7 @@ class SinkManager:
         enabled: bool,
         sink_name: str,
         dimensions: tuple[int, int],
-        sink_class: "type[OutputSink] | None" = None,
+        sink_class: "type[OutputSink]",
     ) -> None:
         """Create, update, or destroy a single generic output sink entry."""
         width, height = dimensions
@@ -185,13 +185,6 @@ class SinkManager:
 
         if enabled and existing is None:
             # Create new sink
-            if sink_class is None:
-                from scope.core.outputs import get_output_sink_classes
-
-                sink_class = get_output_sink_classes().get(sink_type)
-            if sink_class is None:
-                logger.error(f"Unknown output sink type: {sink_type}")
-                return
             try:
                 sink = sink_class()
                 if sink.create(sink_name, width, height):
@@ -317,6 +310,10 @@ class SinkManager:
         if not isinstance(graph, GraphConfig):
             return
 
+        from scope.core.outputs import get_output_sink_classes
+
+        sink_classes = get_output_sink_classes()
+
         for node in graph.nodes:
             if node.type != "sink":
                 continue
@@ -328,9 +325,6 @@ class SinkManager:
             if node_id not in self._sink_queues_by_node:
                 continue
 
-            from scope.core.outputs import get_output_sink_classes
-
-            sink_classes = get_output_sink_classes()
             sink_class = sink_classes.get(node.sink_mode)
             if sink_class is None:
                 logger.warning(
@@ -417,8 +411,13 @@ class SinkManager:
         )
 
     # ------------------------------------------------------------------
-    # Recording delegation
+    # Recording
     # ------------------------------------------------------------------
+
+    @property
+    def recording(self) -> RecordingCoordinator:
+        """Access the recording coordinator for record-node operations."""
+        return self._recording
 
     def setup_cloud_graph(self, graph: Any) -> None:
         """Set up record queues from a graph config (cloud mode).
@@ -436,26 +435,6 @@ class SinkManager:
         if record_node_ids:
             self._recording.setup_queues(record_node_ids)
 
-    def get_record_node_ids(self) -> list[str]:
-        """Return the list of record node IDs in the graph."""
-        return self._recording.get_node_ids()
-
-    def get_from_record(self, record_node_id: str) -> torch.Tensor | None:
-        """Read a frame from a record node's output queue."""
-        return self._recording.get(record_node_id)
-
-    async def start_recording(self, node_id: str, fps: float) -> bool:
-        """Start recording for a specific record node."""
-        return await self._recording.start_recording(node_id, fps)
-
-    async def stop_recording(self, node_id: str) -> bool:
-        """Stop recording for a specific record node."""
-        return await self._recording.stop_recording(node_id)
-
-    async def download_recording(self, node_id: str) -> str | None:
-        """Finalize and return the recording file path for a record node."""
-        return await self._recording.download_recording(node_id)
-
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -465,27 +444,8 @@ class SinkManager:
         self._running = False
 
         # Generic output sinks
-        for sink_type, entry in list(self._sinks.items()):
-            q = entry["queue"]
-            while not q.empty():
-                try:
-                    q.get_nowait()
-                except queue.Empty:
-                    break
-            q.put_nowait(None)
-
-            thread = entry.get("thread")
-            if thread and thread.is_alive():
-                thread.join(timeout=2.0)
-                if thread.is_alive():
-                    logger.warning(
-                        f"Output sink thread '{sink_type}' did not stop within 2s"
-                    )
-            try:
-                entry["sink"].close()
-            except Exception as e:
-                logger.error(f"Error closing output sink '{sink_type}': {e}")
-        self._sinks.clear()
+        for sink_type in list(self._sinks):
+            self._close_sink(sink_type)
 
         # Per-node output sinks
         for node_id, entry in list(self._sinks_by_node.items()):
