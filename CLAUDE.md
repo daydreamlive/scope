@@ -108,7 +108,7 @@ SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydre
 Open http://localhost:8022, connect to cloud from the UI, load a pipeline, and start streaming. The local instance connects via WebSocket to the "cloud" instance on port 8002, which proxies WebRTC signaling and API requests back to itself.
 
 **Key files:**
-- `server/dev_cloud_relay.py` — development-only WebSocket handler mimicking the fal.ai cloud protocol
+- `cloud/dev_app.py` — development-only WebSocket handler mimicking the fal.ai cloud protocol
 - `server/cloud_connection.py` — client-side connection manager (`SCOPE_CLOUD_WS_URL` override in `_build_ws_url()`)
 
 ## Contributing Requirements
