@@ -325,10 +325,9 @@ class SinkManager:
         for node in graph.nodes:
             if node.type != "sink":
                 continue
-            sink_mode = getattr(node, "sink_mode", None)
-            if sink_mode not in ("spout", "ndi", "syphon"):
+            if node.sink_mode not in ("spout", "ndi", "syphon"):
                 continue
-            sink_name = getattr(node, "sink_name", "") or ""
+            sink_name = node.sink_name or ""
             node_id = node.id
 
             if node_id not in self._sink_queues_by_node:
@@ -337,10 +336,10 @@ class SinkManager:
             from scope.core.outputs import get_output_sink_classes
 
             sink_classes = get_output_sink_classes()
-            sink_class = sink_classes.get(sink_mode)
+            sink_class = sink_classes.get(node.sink_mode)
             if sink_class is None:
                 logger.warning(
-                    f"Output sink '{sink_mode}' not available for node {node_id}"
+                    f"Output sink '{node.sink_mode}' not available for node {node_id}"
                 )
                 continue
 
@@ -350,28 +349,28 @@ class SinkManager:
                 if sink.create(sink_name, width, height):
                     thread = threading.Thread(
                         target=self._per_node_sink_loop,
-                        args=(node_id, sink_mode),
+                        args=(node_id, node.sink_mode),
                         daemon=True,
                     )
                     self._sinks_by_node[node_id] = {
                         "sink": sink,
                         "thread": thread,
-                        "type": sink_mode,
+                        "type": node.sink_mode,
                         "name": sink_name,
                     }
                     thread.start()
                     logger.info(
-                        f"Multi-sink: started {sink_mode} '{sink_name}' "
+                        f"Multi-sink: started {node.sink_mode} '{sink_name}' "
                         f"for node {node_id}"
                     )
                 else:
                     logger.error(
-                        f"Failed to create output sink {sink_mode} for node {node_id}"
+                        f"Failed to create output sink {node.sink_mode} for node {node_id}"
                     )
                     sink.close()
             except Exception as e:
                 logger.error(
-                    f"Error creating output sink '{sink_mode}' for node {node_id}: {e}"
+                    f"Error creating output sink '{node.sink_mode}' for node {node_id}: {e}"
                 )
 
     def _per_node_sink_loop(self, node_id: str, sink_type: str) -> None:
