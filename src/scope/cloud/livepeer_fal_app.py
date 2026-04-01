@@ -269,6 +269,7 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         runner_env = {k: os.environ[k] for k in env_allowlist if k in os.environ}
         runner_env.setdefault("UV_CACHE_DIR", "/tmp/uv-cache")
         runner_env.setdefault("DAYDREAM_SCOPE_MODELS_DIR", "/data/models")
+        runner_env.setdefault("DAYDREAM_SCOPE_LORA_SHARED_DIR", "/data/models/lora")
         runner_env.setdefault("DAYDREAM_SCOPE_ASSETS_DIR", ASSETS_DIR_PATH)
         runner_env.setdefault("DAYDREAM_SCOPE_LORA_DIR", ASSETS_DIR_PATH + "/lora")
         runner_env.setdefault("DAYDREAM_SCOPE_LOGS_DIR", ASSETS_DIR_PATH + "/logs")
