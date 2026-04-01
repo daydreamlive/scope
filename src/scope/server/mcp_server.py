@@ -414,7 +414,7 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
         """Start recording the active headless session output to an MP4 file.
         Requires an active headless stream (started via start_stream).
         """
-        resp = await _client().post("/api/v1/session/recording/start")
+        resp = await _client().post("/api/v1/recordings/headless/start")
         return await _json(resp)
 
     @mcp.tool()
@@ -422,7 +422,7 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
         """Stop recording the active headless session.
         Returns the path to the recording file.
         """
-        resp = await _client().post("/api/v1/session/recording/stop")
+        resp = await _client().post("/api/v1/recordings/headless/stop")
         return await _json(resp)
 
     @mcp.tool()
@@ -433,7 +433,7 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
         """
         import tempfile
 
-        resp = await _client().get("/api/v1/session/recording/download")
+        resp = await _client().get("/api/v1/recordings/headless")
         resp.raise_for_status()
 
         with tempfile.NamedTemporaryFile(

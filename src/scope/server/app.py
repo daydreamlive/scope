@@ -1272,8 +1272,26 @@ async def download_recording(
     Local-first: if the session has a local recording, serve it directly.
     Falls back to cloud proxy only when there is no local recording and
     cloud is connected (pure cloud mode where recording happens remotely).
+    Use session_id="headless" for the active headless session.
     """
     try:
+        headless = webrtc_manager.headless_session if session_id == "headless" else None
+        if headless:
+            download_file = headless.download_recording()
+            if not download_file or not Path(download_file).exists():
+                raise HTTPException(status_code=404, detail="No recording available")
+
+            background_tasks.add_task(cleanup_temp_file, download_file)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"recording-{timestamp}.mp4"
+
+            return FileResponse(
+                download_file,
+                media_type="video/mp4",
+                filename=filename,
+            )
+
         session = webrtc_manager.get_session(session_id)
         has_local_recording = session and session.recording_manager
 
@@ -1321,8 +1339,16 @@ async def start_recording(
     """Start recording for the specified session.
 
     Creates a RecordingManager if one does not already exist.
+    Use session_id="headless" for the active headless session.
     """
     try:
+        headless = webrtc_manager.headless_session if session_id == "headless" else None
+        if headless:
+            if headless.is_recording:
+                return {"status": "already_recording"}
+            headless.start_recording()
+            return {"status": "started"}
+
         session = webrtc_manager.get_session(session_id)
         if not session:
             raise HTTPException(
@@ -1356,8 +1382,18 @@ async def stop_recording(
     session_id: str,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
 ):
-    """Stop recording for the specified session without downloading."""
+    """Stop recording for the specified session without downloading.
+
+    Use session_id="headless" for the active headless session.
+    """
     try:
+        headless = webrtc_manager.headless_session if session_id == "headless" else None
+        if headless:
+            if not headless.is_recording:
+                return {"status": "not_recording"}
+            headless.stop_recording()
+            return {"status": "stopped"}
+
         session = webrtc_manager.get_session(session_id)
         if not session:
             raise HTTPException(

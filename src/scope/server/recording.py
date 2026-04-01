@@ -23,44 +23,11 @@ TEMP_FILE_PREFIXES = {
 
 # Environment variables
 RECORDING_ENABLED = os.getenv("RECORDING_ENABLED", "false").lower() == "true"
-RECORDING_MAX_LENGTH_STR = os.getenv("RECORDING_MAX_LENGTH", "1h")
 RECORDING_STARTUP_CLEANUP_ENABLED = (
     os.getenv("RECORDING_STARTUP_CLEANUP_ENABLED", "true").lower() == "true"
 )
 
 RECORDING_MAX_FPS = 30.0  # Must match MediaRecorder's hardcoded rate=30
-
-
-def _parse_time_duration(duration_str: str) -> float:
-    """
-    Parse a time duration string (e.g., '1h', '30m', '120s') to seconds.
-
-    Args:
-        duration_str: Duration string like '1h', '30m', '120s', or just a number (treated as seconds)
-
-    Returns:
-        Duration in seconds
-    """
-    duration_str = duration_str.strip().lower()
-
-    if duration_str.endswith("h"):
-        return float(duration_str[:-1]) * 3600
-    elif duration_str.endswith("m"):
-        return float(duration_str[:-1]) * 60
-    elif duration_str.endswith("s"):
-        return float(duration_str[:-1])
-    else:
-        # Try to parse as seconds
-        try:
-            return float(duration_str)
-        except ValueError:
-            logger.warning(
-                f"Invalid duration format: {duration_str}, defaulting to 3600s (1h)"
-            )
-            return 3600.0
-
-
-RECORDING_MAX_LENGTH_SECONDS = _parse_time_duration(RECORDING_MAX_LENGTH_STR)
 
 
 class TimestampNormalizingTrack(MediaStreamTrack):
@@ -189,9 +156,6 @@ class RecordingManager:
         self.recording_track = None
         self.audio_recording_track = None
 
-        # Max length tracking
-        self.first_recording_start_time = None
-
     def set_relay(self, relay: MediaRelay):
         """Set the MediaRelay instance for creating video recording track."""
         self.relay = relay
@@ -298,10 +262,6 @@ class RecordingManager:
                 self.recording_track = recording_track
                 self.audio_recording_track = audio_recording_track
                 self.recording_started = True
-
-                # Track first recording start time
-                if self.first_recording_start_time is None:
-                    self.first_recording_start_time = time.time()
 
             logger.info(f"Started recording to {recording_file}")
         except Exception as e:
