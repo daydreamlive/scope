@@ -1,11 +1,11 @@
-"""Local cloud WebSocket endpoint for testing the cloud relay flow.
+"""Development-only cloud relay for testing the cloud flow locally.
 
 This module implements a lightweight WebSocket handler that speaks the same
 protocol as ``scope.cloud.fal_app.ScopeApp.websocket_handler``, allowing a
 second local Scope instance to act as the "cloud" side of the relay.
 
 Enable by setting ``SCOPE_CLOUD_WS=1`` — the ``/ws`` route is then registered
-in ``app.py``.
+in ``app.py``. See CLAUDE.md "Local Cloud Testing" for usage instructions.
 """
 
 from __future__ import annotations

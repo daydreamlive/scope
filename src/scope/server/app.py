@@ -562,7 +562,7 @@ app.add_middleware(
 if os.environ.get("SCOPE_CLOUD_WS") == "1":
     from fastapi import WebSocket as _WebSocket
 
-    from .cloud_ws_endpoint import cloud_ws_handler
+    from .dev_cloud_relay import cloud_ws_handler
 
     @app.websocket("/ws")
     async def cloud_ws(ws: _WebSocket):
