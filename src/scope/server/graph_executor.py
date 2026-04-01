@@ -200,47 +200,36 @@ def build_graph(
                 feeder_proc = node_processors.get(e.from_node)
                 if feeder_proc is not None:
                     sink_processors_by_node[sink_id] = feeder_proc
-                    sink_node = node_by_id.get(sink_id)
-                    sink_mode = (
-                        getattr(sink_node, "sink_mode", None) if sink_node else None
-                    )
+                    sink_node = node_by_id[sink_id]
+                    sink_mode = sink_node.sink_mode
                     # WebRTC preview reads sink_queues_by_node; NDI/Spout/Syphon threads
                     # must use a separate queue or they steal frames from get_from_sink().
                     sink_q = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
                     sink_queues_by_node[sink_id] = sink_q
-                    extra_hw: list[queue.Queue] = []
+                    queues_to_add = [sink_q]
                     if sink_mode in ("ndi", "spout", "syphon"):
                         sink_q_hw = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
                         sink_hardware_queues_by_node[sink_id] = sink_q_hw
-                        extra_hw.append(sink_q_hw)
+                        queues_to_add.append(sink_q_hw)
 
                     port = e.from_port
-                    to_append = [sink_q, *extra_hw]
-                    if port in feeder_proc.output_queues:
-                        for q in to_append:
-                            feeder_proc.output_queues[port].append(q)
-                    else:
-                        feeder_proc.output_queues[port] = list(to_append)
+                    feeder_proc.output_queues.setdefault(port, []).extend(queues_to_add)
                     logger.info(
                         "Sink %s: dedicated queue(s) on %s port '%s' "
                         "(webrtc + hardware=%s, total on port: %d)",
                         sink_id,
                         e.from_node,
                         port,
-                        bool(extra_hw),
+                        sink_id in sink_hardware_queues_by_node,
                         len(feeder_proc.output_queues[port]),
                     )
                 break
 
     # Backward compat: first sink determines the primary sink_processor
     sink_node_id: str | None = None
-    sink_node_ids = list(sink_queues_by_node.keys())
-    if sink_node_ids:
-        first_sink_id = sink_node_ids[0]
-        for e in graph.edges_to(first_sink_id):
-            if e.kind == "stream":
-                sink_node_id = e.from_node
-                break
+    if sink_processors_by_node:
+        first_sink_id = next(iter(sink_processors_by_node))
+        sink_node_id = sink_processors_by_node[first_sink_id].node_id
 
     if sink_node_id is None:
         # No explicit sink node: treat last pipeline node as sink (linear)
@@ -288,10 +277,7 @@ def build_graph(
             if feeder_proc is not None:
                 rec_q = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
                 record_queues_by_node[rec_id] = rec_q
-                if port in feeder_proc.output_queues:
-                    feeder_proc.output_queues[port].append(rec_q)
-                else:
-                    feeder_proc.output_queues[port] = [rec_q]
+                feeder_proc.output_queues.setdefault(port, []).append(rec_q)
                 logger.info(
                     "Record %s: dedicated queue on pipeline %s port '%s' (total queues: %d)",
                     rec_id,
