@@ -1,4 +1,4 @@
-"""OutputSinkManager — manages all output concerns: sinks and recording.
+"""SinkManager — manages all output concerns: sinks and recording.
 
 Extracted from FrameProcessor to separate output lifecycle management
 from frame processing logic. Also owns per-node sink queue routing
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class OutputSinkManager:
+class SinkManager:
     """Manages all output concerns for FrameProcessor.
 
     Owns:
@@ -40,12 +40,9 @@ class OutputSinkManager:
     def __init__(
         self,
         *,
-        get_dimensions: Callable[[], tuple[int, int]],
-        is_running: Callable[[], bool],
-        get_fps: Callable[[], float],
+        get_fps: "Callable[[], float]",
     ):
-        self._get_dimensions = get_dimensions
-        self._is_running = is_running
+        self._running = False
 
         # Per-node sink queues from graph executor
         self._sink_queues_by_node: dict[str, queue.Queue] = {}
@@ -62,6 +59,14 @@ class OutputSinkManager:
 
         # Recording coordination (per-record-node queues and managers)
         self._recording = RecordingCoordinator(get_fps=get_fps)
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
+
+    def start(self) -> None:
+        """Mark the manager as running."""
+        self._running = True
 
     # ------------------------------------------------------------------
     # Graph queue setup
@@ -140,10 +145,12 @@ class OutputSinkManager:
     # Generic output sinks
     # ------------------------------------------------------------------
 
-    def update_config(self, config: dict) -> None:
+    def update_config(self, config: dict, dimensions: tuple[int, int]) -> None:
         """Handle the generic output_sinks config dict.
 
-        Config format: {"spout": {"enabled": True, "name": "ScopeOut"}, "ndi": {...}}
+        Args:
+            config: Format: {"spout": {"enabled": True, "name": "ScopeOut"}, ...}
+            dimensions: (width, height) for creating sinks.
         """
         from scope.core.outputs import get_output_sink_classes
 
@@ -160,6 +167,7 @@ class OutputSinkManager:
                 sink_type=sink_type,
                 enabled=enabled,
                 sink_name=name,
+                dimensions=dimensions,
                 sink_class=sink_cls,
             )
 
@@ -168,10 +176,11 @@ class OutputSinkManager:
         sink_type: str,
         enabled: bool,
         sink_name: str,
+        dimensions: tuple[int, int],
         sink_class: "type[OutputSink] | None" = None,
     ) -> None:
         """Create, update, or destroy a single generic output sink entry."""
-        width, height = self._get_dimensions()
+        width, height = dimensions
         existing = self._sinks.get(sink_type)
 
         logger.info(
@@ -229,6 +238,7 @@ class OutputSinkManager:
                     sink_type=sink_type,
                     enabled=True,
                     sink_name=sink_name,
+                    dimensions=dimensions,
                     sink_class=sink_class,
                 )
 
@@ -263,7 +273,7 @@ class OutputSinkManager:
         logger.info(f"Output sink thread started: {sink_type}")
         frame_count = 0
 
-        while self._is_running() and sink_type in self._sinks:
+        while self._running and sink_type in self._sinks:
             entry = self._sinks.get(sink_type)
             if entry is None:
                 break
@@ -301,7 +311,7 @@ class OutputSinkManager:
     # Per-node output sinks (multi-sink graph mode)
     # ------------------------------------------------------------------
 
-    def setup_multi_sinks(self, graph: Any) -> None:
+    def setup_multi_sinks(self, graph: Any, dimensions: tuple[int, int]) -> None:
         """Set up per-sink-node output sinks for non-WebRTC graph sinks.
 
         For sink nodes with sink_mode in (spout, ndi, syphon), creates a
@@ -335,7 +345,7 @@ class OutputSinkManager:
                 continue
 
             try:
-                width, height = self._get_dimensions()
+                width, height = dimensions
                 sink = sink_class()
                 if sink.create(sink_name, width, height):
                     thread = threading.Thread(
@@ -381,7 +391,7 @@ class OutputSinkManager:
         frame_count = 0
         logger.info(f"Multi-sink output thread started: {sink_type} node {node_id}")
 
-        while self._is_running() and node_id in self._sinks_by_node:
+        while self._running and node_id in self._sinks_by_node:
             try:
                 try:
                     frame = sink_q.get(timeout=0.1)
@@ -462,6 +472,8 @@ class OutputSinkManager:
 
     def stop(self) -> None:
         """Stop and clean up all output sinks and recording."""
+        self._running = False
+
         # Generic output sinks
         for sink_type, entry in list(self._sinks.items()):
             q = entry["queue"]

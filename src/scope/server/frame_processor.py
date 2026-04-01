@@ -14,8 +14,8 @@ from .modulation import ModulationEngine
 from .parameter_scheduler import ParameterScheduler
 from .pipeline_manager import PipelineManager
 from .pipeline_processor import PipelineProcessor
-from .sink_manager import OutputSinkManager
-from .source_manager import InputSourceManager
+from .sink_manager import SinkManager
+from .source_manager import SourceManager
 
 if TYPE_CHECKING:
     from av import AudioFrame
@@ -40,7 +40,7 @@ class FrameProcessor:
     2. Cloud mode: Frames sent to cloud for processing
 
     Input/output routing (WebRTC, NDI, Spout, recording, etc.) is delegated
-    to InputSourceManager and OutputSinkManager.
+    to SourceManager and SinkManager.
     """
 
     def __init__(
@@ -118,20 +118,12 @@ class FrameProcessor:
         # The processor whose output we read in graph mode (legacy get() path)
         self._sink_processor: PipelineProcessor | None = None
 
-        # Input source manager (sources, source queues, hardware input)
-        self._input_source_manager = InputSourceManager(
-            frame_to_tensor=self._frame_array_to_tensor,
-            is_running=lambda: self.running,
-            cloud_manager=cloud_manager,
-            is_video_mode=lambda: self._video_mode,
-        )
+        # Source manager (sources, source queues, hardware input)
+        self._source_manager = SourceManager()
+        self._source_manager.set_on_frame(self._on_hardware_source_frame)
 
         # Sink manager (sinks, sink queues, hardware output, recording)
-        self.sink_manager = OutputSinkManager(
-            get_dimensions=self._get_pipeline_dimensions,
-            is_running=lambda: self.running,
-            get_fps=self.get_fps,
-        )
+        self.sink_manager = SinkManager(get_fps=self.get_fps)
 
         # Frame counting for debug logging
         self._frames_in = 0
@@ -151,11 +143,15 @@ class FrameProcessor:
             return
 
         self.running = True
+        self._source_manager.start()
+        self.sink_manager.start()
 
         # Process output sink settings from initial parameters
         if "output_sinks" in self.parameters:
             sinks_config = self.parameters.pop("output_sinks")
-            self.sink_manager.update_config(sinks_config)
+            self.sink_manager.update_config(
+                sinks_config, self._get_pipeline_dimensions()
+            )
 
         # Process generic input source settings.
         # When a graph has source nodes, per-node input setup handles routing,
@@ -171,7 +167,7 @@ class FrameProcessor:
                 self.parameters.pop("input_source")
             else:
                 input_source_config = self.parameters.pop("input_source")
-                self._input_source_manager.update_config(input_source_config)
+                self._source_manager.update_config(input_source_config)
 
         # Reset frame counters on start
         self._frames_in = 0
@@ -198,7 +194,7 @@ class FrameProcessor:
                 from .graph_schema import GraphConfig
 
                 graph = GraphConfig(**graph_data)
-                self._input_source_manager.setup_multi_sources(graph)
+                self._source_manager.setup_multi_sources(graph)
                 self.sink_manager.setup_cloud_graph(graph)
 
             logger.info("[FRAME-PROCESSOR] Started in cloud mode")
@@ -303,7 +299,7 @@ class FrameProcessor:
         self.sink_manager.stop()
 
         # Clean up all input sources
-        self._input_source_manager.stop()
+        self._source_manager.stop()
 
         # Clean up cloud callbacks in cloud mode
         if self._cloud_mode and self.cloud_manager:
@@ -311,13 +307,10 @@ class FrameProcessor:
             self.cloud_manager.remove_audio_callback(self._on_audio_from_cloud)
 
         # Log final frame stats
-        total_to_cloud = (
-            self._frames_to_cloud + self._input_source_manager.frames_to_cloud
-        )
         if self._cloud_mode:
             logger.info(
                 f"[FRAME-PROCESSOR] Stopped (cloud mode). "
-                f"Frames: in={self._frames_in}, to_cloud={total_to_cloud}, "
+                f"Frames: in={self._frames_in}, to_cloud={self._frames_to_cloud}, "
                 f"from_cloud={self._frames_from_cloud}, out={self._frames_out}"
             )
         else:
@@ -402,6 +395,36 @@ class FrameProcessor:
             t = torch.as_tensor(frame_array, dtype=torch.uint8)
         return t.unsqueeze(0)
 
+    def _on_hardware_source_frame(
+        self, source_node_id: str | None, rgb_frame: np.ndarray
+    ) -> None:
+        """Callback invoked by SourceManager when a hardware source produces a frame.
+
+        Routes the frame to cloud or to local source queues depending on mode.
+        source_node_id is None for the generic (non-graph) input source.
+        """
+        if self._cloud_mode:
+            if not self._video_mode or self.cloud_manager is None:
+                return
+            if source_node_id is not None:
+                track_idx = self.cloud_manager.get_source_track_index(source_node_id)
+                if track_idx is not None:
+                    sent = self.cloud_manager.send_frame_to_track(rgb_frame, track_idx)
+                else:
+                    sent = self.cloud_manager.send_frame(rgb_frame)
+            else:
+                sent = self.cloud_manager.send_frame(rgb_frame)
+            if sent:
+                self._frames_to_cloud += 1
+            return
+
+        # Local mode: convert to tensor and route to source queues
+        frame_tensor = self._frame_array_to_tensor(rgb_frame)
+        if source_node_id is not None:
+            self._source_manager.route_frame_to_source(frame_tensor, source_node_id)
+        else:
+            self._source_manager.route_frame_to_all_sources(frame_tensor)
+
     def _maybe_emit_frame_heartbeat(self) -> None:
         """Log stats periodically when frames flow (shared by put() paths)."""
         now = time.time()
@@ -420,7 +443,7 @@ class FrameProcessor:
             return False
 
         # Single-source shortcut: delegate to put_to_source
-        single_id = self._input_source_manager.single_source_node_id
+        single_id = self._source_manager.single_source_node_id
         if single_id is not None:
             return self.put_to_source(frame, single_id, count_frame=True)
 
@@ -478,9 +501,7 @@ class FrameProcessor:
 
         # Local mode: convert and route to source node queues
         frame_tensor = self._frame_array_to_tensor(frame.to_ndarray(format="rgb24"))
-        return self._input_source_manager.route_frame_to_source(
-            frame_tensor, source_node_id
-        )
+        return self._source_manager.route_frame_to_source(frame_tensor, source_node_id)
 
     def get_from_sink(self, sink_node_id: str) -> torch.Tensor | None:
         """Read a frame from a specific sink node's output queue (multi-sink)."""
@@ -702,10 +723,6 @@ class FrameProcessor:
         now = time.time()
         elapsed = now - self._last_stats_time
 
-        total_to_cloud = (
-            self._frames_to_cloud + self._input_source_manager.frames_to_cloud
-        )
-
         if elapsed > 0:
             fps_in = self._frames_in / elapsed if self._frames_in > 0 else 0
             fps_out = self._frames_out / elapsed if self._frames_out > 0 else 0
@@ -714,7 +731,7 @@ class FrameProcessor:
             if self._cloud_mode:
                 logger.info(
                     f"[FRAME-PROCESSOR] RELAY MODE | "
-                    f"Frames: in={self._frames_in}, to_cloud={total_to_cloud}, "
+                    f"Frames: in={self._frames_in}, to_cloud={self._frames_to_cloud}, "
                     f"from_cloud={self._frames_from_cloud}, out={self._frames_out} | "
                     f"Rate: {fps_in:.1f} fps in, {fps_out:.1f} fps out"
                 )
@@ -738,7 +755,7 @@ class FrameProcessor:
                 ),
             }
             if self._cloud_mode:
-                heartbeat_metadata["frames_to_cloud"] = total_to_cloud
+                heartbeat_metadata["frames_to_cloud"] = self._frames_to_cloud
                 heartbeat_metadata["frames_from_cloud"] = self._frames_from_cloud
             else:
                 heartbeat_metadata["pipeline_fps"] = (
@@ -768,16 +785,13 @@ class FrameProcessor:
             "fps_out": self._frames_out / elapsed if elapsed > 0 else 0,
             "pipeline_fps": self.get_fps(),
             "output_sinks": self.sink_manager.get_info(),
-            "input_source_enabled": self._input_source_manager.enabled,
-            "input_source_type": self._input_source_manager.source_type,
+            "input_source_enabled": self._source_manager.enabled,
+            "input_source_type": self._source_manager.source_type,
             "relay_mode": self._cloud_mode,
         }
 
         if self._cloud_mode:
-            total_to_cloud = (
-                self._frames_to_cloud + self._input_source_manager.frames_to_cloud
-            )
-            stats["frames_to_cloud"] = total_to_cloud
+            stats["frames_to_cloud"] = self._frames_to_cloud
             stats["frames_from_cloud"] = self._frames_from_cloud
 
         return stats
@@ -819,19 +833,21 @@ class FrameProcessor:
         # Handle generic output sinks config
         if "output_sinks" in parameters:
             sinks_config = parameters.pop("output_sinks")
-            self.sink_manager.update_config(sinks_config)
+            self.sink_manager.update_config(
+                sinks_config, self._get_pipeline_dimensions()
+            )
 
         # Handle generic input source settings.
         # Skip when per-node sources or graph source queues are active.
         if "input_source" in parameters:
             if (
-                self._input_source_manager.has_per_node_sources
-                or self._input_source_manager.has_source_queues
+                self._source_manager.has_per_node_sources
+                or self._source_manager.has_source_queues
             ):
                 parameters.pop("input_source")
             else:
                 input_source_config = parameters.pop("input_source")
-                self._input_source_manager.update_config(input_source_config)
+                self._source_manager.update_config(input_source_config)
 
         if "modulations" in parameters:
             raw = parameters.pop("modulations")
@@ -935,7 +951,7 @@ class FrameProcessor:
         self.pipeline_ids = graph_run.pipeline_ids
 
         # Delegate queue routing to managers
-        self._input_source_manager.setup_graph_queues(
+        self._source_manager.setup_graph_queues(
             source_queues=graph_run.source_queues,
             source_queues_by_node=graph_run.source_queues_by_node,
         )
@@ -955,15 +971,15 @@ class FrameProcessor:
             processor.start()
 
         # Set up per-source-node input sources for non-WebRTC sources
-        self._input_source_manager.setup_multi_sources(graph)
+        self._source_manager.setup_multi_sources(graph)
 
         # Set up per-sink-node output sinks for non-WebRTC sinks
-        self.sink_manager.setup_multi_sinks(graph)
+        self.sink_manager.setup_multi_sinks(graph, self._get_pipeline_dimensions())
 
         logger.info(
             f"Created graph with {len(self.pipeline_processors)} processors, "
             f"sink={graph_run.sink_node_id}, "
-            f"sources={self._input_source_manager.get_source_node_ids()}, "
+            f"sources={self._source_manager.get_source_node_ids()}, "
             f"sinks={self.sink_manager.get_sink_node_ids()}, "
             f"records={self.sink_manager.get_record_node_ids()}"
         )

@@ -1,8 +1,12 @@
-"""InputSourceManager — manages generic and per-node hardware input sources.
+"""SourceManager — manages generic and per-node hardware input sources.
 
 Extracted from FrameProcessor to separate input source lifecycle management
 from frame processing logic. Also owns the per-node source queue routing
 from the graph executor so FrameProcessor doesn't need to know about it.
+
+The manager does not know about tensors, cloud forwarding, or GPU uploads.
+Receiver loops emit raw numpy frames via a callback; the caller (FrameProcessor)
+decides how to route them (tensor conversion, cloud forwarding, etc.).
 """
 
 import logging
@@ -12,19 +16,19 @@ import time
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-import torch
-
 if TYPE_CHECKING:
     import numpy as np
 
     from scope.core.inputs import InputSource
 
-    from .cloud_connection import CloudConnectionManager
-
 logger = logging.getLogger(__name__)
 
+# Type alias for the frame callback: (source_node_id | None, numpy_frame) -> None
+# source_node_id is None for the generic (non-graph) input source.
+FrameCallback = Callable[[str | None, "np.ndarray"], None]
 
-class InputSourceManager:
+
+class SourceManager:
     """Manages input sources and source-queue routing for FrameProcessor.
 
     Owns:
@@ -34,19 +38,8 @@ class InputSourceManager:
     - Per-node hardware input sources for graph source nodes
     """
 
-    def __init__(
-        self,
-        *,
-        frame_to_tensor: Callable[["np.ndarray"], torch.Tensor],
-        is_running: Callable[[], bool],
-        cloud_manager: "CloudConnectionManager | None" = None,
-        is_video_mode: Callable[[], bool] = lambda: False,
-    ):
-        self._frame_to_tensor = frame_to_tensor
-        self._is_running = is_running
-        self._cloud_manager = cloud_manager
-        self._cloud_mode = cloud_manager is not None
-        self._is_video_mode = is_video_mode
+    def __init__(self):
+        self._running = False
 
         # Graph source queues for generic source fan-out
         self._graph_source_queues: list[queue.Queue] = []
@@ -62,8 +55,9 @@ class InputSourceManager:
         # Per-node input sources: node_id -> {source, thread, type}
         self._sources_by_node: dict[str, dict] = {}
 
-        # Counter for frames sent to cloud from hardware sources
-        self.frames_to_cloud = 0
+        # Callback invoked with (source_node_id, numpy_frame) for each received frame.
+        # Set by the caller before starting receiver threads.
+        self._on_frame: FrameCallback | None = None
 
     # ------------------------------------------------------------------
     # Properties
@@ -98,6 +92,18 @@ class InputSourceManager:
         return list(self._source_queues_by_node.keys())
 
     # ------------------------------------------------------------------
+    # Configuration
+    # ------------------------------------------------------------------
+
+    def set_on_frame(self, callback: FrameCallback) -> None:
+        """Set the callback invoked for each received hardware-source frame."""
+        self._on_frame = callback
+
+    def start(self) -> None:
+        """Mark the manager as running (call before starting receiver threads)."""
+        self._running = True
+
+    # ------------------------------------------------------------------
     # Graph queue setup
     # ------------------------------------------------------------------
 
@@ -114,9 +120,7 @@ class InputSourceManager:
     # Frame routing
     # ------------------------------------------------------------------
 
-    def route_frame_to_source(
-        self, frame_tensor: torch.Tensor, source_node_id: str
-    ) -> bool:
+    def route_frame_to_source(self, frame_tensor, source_node_id: str) -> bool:
         """Route a pre-converted tensor frame to a source node's queues."""
         queues = self._source_queues_by_node.get(source_node_id)
         if not queues:
@@ -128,6 +132,21 @@ class InputSourceManager:
             except queue.Full:
                 logger.debug(
                     "Source node %s queue full, dropping frame", source_node_id
+                )
+
+        return True
+
+    def route_frame_to_all_sources(self, frame_tensor) -> bool:
+        """Route a pre-converted tensor frame to all generic source queues."""
+        if not self._graph_source_queues:
+            return False
+
+        for sq in self._graph_source_queues:
+            try:
+                sq.put_nowait(frame_tensor)
+            except queue.Full:
+                logger.debug(
+                    "Graph source queue full, dropping %s frame", self._source_type
                 )
 
         return True
@@ -226,25 +245,12 @@ class InputSourceManager:
 
         frame_count = 0
 
-        while self._is_running() and self._source_enabled and self._source is not None:
+        while self._running and self._source_enabled and self._source is not None:
             try:
                 rgb_frame = self._source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
-                    if self._cloud_mode:
-                        if self._is_video_mode() and self._cloud_manager:
-                            if self._cloud_manager.send_frame(rgb_frame):
-                                self.frames_to_cloud += 1
-                    elif self._graph_source_queues:
-                        frame_tensor = self._frame_to_tensor(rgb_frame)
-
-                        for sq in self._graph_source_queues:
-                            try:
-                                sq.put_nowait(frame_tensor)
-                            except queue.Full:
-                                logger.debug(
-                                    f"Graph source queue full, "
-                                    f"dropping {self._source_type} frame"
-                                )
+                    if self._on_frame is not None:
+                        self._on_frame(None, rgb_frame)
 
                     frame_count += 1
                     if frame_count % 100 == 0:
@@ -288,10 +294,8 @@ class InputSourceManager:
             source_name = getattr(node, "source_name", "") or ""
             node_id = node.id
 
-            # In cloud mode we don't need local source queues — frames are
-            # forwarded to the cloud via send_frame_to_track. In local mode
-            # the node must have queues registered by the graph executor.
-            if not self._cloud_mode and node_id not in self._source_queues_by_node:
+            # Skip nodes without registered queues (unless handled by callback)
+            if node_id not in self._source_queues_by_node and self._on_frame is None:
                 continue
 
             from scope.core.inputs import get_input_source_classes
@@ -349,33 +353,12 @@ class InputSourceManager:
         source = entry["source"]
         frame_count = 0
 
-        while self._is_running() and node_id in self._sources_by_node:
+        while self._running and node_id in self._sources_by_node:
             try:
                 rgb_frame = source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
-                    if self._cloud_mode:
-                        # Cloud mode: forward to the correct cloud input track
-                        if self._is_video_mode() and self._cloud_manager:
-                            track_idx = self._cloud_manager.get_source_track_index(
-                                node_id
-                            )
-                            if track_idx is not None:
-                                sent = self._cloud_manager.send_frame_to_track(
-                                    rgb_frame, track_idx
-                                )
-                            else:
-                                sent = self._cloud_manager.send_frame(rgb_frame)
-                            if sent:
-                                self.frames_to_cloud += 1
-                    else:
-                        queues = self._source_queues_by_node.get(node_id)
-                        if queues:
-                            frame_tensor = self._frame_to_tensor(rgb_frame)
-                            for sq in queues:
-                                try:
-                                    sq.put_nowait(frame_tensor)
-                                except queue.Full:
-                                    pass
+                    if self._on_frame is not None:
+                        self._on_frame(node_id, rgb_frame)
 
                     frame_count += 1
                     if frame_count % 100 == 0:
@@ -401,6 +384,8 @@ class InputSourceManager:
 
     def stop(self) -> None:
         """Stop and clean up all input sources."""
+        self._running = False
+
         # Generic input source
         self._source_enabled = False
         if self._source is not None:
