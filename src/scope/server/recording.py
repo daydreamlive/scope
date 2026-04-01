@@ -23,44 +23,11 @@ TEMP_FILE_PREFIXES = {
 
 # Environment variables
 RECORDING_ENABLED = os.getenv("RECORDING_ENABLED", "false").lower() == "true"
-RECORDING_MAX_LENGTH_STR = os.getenv("RECORDING_MAX_LENGTH", "1h")
 RECORDING_STARTUP_CLEANUP_ENABLED = (
     os.getenv("RECORDING_STARTUP_CLEANUP_ENABLED", "true").lower() == "true"
 )
 
 RECORDING_MAX_FPS = 30.0  # Must match MediaRecorder's hardcoded rate=30
-
-
-def _parse_time_duration(duration_str: str) -> float:
-    """
-    Parse a time duration string (e.g., '1h', '30m', '120s') to seconds.
-
-    Args:
-        duration_str: Duration string like '1h', '30m', '120s', or just a number (treated as seconds)
-
-    Returns:
-        Duration in seconds
-    """
-    duration_str = duration_str.strip().lower()
-
-    if duration_str.endswith("h"):
-        return float(duration_str[:-1]) * 3600
-    elif duration_str.endswith("m"):
-        return float(duration_str[:-1]) * 60
-    elif duration_str.endswith("s"):
-        return float(duration_str[:-1])
-    else:
-        # Try to parse as seconds
-        try:
-            return float(duration_str)
-        except ValueError:
-            logger.warning(
-                f"Invalid duration format: {duration_str}, defaulting to 3600s (1h)"
-            )
-            return 3600.0
-
-
-RECORDING_MAX_LENGTH_SECONDS = _parse_time_duration(RECORDING_MAX_LENGTH_STR)
 
 
 class TimestampNormalizingTrack(MediaStreamTrack):
@@ -189,10 +156,6 @@ class RecordingManager:
         self.recording_track = None
         self.audio_recording_track = None
 
-        # Max length tracking
-        self.first_recording_start_time = None
-        self.max_length_reached = False
-
     def set_relay(self, relay: MediaRelay):
         """Set the MediaRelay instance for creating video recording track."""
         self.relay = relay
@@ -263,10 +226,6 @@ class RecordingManager:
             if self.recording_started:
                 return
 
-            # Check if max length has been reached
-            if self.max_length_reached:
-                return
-
         recording_file = None
         media_recorder = None
         recording_track = None
@@ -304,10 +263,6 @@ class RecordingManager:
                 self.audio_recording_track = audio_recording_track
                 self.recording_started = True
 
-                # Track first recording start time
-                if self.first_recording_start_time is None:
-                    self.first_recording_start_time = time.time()
-
             logger.info(f"Started recording to {recording_file}")
         except Exception as e:
             logger.error(f"Error starting recording: {e}")
@@ -318,41 +273,6 @@ class RecordingManager:
                 audio_recording_track,
             )
             raise
-
-    def check_max_length(self) -> bool:
-        """
-        Check if recording has exceeded max length and stop if necessary.
-        This should be called periodically during recording.
-
-        Returns:
-            True if max length was reached and recording should be stopped, False otherwise
-        """
-        if self.max_length_reached:
-            return False
-
-        with self.recording_lock:
-            if not self.recording_started:
-                return False
-
-            # Calculate total duration from start time
-            if self.first_recording_start_time is not None:
-                total_duration = time.time() - self.first_recording_start_time
-
-                if total_duration >= RECORDING_MAX_LENGTH_SECONDS:
-                    if not self.max_length_reached:
-                        # Only log once when max length is first reached
-                        logger.info(
-                            f"Recording max length reached (total: {total_duration:.2f}s, max: {RECORDING_MAX_LENGTH_SECONDS}s). Stopping recording."
-                        )
-                    self.max_length_reached = True
-                    return True
-
-        return False
-
-    async def stop_recording_if_max_length_reached(self):
-        """Stop current recording if max length has been reached."""
-        if self.max_length_reached and self.recording_started:
-            await self.stop_recording()
 
     async def _cleanup_recording(
         self,
@@ -418,8 +338,13 @@ class RecordingManager:
                 self.media_recorder = None
                 self.recording_started = False
 
-    async def finalize_and_get_recording(self):
-        """Finalize the current recording and return a copy for download."""
+    async def finalize_and_get_recording(self, restart_after: bool = True):
+        """Finalize the current recording and return a copy for download.
+
+        When restart_after is True (session-level recording), a new recording
+        segment is started after the copy. Per-node queue-based recording
+        passes restart_after=False so the caller can replace the track.
+        """
         try:
             with self.recording_lock:
                 has_active_recording = self.recording_started and self.media_recorder
@@ -442,12 +367,10 @@ class RecordingManager:
                 # Create a copy for download
                 download_file = self._copy_single_segment(recording_file)
 
-                # Continue recording if max length not reached
-                if not self.max_length_reached:
+                # Continue recording after download
+                if restart_after:
                     await self.start_recording()
                     logger.info("Continued recording after download")
-                else:
-                    logger.info("Skipped starting new recording (max length reached)")
 
                 return download_file
 
@@ -515,10 +438,6 @@ class RecordingManager:
             if file_path and os.path.exists(file_path):
                 self._safe_remove_file(file_path)
                 logger.info(f"Deleted recording file: {file_path}")
-
-    def get_recording_path(self):
-        """Get the path to the recording file."""
-        return Path(self.recording_file) if self.recording_file else None
 
     @property
     def is_recording_started(self):

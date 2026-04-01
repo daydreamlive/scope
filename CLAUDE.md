@@ -111,6 +111,36 @@ Open http://localhost:8022, connect to cloud from the UI, load a pipeline, and s
 - `cloud/dev_app.py` — development-only WebSocket handler mimicking the fal.ai cloud protocol
 - `server/cloud_connection.py` — client-side connection manager (`SCOPE_CLOUD_WS_URL` override in `_build_ws_url()`)
 
+## MCP Server Testing with Local Cloud Dev
+
+When asked to test Scope via MCP tools (e.g., with a workflow JSON), follow this sequence directly — do not read source code to figure out the API.
+
+**Setup (run both as background processes):**
+
+```bash
+# Cloud instance:
+SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
+
+# Local instance:
+SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022
+```
+
+**MCP tool sequence:**
+
+1. `connect_to_scope(port=8022)` — connect to the local instance
+2. `connect_to_cloud()` — connects to cloud (env vars provide app_id/url)
+3. `resolve_workflow(workflow_json=...)` — validate dependencies
+4. `load_pipeline(pipeline_id=...)` — load the pipeline(s) from the workflow; wait a few seconds for loading to complete. The load is proxied to the cloud instance automatically.
+5. `start_stream(pipeline_id=...)` — start a headless session. **Takes `pipeline_id` only, not a graph.** Extract the pipeline_id from the workflow JSON.
+6. `capture_frame()` — capture output frame (returns file_path to a JPEG)
+7. `start_recording()` / `stop_recording()` / `download_recording()` — record and download MP4
+
+**Key details:**
+- The headless session endpoint (`/api/v1/session/start`) accepts `pipeline_id`, `input_mode`, `prompts`, `input_source` — it does **not** accept graph configs
+- When parsing a workflow JSON, extract `pipeline_id` from `pipelines[].pipeline_id` for `load_pipeline` and `start_stream`
+- `resolve_workflow` takes the full workflow JSON as a **string**
+- `capture_frame` and `download_recording` return file paths — use the Read tool to view the captured image
+
 ## Contributing Requirements
 
 - All commits must be signed off (DCO): `git commit -s`
