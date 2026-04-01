@@ -122,7 +122,7 @@ class FrameProcessor:
         self._source_manager.set_on_frame(self._on_hardware_source_frame)
 
         # Sink manager (sinks, sink queues, hardware output, recording)
-        self.sink_manager = SinkManager(get_fps=self.get_fps)
+        self.sink_manager = SinkManager()
 
         # Frame counting for debug logging
         self._frames_in = 0
@@ -571,15 +571,6 @@ class FrameProcessor:
         if fps is not None:
             return fps
         return self.get_fps()
-
-    def notify_primary_frame_output(self, frame: torch.Tensor) -> None:
-        """Handle side effects for frames from the primary output track.
-
-        Called by the primary track's recv() when using get_from_sink()
-        instead of get(). Emits the playback_ready event on first frame
-        and fans out to output sinks (NDI/Spout).
-        """
-        self._on_frame_output(frame)
 
     def _on_frame_output(self, frame: torch.Tensor) -> None:
         """Common post-output logic: increment counter, emit playback_ready, fan out to sinks."""
