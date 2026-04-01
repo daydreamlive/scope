@@ -58,6 +58,7 @@ from .cloud_proxy import (
 from .download_models import download_models
 from .download_progress_manager import download_progress_manager
 from .file_utils import (
+    AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
     LORA_EXTENSIONS,
     VIDEO_EXTENSIONS,
@@ -1920,12 +1921,19 @@ async def list_assets(
             extensions = IMAGE_EXTENSIONS
         elif type == "video":
             extensions = VIDEO_EXTENSIONS
+        elif type == "audio":
+            extensions = AUDIO_EXTENSIONS
         else:
-            extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+            extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 
         for file_path in iter_files(assets_dir, extensions):
             ext = file_path.suffix.lower()
-            asset_type = "image" if ext in IMAGE_EXTENSIONS else "video"
+            if ext in IMAGE_EXTENSIONS:
+                asset_type = "image"
+            elif ext in AUDIO_EXTENSIONS:
+                asset_type = "audio"
+            else:
+                asset_type = "video"
             asset_files.append(process_asset_file(file_path, assets_dir, asset_type))
 
         # Sort by created_at (most recent first), then by folder and name
@@ -1943,14 +1951,13 @@ async def upload_asset(
     filename: str = Query(...),
     cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
-    """Upload an asset file (image or video) to the assets directory.
+    """Upload an asset file (image, video, or audio) to the assets directory.
 
     When cloud mode is active, the file is uploaded to the cloud server instead.
     """
 
     try:
-        # Validate file type - support both images and videos
-        allowed_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+        allowed_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 
         file_extension = Path(filename).suffix.lower()
         if file_extension not in allowed_extensions:
@@ -1959,7 +1966,6 @@ async def upload_asset(
                 detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}",
             )
 
-        # Determine asset type
         if file_extension in IMAGE_EXTENSIONS:
             asset_type = "image"
             content_type_map = {
@@ -1968,6 +1974,14 @@ async def upload_asset(
                 ".jpeg": "image/jpeg",
                 ".webp": "image/webp",
                 ".bmp": "image/bmp",
+            }
+        elif file_extension in AUDIO_EXTENSIONS:
+            asset_type = "audio"
+            content_type_map = {
+                ".wav": "audio/wav",
+                ".mp3": "audio/mpeg",
+                ".flac": "audio/flac",
+                ".ogg": "audio/ogg",
             }
         else:
             asset_type = "video"
