@@ -78,10 +78,11 @@ To switch away from explicit runner overrides, unset both `LIVEPEER_WS_URL` and 
 | Variable             | Required | Description |
 | -------------------- | -------- | ----------- |
 | `SCOPE_CLOUD_MODE`   | Yes      | Set to `livepeer` to enable Livepeer relay mode. |
-| `LIVEPEER_TOKEN`     | No       | Base64-encoded JSON token used to start the LV2V job. |
 | `LIVEPEER_ORCH_URL`  | No       | Explicit orchestrator URL. Formats: `host[:port]` or `http(s)://host[:port]`. If unset, token discovery is used. |
-| `LIVEPEER_WS_URL`    | No       | Explicit runner WebSocket URL (e.g. `ws://127.0.0.1:8001/ws` or `wss://fal.run/<app-id>/ws`). |
+| `LIVEPEER_SIGNER`    | No       | Override signer URL used for Livepeer payments. To disable payments, set to a falsy value such as `"off"`. |
+| `LIVEPEER_WS_URL`    | No       | Explicit runner WebSocket URL (e.g. `ws://127.0.0.1:8001/ws`). |
 | `SCOPE_CLOUD_APP_ID` | No       | Fal app id used to construct `ws_url` as `wss://fal.run/<app-id>`. Must include `/ws` suffix. Used when `LIVEPEER_WS_URL` is not set. |
+| `LIVEPEER_TOKEN`     | No       | Base64-encoded JSON token used to start the LV2V job. Can be used to override Livepeer orch / payments routing. |
 | `LIVEPEER_DEBUG`     | No       | Enables debug logging for the Livepeer Gateway SDK and local Livepeer modules. |
 | `LIVEPEER_DEV_MODE`  | No       | Used for developing against a local Livepeer orchestrator with self-signed certificates. |
 | `DAYDREAM_API_BASE`  | No       | Override for the Daydream API base used when validating remote plugin installs (runner only). Defaults to `https://api.daydream.live`. |
@@ -93,10 +94,10 @@ Once both the runner and the server are up:
 1. Connect Scope to the remote backend from the UI, or call one of:
    - `POST /api/v1/cloud/connect`
 
-   Both accept a `CloudConnectRequest` body. In Livepeer mode, `LIVEPEER_TOKEN`
-   is still the auth credential; `app_id` is optional runner routing config
-   (used to derive a Fal `ws_url` when `LIVEPEER_WS_URL` is not set), and
-   `api_key` is ignored.
+   Both accept a `CloudConnectRequest` body. In Livepeer mode, `api_key` and
+   `user_id` are required up front. `SCOPE_CLOUD_API_KEY` can override auth
+   credentials, while `LIVEPEER_TOKEN` can override Livepeer auth/routing
+   behavior (for example signer/discovery/orchestrator selection).
 
 2. Start streaming from the Scope UI. Scope creates the Livepeer LV2V job on connect, then opens media channels when the stream starts.
 
