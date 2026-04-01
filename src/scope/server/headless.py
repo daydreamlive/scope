@@ -111,6 +111,28 @@ class HeadlessRecorder:
         return self._frame_count
 
 
+class HeadlessRecordingAdapter:
+    """Adapts HeadlessSession recording to the RecordingManager interface
+    so the existing ``/api/v1/recordings/{session_id}/*`` endpoints work
+    transparently for headless sessions."""
+
+    def __init__(self, session: "HeadlessSession"):
+        self._session = session
+
+    @property
+    def is_recording_started(self) -> bool:
+        return self._session.is_recording
+
+    async def start_recording(self):
+        self._session.start_recording()
+
+    async def stop_recording(self):
+        self._session.stop_recording()
+
+    async def finalize_and_get_recording(self, restart_after: bool = True):
+        return self._session.download_recording()
+
+
 class HeadlessSession:
     """Pipeline session without WebRTC. Runs FrameProcessor directly."""
 
@@ -127,6 +149,7 @@ class HeadlessSession:
         self._frame_consumer_task: asyncio.Task | None = None
         self._recorder: HeadlessRecorder | None = None
         self._stopped_recording_path: str | None = None
+        self.recording_manager = HeadlessRecordingAdapter(self)
 
     def start_frame_consumer(self):
         """Start a background task that continuously pulls frames to keep the

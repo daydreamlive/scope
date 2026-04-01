@@ -798,8 +798,13 @@ class WebRTCManager:
         else:
             logger.warning(f"Attempted to remove non-existent session: {session_id}")
 
-    def get_session(self, session_id: str) -> Session | None:
-        """Get a session by ID."""
+    def get_session(self, session_id: str) -> Session | HeadlessSession | None:
+        """Get a session by ID.
+
+        Use session_id="headless" to retrieve the active headless session.
+        """
+        if session_id == "headless":
+            return self.headless_session
         return self.sessions.get(session_id)
 
     def list_sessions(self) -> dict[str, Session]:
