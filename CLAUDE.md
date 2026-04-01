@@ -117,13 +117,23 @@ When asked to test Scope via MCP tools (e.g., with a workflow JSON), follow this
 
 **Setup (run both as background processes):**
 
+First, kill any existing processes on the ports to avoid "address already in use" errors:
+
+```bash
+lsof -ti:8002 -ti:8022 | xargs kill -9 2>/dev/null
+```
+
+Then start the instances (start cloud first, wait for it to be healthy before starting local):
+
 ```bash
 # Cloud instance:
 SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
 
-# Local instance:
+# Local instance (start after cloud is healthy):
 SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022
 ```
+
+Wait for both to be healthy: `curl -s http://localhost:8002/api/v1/health && curl -s http://localhost:8022/api/v1/health`
 
 **MCP tool sequence:**
 
@@ -140,6 +150,51 @@ SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydre
 - When parsing a workflow JSON, extract `pipeline_id` from `pipelines[].pipeline_id` for `load_pipeline` and `start_stream`
 - `resolve_workflow` takes the full workflow JSON as a **string**
 - `capture_frame` and `download_recording` return file paths — use the Read tool to view the captured image
+
+**Headless session is NOT proxied to cloud — call cloud instance directly:**
+
+The `/api/v1/session/start`, `/session/frame`, `/session/stop`, and `/recordings/headless/*` endpoints are defined in `mcp_router.py` and run locally on the instance they are called on. They are **not** proxied through the cloud WebSocket connection. When using local cloud dev, call these endpoints on the **cloud instance (port 8002)** directly, not the local instance (8022). The MCP tools handle this automatically, but if calling HTTP APIs directly, use port 8002 for session/recording operations.
+
+**Passthrough pipeline requires video input:**
+
+The `passthrough` pipeline passes input through unchanged — it does **not** generate frames on its own. In headless mode, you must provide an `input_source`. Create a test video and pass it:
+
+```bash
+# Create a 60-second blue test video:
+ffmpeg -y -f lavfi -i "color=c=blue:size=512x512:rate=30:duration=60" -c:v libx264 -pix_fmt yuv420p /tmp/test_input.mp4
+```
+
+Then start the session with `input_mode: "video"` and `input_source`:
+```json
+{
+  "pipeline_id": "passthrough",
+  "input_mode": "video",
+  "input_source": {
+    "enabled": true,
+    "source_type": "video_file",
+    "source_name": "/tmp/test_input.mp4"
+  }
+}
+```
+
+**HTTP API fallback (when MCP tools are unavailable):**
+
+If the MCP server disconnects (e.g., after restarting Scope processes), use direct HTTP calls:
+
+| Operation | HTTP API |
+|-----------|----------|
+| Connect to cloud | `POST /api/v1/cloud/connect` body: `{"app_id": "local"}` |
+| Cloud status | `GET /api/v1/cloud/status` |
+| Resolve workflow | `POST /api/v1/workflow/resolve` body: `{"pipelines": [...]}` (pipelines array directly, **not** wrapped in `workflow_json`) |
+| Load pipeline | `POST /api/v1/pipeline/load` body: `{"pipeline_ids": ["name"]}` (array, **not** `pipeline_id`) |
+| Pipeline status | `GET /api/v1/pipeline/status` |
+| Start session | `POST /api/v1/session/start` body: `{"pipeline_id": "name", ...}` |
+| Capture frame | `GET /api/v1/session/frame` (returns JPEG binary) |
+| Stop session | `POST /api/v1/session/stop` |
+| Start recording | `POST /api/v1/recordings/headless/start` |
+| Stop recording | `POST /api/v1/recordings/headless/stop` |
+| Download recording | `GET /api/v1/recordings/headless` (returns MP4 binary) |
+| Logs | `GET /api/v1/logs/tail?lines=30` (not `/api/v1/logs`) |
 
 ## Contributing Requirements
 
