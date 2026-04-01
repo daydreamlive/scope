@@ -86,6 +86,31 @@ This documentation can be used to understand the architecture of the project:
 - Python extras: `uv sync --extra link` (Ableton Link) or `uv sync --extra midi` (MIDI clock).
 - On Linux, the ALSA library is required: install `libasound2` (Debian/Ubuntu), `alsa-lib` (Fedora/RHEL), or `alsa-lib` (Arch). Docker images do not include ALSA since MIDI requires local hardware access.
 
+## Local Cloud Testing
+
+Test the cloud relay flow locally by running two Scope instances — one acting as the "cloud" relay server.
+
+**Environment variables:**
+- `SCOPE_CLOUD_WS=1` — enables the `/ws` WebSocket endpoint on a Scope instance, making it act as a cloud relay server
+- `SCOPE_CLOUD_WS_URL` — overrides the cloud WebSocket URL so the connecting instance points to your local "cloud" instead of fal.ai
+- `SCOPE_CLOUD_APP_ID` — any non-empty value (e.g., `local`) to satisfy the app ID requirement
+
+**Setup (two terminals):**
+
+```bash
+# Terminal 1 — "cloud" instance (relay server):
+SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
+
+# Terminal 2 — "local" instance (connects to cloud):
+SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022
+```
+
+Open http://localhost:8022, connect to cloud from the UI, load a pipeline, and start streaming. The local instance connects via WebSocket to the "cloud" instance on port 8002, which proxies WebRTC signaling and API requests back to itself.
+
+**Key files:**
+- `cloud/dev_app.py` — development-only WebSocket handler mimicking the fal.ai cloud protocol
+- `server/cloud_connection.py` — client-side connection manager (`SCOPE_CLOUD_WS_URL` override in `_build_ws_url()`)
+
 ## Contributing Requirements
 
 - All commits must be signed off (DCO): `git commit -s`
