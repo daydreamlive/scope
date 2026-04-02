@@ -1207,7 +1207,7 @@ class WebRTCManager:
                     if frame is not None:
                         return frame
         if self.headless_session:
-            frame = self.headless_session.get_last_frame()
+            frame = self.headless_session.get_last_frame(sink_node_id=sink_node_id)
             if frame is not None:
                 return frame
         return None
