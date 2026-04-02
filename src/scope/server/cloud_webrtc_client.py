@@ -338,8 +338,7 @@ class CloudWebRTCClient:
                         self._receive_frames(track, self.output_handlers[idx])
                     )
                     self._receive_tasks.append(task)
-                    if idx == 0:
-                        asyncio.create_task(self._request_keyframe())
+                    asyncio.create_task(self._request_keyframe())
                 else:
                     logger.warning(f"No output handler for cloud video track {idx}")
             elif track.kind == "audio":
@@ -529,43 +528,49 @@ class CloudWebRTCClient:
             )
 
     async def _request_keyframe(self):
-        """Request a keyframe via PLI once the receiver has remote streams.
+        """Request keyframes via PLI for all video receivers.
 
         VP8/VP9 decoders need a keyframe (I-frame) to start decoding.
         After a new WebRTC connection, we may receive P-frames first,
         causing decode errors. Sending PLI (Picture Loss Indication)
-        requests the remote end to send a keyframe.
+        requests the remote end to send a keyframe for each track.
         """
-        # Poll until remote_streams is populated (RTP packets have arrived)
+        # Poll until at least one receiver has remote_streams (RTP arrived)
         timeout = 5.0
         poll_interval = 0.1
         elapsed = 0.0
-        receiver = None
-        remote_streams = None
 
         while elapsed < timeout:
             await asyncio.sleep(poll_interval)
             elapsed += poll_interval
             for r in self.pc.getReceivers():
                 if r.track and r.track.kind == "video":
-                    streams = r._RTCRtpReceiver__remote_streams
-                    if streams:
-                        receiver = r
-                        remote_streams = streams
+                    if r._RTCRtpReceiver__remote_streams:
                         break
-            if remote_streams:
-                break
-
-        if not remote_streams or not receiver:
+            else:
+                continue
+            break
+        else:
             logger.debug("No remote streams after %.1fs, skipping PLI", timeout)
             return
 
-        try:
-            media_ssrc = next(iter(remote_streams))
-            await receiver._send_rtcp_pli(media_ssrc)
-            logger.info(f"Sent PLI keyframe request (media_ssrc={media_ssrc})")
-        except Exception as e:
-            logger.debug(f"Could not send PLI: {e}")
+        # Send PLI for every video receiver that has remote streams
+        pli_count = 0
+        for r in self.pc.getReceivers():
+            if not r.track or r.track.kind != "video":
+                continue
+            streams = r._RTCRtpReceiver__remote_streams
+            if not streams:
+                continue
+            try:
+                media_ssrc = next(iter(streams))
+                await r._send_rtcp_pli(media_ssrc)
+                pli_count += 1
+            except Exception as e:
+                logger.debug(f"Could not send PLI for receiver: {e}")
+
+        if pli_count:
+            logger.info(f"Sent PLI keyframe requests for {pli_count} video track(s)")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a frame to the primary (index 0) cloud input track."""
