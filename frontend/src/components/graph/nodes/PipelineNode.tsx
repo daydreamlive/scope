@@ -432,9 +432,12 @@ export function PipelineNode({
                   Prompt
                 </p>
                 {isPromptConnected ? (
-                  <NodePill className="opacity-50 break-all">
-                    {promptText || "—"}
-                  </NodePill>
+                  <NodePillTextarea
+                    value={promptText || "—"}
+                    onChange={() => {}}
+                    disabled
+                    className="opacity-50"
+                  />
                 ) : (
                   <div className="flex flex-col gap-1">
                     <NodePillTextarea
