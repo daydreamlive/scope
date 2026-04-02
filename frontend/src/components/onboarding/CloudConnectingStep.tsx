@@ -33,7 +33,7 @@ export function CloudConnectingStep({
   onBack,
 }: CloudConnectingStepProps) {
   const { isConnected, isConnecting, connectStage, refresh } = useCloudStatus();
-  const { setOnboardingStyle } = useOnboarding();
+  const { setOnboardingStyle, setSurveyAnswers } = useOnboarding();
   const {
     isDisclosed: telemetryDisclosed,
     markDisclosed,
@@ -47,7 +47,7 @@ export function CloudConnectingStep({
   const [localTelemetryDisclosed, setLocalTelemetryDisclosed] =
     useState(telemetryDisclosed);
   const [telemetrySkippedSurvey, setTelemetrySkippedSurvey] = useState(false);
-  const [surveyAnswers, setSurveyAnswers] = useState<SurveyAnswers | null>(
+  const [surveyAnswers, setSurveyAnswersLocal] = useState<SurveyAnswers | null>(
     null
   );
 
@@ -77,6 +77,7 @@ export function CloudConnectingStep({
         use_case: surveyAnswers.useCase,
       });
       setOnboardingStyle(surveyAnswers.onboardingStyle);
+      setSurveyAnswers(surveyAnswers.referralSource, surveyAnswers.useCase);
       const timer = setTimeout(onConnected, 500);
       return () => clearTimeout(timer);
     }
@@ -89,6 +90,7 @@ export function CloudConnectingStep({
         use_case: null,
       });
       setOnboardingStyle(surveyAnswers.onboardingStyle);
+      setSurveyAnswers(null, null);
       const timer = setTimeout(onConnected, 500);
       return () => clearTimeout(timer);
     }
@@ -100,10 +102,11 @@ export function CloudConnectingStep({
     telemetrySkippedSurvey,
     onConnected,
     setOnboardingStyle,
+    setSurveyAnswers,
   ]);
 
   const handleSurveyComplete = useCallback((answers: SurveyAnswers) => {
-    setSurveyAnswers(answers);
+    setSurveyAnswersLocal(answers);
     setSurveyDone(true);
   }, []);
 

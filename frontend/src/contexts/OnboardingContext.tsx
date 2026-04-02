@@ -35,6 +35,8 @@ export interface OnboardingState {
   onboardingStyle: "teaching" | "simple" | null;
   selectedWorkflowId: string | null;
   downloadFailures: number;
+  referralSource: string | null;
+  useCase: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -55,6 +57,11 @@ type OnboardingAction =
   | { type: "GO_BACK" }
   | { type: "COMPLETE" }
   | { type: "TELEMETRY_DISCLOSED" }
+  | {
+      type: "SET_SURVEY_ANSWERS";
+      referralSource: string | null;
+      useCase: string | null;
+    }
   | {
       type: "LOADED";
       completed: boolean;
@@ -116,17 +123,35 @@ function reducer(
       };
 
     case "WORKFLOW_READY":
-      trackEvent("onboarding_completed");
+      trackEvent("onboarding_completed", {
+        inference_mode: state.inferenceMode,
+        onboarding_style: state.onboardingStyle,
+        selected_workflow: state.selectedWorkflowId,
+        referral_source: state.referralSource,
+        use_case: state.useCase,
+      });
       markOnboardingCompleted();
       return { ...state, phase: "idle" };
 
     case "START_FROM_SCRATCH":
-      trackEvent("onboarding_completed");
+      trackEvent("onboarding_completed", {
+        inference_mode: state.inferenceMode,
+        onboarding_style: state.onboardingStyle,
+        selected_workflow: null,
+        referral_source: state.referralSource,
+        use_case: state.useCase,
+      });
       markOnboardingCompleted();
       return { ...state, phase: "idle", selectedWorkflowId: null };
 
     case "IMPORT_WORKFLOW_READY":
-      trackEvent("onboarding_completed");
+      trackEvent("onboarding_completed", {
+        inference_mode: state.inferenceMode,
+        onboarding_style: state.onboardingStyle,
+        selected_workflow: "imported",
+        referral_source: state.referralSource,
+        use_case: state.useCase,
+      });
       markOnboardingCompleted();
       return { ...state, phase: "idle" };
 
@@ -145,6 +170,13 @@ function reducer(
           return state;
       }
     }
+
+    case "SET_SURVEY_ANSWERS":
+      return {
+        ...state,
+        referralSource: action.referralSource,
+        useCase: action.useCase,
+      };
 
     case "LOADED": {
       if (action.completed)
@@ -203,6 +235,10 @@ interface OnboardingContextValue {
   importWorkflowReady: () => void;
   goBack: () => void;
   telemetryDisclosed: () => void;
+  setSurveyAnswers: (
+    referralSource: string | null,
+    useCase: string | null,
+  ) => void;
 }
 
 const OnboardingContext = createContext<OnboardingContextValue | null>(null);
@@ -217,6 +253,8 @@ const initialState: OnboardingState = {
   onboardingStyle: null,
   selectedWorkflowId: null,
   downloadFailures: 0,
+  referralSource: null,
+  useCase: null,
 };
 
 export function OnboardingProvider({ children }: { children: ReactNode }) {
@@ -281,6 +319,11 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     () => dispatch({ type: "TELEMETRY_DISCLOSED" }),
     []
   );
+  const setSurveyAnswers = useCallback(
+    (referralSource: string | null, useCase: string | null) =>
+      dispatch({ type: "SET_SURVEY_ANSWERS", referralSource, useCase }),
+    []
+  );
 
   const isOnboarding = state.phase !== "idle";
   const isOverlayVisible = [
@@ -310,6 +353,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         importWorkflowReady,
         goBack,
         telemetryDisclosed,
+        setSurveyAnswers,
       }}
     >
       {children}
