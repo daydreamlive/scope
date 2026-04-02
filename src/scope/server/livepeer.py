@@ -90,9 +90,9 @@ class LivepeerConnection:
     ) -> None:
         """Create and connect a persistent Livepeer LV2V job."""
         # Keep connect signature compatible with cloud-style connect requests.
-        # Livepeer token-based auth ignores api_key, while app_id can be used as
-        # optional runner routing config (derived into a fal ws_url in the client).
-        _ = api_key
+        # app_id can be used as optional runner routing config (derived into a
+        # fal ws_url in the client). api_key is forwarded so Livepeer startup can
+        # include Daydream signer metadata.
         self._user_id = user_id
 
         if self.is_connected:
@@ -118,6 +118,7 @@ class LivepeerConnection:
             token=token,
             model_id=LIVEPEER_MODEL_ID,
             app_id=app_id,
+            api_key=api_key,
         )
         client.add_frame_callback(self._on_frame_from_livepeer)
         client.add_audio_callback(self._on_audio_from_livepeer)

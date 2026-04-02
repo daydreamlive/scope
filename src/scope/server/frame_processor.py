@@ -9,7 +9,7 @@ import numpy as np
 import torch
 from aiortc.mediastreams import VideoFrame
 
-from .cloud_relay import CloudRelay
+from .cloud_relay import CloudRelay, compute_relay_video_mode
 from .kafka_publisher import publish_event
 from .modulation import ModulationEngine
 from .parameter_scheduler import ParameterScheduler
@@ -98,7 +98,10 @@ class FrameProcessor:
         self._thread_pin_local = threading.local()
 
         # Cloud relay (None in local mode)
-        video_mode = (initial_parameters or {}).get("input_mode") == "video"
+        if cloud_manager is not None:
+            video_mode = compute_relay_video_mode(initial_parameters)
+        else:
+            video_mode = (initial_parameters or {}).get("input_mode") == "video"
         self._cloud_relay: CloudRelay | None = (
             CloudRelay(cloud_manager, video_mode=video_mode)
             if cloud_manager is not None
@@ -397,6 +400,14 @@ class FrameProcessor:
         source_node_id is None for the generic (non-graph) input source.
         """
         if self._cloud_relay is not None:
+            if self._cloud_relay.frames_to_cloud == 0:
+                logger.info(
+                    "[FRAME-PROCESSOR] First hardware source frame received "
+                    "(source_node_id=%s, shape=%s, cloud_mode=True, video_mode=%s)",
+                    source_node_id,
+                    rgb_frame.shape,
+                    self._cloud_relay.video_mode,
+                )
             if source_node_id is not None:
                 self._cloud_relay.send_frame_to_source(rgb_frame, source_node_id)
             else:

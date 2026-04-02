@@ -414,6 +414,31 @@ class SinkManager:
     # Recording
     # ------------------------------------------------------------------
 
+    def get_from_record(self, record_node_id: str):
+        """Read a frame from a record node's output queue."""
+        return self._recording.get(record_node_id)
+
+    def put_to_record(self, node_id: str, frame) -> None:
+        """Convert a VideoFrame to tensor and put it into a record node's queue."""
+        import torch
+
+        rec_q = self._recording._record_queues.get(node_id)
+        if rec_q is None:
+            return
+        try:
+            frame_np = frame.to_ndarray(format="rgb24")
+            t = torch.as_tensor(frame_np, dtype=torch.uint8).unsqueeze(0)
+            try:
+                rec_q.put_nowait(t)
+            except queue.Full:
+                try:
+                    rec_q.get_nowait()
+                    rec_q.put_nowait(t)
+                except queue.Empty:
+                    pass
+        except Exception as e:
+            logger.error(f"Error in put_to_record for node {node_id}: {e}")
+
     @property
     def recording(self) -> RecordingCoordinator:
         """Access the recording coordinator for record-node operations."""

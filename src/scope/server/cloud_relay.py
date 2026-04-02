@@ -21,6 +21,43 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def compute_relay_video_mode(initial_parameters: dict | None) -> bool:
+    """Return whether ``CloudRelay`` should forward frames to the cloud runner.
+
+    ``input_mode == "video"`` is the primary signal, but it is often omitted
+    (``None``) in serialized WebRTC params. Graph workflows with Source nodes
+    or enabled server-side capture (Syphon/NDI/Spout/video file) always produce
+    frames that must be relayed; without this, :class:`CloudRelay` drops every
+    frame when ``video_mode`` is false (e.g. Syphon works locally but not in cloud).
+    """
+    params = initial_parameters or {}
+    if params.get("input_mode") == "video":
+        logger.info("[CLOUD-RELAY] video_mode=True (input_mode=video)")
+        return True
+    graph_data = params.get("graph")
+    if graph_data and isinstance(graph_data, dict):
+        for node in graph_data.get("nodes", []):
+            if node.get("type") == "source":
+                logger.info(
+                    "[CLOUD-RELAY] video_mode=True (graph source node detected)"
+                )
+                return True
+    inp = params.get("input_source")
+    if isinstance(inp, dict) and inp.get("enabled"):
+        st = inp.get("source_type") or ""
+        if st in ("spout", "ndi", "syphon", "video_file"):
+            logger.info("[CLOUD-RELAY] video_mode=True (input_source: %s)", st)
+            return True
+    logger.warning(
+        "[CLOUD-RELAY] video_mode=False — no video source detected "
+        "(input_mode=%s, has_graph=%s, input_source=%s)",
+        params.get("input_mode"),
+        bool(graph_data),
+        inp,
+    )
+    return False
+
+
 class CloudRelay:
     """Relay frames to/from a cloud pipeline instance.
 
@@ -66,15 +103,27 @@ class CloudRelay:
     def send_frame(self, rgb_frame: np.ndarray) -> bool:
         """Send a frame to the cloud (generic / track 0)."""
         if not self._video_mode:
+            if self.frames_to_cloud == 0:
+                logger.warning(
+                    "[CLOUD-RELAY] Dropping frame: video_mode=False "
+                    "(Syphon/graph source detected but relay not enabled)"
+                )
             return False
         sent = self._cloud_manager.send_frame(rgb_frame)
         if sent:
             self.frames_to_cloud += 1
+            if self.frames_to_cloud == 1:
+                logger.info("[CLOUD-RELAY] First frame sent to cloud (generic/track 0)")
         return sent
 
     def send_frame_to_source(self, rgb_frame: np.ndarray, source_node_id: str) -> bool:
         """Send a frame to a specific cloud source track."""
         if not self._video_mode:
+            if self.frames_to_cloud == 0:
+                logger.warning(
+                    "[CLOUD-RELAY] Dropping frame for source %s: video_mode=False",
+                    source_node_id,
+                )
             return False
         track_idx = self._cloud_manager.get_source_track_index(source_node_id)
         if track_idx is not None:
@@ -83,6 +132,13 @@ class CloudRelay:
             sent = self._cloud_manager.send_frame(rgb_frame)
         if sent:
             self.frames_to_cloud += 1
+            if self.frames_to_cloud == 1:
+                logger.info(
+                    "[CLOUD-RELAY] First frame sent to cloud for source %s "
+                    "(track_idx=%s)",
+                    source_node_id,
+                    track_idx,
+                )
         return sent
 
     # ------------------------------------------------------------------
@@ -92,6 +148,8 @@ class CloudRelay:
     def on_frame_from_cloud(self, frame: "VideoFrame") -> None:
         """Callback when a processed video frame is received from cloud."""
         self.frames_from_cloud += 1
+        if self.frames_from_cloud == 1:
+            logger.info("[CLOUD-RELAY] First frame received from cloud")
         try:
             frame_np = frame.to_ndarray(format="rgb24")
             try:

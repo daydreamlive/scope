@@ -136,6 +136,11 @@ class PipelineManager:
         Returns True if the alias was created, False if *pipeline_id* is not loaded.
         """
         with self._lock:
+            # Graph loads already register each pipeline under the node id
+            # (instance_key). Do not replace that entry with whatever is keyed by
+            # the bare registry name (e.g. "passthrough") — that can be a stale
+            # singleton and would make multiple graph nodes share the wrong
+            # pipeline instance.
             if alias_key in self._pipelines:
                 return True
             existing = self._pipelines.get(pipeline_id)

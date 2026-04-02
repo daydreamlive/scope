@@ -43,6 +43,7 @@ uv run -m scope.core.pipelines.longlive.test  # Test specific pipeline
 - **`core/`**: Pipeline definitions, registry, base classes
 
 Key files:
+
 - **`server/app.py`**: Main FastAPI application entry point
 - **`server/pipeline_manager.py`**: Manages pipeline lifecycle with lazy loading
 - **`server/webrtc.py`**: WebRTC streaming implementation
@@ -80,6 +81,7 @@ This documentation can be used to understand the architecture of the project:
 
 - The `docs/api` directory contains server API reference
 - The `docs/architecture` contains architecture documents describing different systems used within the project
+- Additional agent-specific instructions and reusable skills can be found in `.agents/skills`
 
 ### Tempo Sync (Link / MIDI)
 
@@ -91,6 +93,7 @@ This documentation can be used to understand the architecture of the project:
 Test the cloud relay flow locally by running two Scope instances — one acting as the "cloud" relay server.
 
 **Environment variables:**
+
 - `SCOPE_CLOUD_WS=1` — enables the `/ws` WebSocket endpoint on a Scope instance, making it act as a cloud relay server
 - `SCOPE_CLOUD_WS_URL` — overrides the cloud WebSocket URL so the connecting instance points to your local "cloud" instead of fal.ai
 - `SCOPE_CLOUD_APP_ID` — any non-empty value (e.g., `local`) to satisfy the app ID requirement
@@ -105,66 +108,99 @@ SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
 SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022
 ```
 
-Open http://localhost:8022, connect to cloud from the UI, load a pipeline, and start streaming. The local instance connects via WebSocket to the "cloud" instance on port 8002, which proxies WebRTC signaling and API requests back to itself.
+Open <http://localhost:8022>, connect to cloud from the UI, load a pipeline, and start streaming. The local instance connects via WebSocket to the "cloud" instance on port 8002, which proxies WebRTC signaling and API requests back to itself.
 
 **Key files:**
+
 - `cloud/dev_app.py` — development-only WebSocket handler mimicking the fal.ai cloud protocol
 - `server/cloud_connection.py` — client-side connection manager (`SCOPE_CLOUD_WS_URL` override in `_build_ws_url()`)
+- `server/mcp_router.py` — headless session endpoints and cloud output wiring (`_wire_cloud_outputs`)
+- `server/cloud_webrtc_client.py` — WebRTC client that sends frames to cloud and receives output
+- `server/cloud_relay.py` — frame relay between FrameProcessor and cloud WebRTC
+- `server/headless.py` — HeadlessSession with frame consumer and per-sink frame capture
+- `server/sink_manager.py` — per-sink queue routing and recording coordination
+- `server/graph_executor.py` — graph validation and pipeline wiring
+- `server/pipeline_manager.py` — pipeline loading and aliasing (node_id → pipeline_id mapping)
 
-## MCP Server Testing with Local Cloud Dev
+**Cloud frame flow architecture (local cloud dev):**
 
-When asked to test Scope via MCP tools (e.g., with a workflow JSON), follow this sequence directly — do not read source code to figure out the API.
-
-**Setup (run both as background processes):**
-
-First, kill any existing processes on the ports to avoid "address already in use" errors:
-
-```bash
-lsof -ti:8002 -ti:8022 | xargs kill -9 2>/dev/null
+```
+Local (8022)                              Cloud (8002)
+─────────────                             ────────────
+SourceManager reads video files
+  → FrameProcessor._on_hardware_source_frame()
+  → CloudRelay.send_frame_to_source()
+  → CloudWebRTCClient.input_tracks[i]    → WebRTC track received
+     (WebRTC)                             → VideoProcessingTrack.recv()
+                                          → FrameProcessor.put_to_source()
+                                          → GraphExecutor processes pipeline(s)
+                                          → SinkOutputTrack(s) send output
+  CloudWebRTCClient receives tracks ←     ← WebRTC output tracks
+  output_handlers[0] = primary sink       (track 0: primary sink)
+  output_handlers[1..N] = extra sinks     (track 1+: extra sinks, record nodes)
+  _wire_cloud_outputs() routes to:
+    - sink_manager._sink_queues_by_node (per-sink queues)
+    - recording_coordinator queues (per-record-node)
+  HeadlessSession._consume_frames()
+    reads from per-sink queues → _last_frames_by_sink
 ```
 
-Then start the instances (start cloud first, wait for it to be healthy before starting local):
+## MCP Server Testing
+
+When asked to test Scope via MCP tools (e.g., with a workflow JSON), follow this sequence directly — do not read source code to figure out the API. Use the HTTP API directly (not MCP tools) because restarting Scope kills the MCP server connection.
+
+**IMPORTANT — single instance by default:** Unless the user explicitly asks for "local cloud", "cloud testing", or "two instances", run a SINGLE Scope instance. Do NOT set up the local cloud relay (two-instance) architecture unless explicitly requested.
+
+**Setup (single instance):**
 
 ```bash
-# Cloud instance:
-SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
-
-# Local instance (start after cloud is healthy):
-SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022
+lsof -ti:8022 | xargs kill -9 2>/dev/null
+CUDA_VISIBLE_DEVICES="" uv run daydream-scope --port 8022 > /tmp/scope.log 2>&1 &
+# Wait for healthy:
+for i in $(seq 1 30); do curl -s http://localhost:8022/health > /dev/null 2>&1 && break; sleep 1; done
 ```
 
-Wait for both to be healthy: `curl -s http://localhost:8002/api/v1/health && curl -s http://localhost:8022/api/v1/health`
+**Test sequence (HTTP API):**
 
-**MCP tool sequence:**
+1. Resolve workflow: `POST /api/v1/workflow/resolve` body: `{"pipelines": [...]}` (pipelines array from workflow JSON, NOT wrapped)
+2. Load pipelines: `POST /api/v1/pipeline/load` body: `{"pipeline_ids": ["split-screen", "passthrough"]}` (array of unique IDs)
+3. Wait for load: `GET /api/v1/pipeline/status` — poll until `"status": "loaded"`
+4. Start session: `POST /api/v1/session/start` (see below for body format)
+5. Wait ~10s for frames to flow, verify with `GET /api/v1/session/metrics`
+6. Capture frames: `GET /api/v1/session/frame?sink_node_id=<id>` — save to `/tmp/frame_<sink_id>.jpg`
+7. Start per-node recording: `POST /api/v1/recordings/headless/start?node_id=<record_id>`
+8. Wait ~5s
+9. Stop recording: `POST /api/v1/recordings/headless/stop?node_id=<record_id>`
+10. Download recording: `GET /api/v1/recordings/headless?node_id=<record_id>` — save to `/tmp/recording_<record_id>.mp4`
+11. Stop session: `POST /api/v1/session/stop`
 
-1. `connect_to_scope(port=8022)` — connect to the local instance
-2. `connect_to_cloud()` — connects to cloud (env vars provide app_id/url)
-3. `resolve_workflow(workflow_json=...)` — validate dependencies
-4. `load_pipeline(pipeline_id=...)` — load the pipeline(s) from the workflow; wait a few seconds for loading to complete. The load is proxied to the cloud instance automatically.
-5. `start_stream(pipeline_id=...)` — start a headless session. **Takes `pipeline_id` only, not a graph.** Extract the pipeline_id from the workflow JSON.
-6. `capture_frame()` — capture output frame (returns file_path to a JPEG)
-7. `start_recording()` / `stop_recording()` / `download_recording()` — record and download MP4
+**Critical: `input_mode: "video"` is required for video file sources.** Without it, `CloudRelay.video_mode` stays False and no frames are sent. Always include `"input_mode": "video"` in the session start body when using video file inputs.
 
-**Key details:**
-- The headless session endpoint (`/api/v1/session/start`) accepts `pipeline_id`, `input_mode`, `prompts`, `input_source` — it does **not** accept graph configs
-- When parsing a workflow JSON, extract `pipeline_id` from `pipelines[].pipeline_id` for `load_pipeline` and `start_stream`
-- `resolve_workflow` takes the full workflow JSON as a **string**
-- `capture_frame` and `download_recording` return file paths — use the Read tool to view the captured image
+**Session start body for multi-source/multi-sink graphs:**
 
-**Headless session is NOT proxied to cloud — call cloud instance directly:**
-
-The `/api/v1/session/start`, `/session/frame`, `/session/stop`, and `/recordings/headless/*` endpoints are defined in `mcp_router.py` and run locally on the instance they are called on. They are **not** proxied through the cloud WebSocket connection. When using local cloud dev, call these endpoints on the **cloud instance (port 8002)** directly, not the local instance (8022). The MCP tools handle this automatically, but if calling HTTP APIs directly, use port 8002 for session/recording operations.
-
-**Passthrough pipeline requires video input:**
-
-The `passthrough` pipeline passes input through unchanged — it does **not** generate frames on its own. In headless mode, you must provide an `input_source`. Create a test video and pass it:
-
-```bash
-# Create a 60-second blue test video:
-ffmpeg -y -f lavfi -i "color=c=blue:size=512x512:rate=30:duration=60" -c:v libx264 -pix_fmt yuv420p /tmp/test_input.mp4
+```json
+{
+  "input_mode": "video",
+  "graph": {
+    "nodes": [
+      {"id": "input", "type": "source", "source_mode": "video_file", "source_name": "/tmp/test.mp4"},
+      {"id": "my_pipeline", "type": "pipeline", "pipeline_id": "split-screen"},
+      {"id": "output", "type": "sink"},
+      {"id": "record", "type": "record"}
+    ],
+    "edges": [
+      {"from": "input", "from_port": "video", "to_node": "my_pipeline", "to_port": "video", "kind": "stream"},
+      {"from": "my_pipeline", "from_port": "video", "to_node": "output", "to_port": "video", "kind": "stream"},
+      {"from": "my_pipeline", "from_port": "video", "to_node": "record", "to_port": "video", "kind": "stream"}
+    ]
+  }
+}
 ```
 
-Then start the session with `input_mode: "video"` and `input_source`:
+Record nodes and their edges come from the workflow JSON's `graph.ui_state.nodes` (type=record) and `graph.ui_state.edges`. Convert UI edge format to API edge format: `source` → `from`, `sourceHandle: "stream:video"` → `from_port: "video"`, `target` → `to_node`, `targetHandle: "stream:video"` → `to_port: "video"`, add `kind: "stream"`.
+
+**Session start body for single pipeline:**
+
 ```json
 {
   "pipeline_id": "passthrough",
@@ -177,24 +213,87 @@ Then start the session with `input_mode: "video"` and `input_source`:
 }
 ```
 
-**HTTP API fallback (when MCP tools are unavailable):**
+**Create test videos** (ffmpeg not available, use OpenCV):
 
-If the MCP server disconnects (e.g., after restarting Scope processes), use direct HTTP calls:
+```bash
+uv run python -c "
+import cv2, numpy as np
+for name, color in [('test', (0,0,255)), ('test1', (0,255,0)), ('test2', (255,0,0))]:
+    w = cv2.VideoWriter(f'/tmp/{name}.mp4', cv2.VideoWriter_fourcc(*'mp4v'), 30, (512,512))
+    frame = np.zeros((512,512,3), dtype=np.uint8); frame[:] = color
+    for _ in range(300): w.write(frame)
+    w.release()
+"
+```
+
+**Per-node recording:** The session ID for headless sessions is `"headless"`. Recording endpoints require `?node_id=` for graphs with record nodes:
 
 | Operation | HTTP API |
 |-----------|----------|
-| Connect to cloud | `POST /api/v1/cloud/connect` body: `{"app_id": "local"}` |
-| Cloud status | `GET /api/v1/cloud/status` |
-| Resolve workflow | `POST /api/v1/workflow/resolve` body: `{"pipelines": [...]}` (pipelines array directly, **not** wrapped in `workflow_json`) |
-| Load pipeline | `POST /api/v1/pipeline/load` body: `{"pipeline_ids": ["name"]}` (array, **not** `pipeline_id`) |
+| Start recording | `POST /api/v1/recordings/headless/start?node_id=record` |
+| Stop recording | `POST /api/v1/recordings/headless/stop?node_id=record` |
+| Download recording | `GET /api/v1/recordings/headless?node_id=record` (returns MP4 binary) |
+
+**Full HTTP API reference:**
+
+| Operation | HTTP API |
+|-----------|----------|
+| Health | `GET /health` (NOT `/api/v1/health`) |
+| Resolve workflow | `POST /api/v1/workflow/resolve` body: `{"pipelines": [...]}` |
+| Load pipeline | `POST /api/v1/pipeline/load` body: `{"pipeline_ids": ["name"]}` |
 | Pipeline status | `GET /api/v1/pipeline/status` |
-| Start session | `POST /api/v1/session/start` body: `{"pipeline_id": "name", ...}` |
-| Capture frame | `GET /api/v1/session/frame` (returns JPEG binary) |
+| Start session | `POST /api/v1/session/start` body: `{"input_mode": "video", "graph": {...}}` |
+| Session metrics | `GET /api/v1/session/metrics` |
+| Capture frame | `GET /api/v1/session/frame` or `?sink_node_id=output` (returns JPEG binary) |
 | Stop session | `POST /api/v1/session/stop` |
-| Start recording | `POST /api/v1/recordings/headless/start` |
-| Stop recording | `POST /api/v1/recordings/headless/stop` |
-| Download recording | `GET /api/v1/recordings/headless` (returns MP4 binary) |
-| Logs | `GET /api/v1/logs/tail?lines=30` (not `/api/v1/logs`) |
+| Start recording | `POST /api/v1/recordings/headless/start?node_id=<id>` |
+| Stop recording | `POST /api/v1/recordings/headless/stop?node_id=<id>` |
+| Download recording | `GET /api/v1/recordings/headless?node_id=<id>` (returns MP4 binary) |
+| Logs | `GET /api/v1/logs/tail?lines=30` |
+
+**Debugging:**
+
+- Check frame flow with `GET /api/v1/session/metrics`
+- Check logs with `GET /api/v1/logs/tail?lines=50`
+- `frames_in > 0, frames_out = 0` → pipeline processing failing
+- All sinks return same frame → per-sink routing issue in HeadlessSession
+
+## MCP Server Testing with Local Cloud Dev
+
+**Only use this section when the user explicitly asks for local cloud / two-instance testing.**
+
+Test the cloud relay flow locally by running two Scope instances — one acting as the "cloud" relay server. This is for testing the cloud WebRTC relay path specifically.
+
+**Setup (two instances):**
+
+```bash
+lsof -ti:8002 -ti:8022 | xargs kill -9 2>/dev/null
+
+# Cloud instance (start first):
+CUDA_VISIBLE_DEVICES="" SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002 > /tmp/cloud.log 2>&1 &
+for i in $(seq 1 30); do curl -s http://localhost:8002/health > /dev/null 2>&1 && break; sleep 1; done
+
+# Local instance (start after cloud is healthy):
+CUDA_VISIBLE_DEVICES="" SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022 > /tmp/local.log 2>&1 &
+for i in $(seq 1 30); do curl -s http://localhost:8022/health > /dev/null 2>&1 && break; sleep 1; done
+```
+
+**Additional cloud-specific steps (before resolve/load):**
+
+```bash
+# Connect to cloud:
+curl -s -X POST http://localhost:8022/api/v1/cloud/connect -H 'Content-Type: application/json' -d '{"app_id": "local"}'
+# Wait and verify:
+sleep 2 && curl -s http://localhost:8022/api/v1/cloud/status
+```
+
+Then follow the same test sequence as single-instance mode above. All session/frame/recording endpoints go to port 8022 (local), not 8002 (cloud). Pipeline load is automatically proxied to cloud.
+
+**Cloud-specific debugging:**
+
+- `frames_to_cloud > 0, frames_from_cloud = 0` → cloud is not sending output back; check cloud logs
+- Both instances write separate log files to `~/.daydream-scope/logs/` — the `/api/v1/logs/tail` endpoint returns the most recent file alphabetically, which may be the wrong instance's logs. Read the actual log files with `ls -t ~/.daydream-scope/logs/scope-logs-*.log | head -2` to find both
+- Cloud status: `GET /api/v1/cloud/status` on port 8022
 
 ## Contributing Requirements
 

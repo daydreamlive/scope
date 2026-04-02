@@ -40,6 +40,8 @@ COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
 RUN uv sync --frozen
 
 # Build frontend
+ARG VITE_POSTHOG_KEY
+ARG VITE_MIXPANEL_TOKEN
 COPY frontend/ ./frontend/
 RUN cd frontend && npm install && npm run build
 

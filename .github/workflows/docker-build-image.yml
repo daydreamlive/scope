@@ -121,5 +121,8 @@ jobs:
             org.opencontainers.image.source=https://github.com/daydreamlive/scope
             org.opencontainers.image.description=${{ inputs.description }}
             org.opencontainers.image.licenses=MIT
+          build-args: |
+            VITE_POSTHOG_KEY=${{ secrets.VITE_POSTHOG_KEY }}
+            VITE_MIXPANEL_TOKEN=${{ secrets.VITE_MIXPANEL_TOKEN }}
           cache-from: type=gha,scope=${{ inputs.variant }}
           cache-to: type=gha,mode=max,scope=${{ inputs.variant }}
