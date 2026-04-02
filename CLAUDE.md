@@ -81,6 +81,7 @@ This documentation can be used to understand the architecture of the project:
 
 - The `docs/api` directory contains server API reference
 - The `docs/architecture` contains architecture documents describing different systems used within the project
+- Additional agent-specific instructions and reusable skills can be found in `.agents/skills`
 
 ### Tempo Sync (Link / MIDI)
 
