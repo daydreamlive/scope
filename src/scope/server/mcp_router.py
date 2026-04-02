@@ -251,9 +251,9 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
 
     # Wire extra sink output handlers (track index 1+)
     for i, sid in enumerate(sink_ids[1:], start=1):
-        handler = webrtc_client.extra_output_handlers.get(i)
-        if handler is None:
+        if i >= len(webrtc_client.output_handlers):
             continue
+        handler = webrtc_client.output_handlers[i]
         sink_q = frame_processor._sink_queues_by_node[sid]
 
         def _make_sink_cb(q, sink_id):
@@ -283,9 +283,9 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
     num_extra_sinks = max(0, len(sink_ids) - 1)
     for i, rec_id in enumerate(record_ids):
         handler_index = num_extra_sinks + 1 + i
-        handler = webrtc_client.extra_output_handlers.get(handler_index)
-        if handler is None:
+        if handler_index >= len(webrtc_client.output_handlers):
             continue
+        handler = webrtc_client.output_handlers[handler_index]
 
         def _make_rec_cb(fp, rid):
             def cb(frame: VideoFrame) -> None:
