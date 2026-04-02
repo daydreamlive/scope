@@ -714,7 +714,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
       ],
       prompts: [
         {
-          text: "A majestic lion prowling through dense jungle undergrowth, slow deliberate steps forward, low tracking camera following at ground level, dappled sunlight filtering through canopy, warm golden tones, shallow depth of field, nature documentary cinematography.",
+          text: "A majestic lion striding across an open savannah, tall golden grass swaying in the wind, slow side tracking camera at eye level, warm afternoon sunlight casting long shadows, distant acacia trees on the horizon, shallow depth of field, nature documentary cinematography.",
           weight: 1,
         },
       ],
@@ -760,7 +760,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 nodeType: "primitive",
                 valueType: "string",
                 value:
-                  "A majestic lion prowling through dense jungle undergrowth, slow deliberate steps forward, low tracking camera following at ground level, dappled sunlight filtering through canopy, warm golden tones, shallow depth of field, nature documentary cinematography.",
+                  "A majestic lion striding across an open savannah, tall golden grass swaying in the wind, slow side tracking camera at eye level, warm afternoon sunlight casting long shadows, distant acacia trees on the horizon, shallow depth of field, nature documentary cinematography.",
                 parameterOutputs: [
                   { name: "value", type: "string", defaultValue: "" },
                 ],
@@ -831,7 +831,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               input_mode: "text",
               prompt_interpolation_method: "linear",
               __prompt:
-                "A majestic lion prowling through dense jungle undergrowth, slow deliberate steps forward, low tracking camera following at ground level, dappled sunlight filtering through canopy, warm golden tones, shallow depth of field, nature documentary cinematography.",
+                "A majestic lion striding across an open savannah, tall golden grass swaying in the wind, slow side tracking camera at eye level, warm afternoon sunlight casting long shadows, distant acacia trees on the horizon, shallow depth of field, nature documentary cinematography.",
             },
           },
         },
@@ -1393,7 +1393,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
       ],
       prompts: [
         {
-          text: "A majestic lion prowling through dense jungle undergrowth, slow deliberate steps forward, low tracking camera following at ground level, dappled sunlight filtering through canopy, warm golden tones, shallow depth of field, nature documentary cinematography.",
+          text: "A majestic lion striding across an open savannah, tall golden grass swaying in the wind, slow side tracking camera at eye level, warm afternoon sunlight casting long shadows, distant acacia trees on the horizon, shallow depth of field, nature documentary cinematography.",
           weight: 1,
         },
       ],
@@ -1439,7 +1439,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
                 nodeType: "primitive",
                 valueType: "string",
                 value:
-                  "A majestic lion prowling through dense jungle undergrowth, slow deliberate steps forward, low tracking camera following at ground level, dappled sunlight filtering through canopy, warm golden tones, shallow depth of field, nature documentary cinematography.",
+                  "A majestic lion striding across an open savannah, tall golden grass swaying in the wind, slow side tracking camera at eye level, warm afternoon sunlight casting long shadows, distant acacia trees on the horizon, shallow depth of field, nature documentary cinematography.",
                 parameterOutputs: [
                   { name: "value", type: "string", defaultValue: "" },
                 ],
@@ -1465,7 +1465,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
               input_mode: "text",
               prompt_interpolation_method: "linear",
               __prompt:
-                "A majestic lion prowling through dense jungle undergrowth, slow deliberate steps forward, low tracking camera following at ground level, dappled sunlight filtering through canopy, warm golden tones, shallow depth of field, nature documentary cinematography.",
+                "A majestic lion striding across an open savannah, tall golden grass swaying in the wind, slow side tracking camera at eye level, warm afternoon sunlight casting long shadows, distant acacia trees on the horizon, shallow depth of field, nature documentary cinematography.",
             },
           },
         },
