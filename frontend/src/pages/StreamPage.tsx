@@ -2016,6 +2016,8 @@ export function StreamPage() {
       } | null = null;
       // Sink node IDs for multi-track WebRTC
       const graphSinkNodeIds: string[] = [];
+      // Record nodes need recvonly transceivers too (same order as backend: sinks then records)
+      const graphRecordNodeIds: string[] = [];
       // The graph config to pass via initialParameters (sent over WebRTC)
       let graphConfigForStream: ReturnType<
         NonNullable<typeof graphEditorRef.current>["getCurrentGraphConfig"]
@@ -2053,6 +2055,9 @@ export function StreamPage() {
             // Extract sink node IDs for multi-track WebRTC
             graphSinkNodeIds.push(
               ...graphNodes.filter(n => n.type === "sink").map(n => n.id)
+            );
+            graphRecordNodeIds.push(
+              ...graphNodes.filter(n => n.type === "record").map(n => n.id)
             );
 
             // Extract source mode from all source nodes and normalize
@@ -2338,6 +2343,11 @@ export function StreamPage() {
         graphSinkNodeIds.push(
           ...graphConfigForStream.nodes
             .filter(n => n.type === "sink")
+            .map(n => n.id)
+        );
+        graphRecordNodeIds.push(
+          ...graphConfigForStream.nodes
+            .filter(n => n.type === "record")
             .map(n => n.id)
         );
       }
@@ -2732,11 +2742,16 @@ export function StreamPage() {
       }
 
       // Pipeline is loaded, now start WebRTC stream
-      // Pass sink node IDs for multi-track WebRTC support
+      // Pass sink + record node IDs so recvonly transceivers match backend
+      // (extra outputs: sink[1..] then record nodes).
+      const webrtcMultiOutputNodeIds =
+        graphSinkNodeIds.length > 0 || graphRecordNodeIds.length > 0
+          ? [...graphSinkNodeIds, ...graphRecordNodeIds]
+          : undefined;
       startStream(
         initialParameters,
         sourceNodeStreamsForWebRTC ? undefined : streamToSend,
-        graphSinkNodeIds.length > 0 ? graphSinkNodeIds : undefined,
+        webrtcMultiOutputNodeIds,
         sourceNodeStreamsForWebRTC
       );
 
