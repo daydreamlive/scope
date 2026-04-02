@@ -22,7 +22,9 @@ export function useKeyboardShortcuts(
   edges: Edge[],
   setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>,
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>,
-  handleSave?: () => void
+  handleSave?: () => void,
+  undo?: () => void,
+  redo?: () => void
 ) {
   const clipboardRef = useRef<ClipboardData | null>(null);
   const pasteCountRef = useRef(0);
@@ -35,6 +37,11 @@ export function useKeyboardShortcuts(
 
   const handleSaveRef = useRef(handleSave);
   handleSaveRef.current = handleSave;
+
+  const undoRef = useRef(undo);
+  undoRef.current = undo;
+  const redoRef = useRef(redo);
+  redoRef.current = redo;
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -49,6 +56,22 @@ export function useKeyboardShortcuts(
       if ((e.metaKey || e.ctrlKey) && e.key === "s") {
         e.preventDefault();
         handleSaveRef.current?.();
+        return;
+      }
+
+      // Cmd/Ctrl+Z → Undo, Cmd/Ctrl+Shift+Z or Cmd/Ctrl+Y → Redo
+      if ((e.metaKey || e.ctrlKey) && e.key === "z" && !isInputElement) {
+        e.preventDefault();
+        if (e.shiftKey) {
+          redoRef.current?.();
+        } else {
+          undoRef.current?.();
+        }
+        return;
+      }
+      if ((e.metaKey || e.ctrlKey) && e.key === "y" && !isInputElement) {
+        e.preventDefault();
+        redoRef.current?.();
         return;
       }
 

@@ -88,6 +88,7 @@ import { useNodeFactories } from "./hooks/node/useNodeFactories";
 import { useValueForwarding } from "./hooks/value/useValueForwarding";
 import { useOutputSinkSync } from "./hooks/value/useOutputSinkSync";
 import { useKeyboardShortcuts } from "./hooks/graph/useKeyboardShortcuts";
+import { useGraphHistory } from "./hooks/graph/useGraphHistory";
 import { useGraphNavigation } from "./hooks/subgraph/useGraphNavigation";
 import { useParentValueBridge } from "./hooks/value/useParentValueBridge";
 import { useSubgraphEval } from "./hooks/subgraph/useSubgraphEval";
@@ -556,6 +557,15 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     );
 
     useOutputSinkSync(nodes, onOutputSinkBulkChangeRef);
+    const { undo, redo } = useGraphHistory(
+      nodes,
+      edges,
+      setNodes,
+      setEdges,
+      enrichDepsRef,
+      handleEdgeDelete
+    );
+
     useKeyboardShortcuts(
       reactFlowInstanceRef,
       setPendingNodePosition,
@@ -564,7 +574,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       edges,
       setNodes,
       setEdges,
-      handleSave
+      handleSave,
+      undo,
+      redo
     );
 
     const {
