@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+import aiohttp
 import click
 import httpx
 import uvicorn
@@ -210,11 +211,19 @@ async def _media_input_loop(
             frame_processor.put(frame)
     except asyncio.CancelledError:
         raise
+    except aiohttp.ClientPayloadError as exc:
+        # Orchestrator truncated the transfer mid-stream (e.g. TransferEncodingError 400)
+        # or dropped the connection. This is a network-level disconnect — treat as a
+        # graceful stop rather than an application error.
+        logger.warning("Media input loop: orchestrator disconnected mid-stream: %s", exc)
     except Exception as exc:
         logger.error("Media input loop failed: %s", exc)
     finally:
         try:
             await media_output.close()
+        except aiohttp.ClientConnectorError as exc:
+            # Host already unreachable (orchestrator went down); suppress cleanup errors.
+            logger.debug("Media output close: orchestrator unreachable (suppressed): %s", exc)
         except Exception as exc:
             logger.warning("Media output close failed: %s", exc)
         if session.media_output is media_output:
