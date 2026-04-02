@@ -9,6 +9,7 @@ import {
   COLOR_STREAM,
   COLOR_VACE,
   COLOR_BOOLEAN,
+  COLOR_TRIGGER,
   COLOR_DEFAULT,
 } from "./nodeColors";
 
@@ -69,7 +70,12 @@ export function getEdgeColor(
       return COLOR_BOOLEAN;
     }
     if (sourceNode.data.nodeType === "trigger") {
-      return COLOR_BOOLEAN;
+      return COLOR_TRIGGER;
+    }
+    if (sourceNode.data.nodeType === "scheduler") {
+      if (parsed.name === "elapsed") return COLOR_NUMBER;
+      if (parsed.name === "is_playing") return COLOR_BOOLEAN;
+      return COLOR_TRIGGER;
     }
     if (sourceNode.data.nodeType === "tempo") {
       return COLOR_NUMBER;

@@ -11,6 +11,7 @@ export const COLOR_STREAM = "#eeeeee";
 export const COLOR_STRING = "#fbbf24"; // amber-400
 export const COLOR_NUMBER = "#38bdf8"; // sky-400
 export const COLOR_BOOLEAN = "#34d399"; // emerald-400
+export const COLOR_TRIGGER = "#f97316"; // orange-500
 export const COLOR_VACE = "#a78bfa"; // violet-400
 export const COLOR_LORA = "#f472b6"; // pink-400
 export const COLOR_IMAGE = COLOR_STRING; // images are string-typed paths
@@ -23,6 +24,7 @@ export const PARAM_TYPE_COLORS: Record<string, string> = {
   string: COLOR_STRING,
   number: COLOR_NUMBER,
   boolean: COLOR_BOOLEAN,
+  trigger: COLOR_TRIGGER,
   list_number: COLOR_NUMBER,
   float: COLOR_NUMBER,
   int: COLOR_NUMBER,
@@ -45,4 +47,5 @@ export const TYPE_BG: Record<string, string> = {
   string: "rgba(251,191,36,0.12)",
   number: "rgba(56,189,248,0.12)",
   boolean: "rgba(52,211,153,0.12)",
+  trigger: "rgba(249,115,22,0.12)",
 };

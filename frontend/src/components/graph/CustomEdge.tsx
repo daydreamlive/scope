@@ -22,11 +22,31 @@ export function CustomEdge({
     targetPosition,
   });
 
-  const edgeColor = (style?.stroke as string) || "#9ca3af";
+  const flashing = data?.flashing === true;
+  const edgeColor = flashing
+    ? "#ffffff"
+    : (style?.stroke as string) || "#9ca3af";
+
+  const edgeStyle = flashing
+    ? {
+        ...style,
+        stroke: "#ffffff",
+        filter: "drop-shadow(0 0 4px rgba(255,255,255,0.6))",
+        transition: "stroke 150ms, filter 150ms",
+      }
+    : {
+        ...style,
+        transition: "stroke 150ms, filter 150ms",
+      };
 
   return (
     <>
-      <BaseEdge id={id} path={edgePath} markerEnd={markerEnd} style={style} />
+      <BaseEdge
+        id={id}
+        path={edgePath}
+        markerEnd={markerEnd}
+        style={edgeStyle}
+      />
       <g
         className="edge-delete-dot"
         transform={`translate(${labelX}, ${labelY})`}

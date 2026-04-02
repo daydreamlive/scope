@@ -35,7 +35,8 @@ interface AddNodeModalProps {
       | "record"
       | "tempo"
       | "prompt_list"
-      | "prompt_blend",
+      | "prompt_blend"
+      | "scheduler",
     subType?: string
   ) => void;
 }
@@ -65,7 +66,8 @@ interface NodeCatalogItem {
     | "record"
     | "tempo"
     | "prompt_list"
-    | "prompt_blend";
+    | "prompt_blend"
+    | "scheduler";
   subType?: string;
   name: string;
   description: string;
@@ -281,6 +283,14 @@ const NODE_CATALOG: NodeCatalogItem[] = [
       "Blend multiple weighted prompts with linear or SLERP interpolation",
     color: "#fbbf24",
     category: "Controls",
+  },
+  {
+    type: "scheduler",
+    name: "Scheduler",
+    description:
+      "Time-based trigger scheduler that fires named outputs at specific time points",
+    color: "#f97316",
+    category: "Utility",
   },
 ];
 

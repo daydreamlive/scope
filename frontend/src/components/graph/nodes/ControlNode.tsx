@@ -1,4 +1,10 @@
-import { Handle, Position, useEdges, useNodes } from "@xyflow/react";
+import {
+  Handle,
+  Position,
+  useEdges,
+  useNodes,
+  useReactFlow,
+} from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { useEffect, useRef, useState } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
@@ -23,7 +29,7 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
-import { PARAM_TYPE_COLORS } from "../nodeColors";
+import { PARAM_TYPE_COLORS, COLOR_TRIGGER } from "../nodeColors";
 
 type ControlNodeType = Node<FlowNodeData, "control">;
 
@@ -64,6 +70,7 @@ export function ControlNode({
 }: NodeProps<ControlNodeType>) {
   const { updateData: updateNodeData } = useNodeData(id);
   const { collapsed, toggleCollapse } = useNodeCollapse();
+  const { setEdges } = useReactFlow();
   const controlType = data.controlType || "float";
   const pattern = data.controlPattern || "sine";
   const speed = data.controlSpeed ?? 1.0;
@@ -90,6 +97,72 @@ export function ControlNode({
   const lastValueRef = useRef<number>(min);
   const startTimeRef = useRef<number>(Date.now());
   const animationFrameRef = useRef<number | undefined>(undefined);
+
+  const [triggerFlash, setTriggerFlash] = useState(false);
+  const triggerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevControlArmedRef = useRef(false);
+  const prevControlEdgeCountersRef = useRef<Record<string, number>>({});
+  const controlEdgeFlashTimers = useRef<
+    Map<string, ReturnType<typeof setTimeout>>
+  >(new Map());
+
+  const controlCounters =
+    (data._controlTriggerCounters as Record<string, number>) ?? {};
+  const controlArmed = Boolean(data.controlTriggerArmed);
+
+  useEffect(() => {
+    // Find which specific edge IDs had their counter change
+    const changedEdgeIds: string[] = [];
+    for (const [edgeId, counter] of Object.entries(controlCounters)) {
+      const prev = prevControlEdgeCountersRef.current[edgeId] ?? 0;
+      if (counter > 0 && counter !== prev) {
+        changedEdgeIds.push(edgeId);
+      }
+    }
+    prevControlEdgeCountersRef.current = { ...controlCounters };
+
+    const armedRising = controlArmed && !prevControlArmedRef.current;
+    prevControlArmedRef.current = controlArmed;
+
+    const hasChange = changedEdgeIds.length > 0 || armedRising;
+
+    if (hasChange) {
+      setTriggerFlash(true);
+      if (triggerTimerRef.current) clearTimeout(triggerTimerRef.current);
+      triggerTimerRef.current = setTimeout(() => setTriggerFlash(false), 200);
+    }
+
+    // Flash only the specific edges whose counters changed
+    if (changedEdgeIds.length > 0) {
+      const changedSet = new Set(changedEdgeIds);
+      setEdges(edges =>
+        edges.map(e => {
+          if (changedSet.has(e.id) && !e.data?.flashing) {
+            return { ...e, data: { ...e.data, flashing: true } };
+          }
+          return e;
+        })
+      );
+      for (const edgeId of changedEdgeIds) {
+        const existing = controlEdgeFlashTimers.current.get(edgeId);
+        if (existing) clearTimeout(existing);
+        controlEdgeFlashTimers.current.set(
+          edgeId,
+          setTimeout(() => {
+            setEdges(edges =>
+              edges.map(e => {
+                if (e.id === edgeId && e.data?.flashing) {
+                  return { ...e, data: { ...e.data, flashing: false } };
+                }
+                return e;
+              })
+            );
+            controlEdgeFlashTimers.current.delete(edgeId);
+          }, 200)
+        );
+      }
+    }
+  }, [controlCounters, controlArmed, setEdges]);
 
   const color = getControlTypeColor(controlType);
   const title = getControlTitle(controlType);
@@ -133,13 +206,21 @@ export function ControlNode({
 
   let switchSelectedString: string | undefined;
   if (isSwitchMode && switchSlots.length > 0) {
-    let bestIdx = lastActiveIndexRef.current;
-    let bestVal = 0;
-    for (let i = 0; i < switchSlots.length; i++) {
-      if (switchSlots[i].numVal > bestVal) {
-        bestVal = switchSlots[i].numVal;
-        bestIdx = i;
+    const hasNumericInput = switchSlots.some(s => s.numVal > 0);
+    let bestIdx: number;
+    if (hasNumericInput) {
+      bestIdx = lastActiveIndexRef.current;
+      let bestVal = 0;
+      for (let i = 0; i < switchSlots.length; i++) {
+        if (switchSlots[i].numVal > bestVal) {
+          bestVal = switchSlots[i].numVal;
+          bestIdx = i;
+        }
       }
+    } else if (data.controlSwitchIndex !== undefined) {
+      bestIdx = (data.controlSwitchIndex as number) % switchSlots.length;
+    } else {
+      bestIdx = lastActiveIndexRef.current;
     }
     if (bestIdx >= switchSlots.length) bestIdx = 0;
     lastActiveIndexRef.current = bestIdx;
@@ -493,6 +574,16 @@ export function ControlNode({
                 );
               })}
 
+              {/* Trigger row */}
+              <div ref={setRowRef("trigger")} className="flex items-center">
+                <span
+                  className={`${NODE_TOKENS.labelText} text-[8px]`}
+                  style={{ color: COLOR_TRIGGER }}
+                >
+                  ← next
+                </span>
+              </div>
+
               {/* Add button */}
               <button
                 className="w-full py-0.5 mt-0.5 rounded bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] text-[#888] hover:text-[#ccc] hover:border-[rgba(119,119,119,0.4)] text-[10px] transition-colors"
@@ -569,6 +660,33 @@ export function ControlNode({
             />
           </span>
         ))}
+
+      {/* Trigger input handle (switch mode only) */}
+      {isSwitchMode && (
+        <Handle
+          type="target"
+          position={Position.Left}
+          id={buildHandleId("param", "trigger")}
+          className={
+            collapsed
+              ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+              : "!w-2.5 !h-2.5 !border-0"
+          }
+          style={
+            collapsed
+              ? { ...collapsedHandleStyle("left"), opacity: 0 }
+              : {
+                  top: rowPositions["trigger"] ?? 44,
+                  left: 0,
+                  backgroundColor: triggerFlash ? "#ffffff" : COLOR_TRIGGER,
+                  boxShadow: triggerFlash
+                    ? "0 0 6px 2px rgba(255,255,255,0.6)"
+                    : "none",
+                  transition: "background-color 200ms, box-shadow 200ms",
+                }
+          }
+        />
+      )}
 
       {/* Param input handles (animated mode only) */}
       {!isSwitchMode && (

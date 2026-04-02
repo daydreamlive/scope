@@ -55,6 +55,21 @@ export function getNumberFromNode(
     if (typeof val === "boolean") return val ? 1 : 0;
     return null;
   }
+  if (t === "scheduler") {
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    if (parsed.name === "elapsed")
+      return (node.data.schedulerElapsed as number) ?? 0;
+    if (parsed.name === "is_playing")
+      return (node.data.schedulerIsPlaying as boolean) ? 1 : 0;
+    if (parsed.name === "tick")
+      return (node.data.schedulerTickCount as number) ?? 0;
+    const counts = node.data.schedulerFireCounts as
+      | Record<string, number>
+      | undefined;
+    return counts?.[parsed.name] ?? 0;
+  }
   if (t === "tempo") {
     if (!sourceHandleId) return null;
     const parsed = parseHandleId(sourceHandleId);
@@ -172,6 +187,21 @@ export function getAnyValueFromNode(
     const idx = parseInt(parsed.name.replace("midi_", ""), 10);
     if (isNaN(idx) || idx >= channels.length) return null;
     return channels[idx].value;
+  }
+  if (t === "scheduler") {
+    if (!sourceHandleId) return null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    if (parsed.name === "elapsed")
+      return (node.data.schedulerElapsed as number) ?? 0;
+    if (parsed.name === "is_playing")
+      return (node.data.schedulerIsPlaying as boolean) ? 1 : 0;
+    if (parsed.name === "tick")
+      return (node.data.schedulerTickCount as number) ?? 0;
+    const counts = node.data.schedulerFireCounts as
+      | Record<string, number>
+      | undefined;
+    return counts?.[parsed.name] ?? 0;
   }
   if (t === "tempo") {
     if (!sourceHandleId) return null;

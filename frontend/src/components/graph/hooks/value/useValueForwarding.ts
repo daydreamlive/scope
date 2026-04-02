@@ -50,6 +50,7 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "tempo",
   "prompt_list",
   "prompt_blend",
+  "scheduler",
 ]);
 
 const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
@@ -62,8 +63,10 @@ const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
   "vace",
   "pipeline",
   "record",
+  "control",
   "prompt_list",
   "prompt_blend",
+  "scheduler",
 ]);
 
 function resolveSubgraphTarget(
@@ -157,11 +160,15 @@ export function useValueForwarding(
     return 0;
   }, [isStreaming]);
 
+  const lastSessionTickRef = useRef(0);
+
   useEffect(() => {
     if (!isStreaming || !onNodeParamChangeRef.current) return;
 
-    // On new session start, clear dedup state so all params are re-sent.
-    if (sessionTick > 0) {
+    // On new session start, clear dedup state so all params are re-sent —
+    // but only once per session, not on every effect re-run.
+    if (sessionTick > 0 && sessionTick !== lastSessionTickRef.current) {
+      lastSessionTickRef.current = sessionTick;
       lastSentRef.current.clear();
       prevNodeDataRef.current.clear();
     }
@@ -293,6 +300,24 @@ export function useValueForwarding(
           handleName: "prompts",
           value: node.data.promptBlendItems ?? [],
         });
+      } else if (node.data.nodeType === "scheduler") {
+        valuesToForward.push({
+          handleName: "elapsed",
+          value: node.data.schedulerElapsed ?? 0,
+        });
+        valuesToForward.push({
+          handleName: "is_playing",
+          value: (node.data.schedulerIsPlaying as boolean) ? 1 : 0,
+        });
+        valuesToForward.push({
+          handleName: "tick",
+          value: node.data.schedulerTickCount ?? 0,
+        });
+        const fireCounts =
+          (node.data.schedulerFireCounts as Record<string, number>) ?? {};
+        for (const [port, count] of Object.entries(fireCounts)) {
+          valuesToForward.push({ handleName: port, value: count });
+        }
       } else if (
         node.data.nodeType === "subgraph_input" ||
         node.data.nodeType === "subgraph"
@@ -306,7 +331,8 @@ export function useValueForwarding(
       const isAnimated =
         node.data.nodeType === "control" ||
         node.data.nodeType === "math" ||
-        node.data.nodeType === "tempo";
+        node.data.nodeType === "tempo" ||
+        node.data.nodeType === "scheduler";
       if (isAnimated) {
         const now = Date.now();
         const lastTime = lastForwardTimeRef.current[node.id] || 0;
@@ -543,6 +569,94 @@ export function useValueForwarding(
         ) {
           nodeUpdates["triggerValue"] = Boolean(sourceValue);
         } else if (
+          targetNode.data.nodeType === "control" &&
+          targetParsed.name === "trigger"
+        ) {
+          let shouldAdvance = false;
+          if (typeof sourceValue === "boolean") {
+            const wasArmed =
+              nodeUpdates["controlTriggerArmed"] !== undefined
+                ? Boolean(nodeUpdates["controlTriggerArmed"])
+                : Boolean(targetNode.data.controlTriggerArmed);
+            if (sourceValue && !wasArmed) shouldAdvance = true;
+            if (sourceValue) {
+              nodeUpdates["controlTriggerArmed"] = true;
+            } else if (nodeUpdates["controlTriggerArmed"] === undefined) {
+              nodeUpdates["controlTriggerArmed"] = false;
+            }
+          } else {
+            const counter = Number(sourceValue) || 0;
+            const counters = (nodeUpdates["_controlTriggerCounters"] as Record<
+              string,
+              number
+            >) ?? {
+              ...((targetNode.data._controlTriggerCounters as Record<
+                string,
+                number
+              >) ?? {}),
+            };
+            const lastSeen = counters[edge.id] ?? 0;
+            if (counter > 0 && counter !== lastSeen) shouldAdvance = true;
+            counters[edge.id] = counter;
+            nodeUpdates["_controlTriggerCounters"] = counters;
+          }
+          if (shouldAdvance) {
+            const items = (targetNode.data.controlItems as string[]) ?? [
+              "item1",
+            ];
+            const currentIdx =
+              nodeUpdates["controlSwitchIndex"] !== undefined
+                ? (nodeUpdates["controlSwitchIndex"] as number)
+                : ((targetNode.data.controlSwitchIndex as number) ?? 0);
+            const nextIdx = (currentIdx + 1) % items.length;
+            nodeUpdates["controlSwitchIndex"] = nextIdx;
+            nodeUpdates["currentValue"] = items[nextIdx] ?? "";
+          }
+        } else if (
+          targetNode.data.nodeType === "prompt_list" &&
+          targetParsed.name === "trigger"
+        ) {
+          let shouldAdvance = false;
+          if (typeof sourceValue === "boolean") {
+            const wasArmed =
+              nodeUpdates["promptListTriggerArmed"] !== undefined
+                ? Boolean(nodeUpdates["promptListTriggerArmed"])
+                : Boolean(targetNode.data.promptListTriggerArmed);
+            if (sourceValue && !wasArmed) shouldAdvance = true;
+            if (sourceValue) {
+              nodeUpdates["promptListTriggerArmed"] = true;
+            } else if (nodeUpdates["promptListTriggerArmed"] === undefined) {
+              nodeUpdates["promptListTriggerArmed"] = false;
+            }
+          } else {
+            const counter = Number(sourceValue) || 0;
+            const counters = (nodeUpdates["_promptTriggerCounters"] as Record<
+              string,
+              number
+            >) ?? {
+              ...((targetNode.data._promptTriggerCounters as Record<
+                string,
+                number
+              >) ?? {}),
+            };
+            const lastSeen = counters[edge.id] ?? 0;
+            if (counter > 0 && counter !== lastSeen) {
+              shouldAdvance = true;
+            }
+            counters[edge.id] = counter;
+            nodeUpdates["_promptTriggerCounters"] = counters;
+          }
+          if (shouldAdvance) {
+            const items = (targetNode.data.promptListItems as string[]) ?? [""];
+            const currentIdx =
+              nodeUpdates["promptListActiveIndex"] !== undefined
+                ? (nodeUpdates["promptListActiveIndex"] as number)
+                : ((targetNode.data.promptListActiveIndex as number) ?? 0);
+            const nextIdx = (currentIdx + 1) % items.length;
+            nodeUpdates["promptListActiveIndex"] = nextIdx;
+            nodeUpdates["promptListActiveText"] = items[nextIdx] ?? "";
+          }
+        } else if (
           targetNode.data.nodeType === "prompt_list" &&
           targetParsed.name === "cycle"
         ) {
@@ -605,6 +719,40 @@ export function useValueForwarding(
                 }
               }
               nodeUpdates["promptBlendItems"] = items;
+            }
+          }
+        } else if (targetNode.data.nodeType === "scheduler") {
+          if (targetParsed.name === "start" || targetParsed.name === "reset") {
+            const counterKey =
+              targetParsed.name === "start"
+                ? "_schedulerStartCount"
+                : "_schedulerResetCount";
+            const armedKey =
+              targetParsed.name === "start"
+                ? "_schedulerStartArmed"
+                : "_schedulerResetArmed";
+            if (typeof sourceValue === "boolean") {
+              const wasArmed =
+                nodeUpdates[armedKey] !== undefined
+                  ? Boolean(nodeUpdates[armedKey])
+                  : Boolean(targetNode.data[armedKey]);
+              if (sourceValue && !wasArmed) {
+                const prev =
+                  (nodeUpdates[counterKey] as number) ??
+                  (targetNode.data[counterKey] as number) ??
+                  0;
+                nodeUpdates[counterKey] = prev + 1;
+              }
+              nodeUpdates[armedKey] = sourceValue;
+            } else {
+              const counter = Number(sourceValue) || 0;
+              const prev =
+                (nodeUpdates[counterKey] as number) ??
+                (targetNode.data[counterKey] as number) ??
+                0;
+              if (counter > 0 && counter !== prev) {
+                nodeUpdates[counterKey] = counter;
+              }
             }
           }
         } else if (targetNode.data.nodeType === "pipeline") {

@@ -34,7 +34,7 @@ function getPortColorHex(portName: string): string {
 }
 
 function getParamTypeColor(
-  type: "string" | "number" | "boolean" | "list_number"
+  type: "string" | "number" | "boolean" | "list_number" | "trigger"
 ): string {
   return PARAM_TYPE_COLORS[type] || COLOR_DEFAULT;
 }
