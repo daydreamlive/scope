@@ -196,7 +196,7 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
 
     The cloud sends multiple video tracks:
     - Track 0: primary sink (goes to cloud_manager's main callback → FP._cloud_output_queue)
-    - Track 1..N: extra sinks → FP._sink_queues_by_node
+    - Track 1..N: extra sinks → FP.sink_manager._sink_queues_by_node
     - Track N+1..M: record nodes → FP.recording.record_queues
     """
     import queue
@@ -213,8 +213,10 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
     # Create per-sink queues in the FrameProcessor so HeadlessSession
     # can read from them via get_from_sink()
     for sid in sink_ids:
-        if sid not in frame_processor._sink_queues_by_node:
-            frame_processor._sink_queues_by_node[sid] = queue.Queue(maxsize=2)
+        if sid not in frame_processor.sink_manager._sink_queues_by_node:
+            frame_processor.sink_manager._sink_queues_by_node[sid] = queue.Queue(
+                maxsize=2
+            )
 
     # The first sink is the primary (track 0) — its frames come through
     # the main cloud callback → _cloud_output_queue. We need to also
@@ -222,11 +224,11 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
     # can find them.
     if sink_ids:
         primary_sink_id = sink_ids[0]
-        primary_q = frame_processor._sink_queues_by_node[primary_sink_id]
+        primary_q = frame_processor.sink_manager._sink_queues_by_node[primary_sink_id]
 
         import torch
 
-        original_callback = frame_processor._on_frame_from_cloud
+        original_callback = frame_processor._cloud_relay.on_frame_from_cloud
 
         def _primary_sink_callback(frame: VideoFrame) -> None:
             original_callback(frame)
@@ -244,17 +246,19 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
             except Exception as e:
                 logger.error(f"Error in primary sink callback: {e}")
 
-        cloud_manager.remove_frame_callback(frame_processor._on_frame_from_cloud)
+        cloud_manager.remove_frame_callback(
+            frame_processor._cloud_relay.on_frame_from_cloud
+        )
         cloud_manager.add_frame_callback(_primary_sink_callback)
         # Store ref so stop() can deregister
-        frame_processor._on_frame_from_cloud = _primary_sink_callback
+        frame_processor._cloud_relay.on_frame_from_cloud = _primary_sink_callback
 
     # Wire extra sink output handlers (track index 1+)
     for i, sid in enumerate(sink_ids[1:], start=1):
         if i >= len(webrtc_client.output_handlers):
             continue
         handler = webrtc_client.output_handlers[i]
-        sink_q = frame_processor._sink_queues_by_node[sid]
+        sink_q = frame_processor.sink_manager._sink_queues_by_node[sid]
 
         def _make_sink_cb(q, sink_id):
             import torch

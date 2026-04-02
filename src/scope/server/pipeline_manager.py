@@ -136,8 +136,6 @@ class PipelineManager:
         Returns True if the alias was created, False if *pipeline_id* is not loaded.
         """
         with self._lock:
-            if alias_key in self._pipelines:
-                return True
             existing = self._pipelines.get(pipeline_id)
             if existing is None:
                 return False
