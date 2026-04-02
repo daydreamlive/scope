@@ -32,29 +32,17 @@ def compute_relay_video_mode(initial_parameters: dict | None) -> bool:
     """
     params = initial_parameters or {}
     if params.get("input_mode") == "video":
-        logger.info("[CLOUD-RELAY] video_mode=True (input_mode=video)")
         return True
     graph_data = params.get("graph")
     if graph_data and isinstance(graph_data, dict):
         for node in graph_data.get("nodes", []):
             if node.get("type") == "source":
-                logger.info(
-                    "[CLOUD-RELAY] video_mode=True (graph source node detected)"
-                )
                 return True
     inp = params.get("input_source")
     if isinstance(inp, dict) and inp.get("enabled"):
         st = inp.get("source_type") or ""
         if st in ("spout", "ndi", "syphon", "video_file"):
-            logger.info("[CLOUD-RELAY] video_mode=True (input_source: %s)", st)
             return True
-    logger.warning(
-        "[CLOUD-RELAY] video_mode=False — no video source detected "
-        "(input_mode=%s, has_graph=%s, input_source=%s)",
-        params.get("input_mode"),
-        bool(graph_data),
-        inp,
-    )
     return False
 
 
