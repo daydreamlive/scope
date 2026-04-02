@@ -636,10 +636,6 @@ class CloudConnectionManager:
         self._connect_stage = "Setting up video stream..."
         self._webrtc_client = CloudWebRTCClient(self)
 
-        # Register frame callback to update stats and forward to subscribers
-        self._webrtc_client.output_handler.add_callback(self._on_frame_from_cloud)
-        self._webrtc_client.audio_output_handler.add_callback(self._on_audio_from_cloud)
-
         try:
             await self._webrtc_client.connect(initial_parameters)
             self._connect_stage = None
@@ -649,6 +645,11 @@ class CloudConnectionManager:
             logger.error(f"Failed to start WebRTC: {e}")
             self._webrtc_client = None
             raise
+
+        # Register frame/audio callbacks AFTER connect() because connect()
+        # recreates output_handlers — callbacks added before would be lost.
+        self._webrtc_client.output_handler.add_callback(self._on_frame_from_cloud)
+        self._webrtc_client.audio_output_handler.add_callback(self._on_audio_from_cloud)
 
     async def stop_webrtc(self) -> None:
         """Stop the WebRTC connection to cloud.ai."""
