@@ -80,7 +80,7 @@ export function PromptInput({
     normalizedWeights,
   } = usePromptManager({
     prompts: prompts, // Controlled component
-    maxPrompts: 4,
+    maxPrompts: 50,
     defaultWeight: 100,
     onPromptsChange: onPromptsChange,
   });
