@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 from enum import Enum
+from pathlib import Path
 from typing import Any
 
 import torch
@@ -722,9 +723,73 @@ class PipelineManager:
         config["base_seed"] = base_seed
         config["vae_type"] = vae_type
         if loras:
-            config["loras"] = loras
+            config["loras"] = self._resolve_lora_paths(loras)
         # Pass merge_mode directly to mixin, not via config
         config["_lora_merge_mode"] = lora_merge_mode
+
+    def _resolve_lora_paths(self, loras: list[dict]) -> list[dict]:
+        """Resolve LoRA file paths against the LoRA directory.
+
+        Relative paths and bare filenames are resolved against get_lora_dir()
+        and get_shared_lora_dir() so that user-configured LoRAs specified by
+        filename alone (e.g. "hydravj_000000750.safetensors") are found correctly.
+        Absolute paths are passed through unchanged.
+
+        Pre-validates that each resolved path exists and raises a clear
+        RuntimeError before pipeline initialization begins.
+
+        Args:
+            loras: List of LoRA config dicts with at least a 'path' key.
+
+        Returns:
+            Copy of loras list with 'path' values resolved to absolute paths.
+
+        Raises:
+            RuntimeError: If a LoRA file cannot be found in any search location.
+        """
+        from .models_config import get_lora_dir, get_shared_lora_dir
+
+        lora_dir = get_lora_dir()
+        shared_dir = get_shared_lora_dir()
+
+        resolved = []
+        for lora in loras:
+            lora_path = lora.get("path")
+            if not lora_path:
+                resolved.append(lora)
+                continue
+
+            p = Path(lora_path)
+            if p.is_absolute():
+                # Already absolute — validate existence directly.
+                if not p.exists():
+                    raise RuntimeError(
+                        f"LoRA file not found: {lora_path}. "
+                        f"Ensure the file exists in your remote model directory."
+                    )
+                resolved.append({**lora, "path": str(p)})
+                continue
+
+            # Search: lora_dir, then shared_dir (if configured).
+            candidates = [lora_dir / p]
+            if shared_dir:
+                candidates.append(shared_dir / p)
+
+            found = next((c for c in candidates if c.exists()), None)
+            if found is None:
+                search_dirs = [str(lora_dir)]
+                if shared_dir:
+                    search_dirs.append(str(shared_dir))
+                raise RuntimeError(
+                    f"LoRA file '{lora_path}' not found. "
+                    f"Searched: {', '.join(search_dirs)}. "
+                    f"Ensure the file is available in your remote model directory."
+                )
+
+            logger.debug("Resolved LoRA path '%s' -> '%s'", lora_path, found)
+            resolved.append({**lora, "path": str(found)})
+
+        return resolved
 
     def unload_pipeline_by_id(
         self,
