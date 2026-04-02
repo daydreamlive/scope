@@ -28,7 +28,7 @@ interface TimelinePromptEditorProps {
   defaultSpatialInterpolationMethod?: "linear" | "slerp" | null;
 }
 
-const MAX_PROMPTS = 4;
+const MAX_PROMPTS = 50;
 const DEFAULT_WEIGHT = 100;
 
 export function TimelinePromptEditor({

@@ -42,7 +42,8 @@ type NodeTypeKey =
   | "record"
   | "tempo"
   | "prompt_list"
-  | "prompt_blend";
+  | "prompt_blend"
+  | "scheduler";
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -435,6 +436,27 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       parameterOutputs: [{ name: "prompts", type: "string", defaultValue: "" }],
     },
   },
+  scheduler: {
+    type: "scheduler",
+    idPrefix: "scheduler",
+    defaultX: 50,
+    data: {
+      label: "Scheduler",
+      nodeType: "scheduler",
+      schedulerTriggers: [],
+      schedulerDuration: 30,
+      schedulerLoop: false,
+      schedulerElapsed: 0,
+      schedulerIsPlaying: false,
+      schedulerFireCounts: {},
+      schedulerTickCount: 0,
+      parameterOutputs: [
+        { name: "elapsed", type: "number", defaultValue: 0 },
+        { name: "is_playing", type: "number", defaultValue: 0 },
+        { name: "tick", type: "number", defaultValue: 0 },
+      ],
+    },
+  },
 };
 
 interface UseNodeFactoriesArgs {
@@ -528,7 +550,8 @@ export function useNodeFactories({
         | "record"
         | "tempo"
         | "prompt_list"
-        | "prompt_blend",
+        | "prompt_blend"
+        | "scheduler",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;

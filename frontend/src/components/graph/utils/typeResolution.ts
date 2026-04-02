@@ -7,6 +7,7 @@ export type ResolvedType =
   | "string"
   | "number"
   | "boolean"
+  | "trigger"
   | "list_number"
   | "video_path"
   | "vace"
@@ -39,7 +40,17 @@ export function resolveSourceType(
   if (nt === "lora") return "lora";
   if (nt === "midi") return "number";
   if (nt === "bool") return "boolean";
-  if (nt === "trigger") return "boolean";
+  if (nt === "trigger") return "trigger";
+  if (nt === "scheduler") {
+    if (sourceHandleId) {
+      const parsed = parseHandleId(sourceHandleId);
+      if (parsed) {
+        if (parsed.name === "elapsed" || parsed.name === "is_playing")
+          return "number";
+      }
+    }
+    return "trigger";
+  }
   if (nt === "tempo") return "number";
   if (nt === "prompt_list") return "string";
   if (nt === "prompt_blend") return "string";

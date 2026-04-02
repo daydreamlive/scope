@@ -22,7 +22,7 @@ export type PortType = "stream" | "string" | "number" | "boolean";
 
 export interface ParameterPortDef {
   name: string;
-  type: "string" | "number" | "boolean" | "list_number";
+  type: "string" | "number" | "boolean" | "list_number" | "trigger";
   defaultValue?: unknown;
   label?: string;
   min?: number;
@@ -44,7 +44,7 @@ export interface SubgraphPort {
   /** Whether this is a stream (video) or parameter connection */
   portType: "stream" | "param";
   /** For param ports: the data type */
-  paramType?: "string" | "number" | "boolean" | "list_number";
+  paramType?: "string" | "number" | "boolean" | "list_number" | "trigger";
   /** Which inner node this port maps to */
   innerNodeId: string;
   /** Which handle on that inner node */
@@ -101,7 +101,8 @@ export interface FlowNodeData {
     | "record"
     | "tempo"
     | "prompt_list"
-    | "prompt_blend";
+    | "prompt_blend"
+    | "scheduler";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -114,7 +115,7 @@ export interface FlowNodeData {
   /** Pipeline schemas keyed by pipeline_id, for looking up ports on selection change */
   pipelinePortsMap?: Record<string, { inputs: string[]; outputs: string[] }>;
   /** For primitive nodes: the type of value (string, number, boolean) */
-  valueType?: "string" | "number" | "boolean";
+  valueType?: "string" | "number" | "boolean" | "trigger";
   /** For primitive / slider nodes: the current value */
   value?: unknown;
   /** For control nodes: the type of control (float, int, string) */
@@ -273,6 +274,12 @@ export interface FlowNodeData {
   boolMode?: "gate" | "toggle";
   /** For bool nodes: threshold value (input > threshold → true) */
   boolThreshold?: number;
+  /** For bool nodes: armed state for boolean trigger sources */
+  boolTriggerArmed?: boolean;
+  /** For bool nodes: per-edge fire count tracking for counter trigger sources */
+  _boolTriggerCounters?: Record<string, number>;
+  /** For bool nodes: timestamp of last gate fire (for auto-reset) */
+  _boolGateTimer?: number;
 
   /* ── VACE node fields ── */
   /** For VACE nodes: context scale (0.0-2.0) */
@@ -346,6 +353,19 @@ export interface FlowNodeData {
   /* ── Prompt blend node fields ── */
   promptBlendItems?: Array<{ text: string; weight: number }>;
   promptBlendMethod?: "linear" | "slerp";
+
+  /* ── Scheduler node fields ── */
+  schedulerTriggers?: Array<{ time: number; port_name: string }>;
+  schedulerDuration?: number;
+  schedulerLoop?: boolean;
+  schedulerElapsed?: number;
+  schedulerIsPlaying?: boolean;
+  schedulerFireCounts?: Record<string, number>;
+  schedulerTickCount?: number;
+  _schedulerStartCount?: number;
+  _schedulerStartArmed?: boolean;
+  _schedulerResetCount?: number;
+  _schedulerResetArmed?: boolean;
 
   /* ── Tempo beat count offset ── */
   tempoBeatCountOffset?: number;
@@ -804,6 +824,7 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "tempo",
   "prompt_list",
   "prompt_blend",
+  "scheduler",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */

@@ -123,12 +123,20 @@ export function useConnectionLogic(
                 ...n,
                 data: {
                   ...n.data,
-                  valueType: expectedType as "string" | "number" | "boolean",
+                  valueType: expectedType as
+                    | "string"
+                    | "number"
+                    | "boolean"
+                    | "trigger",
                   value: defaultVal,
                   parameterOutputs: [
                     {
                       name: "value",
-                      type: expectedType as "string" | "number" | "boolean",
+                      type: expectedType as
+                        | "string"
+                        | "number"
+                        | "boolean"
+                        | "trigger",
                       defaultValue: defaultVal,
                     },
                   ],
@@ -171,7 +179,11 @@ export function useConnectionLogic(
                   ...n,
                   data: {
                     ...n.data,
-                    valueType: srcType as "string" | "number" | "boolean",
+                    valueType: srcType as
+                      | "string"
+                      | "number"
+                      | "boolean"
+                      | "trigger",
                   },
                 };
               })
@@ -196,7 +208,11 @@ export function useConnectionLogic(
           expectedType !== "vace" &&
           expectedType !== "video_path"
         ) {
-          const narrowType = expectedType as "string" | "number" | "boolean";
+          const narrowType = expectedType as
+            | "string"
+            | "number"
+            | "boolean"
+            | "trigger";
           const { rerouteIds, rootSourceId } = collectUpstreamChain(
             sourceNode.id,
             nodes,
@@ -366,10 +382,26 @@ export function useConnectionLogic(
       const conn = effectiveConnection;
 
       setEdges(eds => {
-        const filtered = eds.filter(
-          e =>
-            !(e.target === conn.target && e.targetHandle === conn.targetHandle)
-        );
+        const tgtNode = nodes.find(n => n.id === conn.target);
+        const tgtParsed = parseHandleId(conn.targetHandle);
+        const multiInput =
+          tgtNode &&
+          tgtParsed?.kind === "param" &&
+          tgtParsed.name === "trigger" &&
+          (tgtNode.data.nodeType === "prompt_list" ||
+            tgtNode.data.nodeType === "record" ||
+            tgtNode.data.nodeType === "control" ||
+            tgtNode.data.nodeType === "bool");
+
+        const filtered = multiInput
+          ? eds
+          : eds.filter(
+              e =>
+                !(
+                  e.target === conn.target &&
+                  e.targetHandle === conn.targetHandle
+                )
+            );
 
         const changedTypes = adaptNodeTypes(conn, filtered);
         const sourceNode = nodes.find(n => n.id === conn.source);

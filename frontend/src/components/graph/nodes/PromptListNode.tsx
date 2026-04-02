@@ -1,6 +1,6 @@
-import { Handle, Position } from "@xyflow/react";
+import { Handle, Position, useReactFlow } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { useCallback } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
@@ -16,6 +16,8 @@ import {
 } from "../ui";
 import { COLOR_STRING as COLOR } from "../nodeColors";
 
+const COLOR_TRIGGER = "#f97316";
+
 type PromptListNodeType = Node<FlowNodeData, "prompt_list">;
 
 export function PromptListNode({
@@ -25,6 +27,7 @@ export function PromptListNode({
 }: NodeProps<PromptListNodeType>) {
   const { updateData } = useNodeData(id);
   const { collapsed, toggleCollapse } = useNodeCollapse();
+  const { setEdges } = useReactFlow();
 
   const items: string[] =
     data.promptListItems && (data.promptListItems as string[]).length > 0
@@ -79,6 +82,73 @@ export function PromptListNode({
     [items, activeIndex, updateData]
   );
 
+  const [triggerFlash, setTriggerFlash] = useState(false);
+  const triggerTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const prevArmedRef = useRef(false);
+  const prevEdgeCountersRef = useRef<Record<string, number>>({});
+  const edgeFlashTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
+
+  const triggerCounters =
+    (data._promptTriggerCounters as Record<string, number>) ?? {};
+  const triggerArmed = Boolean(data.promptListTriggerArmed);
+
+  useEffect(() => {
+    // Find which specific edge IDs had their counter change
+    const changedEdgeIds: string[] = [];
+    for (const [edgeId, counter] of Object.entries(triggerCounters)) {
+      const prev = prevEdgeCountersRef.current[edgeId] ?? 0;
+      if (counter > 0 && counter !== prev) {
+        changedEdgeIds.push(edgeId);
+      }
+    }
+    prevEdgeCountersRef.current = { ...triggerCounters };
+
+    const armedRising = triggerArmed && !prevArmedRef.current;
+    prevArmedRef.current = triggerArmed;
+
+    const hasChange = changedEdgeIds.length > 0 || armedRising;
+
+    if (hasChange) {
+      setTriggerFlash(true);
+      if (triggerTimerRef.current) clearTimeout(triggerTimerRef.current);
+      triggerTimerRef.current = setTimeout(() => setTriggerFlash(false), 200);
+    }
+
+    // Flash only the specific edges whose counters changed
+    if (changedEdgeIds.length > 0) {
+      const changedSet = new Set(changedEdgeIds);
+      setEdges(edges =>
+        edges.map(e => {
+          if (changedSet.has(e.id) && !e.data?.flashing) {
+            return { ...e, data: { ...e.data, flashing: true } };
+          }
+          return e;
+        })
+      );
+      // Schedule clear for each edge
+      for (const edgeId of changedEdgeIds) {
+        const existing = edgeFlashTimers.current.get(edgeId);
+        if (existing) clearTimeout(existing);
+        edgeFlashTimers.current.set(
+          edgeId,
+          setTimeout(() => {
+            setEdges(edges =>
+              edges.map(e => {
+                if (e.id === edgeId && e.data?.flashing) {
+                  return { ...e, data: { ...e.data, flashing: false } };
+                }
+                return e;
+              })
+            );
+            edgeFlashTimers.current.delete(edgeId);
+          }, 200)
+        );
+      }
+    }
+  }, [triggerCounters, triggerArmed, setEdges]);
+
   const { setRowRef, rowPositions } = useHandlePositions([
     items.length,
     activeIndex,
@@ -131,8 +201,21 @@ export function PromptListNode({
                   ›
                 </button>
               </div>
-              <span className={`${NODE_TOKENS.labelText} text-[8px]`}>
+              <span
+                className={`${NODE_TOKENS.labelText} text-[8px]`}
+                style={{ color: "#38bdf8" }}
+              >
                 cycle →
+              </span>
+            </div>
+
+            {/* Trigger input row */}
+            <div ref={setRowRef("trigger")} className="flex items-center">
+              <span
+                className={`${NODE_TOKENS.labelText} text-[8px]`}
+                style={{ color: COLOR_TRIGGER }}
+              >
+                ← next
               </span>
             </div>
 
@@ -204,6 +287,31 @@ export function PromptListNode({
                 top: rowPositions["nav"] ?? 0,
                 left: 0,
                 backgroundColor: "#38bdf8",
+              }
+        }
+      />
+
+      {/* Trigger input handle */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={buildHandleId("param", "trigger")}
+        className={
+          collapsed
+            ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+            : "!w-2.5 !h-2.5 !border-0"
+        }
+        style={
+          collapsed
+            ? { ...collapsedHandleStyle("left"), opacity: 0 }
+            : {
+                top: rowPositions["trigger"] ?? 0,
+                left: 0,
+                backgroundColor: triggerFlash ? "#ffffff" : COLOR_TRIGGER,
+                boxShadow: triggerFlash
+                  ? "0 0 6px 2px rgba(255,255,255,0.6)"
+                  : "none",
+                transition: "background-color 200ms, box-shadow 200ms",
               }
         }
       />
