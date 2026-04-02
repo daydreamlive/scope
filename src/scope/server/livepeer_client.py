@@ -186,10 +186,6 @@ class LivepeerClient:
             self._payment_task = asyncio.create_task(
                 self._payment_loop(self._job, self._job.payment_session)
             )
-            logger.info(
-                "Livepeer payment loop started (interval=%.1fs)",
-                PAYMENT_SEND_INTERVAL_S,
-            )
         else:
             logger.debug("Livepeer signer not configured; payment loop disabled")
 
@@ -542,9 +538,15 @@ class LivepeerClient:
 
     async def _payment_loop(self, job: Any, payment_session: Any) -> None:
         """Send periodic payments while this job remains active."""
+        logger.info(
+            "Livepeer payment loop started (interval=%.1fs)",
+            PAYMENT_SEND_INTERVAL_S,
+        )
+        # NB: This sends a payment immediately. It may have been a while
+        # since the upfront payment was made due to cold starts, so get
+        # ahead of the orchestrator's own balance check.
         try:
             while not self._shutdown_started and self._job is job:
-                await asyncio.sleep(PAYMENT_SEND_INTERVAL_S)
                 if not self._connected or self._job is not job:
                     break
                 try:
@@ -553,6 +555,13 @@ class LivepeerClient:
                     logger.debug("Livepeer payment loop skipped cycle: %s", e)
                 except Exception as e:
                     logger.warning("Livepeer periodic payment failed: %s", e)
+                if (
+                    self._shutdown_started
+                    or not self._connected
+                    or self._job is not job
+                ):
+                    break
+                await asyncio.sleep(PAYMENT_SEND_INTERVAL_S)
         except asyncio.CancelledError:
             pass
         finally:
