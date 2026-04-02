@@ -29,21 +29,37 @@ Default assumptions:
 
 Source: prebuilt artifacts from the `Upload artifacts to google bucket` step in the `Build binaries` workflow for [PR #3884](https://github.com/livepeer/go-livepeer/pull/3884). This PR (`ja/serverless`) is still WIP — once it merges, update this skill to pull from a release or `master` build instead.
 
-Current `ja/serverless` head:
-- ref: `ja/serverless`
-- sha: `04ac4c5a7f108cf488c388d94f2c8af03bae21b6`
-- CI run: [23878931453](https://github.com/livepeer/go-livepeer/actions/runs/23878931453)
+**Always resolve the latest head SHA dynamically** — do not hardcode a SHA. Run:
 
-Published binary URLs:
-- darwin amd64: `https://build.livepeer.live/go-livepeer/04ac4c5a7f108cf488c388d94f2c8af03bae21b6/livepeer-darwin-amd64.tar.gz`
-- darwin arm64: `https://build.livepeer.live/go-livepeer/04ac4c5a7f108cf488c388d94f2c8af03bae21b6/livepeer-darwin-arm64.tar.gz`
-- linux amd64: `https://build.livepeer.live/go-livepeer/04ac4c5a7f108cf488c388d94f2c8af03bae21b6/livepeer-linux-amd64.tar.gz`
-- linux arm64: `https://build.livepeer.live/go-livepeer/04ac4c5a7f108cf488c388d94f2c8af03bae21b6/livepeer-linux-arm64.tar.gz`
-- linux gpu amd64: `https://build.livepeer.live/go-livepeer/04ac4c5a7f108cf488c388d94f2c8af03bae21b6/livepeer-linux-gpu-amd64.tar.gz`
-- linux gpu arm64: `https://build.livepeer.live/go-livepeer/04ac4c5a7f108cf488c388d94f2c8af03bae21b6/livepeer-linux-gpu-arm64.tar.gz`
-- windows amd64: `https://build.livepeer.live/go-livepeer/04ac4c5a7f108cf488c388d94f2c8af03bae21b6/livepeer-windows-amd64.zip`
+```bash
+SHA=$(gh pr view 3884 --repo livepeer/go-livepeer --json headRefOid -q '.headRefOid')
+echo "Latest SHA: $SHA"
+```
 
-If the artifact is missing, resolve the correct URL for the latest PR head SHA (see "Updating This SKILL.md") or ask the user. Never build `go-livepeer` from source.
+Then construct the download URL for the current platform:
+
+```bash
+# Detect platform
+ARCH=$(uname -m)
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+case "$ARCH" in
+  x86_64)  ARCH="amd64" ;;
+  aarch64|arm64) ARCH="arm64" ;;
+esac
+URL="https://build.livepeer.live/go-livepeer/${SHA}/livepeer-${OS}-${ARCH}.tar.gz"
+echo "Download URL: $URL"
+```
+
+Full platform matrix (all use `https://build.livepeer.live/go-livepeer/${SHA}/` as base):
+- `livepeer-darwin-amd64.tar.gz`
+- `livepeer-darwin-arm64.tar.gz`
+- `livepeer-linux-amd64.tar.gz`
+- `livepeer-linux-arm64.tar.gz`
+- `livepeer-linux-gpu-amd64.tar.gz`
+- `livepeer-linux-gpu-arm64.tar.gz`
+- `livepeer-windows-amd64.zip`
+
+If the artifact is missing, the PR head may have changed or CI hasn't finished. Verify with `gh pr view 3884 --repo livepeer/go-livepeer --json headRefOid,statusCheckRollup`. Never build `go-livepeer` from source.
 
 ## `serverless.json`
 
@@ -79,6 +95,10 @@ lsof -tiUDP:9001 | xargs kill -9 2>/dev/null
 **Runner** (`SCOPE_PORT=9001` prevents OSC port collision with the main Scope server; `LIVEPEER_DEV_MODE=1` skips auth for local testing):
 
 ```bash
+# CRITICAL: The runner needs the websockets library for its /ws endpoint.
+# Without it, the orchestrator gets "websocket: bad handshake" when connecting.
+uv pip install 'uvicorn[standard]'
+
 LIVEPEER_DEV_MODE=1 SCOPE_PORT=9001 UV_NO_SYNC=1 uv run --extra livepeer livepeer-runner
 ```
 
@@ -112,6 +132,22 @@ Do not declare success after partial recovery. The final check must cover the fu
 
 Interpretation note: a successful `connect_to_cloud` + `pipeline/load` proves the control path. A headless `start_stream` + `capture_frame` may exercise local media paths only. If the user cares about true remote media/WebRTC behavior, finish with a browser or UI-driven verification.
 
+## Headless Session in Livepeer Mode
+
+The headless session (`/api/v1/session/start`) runs locally on the Scope instance — it is **not** proxied to cloud. However, when Scope is connected to cloud, `POST /api/v1/pipeline/load` **is** proxied to the runner. This means the pipeline gets loaded only on the runner side, and the local headless session fails with "Pipeline passthrough not loaded".
+
+**Workaround — load the pipeline locally before starting the session:**
+
+1. `POST /api/v1/cloud/disconnect` — disconnect from cloud
+2. `POST /api/v1/pipeline/load` body: `{"pipeline_ids": ["passthrough"]}` — loads locally (no proxy)
+3. `POST /api/v1/cloud/connect` body: `{}` — reconnect to cloud
+4. Wait for cloud status to show `connected: true`
+5. `POST /api/v1/session/start` body: `{"pipeline_id": "passthrough", ...}` — now works
+
+This applies to all pipelines in Livepeer mode, not just passthrough.
+
+**Video input for passthrough:** Use the bundled test video at `frontend/public/assets/test.mp4` as `input_source` with `source_type: "video_file"` and `input_mode: "video"`. Do not create a synthetic test video with ffmpeg.
+
 ## Troubleshooting
 
 When something fails:
@@ -124,13 +160,18 @@ HTTP API fallbacks useful during Livepeer testing (when MCP is unavailable):
 
 | Operation | Endpoint |
 |-----------|----------|
-| Cloud connect | `POST /api/v1/cloud/connect` |
+| Cloud connect | `POST /api/v1/cloud/connect` body: `{}` |
+| Cloud disconnect | `POST /api/v1/cloud/disconnect` |
 | Cloud status | `GET /api/v1/cloud/status` |
-| Load pipeline | `POST /api/v1/pipeline/load` |
+| Load pipeline | `POST /api/v1/pipeline/load` body: `{"pipeline_ids": ["name"]}` |
 | Pipeline status | `GET /api/v1/pipeline/status` |
-| Start session | `POST /api/v1/session/start` |
-| Capture frame | `GET /api/v1/session/frame` |
+| Start session | `POST /api/v1/session/start` body: `{"pipeline_id": "name", ...}` |
+| Capture frame | `GET /api/v1/session/frame` (returns JPEG binary) |
 | Stop session | `POST /api/v1/session/stop` |
+| Start recording | `POST /api/v1/recordings/headless/start` |
+| Stop recording | `POST /api/v1/recordings/headless/stop` |
+| Download recording | `GET /api/v1/recordings/headless` (returns MP4 binary) |
+| Logs | `GET /api/v1/logs/tail?lines=30` |
 
 ## Practical Notes
 
@@ -140,34 +181,4 @@ HTTP API fallbacks useful during Livepeer testing (when MCP is unavailable):
 
 ## Updating This `SKILL.md`
 
-When the PR head changes or artifact URLs expire:
-
-1. Re-fetch PR metadata for `https://github.com/livepeer/go-livepeer/pull/3884` and record the new head ref and SHA.
-2. Confirm the `Build binaries` workflow still uploads to `build.livepeer.live/go-livepeer/<sha>/...`.
-3. Replace the SHA in the Artifact Discovery section and regenerate the platform URLs.
-
-Refresher script:
-
-```bash
-python3 - <<'PY'
-import json, urllib.request
-
-pr_url = "https://api.github.com/repos/livepeer/go-livepeer/pulls/3884"
-with urllib.request.urlopen(pr_url, timeout=30) as r:
-    pr = json.load(r)
-
-branch = pr["head"]["ref"]
-sha = pr["head"]["sha"]
-print("branch:", branch)
-print("sha:", sha)
-
-base = f"https://build.livepeer.live/go-livepeer/{sha}"
-print("darwin-amd64", f"{base}/livepeer-darwin-amd64.tar.gz")
-print("darwin-arm64", f"{base}/livepeer-darwin-arm64.tar.gz")
-print("linux-amd64", f"{base}/livepeer-linux-amd64.tar.gz")
-print("linux-arm64", f"{base}/livepeer-linux-arm64.tar.gz")
-print("linux-gpu-amd64", f"{base}/livepeer-linux-gpu-amd64.tar.gz")
-print("linux-gpu-arm64", f"{base}/livepeer-linux-gpu-arm64.tar.gz")
-print("windows-amd64", f"{base}/livepeer-windows-amd64.zip")
-PY
-```
+Artifact URLs are resolved dynamically from the PR head SHA (see "Artifact Discovery"), so this file does not need manual SHA updates. If the PR merges, update the artifact discovery section to pull from a `master` build or release instead of the PR.

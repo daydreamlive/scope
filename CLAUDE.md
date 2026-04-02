@@ -134,7 +134,9 @@ SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
 SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022
 ```
 
-Wait for both to be healthy: `curl -s http://localhost:8002/api/v1/health && curl -s http://localhost:8022/api/v1/health`
+Wait for both to be healthy: `curl -s http://localhost:8002/health && curl -s http://localhost:8022/health`
+
+Note: The health endpoint is `/health`, not `/api/v1/health`.
 
 **MCP tool sequence:**
 
