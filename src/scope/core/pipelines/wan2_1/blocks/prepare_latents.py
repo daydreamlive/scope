@@ -76,10 +76,10 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
         block_state = self.get_block_state(state)
 
         generator_param = next(components.generator.model.parameters())
-        latent_height = (
+        latent_height = int(
             block_state.height // components.config.vae_spatial_downsample_factor
         )
-        latent_width = (
+        latent_width = int(
             block_state.width // components.config.vae_spatial_downsample_factor
         )
 
@@ -90,7 +90,8 @@ class PrepareLatentsBlock(ModularPipelineBlocks):
             base_seed = 42
 
         # Create generator from seed for reproducible generation
-        block_seed = base_seed + block_state.current_start_frame
+        # Cast to int: base_seed may arrive as float from JSON load_params
+        block_seed = int(base_seed) + int(block_state.current_start_frame)
         rng = torch.Generator(device=generator_param.device).manual_seed(block_seed)
 
         # Determine number of latent frames to generate
