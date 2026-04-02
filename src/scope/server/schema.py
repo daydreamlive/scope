@@ -815,6 +815,10 @@ class CloudStatusResponse(BaseModel):
         default=None,
         description="Current substage during connection (e.g., 'Connecting to cloud...')",
     )
+    connect_attempt: int = Field(
+        default=0,
+        description="Current connection attempt number (0 = not started, 1+ = active/completed attempt)",
+    )
     webrtc_connected: bool = Field(
         default=False,
         description="Whether WebRTC media connection to cloud is active",

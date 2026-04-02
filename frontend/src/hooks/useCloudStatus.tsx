@@ -31,6 +31,8 @@ export interface CloudStatus {
   last_close_code: number | null;
   last_close_reason: string | null;
   connect_stage: string | null;
+  /** Current connection attempt number (0 = not started, 1+ = active/completed attempt). */
+  connect_attempt: number;
 }
 
 const DEFAULT_STATUS: CloudStatus = {
@@ -43,6 +45,7 @@ const DEFAULT_STATUS: CloudStatus = {
   last_close_code: null,
   last_close_reason: null,
   connect_stage: null,
+  connect_attempt: 0,
 };
 
 // Polling intervals based on connection state
