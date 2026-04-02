@@ -269,6 +269,7 @@ class LivepeerConnection:
             "connected": self.is_connected,
             "connecting": self._connecting,
             "error": self._connect_error,
+            "connect_attempt": getattr(self, "_connect_attempt", 0),
             "webrtc_connected": self.webrtc_connected,
             "app_id": "livepeer" if self.is_connected else None,
             "connection_id": (

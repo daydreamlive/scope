@@ -1,5 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Loader2, CheckCircle2 } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle } from "lucide-react";
+import { Button } from "../ui/button";
 import { useCloudStatus } from "../../hooks/useCloudStatus";
 import { getDaydreamUserId } from "../../lib/auth";
 import { persistSurveyAnswers } from "../../lib/onboardingStorage";
@@ -32,7 +33,7 @@ export function CloudConnectingStep({
   onConnected,
   onBack,
 }: CloudConnectingStepProps) {
-  const { isConnected, isConnecting, connectStage, refresh } = useCloudStatus();
+  const { isConnected, isConnecting, connectStage, error, refresh } = useCloudStatus();
   const { setOnboardingStyle } = useOnboarding();
   const {
     isDisclosed: telemetryDisclosed,
@@ -122,6 +123,11 @@ export function CloudConnectingStep({
     setTelemetrySkippedSurvey(true);
   }, [markDisclosed, dropQueue]);
 
+  const handleRetryConnect = useCallback(async () => {
+    await activateCloudRelay();
+    await refresh();
+  }, [refresh]);
+
   // --- Step 1: Telemetry disclosure (shown FIRST, replaces survey intro) ---
   if (!localTelemetryDisclosed) {
     return (
@@ -209,6 +215,24 @@ export function CloudConnectingStep({
 
   // --- Survey done, waiting for cloud ---
   if (!isConnected) {
+    if (error && !isConnecting) {
+      // Connection failed — show error with retry option
+      return (
+        <div className="flex flex-col items-center gap-6 w-full max-w-md mx-auto text-center">
+          <h2 className="text-2xl font-semibold text-foreground">
+            Connection failed
+          </h2>
+          <AlertCircle className="h-8 w-8 text-destructive" />
+          <p className="text-sm text-muted-foreground">
+            Could not connect to Daydream Cloud. The server may be starting up —
+            please try again in a moment.
+          </p>
+          <Button onClick={handleRetryConnect} size="lg" className="px-8">
+            Try Again
+          </Button>
+        </div>
+      );
+    }
     return (
       <div className="flex flex-col items-center gap-6 w-full max-w-md mx-auto text-center">
         <h2 className="text-2xl font-semibold text-foreground">
@@ -216,7 +240,9 @@ export function CloudConnectingStep({
         </h2>
         <Loader2 className="h-8 w-8 text-muted-foreground animate-spin" />
         <p className="text-sm text-muted-foreground">
-          Finishing connection to Daydream Cloud
+          {isConnecting && connectStage
+            ? connectStage
+            : "Finishing connection to Daydream Cloud"}
         </p>
       </div>
     );

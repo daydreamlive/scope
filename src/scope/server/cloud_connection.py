@@ -68,6 +68,7 @@ class CloudConnectionManager:
         self._connect_task: asyncio.Task | None = None
         self._connect_error: str | None = None
         self._connect_stage: str | None = None
+        self._connect_attempt: int = 0
 
         # Last close info (for reporting to frontend)
         self._last_close_code: int | None = None
@@ -233,11 +234,18 @@ class CloudConnectionManager:
         Unlike connect(), this returns immediately and runs the connection
         in an asyncio task. Check get_status() for connection progress.
 
+        Retries automatically on timeout (cold-start can take several minutes);
+        gives up after MAX_CONNECT_ATTEMPTS and surfaces the error via get_status().
+
         Args:
             app_id: The cloud app ID
             api_key: The cloud API key
             user_id: Optional user ID for log correlation
         """
+        MAX_CONNECT_ATTEMPTS = 3
+        # Delay (seconds) between retries — cold starts can be slow
+        RETRY_DELAYS = [10, 20]
+
         # Cancel any existing connection task
         if self._connect_task is not None and not self._connect_task.done():
             self._connect_task.cancel()
@@ -248,19 +256,46 @@ class CloudConnectionManager:
 
         self._connecting = True
         self._connect_error = None
+        self._connect_attempt = 0
 
         async def _do_connect():
-            try:
-                await self.connect(app_id, api_key, user_id)
-                self._connecting = False
-            except Exception as e:
-                self._connecting = False
-                self._connect_error = str(e)
-                self._connect_stage = None
-                logger.error(f"Background cloud connection failed: {e}")
-                self._publish_cloud_error(
-                    str(e), type(e).__name__, error_type="cloud_connection_failed"
-                )
+            for attempt in range(1, MAX_CONNECT_ATTEMPTS + 1):
+                self._connect_attempt = attempt
+                try:
+                    if attempt > 1:
+                        delay = RETRY_DELAYS[min(attempt - 2, len(RETRY_DELAYS) - 1)]
+                        self._connect_stage = f"Retrying connection (attempt {attempt}/{MAX_CONNECT_ATTEMPTS})..."
+                        logger.info(
+                            f"Cloud connect attempt {attempt}/{MAX_CONNECT_ATTEMPTS}, "
+                            f"waiting {delay}s before retry..."
+                        )
+                        await asyncio.sleep(delay)
+
+                    await self.connect(app_id, api_key, user_id)
+                    self._connecting = False
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    is_timeout = (
+                        "Timeout" in type(e).__name__ or "timeout" in str(e).lower()
+                    )
+                    is_last = attempt >= MAX_CONNECT_ATTEMPTS
+                    self._connect_stage = None
+                    logger.error(
+                        f"Background cloud connection attempt {attempt}/{MAX_CONNECT_ATTEMPTS} failed: {e}"
+                    )
+                    if is_last or not is_timeout:
+                        # Non-recoverable or exhausted retries — surface to the user
+                        self._connecting = False
+                        self._connect_error = str(e)
+                        self._publish_cloud_error(
+                            str(e),
+                            type(e).__name__,
+                            error_type="cloud_connection_failed",
+                        )
+                        return
+                    # Timeout on non-final attempt — retry after delay
 
         self._connect_task = asyncio.create_task(_do_connect())
 
@@ -571,6 +606,7 @@ class CloudConnectionManager:
         self._connecting = False
         self._connect_error = None
         self._connect_stage = None
+        self._connect_attempt = 0
         if self._connect_task is not None and not self._connect_task.done():
             self._connect_task.cancel()
             try:
@@ -755,6 +791,7 @@ class CloudConnectionManager:
             "connecting": self._connecting,
             "error": self._connect_error,
             "connect_stage": self._connect_stage,
+            "connect_attempt": self._connect_attempt,
             "app_id": self.app_id if self.is_connected else None,
             "connection_id": self._connection_id if self.is_connected else None,
             "webrtc_connected": self.webrtc_connected,
