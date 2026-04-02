@@ -710,9 +710,9 @@ class PipelineManager:
         vae_type = "wan"  # Default VAE type
 
         if load_params:
-            height = load_params.get("height", default_height)
-            width = load_params.get("width", default_width)
-            base_seed = load_params.get("base_seed", default_seed)
+            height = int(load_params.get("height", default_height))
+            width = int(load_params.get("width", default_width))
+            base_seed = int(load_params.get("base_seed", default_seed))
             loras = load_params.get("loras", None)
             lora_merge_mode = load_params.get("lora_merge_mode", lora_merge_mode)
             vae_type = load_params.get("vae_type", vae_type)
@@ -921,8 +921,8 @@ class PipelineManager:
             height = 512
             width = 512
             if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
+                height = int(load_params.get("height", 512))
+                width = int(load_params.get("width", 512))
 
             pipeline = PassthroughPipeline(
                 height=height,
@@ -1247,8 +1247,8 @@ class PipelineManager:
             height = 512
             width = 512
             if load_params:
-                height = load_params.get("height", 512)
-                width = load_params.get("width", 512)
+                height = int(load_params.get("height", 512))
+                width = int(load_params.get("width", 512))
 
             pipeline = ControllerVisualizerPipeline(
                 height=height,
