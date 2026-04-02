@@ -713,6 +713,29 @@ export function graphConfigToFlow(
     });
   });
 
+  const records = graph.nodes.filter(
+    n => n.type === "record" && !isSubgraphInnerNode(n.id)
+  );
+  records.forEach((n, i) => {
+    const savedX = n.x ?? undefined;
+    const savedY = n.y ?? undefined;
+    const w = n.w ?? 180;
+    const h = n.h ?? 95;
+    nodes.push({
+      id: n.id,
+      type: "record",
+      position: {
+        x: savedX !== undefined ? savedX : START_X + COLUMN_GAP * 3,
+        y:
+          savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
+      },
+      width: w,
+      height: h,
+      style: { width: w, height: h },
+      data: { label: n.id, nodeType: "record" },
+    });
+  });
+
   // Convert edges - add stream: prefix to handle IDs
   // Skip edges that reference flattened inner subgraph nodes
   const edges: Edge[] = graph.edges
@@ -747,6 +770,9 @@ export function graphConfigToFlow(
     for (const un of uiNodes) {
       // Migrate old "value" nodes to "primitive"
       const nodeType = un.type === "value" ? "primitive" : un.type;
+      if (nodeType === "record") {
+        continue;
+      }
       const nodeData = un.data as FlowNodeData;
       if (un.type === "value") {
         nodeData.nodeType = "primitive";
@@ -850,7 +876,6 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "subgraph",
   "subgraph_input",
   "subgraph_output",
-  "record",
   "tempo",
   "prompt_list",
   "prompt_blend",
@@ -1343,9 +1368,9 @@ export function linearGraphFromSettings(
 }
 
 /**
- * Strip frontend-only fields (position, size, ui_state) from a GraphConfig
- * before sending to the backend. The backend only needs node identity/type,
- * edges, and source config — not layout or UI state.
+ * Drop layout fields (x, y, w, h) and omit `ui_state` from the payload to the
+ * server. Execution topology — including `type: "record"` nodes and their
+ * edges — stays in `nodes` / `edges`; record nodes are not frontend-only.
  */
 export function stripUIFields(graph: GraphConfig): GraphConfig {
   return {

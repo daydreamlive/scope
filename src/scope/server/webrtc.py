@@ -465,25 +465,31 @@ class WebRTCManager:
             if recording_enabled and (
                 video_track is not None or audio_track is not None
             ):
-                recording_manager = RecordingManager(
-                    video_track=video_track,
-                    audio_track=audio_track,
-                )
-                session.recording_manager = recording_manager
-                if relay is not None:
-                    recording_manager.set_relay(relay)
-                if audio_relay is not None:
-                    recording_manager.set_audio_relay(audio_relay)
+                # Graph record nodes use per-node RecordingCoordinator via
+                # /api/v1/recordings/...?node_id= — a single session manager
+                # would conflict with multiple stop/download cycles.
+                if record_node_ids:
+                    session.recording_manager = None
+                else:
+                    recording_manager = RecordingManager(
+                        video_track=video_track,
+                        audio_track=audio_track,
+                    )
+                    session.recording_manager = recording_manager
+                    if relay is not None:
+                        recording_manager.set_relay(relay)
+                    if audio_relay is not None:
+                        recording_manager.set_audio_relay(audio_relay)
 
-                async def start_recording_when_ready():
-                    """Start recording when frames start flowing."""
-                    try:
-                        await asyncio.sleep(0.1)
-                        await recording_manager.start_recording()
-                    except Exception as e:
-                        logger.debug(f"Could not start recording yet: {e}")
+                    async def start_recording_when_ready():
+                        """Start recording when frames start flowing."""
+                        try:
+                            await asyncio.sleep(0.1)
+                            await recording_manager.start_recording()
+                        except Exception as e:
+                            logger.debug(f"Could not start recording yet: {e}")
 
-                asyncio.create_task(start_recording_when_ready())
+                    asyncio.create_task(start_recording_when_ready())
             else:
                 session.recording_manager = None
 
@@ -835,25 +841,28 @@ class WebRTCManager:
             if recording_enabled and (
                 cloud_track is not None or audio_track is not None
             ):
-                recording_manager = RecordingManager(
-                    video_track=cloud_track,
-                    audio_track=audio_track,
-                )
-                session.recording_manager = recording_manager
-                if relay is not None:
-                    recording_manager.set_relay(relay)
-                if audio_track is not None:
-                    audio_relay = MediaRelay()
-                    recording_manager.set_audio_relay(audio_relay)
+                if record_node_ids:
+                    session.recording_manager = None
+                else:
+                    recording_manager = RecordingManager(
+                        video_track=cloud_track,
+                        audio_track=audio_track,
+                    )
+                    session.recording_manager = recording_manager
+                    if relay is not None:
+                        recording_manager.set_relay(relay)
+                    if audio_track is not None:
+                        audio_relay = MediaRelay()
+                        recording_manager.set_audio_relay(audio_relay)
 
-                async def start_recording_when_ready():
-                    try:
-                        await asyncio.sleep(0.1)
-                        await recording_manager.start_recording()
-                    except Exception as e:
-                        logger.debug(f"Could not start recording yet: {e}")
+                    async def start_recording_when_ready():
+                        try:
+                            await asyncio.sleep(0.1)
+                            await recording_manager.start_recording()
+                        except Exception as e:
+                            logger.debug(f"Could not start recording yet: {e}")
 
-                asyncio.create_task(start_recording_when_ready())
+                    asyncio.create_task(start_recording_when_ready())
             else:
                 session.recording_manager = None
 
