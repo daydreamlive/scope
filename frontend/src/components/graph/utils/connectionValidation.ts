@@ -69,9 +69,15 @@ const TARGET_RULES: TargetRule[] = [
       (targetParsedName === "a" || targetParsedName === "b")
     );
   },
-  // bool node – number or trigger for input
+  // bool node – number or trigger for input; trigger handle accepts trigger/boolean/number
   ({ sourceType, targetParsedName, targetNode }) => {
     if (targetNode.data.nodeType !== "bool") return undefined;
+    if (targetParsedName === "trigger")
+      return (
+        sourceType === "trigger" ||
+        sourceType === "boolean" ||
+        sourceType === "number"
+      );
     return (
       (sourceType === "number" || sourceType === "trigger") &&
       targetParsedName === "input"

@@ -274,6 +274,12 @@ export interface FlowNodeData {
   boolMode?: "gate" | "toggle";
   /** For bool nodes: threshold value (input > threshold → true) */
   boolThreshold?: number;
+  /** For bool nodes: armed state for boolean trigger sources */
+  boolTriggerArmed?: boolean;
+  /** For bool nodes: per-edge fire count tracking for counter trigger sources */
+  _boolTriggerCounters?: Record<string, number>;
+  /** For bool nodes: timestamp of last gate fire (for auto-reset) */
+  _boolGateTimer?: number;
 
   /* ── VACE node fields ── */
   /** For VACE nodes: context scale (0.0-2.0) */

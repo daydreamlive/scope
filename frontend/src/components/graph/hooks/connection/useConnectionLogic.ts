@@ -390,7 +390,8 @@ export function useConnectionLogic(
           tgtParsed.name === "trigger" &&
           (tgtNode.data.nodeType === "prompt_list" ||
             tgtNode.data.nodeType === "record" ||
-            tgtNode.data.nodeType === "control");
+            tgtNode.data.nodeType === "control" ||
+            tgtNode.data.nodeType === "bool");
 
         const filtered = multiInput
           ? eds

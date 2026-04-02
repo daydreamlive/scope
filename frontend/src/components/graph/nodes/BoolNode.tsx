@@ -19,7 +19,7 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
-import { COLOR_BOOLEAN as COLOR } from "../nodeColors";
+import { COLOR_BOOLEAN as COLOR, COLOR_TRIGGER } from "../nodeColors";
 
 type BoolNodeType = Node<FlowNodeData, "bool">;
 
@@ -58,6 +58,10 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
   const toggleStateRef = useRef(currentOutput);
 
   useEffect(() => {
+    // Only drive value from the numeric input when it's connected.
+    // When no numeric input, the trigger handle (via useValueForwarding) controls value.
+    if (!inputEdge) return;
+
     let newOutput: boolean;
 
     if (mode === "gate") {
@@ -74,7 +78,7 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
     if (newOutput !== currentOutput) {
       updateData({ value: newOutput });
     }
-  }, [mode, isAboveThreshold, currentOutput, updateData]);
+  }, [mode, isAboveThreshold, currentOutput, updateData, inputEdge]);
 
   // Sync toggle ref if data.value changes externally
   useEffect(() => {
@@ -123,6 +127,10 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
               )}
             </NodeParamRow>
           </div>
+          <div ref={setRowRef("trigger")} className={NODE_TOKENS.paramRow}>
+            <span className={NODE_TOKENS.labelText}>Trigger</span>
+            <NodePill className="opacity-50">—</NodePill>
+          </div>
           <div ref={setRowRef("input")} className={NODE_TOKENS.paramRow}>
             <span className={NODE_TOKENS.labelText}>In</span>
             <NodePill className="opacity-75">
@@ -170,17 +178,42 @@ export function BoolNode({ id, data, selected }: NodeProps<BoolNodeType>) {
         }
       />
 
+      {/* Trigger input handle */}
+      <Handle
+        type="target"
+        position={Position.Left}
+        id={buildHandleId("param", "trigger")}
+        className={
+          collapsed
+            ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+            : "!w-2.5 !h-2.5 !border-0"
+        }
+        style={
+          collapsed
+            ? { ...collapsedHandleStyle("left"), opacity: 0 }
+            : {
+                top: rowPositions["trigger"] ?? 78,
+                left: 0,
+                backgroundColor: COLOR_TRIGGER,
+              }
+        }
+      />
+
       {/* Input handle (number) */}
       <Handle
         type="target"
         position={Position.Left}
         id={buildHandleId("param", "input")}
-        className="!w-2.5 !h-2.5 !border-0"
+        className={
+          collapsed
+            ? "!w-0 !h-0 !border-0 !min-w-0 !min-h-0"
+            : "!w-2.5 !h-2.5 !border-0"
+        }
         style={
           collapsed
-            ? collapsedHandleStyle("left")
+            ? { ...collapsedHandleStyle("left"), opacity: 0 }
             : {
-                top: rowPositions["input"] ?? 78,
+                top: rowPositions["input"] ?? 100,
                 left: 0,
                 backgroundColor: "#38bdf8",
               }

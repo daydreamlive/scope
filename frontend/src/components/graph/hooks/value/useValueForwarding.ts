@@ -64,6 +64,7 @@ const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
   "pipeline",
   "record",
   "control",
+  "bool",
   "prompt_list",
   "prompt_blend",
   "scheduler",
@@ -568,6 +569,69 @@ export function useValueForwarding(
           targetParsed.name === "trigger"
         ) {
           nodeUpdates["triggerValue"] = Boolean(sourceValue);
+        } else if (
+          targetNode.data.nodeType === "bool" &&
+          targetParsed.name === "trigger"
+        ) {
+          // Trigger input for bool node – detect fire, then gate/toggle
+          const mode =
+            (nodeUpdates["boolMode"] as string) ??
+            (targetNode.data.boolMode as string) ??
+            "gate";
+          let shouldFire = false;
+          if (typeof sourceValue === "boolean") {
+            const wasArmed =
+              nodeUpdates["boolTriggerArmed"] !== undefined
+                ? Boolean(nodeUpdates["boolTriggerArmed"])
+                : Boolean(targetNode.data.boolTriggerArmed);
+            if (sourceValue && !wasArmed) shouldFire = true;
+            if (sourceValue) {
+              nodeUpdates["boolTriggerArmed"] = true;
+            } else if (nodeUpdates["boolTriggerArmed"] === undefined) {
+              nodeUpdates["boolTriggerArmed"] = false;
+            }
+          } else {
+            const counter = Number(sourceValue) || 0;
+            const counters = (nodeUpdates["_boolTriggerCounters"] as Record<
+              string,
+              number
+            >) ?? {
+              ...((targetNode.data._boolTriggerCounters as Record<
+                string,
+                number
+              >) ?? {}),
+            };
+            const lastSeen = counters[edge.id] ?? 0;
+            if (counter > 0 && counter !== lastSeen) shouldFire = true;
+            counters[edge.id] = counter;
+            nodeUpdates["_boolTriggerCounters"] = counters;
+          }
+
+          if (shouldFire) {
+            if (mode === "toggle") {
+              const prev =
+                nodeUpdates["value"] !== undefined
+                  ? Boolean(nodeUpdates["value"])
+                  : Boolean(targetNode.data.value);
+              nodeUpdates["value"] = !prev;
+            } else {
+              // Gate: flip on, record timestamp for auto-reset
+              nodeUpdates["value"] = true;
+              nodeUpdates["_boolGateTimer"] = Date.now();
+            }
+          }
+
+          // Gate auto-reset after 150ms
+          const gateTimer =
+            (nodeUpdates["_boolGateTimer"] as number) ??
+            (targetNode.data._boolGateTimer as number);
+          if (mode === "gate" && gateTimer && !shouldFire) {
+            const elapsed = Date.now() - gateTimer;
+            if (elapsed >= 150) {
+              nodeUpdates["value"] = false;
+              nodeUpdates["_boolGateTimer"] = undefined;
+            }
+          }
         } else if (
           targetNode.data.nodeType === "control" &&
           targetParsed.name === "trigger"
