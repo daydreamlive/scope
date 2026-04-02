@@ -6,7 +6,7 @@ import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { NodeCard, NodeHeader, NodeBody, collapsedHandleStyle } from "../ui";
-import { COLOR_BOOLEAN as COLOR } from "../nodeColors";
+import { COLOR_TRIGGER as COLOR } from "../nodeColors";
 
 type TriggerNodeType = Node<FlowNodeData, "trigger">;
 

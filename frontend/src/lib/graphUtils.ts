@@ -10,6 +10,14 @@ import { inferPrimitiveFieldType } from "./schemaSettings";
 import { resolveLoRAPath } from "./workflowSettings";
 import type { SchemaProperty } from "./schemaSettings";
 
+/**
+ * Maps backend node_type_id to a custom React Flow component type.
+ * Nodes not listed here fall back to the generic "backend_node" component.
+ */
+export const CUSTOM_NODE_COMPONENTS: Record<string, string> = {
+  scheduler: "scheduler_node",
+};
+
 // Layout constants
 const NODE_WIDTH = 200;
 const NODE_HEIGHT = 60;
@@ -22,7 +30,7 @@ export type PortType = "stream" | "string" | "number" | "boolean";
 
 export interface ParameterPortDef {
   name: string;
-  type: "string" | "number" | "boolean" | "list_number";
+  type: "string" | "number" | "boolean" | "list_number" | "trigger";
   defaultValue?: unknown;
   label?: string;
   min?: number;
@@ -44,7 +52,7 @@ export interface SubgraphPort {
   /** Whether this is a stream (video) or parameter connection */
   portType: "stream" | "param";
   /** For param ports: the data type */
-  paramType?: "string" | "number" | "boolean" | "list_number";
+  paramType?: "string" | "number" | "boolean" | "list_number" | "trigger";
   /** Which inner node this port maps to */
   innerNodeId: string;
   /** Which handle on that inner node */
@@ -101,8 +109,19 @@ export interface FlowNodeData {
     | "record"
     | "tempo"
     | "prompt_list"
-    | "prompt_blend";
+    | "prompt_blend"
+    | "backend_node";
   availablePipelineIds?: string[];
+  /** Node type ID for backend nodes (registry key, e.g. "scheduler") */
+  backendNodeTypeId?: string | null;
+  /** Schema fetched from backend for auto-rendering backend nodes */
+  backendNodeSchema?: import("../hooks/useNodeSchemas").NodeTypeSchema | null;
+  /** Live state from backend node WebSocket */
+  backendNodeState?: Record<string, unknown> | null;
+  /** Callback to send input to a backend node instance */
+  onBackendNodeInput?: (name: string, value: unknown) => void;
+  /** Callback to send config updates to a backend node instance */
+  onBackendNodeConfig?: (config: Record<string, unknown>) => void;
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
   /** Declared output ports for the selected pipeline */
@@ -114,7 +133,7 @@ export interface FlowNodeData {
   /** Pipeline schemas keyed by pipeline_id, for looking up ports on selection change */
   pipelinePortsMap?: Record<string, { inputs: string[]; outputs: string[] }>;
   /** For primitive nodes: the type of value (string, number, boolean) */
-  valueType?: "string" | "number" | "boolean";
+  valueType?: "string" | "number" | "boolean" | "trigger";
   /** For primitive / slider nodes: the current value */
   value?: unknown;
   /** For control nodes: the type of control (float, int, string) */
@@ -686,6 +705,52 @@ export function graphConfigToFlow(
     });
   });
 
+  // Layout backend nodes — merge any saved data from ui_state
+  const backendNodes = graph.nodes.filter(
+    n => n.type === "node" && !isSubgraphInnerNode(n.id)
+  );
+  const savedBackendData = new Map<string, Record<string, unknown>>();
+  if (graph.ui_state) {
+    for (const un of (graph.ui_state.nodes ?? []) as UIStateNode[]) {
+      if (un.type === "backend_node") {
+        savedBackendData.set(un.id, un.data);
+      }
+    }
+  }
+  backendNodes.forEach((n, i) => {
+    const savedX = n.x ?? undefined;
+    const savedY = n.y ?? undefined;
+    const sizeProps =
+      n.w != null || n.h != null
+        ? {
+            width: n.w ?? undefined,
+            height: n.h ?? undefined,
+            style: { width: n.w ?? undefined, height: n.h ?? undefined },
+          }
+        : {};
+    const flowType =
+      CUSTOM_NODE_COMPONENTS[n.node_type_id ?? ""] ?? "backend_node";
+    const saved = savedBackendData.get(n.id) ?? {};
+    nodes.push({
+      id: n.id,
+      type: flowType,
+      position: {
+        x: savedX !== undefined ? savedX : START_X + COLUMN_GAP,
+        y:
+          savedY !== undefined
+            ? savedY
+            : START_Y + (pipelines.length + i) * (NODE_HEIGHT + ROW_GAP),
+      },
+      ...sizeProps,
+      data: {
+        ...saved,
+        label: n.node_type_id || n.id,
+        nodeType: "backend_node",
+        backendNodeTypeId: n.node_type_id ?? null,
+      },
+    });
+  });
+
   // Convert edges - add stream: prefix to handle IDs
   // Skip edges that reference flattened inner subgraph nodes
   const edges: Edge[] = graph.edges
@@ -717,7 +782,12 @@ export function graphConfigToFlow(
     const uiNodes = (graph.ui_state.nodes ?? []) as UIStateNode[];
     const uiEdges = (graph.ui_state.edges ?? []) as UIStateEdge[];
 
+    const existingNodeIds = new Set(nodes.map(n => n.id));
     for (const un of uiNodes) {
+      // Backend nodes are already restored above with the correct React Flow
+      // component type; skip them here to avoid duplicates.
+      if (existingNodeIds.has(un.id)) continue;
+
       // Migrate old "value" nodes to "primitive"
       const nodeType = un.type === "value" ? "primitive" : un.type;
       const nodeData = un.data as FlowNodeData;
@@ -830,6 +900,10 @@ const NON_SERIALIZABLE_KEYS = new Set<string>([
   "onSetTempo",
   "onRefreshTempoSources",
   "tempoSources",
+  "backendNodeSchema",
+  "backendNodeState",
+  "onBackendNodeInput",
+  "onBackendNodeConfig",
 ]);
 
 /**
@@ -1077,17 +1151,25 @@ export function flowToGraphConfig(
       n.height ??
       n.measured?.height ??
       (typeof n.style?.height === "number" ? n.style.height : undefined);
+    const graphNodeType =
+      n.data.nodeType === "source"
+        ? "source"
+        : n.data.nodeType === "sink"
+          ? "sink"
+          : n.data.nodeType === "backend_node"
+            ? "node"
+            : "pipeline";
+
     return {
       id: n.id,
-      type:
-        n.data.nodeType === "source"
-          ? "source"
-          : n.data.nodeType === "sink"
-            ? "sink"
-            : "pipeline",
+      type: graphNodeType as GraphNode["type"],
       pipeline_id:
         n.data.nodeType === "pipeline"
           ? (n.data.pipelineId ?? null)
+          : undefined,
+      node_type_id:
+        n.data.nodeType === "backend_node"
+          ? (n.data.backendNodeTypeId ?? null)
           : undefined,
       x: n.position.x,
       y: n.position.y,
@@ -1139,9 +1221,17 @@ export function flowToGraphConfig(
     }
   }
 
-  if (frontendNodeIds.size > 0 || Object.keys(nodeFlags).length > 0) {
+  const hasBackendNodes = nodes.some(n => n.data.nodeType === "backend_node");
+
+  if (
+    frontendNodeIds.size > 0 ||
+    Object.keys(nodeFlags).length > 0 ||
+    hasBackendNodes
+  ) {
     const uiNodes: UIStateNode[] = nodes
-      .filter(n => frontendNodeIds.has(n.id))
+      .filter(
+        n => frontendNodeIds.has(n.id) || n.data.nodeType === "backend_node"
+      )
       .map(n => {
         const w =
           n.width ??

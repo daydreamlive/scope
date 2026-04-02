@@ -906,8 +906,9 @@ export const deleteApiKey = async (
 
 export interface GraphNode {
   id: string;
-  type: "source" | "pipeline" | "sink";
+  type: "source" | "pipeline" | "sink" | "node";
   pipeline_id?: string | null;
+  node_type_id?: string | null;
   x?: number | null;
   y?: number | null;
   w?: number | null;

@@ -12,6 +12,8 @@ import { useApi } from "../../../../hooks/useApi";
 import { useCloudStatus } from "../../../../hooks/useCloudStatus";
 import { usePipelinesContext } from "../../../../contexts/PipelinesContext";
 import type { HardwareInfoResponse } from "../../../../lib/api";
+import { useNodeSchemas } from "../../../../hooks/useNodeSchemas";
+import { useNodeWebSocket } from "../../../../hooks/useNodeWebSocket";
 
 import { usePipelineParams } from "../node/usePipelineParams";
 import {
@@ -252,6 +254,38 @@ export function useGraphState(
   const onPlayPauseToggleRef = useRef(streams.onPlayPauseToggle);
   onPlayPauseToggleRef.current = streams.onPlayPauseToggle;
 
+  // Backend node schemas + WebSocket state
+  const { schemas: backendNodeSchemas } = useNodeSchemas();
+
+  const [backendNodeStates, setBackendNodeStates] = useState<
+    Record<string, Record<string, unknown>>
+  >({});
+
+  const { sendInput: sendBackendNodeInput, sendConfig: sendBackendNodeConfig } =
+    useNodeWebSocket({
+      onOutput: useCallback(
+        (instanceId: string, port: string, value: unknown) => {
+          setBackendNodeStates(prev => ({
+            ...prev,
+            [instanceId]: { ...prev[instanceId], [port]: value },
+          }));
+        },
+        []
+      ),
+      onFullState: useCallback(
+        (states: Record<string, Record<string, unknown>>) => {
+          setBackendNodeStates(states);
+        },
+        []
+      ),
+    });
+
+  const sendBackendNodeInputRef = useRef(sendBackendNodeInput);
+  sendBackendNodeInputRef.current = sendBackendNodeInput;
+
+  const sendBackendNodeConfigRef = useRef(sendBackendNodeConfig);
+  sendBackendNodeConfigRef.current = sendBackendNodeConfig;
+
   const handleEdgeDelete = useCallback(
     (edgeId: string) => {
       setEdges(eds => eds.filter(e => e.id !== edgeId));
@@ -308,13 +342,18 @@ export function useGraphState(
     onDisableTempoRef,
     onSetTempoRef,
     onRefreshTempoSourcesRef,
+    backendNodeSchemas,
+    backendNodeStates,
+    sendBackendNodeInputRef,
+    sendBackendNodeConfigRef,
   };
 
   const enrichDepsRef = useRef(enrichDeps);
   enrichDepsRef.current = enrichDeps;
 
   useEffect(() => {
-    if (availablePipelineIds.length === 0) return;
+    if (availablePipelineIds.length === 0 && backendNodeSchemas.length === 0)
+      return;
     setNodes(nds => {
       if (nds.length === 0) return nds;
       return enrichNodes(nds, enrichDepsRef.current);
@@ -340,12 +379,16 @@ export function useGraphState(
     availability.syphonOutputAvailable,
     tempo.tempoState,
     tempo.tempoSources,
+    backendNodeSchemas,
+    backendNodeStates,
   ]);
 
-  // Re-color edges only when node types change (not positions/selections)
+  // Re-color edges when node types change or backend schemas become available
   const nodeTypeFingerprint = useMemo(
-    () => nodes.map(n => `${n.id}:${n.data.nodeType}`).join(","),
-    [nodes]
+    () =>
+      nodes.map(n => `${n.id}:${n.data.nodeType}`).join(",") +
+      `|schemas:${backendNodeSchemas.length}`,
+    [nodes, backendNodeSchemas.length]
   );
   const prevNodeTypesRef = useRef("");
   useEffect(() => {
@@ -416,5 +459,6 @@ export function useGraphState(
     cancelImport: persistence.cancelImport,
     reResolveImport: persistence.reResolveImport,
     loadGraphFromParsed: persistence.loadGraphFromParsed,
+    backendNodeSchemas,
   };
 }

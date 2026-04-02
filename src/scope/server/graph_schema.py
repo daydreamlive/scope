@@ -41,13 +41,17 @@ class GraphNode(BaseModel):
         ...,
         description="Unique node id (e.g. 'input', 'yolo_plugin', 'longlive', 'output')",
     )
-    type: Literal["source", "pipeline", "sink"] = Field(
+    type: Literal["source", "pipeline", "sink", "node"] = Field(
         ...,
-        description="source = external input, pipeline = pipeline instance, sink = output",
+        description="source = external input, pipeline = pipeline instance, sink = output, node = backend node",
     )
     pipeline_id: str | None = Field(
         default=None,
         description="Pipeline ID (registry key) when type is 'pipeline'",
+    )
+    node_type_id: str | None = Field(
+        default=None,
+        description="Node type ID (registry key) when type is 'node'",
     )
     source_mode: str | None = Field(
         default=None,
@@ -98,6 +102,10 @@ class GraphConfig(BaseModel):
         """Return node ids that are sink nodes."""
         return [n.id for n in self.nodes if n.type == "sink"]
 
+    def get_backend_node_ids(self) -> list[str]:
+        """Return node ids that are backend (utility) nodes."""
+        return [n.id for n in self.nodes if n.type == "node"]
+
     def edges_from(self, node_id: str) -> list[GraphEdge]:
         """Return edges whose source is the given node."""
         return [e for e in self.edges if e.from_node == node_id]
@@ -140,10 +148,12 @@ class GraphConfig(BaseModel):
         if not self.get_sink_node_ids():
             errors.append("Graph must have at least one sink node")
 
-        # Pipeline nodes must have pipeline_id
+        # Pipeline nodes must have pipeline_id; node nodes must have node_type_id
         for node in self.nodes:
             if node.type == "pipeline" and not node.pipeline_id:
                 errors.append(f"Pipeline node '{node.id}' is missing pipeline_id")
+            if node.type == "node" and not node.node_type_id:
+                errors.append(f"Backend node '{node.id}' is missing node_type_id")
 
         # Edge references must point to existing nodes
         node_id_set = set(node_ids)

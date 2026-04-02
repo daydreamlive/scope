@@ -9,6 +9,7 @@ import {
   COLOR_STREAM,
   COLOR_VACE,
   COLOR_BOOLEAN,
+  COLOR_TRIGGER,
   COLOR_DEFAULT,
 } from "./nodeColors";
 
@@ -69,7 +70,7 @@ export function getEdgeColor(
       return COLOR_BOOLEAN;
     }
     if (sourceNode.data.nodeType === "trigger") {
-      return COLOR_BOOLEAN;
+      return COLOR_TRIGGER;
     }
     if (sourceNode.data.nodeType === "tempo") {
       return COLOR_NUMBER;
@@ -96,6 +97,30 @@ export function getEdgeColor(
       if (port?.paramType) {
         return PARAM_TYPE_COLORS[port.paramType] || COLOR_DEFAULT;
       }
+      return COLOR_DEFAULT;
+    }
+    if (sourceNode.data.nodeType === "backend_node") {
+      const schema = sourceNode.data.backendNodeSchema as
+        | {
+            outputs?: { name: string; type: string }[];
+            dynamic_ports?: boolean;
+          }
+        | undefined;
+      if (schema?.outputs) {
+        const port = schema.outputs.find(o => o.name === parsed.name);
+        if (port) {
+          const typeMap: Record<string, string> = {
+            trigger: "trigger",
+            bool: "boolean",
+            float: "number",
+            int: "number",
+            string: "string",
+          };
+          const resolved = typeMap[port.type] ?? port.type;
+          return PARAM_TYPE_COLORS[resolved] || COLOR_DEFAULT;
+        }
+      }
+      if (schema?.dynamic_ports) return COLOR_TRIGGER;
       return COLOR_DEFAULT;
     }
     return COLOR_DEFAULT;

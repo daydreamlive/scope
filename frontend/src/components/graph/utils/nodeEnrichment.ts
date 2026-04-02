@@ -2,6 +2,7 @@ import type { Edge, Node } from "@xyflow/react";
 import { extractParameterPorts } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import type { GraphConfig, PipelineSchemaInfo } from "../../../lib/api";
+import type { NodeTypeSchema } from "../../../hooks/useNodeSchemas";
 import { buildEdgeStyle } from "../constants";
 
 export interface EnrichNodesDeps {
@@ -65,6 +66,14 @@ export interface EnrichNodesDeps {
   onDisableTempoRef: React.RefObject<(() => void) | undefined>;
   onSetTempoRef: React.RefObject<((bpm: number) => void) | undefined>;
   onRefreshTempoSourcesRef: React.RefObject<(() => void) | undefined>;
+  backendNodeSchemas: NodeTypeSchema[];
+  backendNodeStates: Record<string, Record<string, unknown>>;
+  sendBackendNodeInputRef: React.RefObject<
+    ((instanceId: string, name: string, value: unknown) => void) | undefined
+  >;
+  sendBackendNodeConfigRef: React.RefObject<
+    ((instanceId: string, config: Record<string, unknown>) => void) | undefined
+  >;
 }
 
 const FIXED_SIZE_NODE_TYPES = new Set(["source", "sink", "image"]);
@@ -225,6 +234,27 @@ export function enrichNodes(
           onSetTempo: (bpm: number) => deps.onSetTempoRef.current?.(bpm),
           onRefreshTempoSources: () =>
             deps.onRefreshTempoSourcesRef.current?.(),
+        },
+      };
+    }
+    if (n.data.nodeType === "backend_node") {
+      const typeId = n.data.backendNodeTypeId;
+      const schema = typeId
+        ? deps.backendNodeSchemas.find(s => s.node_type_id === typeId)
+        : undefined;
+      const nodeState = deps.backendNodeStates[n.id] ?? {};
+      const nodeId = n.id;
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          backendNodeSchema: schema ?? null,
+          backendNodeState: nodeState,
+          isStreaming: deps.isStreaming,
+          onBackendNodeInput: (name: string, value: unknown) =>
+            deps.sendBackendNodeInputRef.current?.(nodeId, name, value),
+          onBackendNodeConfig: (config: Record<string, unknown>) =>
+            deps.sendBackendNodeConfigRef.current?.(nodeId, config),
         },
       };
     }

@@ -24,6 +24,7 @@ from .plugins_config import (
 )
 
 if TYPE_CHECKING:
+    from scope.core.nodes.registry import NodeRegistry
     from scope.core.pipelines.registry import PipelineRegistry
 
 logger = logging.getLogger(__name__)
@@ -510,6 +511,22 @@ class PluginManager:
 
             # Update pipeline-to-plugin mapping by checking which plugins provide which pipelines
             self._update_pipeline_plugin_mapping(registry)
+
+    def register_plugin_nodes(self, registry: "NodeRegistry") -> None:
+        """Call register_nodes hook for all plugins.
+
+        Args:
+            registry: NodeRegistry to register nodes with
+        """
+        with self._lock:
+
+            def register_callback(node_class: Any) -> None:
+                config_class = node_class.get_config_class()
+                node_type_id = config_class.node_type_id
+                registry.register(node_type_id, node_class)
+                logger.info(f"Registered plugin node: {node_type_id}")
+
+            self._pm.hook.register_nodes(register=register_callback)
 
     def _update_pipeline_plugin_mapping(self, registry: "PipelineRegistry") -> None:
         """Update the mapping of pipeline IDs to plugin names."""
@@ -1561,3 +1578,12 @@ def register_plugin_pipelines(registry: "PipelineRegistry") -> None:
         registry: PipelineRegistry to register pipelines with
     """
     get_plugin_manager().register_plugin_pipelines(registry)
+
+
+def register_plugin_nodes(registry: "NodeRegistry") -> None:
+    """Call register_nodes hook for all plugins.
+
+    Args:
+        registry: NodeRegistry to register nodes with
+    """
+    get_plugin_manager().register_plugin_nodes(registry)

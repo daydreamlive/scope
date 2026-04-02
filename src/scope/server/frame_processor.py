@@ -256,6 +256,14 @@ class FrameProcessor:
 
         self.running = False
 
+        try:
+            from .app import node_manager
+
+            if node_manager is not None:
+                node_manager.stop_all_nodes()
+        except Exception:
+            logger.exception("Failed to stop backend nodes")
+
         # Cancel any pending scheduled parameter changes
         if self.parameter_scheduler is not None:
             self.parameter_scheduler.cancel_pending()
@@ -1137,6 +1145,8 @@ class FrameProcessor:
         self.pipeline_processors = graph_run.processors
         self.pipeline_ids = graph_run.pipeline_ids
 
+        self._setup_backend_nodes(graph)
+
         # Index processors by node_id for per-node parameter routing
         for proc in self.pipeline_processors:
             self._processors_by_node_id[proc.node_id] = proc
@@ -1149,6 +1159,20 @@ class FrameProcessor:
             f"Created graph with {len(self.pipeline_processors)} processors, "
             f"sink={graph_run.sink_node_id}"
         )
+
+    def _setup_backend_nodes(self, graph) -> None:
+        """Load backend node instances from the graph config into NodeManager."""
+        has_node_nodes = any(n.type == "node" for n in graph.nodes)
+        if not has_node_nodes:
+            return
+        try:
+            from .app import node_manager
+
+            if node_manager is not None:
+                node_manager.set_frame_processor(self)
+                node_manager.load_graph(graph)
+        except Exception:
+            logger.exception("Failed to set up backend nodes")
 
     def __enter__(self):
         self.start()

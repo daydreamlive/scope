@@ -7,6 +7,7 @@ export type ResolvedType =
   | "string"
   | "number"
   | "boolean"
+  | "trigger"
   | "list_number"
   | "video_path"
   | "vace"
@@ -39,7 +40,7 @@ export function resolveSourceType(
   if (nt === "lora") return "lora";
   if (nt === "midi") return "number";
   if (nt === "bool") return "boolean";
-  if (nt === "trigger") return "boolean";
+  if (nt === "trigger") return "trigger";
   if (nt === "tempo") return "number";
   if (nt === "prompt_list") return "string";
   if (nt === "prompt_blend") return "string";
@@ -70,6 +71,32 @@ export function resolveSourceType(
             : node.data.subgraphInputs;
         const port = ports?.find(p => p.name === parsed.name);
         if (port?.paramType) return port.paramType as ResolvedType;
+      }
+    }
+    return "number";
+  }
+  if (nt === "backend_node") {
+    const schema = node.data.backendNodeSchema as
+      | {
+          outputs?: { name: string; type: string }[];
+          dynamic_ports?: boolean;
+        }
+      | undefined;
+    if (schema?.outputs && sourceHandleId) {
+      const parsed = parseHandleId(sourceHandleId);
+      if (parsed) {
+        const port = schema.outputs.find(o => o.name === parsed.name);
+        if (port) {
+          const typeMap: Record<string, ResolvedType> = {
+            float: "number",
+            int: "number",
+            string: "string",
+            bool: "boolean",
+            trigger: "trigger",
+          };
+          return typeMap[port.type] ?? "number";
+        }
+        if (schema.dynamic_ports) return "trigger";
       }
     }
     return "number";

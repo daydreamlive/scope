@@ -6,6 +6,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "../ui/dialog";
+import type { NodeTypeSchema } from "../../hooks/useNodeSchemas";
 
 interface AddNodeModalProps {
   open: boolean;
@@ -38,6 +39,12 @@ interface AddNodeModalProps {
       | "prompt_blend",
     subType?: string
   ) => void;
+  backendNodeSchemas?: NodeTypeSchema[];
+  addBackendNode?: (
+    nodeTypeId: string,
+    nodeName: string,
+    position?: { x: number; y: number }
+  ) => void;
 }
 
 interface NodeCatalogItem {
@@ -65,7 +72,8 @@ interface NodeCatalogItem {
     | "record"
     | "tempo"
     | "prompt_list"
-    | "prompt_blend";
+    | "prompt_blend"
+    | "__backend__";
   subType?: string;
   name: string;
   description: string;
@@ -284,7 +292,15 @@ const NODE_CATALOG: NodeCatalogItem[] = [
   },
 ];
 
-const CATEGORIES = ["All", "I/O", "Values", "Controls", "UI", "Utility"];
+const CATEGORIES = [
+  "All",
+  "I/O",
+  "Values",
+  "Controls",
+  "UI",
+  "Utility",
+  "Custom",
+];
 
 interface TooltipState {
   text: string;
@@ -375,13 +391,30 @@ export function AddNodeModal({
   open,
   onClose,
   onSelectNodeType,
+  backendNodeSchemas,
+  addBackendNode,
 }: AddNodeModalProps) {
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
 
+  const fullCatalog = useMemo(() => {
+    const backendEntries: NodeCatalogItem[] = (backendNodeSchemas ?? []).map(
+      schema => ({
+        type: "__backend__" as NodeCatalogItem["type"],
+        subType: schema.node_type_id,
+        name: schema.node_name,
+        description:
+          schema.node_description || `Custom node: ${schema.node_name}`,
+        color: "#a855f7",
+        category: "Custom",
+      })
+    );
+    return [...NODE_CATALOG, ...backendEntries];
+  }, [backendNodeSchemas]);
+
   const filteredItems = useMemo(() => {
     const lowerSearch = searchText.toLowerCase();
-    return NODE_CATALOG.filter(item => {
+    return fullCatalog.filter(item => {
       const matchesSearch =
         !lowerSearch ||
         item.name.toLowerCase().includes(lowerSearch) ||
@@ -390,10 +423,14 @@ export function AddNodeModal({
         activeCategory === "All" || item.category === activeCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [searchText, activeCategory]);
+  }, [searchText, activeCategory, fullCatalog]);
 
   const handleSelect = (item: NodeCatalogItem) => {
-    onSelectNodeType(item.type, item.subType);
+    if (item.type === "__backend__" && item.subType && addBackendNode) {
+      addBackendNode(item.subType, item.name);
+    } else if (item.type !== "__backend__") {
+      onSelectNodeType(item.type, item.subType);
+    }
     onClose();
     setSearchText("");
     setActiveCategory("All");
