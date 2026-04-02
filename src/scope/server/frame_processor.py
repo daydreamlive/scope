@@ -192,9 +192,35 @@ class FrameProcessor:
 
         # Local mode: setup pipeline graph
         if not self.pipeline_ids:
+            # Fallback: if no pipeline_ids were specified in initial parameters,
+            # use whatever pipelines are currently loaded in the manager.
+            # This matches the schema description: "If not provided, uses the
+            # currently loaded pipeline."
+            if self.pipeline_manager:
+                loaded_ids = self.pipeline_manager.get_loaded_pipeline_ids()
+                if loaded_ids:
+                    logger.info(
+                        f"[FRAME-PROCESSOR] No pipeline_ids in initial parameters; "
+                        f"falling back to loaded pipelines: {loaded_ids}"
+                    )
+                    self.pipeline_ids = loaded_ids
+
+        if not self.pipeline_ids:
             error_msg = "No pipeline IDs provided, cannot start"
             logger.error(error_msg)
             self.running = False
+            # Surface the error to the frontend via data channel so the client
+            # knows why the stream did not start (instead of silently hanging).
+            if self.notification_callback:
+                try:
+                    self.notification_callback(
+                        {
+                            "type": "stream_stopped",
+                            "error_message": error_msg,
+                        }
+                    )
+                except Exception as cb_err:
+                    logger.error(f"Error in notification callback: {cb_err}")
             # Publish error for startup failure
             publish_event(
                 event_type="error",
