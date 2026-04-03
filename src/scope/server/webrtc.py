@@ -415,7 +415,7 @@ class WebRTCManager:
                 # for WebRTC multi-source, or _setup_multi_input_sources for
                 # Syphon/NDI/Spout), signal recv() to keep running.
                 if webrtc_source_node_ids or has_non_webrtc_sources:
-                    video_track._has_external_input = True
+                    video_track.has_external_input = True
 
                 # Store relay for cleanup
                 session.relay = relay

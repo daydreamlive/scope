@@ -153,6 +153,8 @@ class NodeOutputTrack(MediaStreamTrack):
                 return frame
 
             await asyncio.sleep(0.01)
+            if self.readyState != "live":
+                raise MediaStreamError
 
 
 def SinkOutputTrack(
@@ -174,7 +176,7 @@ def RecordOutputTrack(
     """Create a NodeOutputTrack that reads from a record node's output queue."""
     return NodeOutputTrack(
         frame_processor=frame_processor,
-        frame_getter=lambda fp: fp.sink_manager.get_from_record(record_node_id),
+        frame_getter=lambda fp: fp.sink_manager.recording.get(record_node_id),
     )
 
 
@@ -243,7 +245,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self.input_task = None
         self.input_task_running = False
         # True when input is handled externally (e.g. all sources via SourceInputHandler)
-        self._has_external_input = False
+        self.has_external_input = False
         self._paused = False
         self._paused_lock = threading.Lock()
         self._last_frame = None
@@ -292,7 +294,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         while (
             self.input_task_running
             or self._input_source_enabled
-            or self._has_external_input
+            or self.has_external_input
         ):
             try:
                 if self.frame_processor:
@@ -351,7 +353,7 @@ class VideoProcessingTrack(MediaStreamTrack):
     async def stop(self):
         self.input_task_running = False
         self._input_source_enabled = False
-        self._has_external_input = False
+        self.has_external_input = False
 
         if self.input_task is not None:
             self.input_task.cancel()
