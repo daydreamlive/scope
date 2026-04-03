@@ -35,6 +35,7 @@ export interface BillingState {
     exhausted: boolean;
   } | null;
   creditsPerMin: number;
+  allRates: Record<string, number> | null;
   isLoading: boolean;
 }
 
@@ -59,6 +60,7 @@ const defaultState: BillingContextValue = {
   subscription: null,
   trial: null,
   creditsPerMin: 7.5,
+  allRates: null,
   isLoading: true,
   refresh: async () => {},
   openCheckout: async () => {},
@@ -92,6 +94,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     subscription: null,
     trial: null,
     creditsPerMin: 7.5,
+    allRates: null,
     isLoading: true,
   });
   const [showPaywall, setShowPaywall] = useState(false);
@@ -135,12 +138,23 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
       const deviceId = getDeviceId();
       const data = await fetchCreditsBalance(apiKey, deviceId);
+      // creditsPerMin can be a number (old API) or Record<string, number> (new API)
+      const rawRate = data.creditsPerMin;
+      const scopeRate =
+        typeof rawRate === "object" && rawRate !== null
+          ? (rawRate as Record<string, number>).scope ?? 7.5
+          : (rawRate as number);
+
       setState({
         tier: data.tier as "free" | "basic" | "pro",
         credits: data.credits,
         subscription: data.subscription,
         trial: data.trial,
-        creditsPerMin: data.creditsPerMin,
+        creditsPerMin: scopeRate,
+        allRates:
+          typeof rawRate === "object" && rawRate !== null
+            ? (rawRate as Record<string, number>)
+            : null,
         isLoading: false,
       });
     } catch (err) {

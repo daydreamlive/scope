@@ -200,9 +200,21 @@ export function BillingTab() {
       </div>
 
       {/* Actions */}
-      <div className="flex gap-2 pt-2">
+      <div className="flex flex-wrap gap-2 pt-2">
         <Button variant="outline" size="sm" onClick={openPortal}>
           Manage Subscription
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() =>
+            window.open(
+              "https://app.daydream.live/dashboard/usage",
+              "_blank",
+            )
+          }
+        >
+          View Detailed Usage
         </Button>
         {tier === "basic" && (
           <Button size="sm" onClick={() => openCheckout("pro")}>
