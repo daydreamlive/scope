@@ -697,8 +697,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             type: "git",
             plugin_name: "scope-ltx-2",
             plugin_version: "0.3.0",
-            package_spec:
-              "git+https://github.com/daydreamlive/scope-ltx-2",
+            package_spec: "git+https://github.com/daydreamlive/scope-ltx-2",
           },
           loras: [],
           params: {
@@ -1376,8 +1375,7 @@ export const STARTER_WORKFLOWS: StarterWorkflow[] = [
             type: "git",
             plugin_name: "scope-ltx-2",
             plugin_version: "0.3.0",
-            package_spec:
-              "git+https://github.com/daydreamlive/scope-ltx-2",
+            package_spec: "git+https://github.com/daydreamlive/scope-ltx-2",
           },
           loras: [],
           params: {

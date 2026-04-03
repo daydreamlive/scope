@@ -237,7 +237,7 @@ interface OnboardingContextValue {
   telemetryDisclosed: () => void;
   setSurveyAnswers: (
     referralSource: string | null,
-    useCase: string | null,
+    useCase: string | null
   ) => void;
 }
 
