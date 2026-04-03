@@ -28,7 +28,7 @@ export interface CreditsBalance {
     overageEnabled: boolean;
   } | null;
   trial: TrialStatus | null;
-  creditsPerMin: number;
+  creditsPerMin: number | Record<string, number>;
 }
 
 // ─── API functions ───────────────────────────────────────────────────────────
