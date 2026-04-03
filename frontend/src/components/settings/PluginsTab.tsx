@@ -211,15 +211,17 @@ export function PluginsTab({
                         <RefreshCw className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button
-                      onClick={() => onDelete(plugin.name)}
-                      variant="ghost"
-                      size="icon"
-                      disabled={disabled || isInstalling}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {!plugin.bundled && (
+                      <Button
+                        onClick={() => onDelete(plugin.name)}
+                        variant="ghost"
+                        size="icon"
+                        disabled={disabled || isInstalling}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               );
