@@ -87,10 +87,17 @@ def build_graph(
     # Validate edge ports against pipeline input/output declarations
     _validate_edge_ports(graph, pipeline_manager)
 
+    # Sink and record nodes get dedicated queues in steps 4–5, so we
+    # exclude them here to avoid false-positive duplicate-edge errors
+    # when multiple pipelines fan-in to the same sink.
+    _sink_record_ids = {n.id for n in graph.nodes if n.type in ("sink", "record")}
+
     # 1) Create one queue per edge (all edges are stream; frame-by-frame)
     stream_queues: dict[tuple[str, str], queue.Queue] = {}
     for e in graph.edges:
         if e.kind == "stream":
+            if e.to_node in _sink_record_ids:
+                continue
             key = (e.to_node, e.to_port)
             if key in stream_queues:
                 raise ValueError(
@@ -214,6 +221,15 @@ def build_graph(
 
                     port = e.from_port
                     feeder_proc.output_queues.setdefault(port, []).extend(queues_to_add)
+                    # Register external refs so _resize_output_queue keeps
+                    # SinkManager's cached queue references in sync.
+                    feeder_proc.external_queue_refs.append(
+                        (sink_queues_by_node, sink_id)
+                    )
+                    if sink_id in sink_hardware_queues_by_node:
+                        feeder_proc.external_queue_refs.append(
+                            (sink_hardware_queues_by_node, sink_id)
+                        )
                     logger.info(
                         "Sink %s: dedicated queue(s) on %s port '%s' "
                         "(webrtc + hardware=%s, total on port: %d)",
@@ -278,6 +294,7 @@ def build_graph(
                 rec_q = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
                 record_queues_by_node[rec_id] = rec_q
                 feeder_proc.output_queues.setdefault(port, []).append(rec_q)
+                feeder_proc.external_queue_refs.append((record_queues_by_node, rec_id))
                 logger.info(
                     "Record %s: dedicated queue on pipeline %s port '%s' (total queues: %d)",
                     rec_id,

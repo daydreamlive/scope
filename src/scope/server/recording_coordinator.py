@@ -84,6 +84,21 @@ class RecordingCoordinator:
         except queue.Empty:
             return None
 
+    def put(self, record_node_id: str, frame: torch.Tensor) -> bool:
+        """Write a frame into a record node's queue (cloud mode).
+
+        Returns True if the frame was enqueued, False if the queue is
+        missing or full.
+        """
+        rec_q = self._record_queues.get(record_node_id)
+        if rec_q is None:
+            return False
+        try:
+            rec_q.put_nowait(frame)
+            return True
+        except queue.Full:
+            return False
+
     # ------------------------------------------------------------------
     # Recording lifecycle
     # ------------------------------------------------------------------
