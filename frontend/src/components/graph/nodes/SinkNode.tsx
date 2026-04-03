@@ -17,6 +17,9 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   const { updateData } = useNodeData(id);
   const { collapsed, toggleCollapse } = useNodeCollapse();
   const remoteStream = data.remoteStream as MediaStream | null | undefined;
+  const sinkStats = data.sinkStats as
+    | { fps: number; bitrate: number }
+    | undefined;
   const isPlaying = (data.isPlaying as boolean | undefined) ?? true;
   const onPlayPauseToggle = data.onPlayPauseToggle as (() => void) | undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -186,6 +189,17 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
               </button>
             )}
           </div>
+          {sinkStats && (sinkStats.fps > 0 || sinkStats.bitrate > 0) && (
+            <div className="flex items-center gap-3 mt-1 text-[10px] text-[#8c8c8d] font-mono px-0.5">
+              <span>FPS: {sinkStats.fps.toFixed(1)}</span>
+              <span>
+                Bitrate:{" "}
+                {sinkStats.bitrate >= 1000000
+                  ? `${(sinkStats.bitrate / 1000000).toFixed(1)} Mbps`
+                  : `${Math.round(sinkStats.bitrate / 1000)} kbps`}
+              </span>
+            </div>
+          )}
         </div>
       )}
       <Handle

@@ -161,11 +161,24 @@ export function useGraphPersistence({
         setEdges(colorEdges(flowEdges, enriched, handleEdgeDelete));
         setStatus("Restored from local storage");
 
-        const sourceNode = flowNodes.find(n => n.data.nodeType === "source");
-        const restoredMode = sourceNode?.data.sourceMode as string | undefined;
-        if (restoredMode && restoredMode !== "video") {
+        const sourceNodes = flowNodes.filter(n => n.data.nodeType === "source");
+        const modesToRestore = sourceNodes
+          .map(n => ({
+            mode: n.data.sourceMode as string | undefined,
+            nodeId: n.id,
+          }))
+          .filter(
+            (entry): entry is { mode: string; nodeId: string } =>
+              !!entry.mode && entry.mode !== "video"
+          );
+        if (modesToRestore.length > 0) {
           setTimeout(() => {
-            enrichDepsRef.current.onSourceModeChangeRef.current?.(restoredMode);
+            for (const { mode, nodeId } of modesToRestore) {
+              enrichDepsRef.current.onSourceModeChangeRef.current?.(
+                mode,
+                nodeId
+              );
+            }
           }, 0);
         }
 
@@ -338,11 +351,20 @@ export function useGraphPersistence({
       setStatus(`Imported from ${fileName}`);
       setFitViewTrigger(c => c + 1);
 
-      const sourceNode = flowNodes.find(n => n.data.nodeType === "source");
-      const importedMode = sourceNode?.data.sourceMode as string | undefined;
-      if (importedMode) {
+      const sourceNodes = flowNodes.filter(n => n.data.nodeType === "source");
+      const modesToRestore = sourceNodes
+        .map(n => ({
+          mode: n.data.sourceMode as string | undefined,
+          nodeId: n.id,
+        }))
+        .filter(
+          (entry): entry is { mode: string; nodeId: string } => !!entry.mode
+        );
+      if (modesToRestore.length > 0) {
         setTimeout(() => {
-          enrichDepsRef.current.onSourceModeChangeRef.current?.(importedMode);
+          for (const { mode, nodeId } of modesToRestore) {
+            enrichDepsRef.current.onSourceModeChangeRef.current?.(mode, nodeId);
+          }
         }, 0);
       }
     },

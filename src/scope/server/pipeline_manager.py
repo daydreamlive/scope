@@ -130,6 +130,28 @@ class PipelineManager:
                 )
             return self._pipelines[pipeline_id]
 
+    def alias_pipeline(self, alias_key: str, pipeline_id: str) -> bool:
+        """Register an existing pipeline under an additional key.
+
+        Returns True if the alias was created, False if *pipeline_id* is not loaded.
+        """
+        with self._lock:
+            # Graph loads already register each pipeline under the node id
+            # (instance_key). Do not replace that entry with whatever is keyed by
+            # the bare registry name (e.g. "passthrough") — that can be a stale
+            # singleton and would make multiple graph nodes share the wrong
+            # pipeline instance.
+            if alias_key in self._pipelines:
+                return True
+            existing = self._pipelines.get(pipeline_id)
+            if existing is None:
+                return False
+            self._pipelines[alias_key] = existing
+            self._pipeline_statuses[alias_key] = self._pipeline_statuses.get(
+                pipeline_id, PipelineStatus.LOADED
+            )
+            return True
+
     async def _load_pipeline_by_id(
         self,
         pipeline_id: str,
