@@ -667,6 +667,7 @@ export interface PluginInfo {
   latest_version: string | null;
   update_available: boolean | null;
   package_spec: string | null;
+  bundled: boolean;
 }
 
 export interface FailedPluginInfo {
