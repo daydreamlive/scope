@@ -3247,6 +3247,38 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
         )
 
 
+def _install_plugins_on_startup(plugins: tuple[str, ...]) -> None:
+    """Install plugins before starting the server."""
+    import asyncio
+
+    from scope.core.plugins.manager import (
+        PluginDependencyError,
+        PluginInstallError,
+        PluginNameCollisionError,
+        get_plugin_manager,
+    )
+
+    @suppress_init_output
+    def _do_install(pkg: str) -> dict:
+        pm = get_plugin_manager()
+        return asyncio.run(pm.install_plugin_async(package=pkg))
+
+    for plugin in plugins:
+        click.echo(f"Installing plugin: {plugin}")
+        try:
+            result = _do_install(plugin)
+            click.echo(result["message"])
+        except PluginDependencyError as e:
+            click.echo(f"Dependency error installing {plugin}: {e}", err=True)
+            sys.exit(1)
+        except PluginNameCollisionError as e:
+            click.echo(f"Name collision installing {plugin}: {e}", err=True)
+            sys.exit(1)
+        except PluginInstallError as e:
+            click.echo(f"Installation failed for {plugin}: {e}", err=True)
+            sys.exit(1)
+
+
 @click.group(invoke_without_command=True)
 @click.option("--version", is_flag=True, help="Show version information and exit")
 @click.option(
@@ -3280,6 +3312,11 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     help="Run as an MCP (Model Context Protocol) server over stdio instead of the HTTP server. "
     "Connects to a running Scope instance on --port.",
 )
+@click.option(
+    "--install",
+    multiple=True,
+    help="Install plugin(s) before starting the server. Can be specified multiple times.",
+)
 @click.pass_context
 def main(
     ctx,
@@ -3291,6 +3328,7 @@ def main(
     cloud_app_id: str | None,
     cloud_api_key: str | None,
     mcp: bool,
+    install: tuple[str, ...],
 ):
     # Handle version flag
     if version:
@@ -3310,6 +3348,10 @@ def main(
         )
         run_mcp_server(port=explicit_port)
         return
+
+    # Install plugins if requested
+    if install:
+        _install_plugins_on_startup(install)
 
     # Store cloud credentials in environment for app access
     if cloud_app_id:
