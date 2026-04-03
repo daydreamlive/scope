@@ -144,6 +144,11 @@ export class CloudAdapter {
           this.isReady = false;
           this.ws = null;
 
+          // Detect credit-exhaustion close (custom code 4020 or reason string)
+          if (event.code === 4020 || event.reason?.includes("credits")) {
+            window.dispatchEvent(new CustomEvent("billing:credits-exhausted"));
+          }
+
           // Reject all pending requests
           for (const [requestId, pending] of this.pendingRequests) {
             clearTimeout(pending.timeout);
@@ -209,6 +214,16 @@ export class CloudAdapter {
   }
 
   private handleMessage(message: ApiResponse): void {
+    // Handle server-pushed stream termination due to credit exhaustion
+    if (
+      message.type === "stream_terminated" ||
+      message.type === "credits_exhausted"
+    ) {
+      console.warn("[CloudAdapter] Stream terminated: credits exhausted");
+      window.dispatchEvent(new CustomEvent("billing:credits-exhausted"));
+      return;
+    }
+
     // Handle response to pending request
     if (message.request_id && this.pendingRequests.has(message.request_id)) {
       const pending = this.pendingRequests.get(message.request_id)!;
@@ -219,6 +234,10 @@ export class CloudAdapter {
         message.type === "error" ||
         (message.status && message.status >= 400)
       ) {
+        // Detect 402 billing errors and dispatch event for BillingContext
+        if (message.status === 402) {
+          window.dispatchEvent(new CustomEvent("billing:credits-exhausted"));
+        }
         pending.reject(
           new Error(
             message.error || `Request failed with status ${message.status}`
@@ -388,6 +407,9 @@ export class CloudAdapter {
     );
 
     if (response.status && response.status >= 400) {
+      if (response.status === 402) {
+        window.dispatchEvent(new CustomEvent("billing:credits-exhausted"));
+      }
       throw new Error(
         response.error || `API request failed with status ${response.status}`
       );
