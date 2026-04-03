@@ -73,6 +73,7 @@ export function PluginsDialog({
         latest_version: p.latest_version,
         update_available: p.update_available,
         package_spec: p.package_spec,
+        bundled: p.bundled,
       })),
     [pluginInfos]
   );
