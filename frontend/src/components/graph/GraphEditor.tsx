@@ -7,6 +7,7 @@ import {
   useState,
 } from "react";
 import { toast } from "sonner";
+import { Plus } from "lucide-react";
 import {
   ReactFlow,
   Controls,
@@ -289,6 +290,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       cancelImport,
       reResolveImport,
       loadGraphFromParsed,
+      initialLoadDone,
     } = useGraphState(
       {
         onNodeParameterChange,
@@ -454,6 +456,20 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         setNodes,
         setPendingNodePosition
       );
+
+    const handleOpenCreateMenu = useCallback(
+      (screenX: number, screenY: number) => {
+        const rf = reactFlowInstanceRef.current;
+        if (!rf) return;
+        const flowPosition = rf.screenToFlowPosition({
+          x: screenX,
+          y: screenY,
+        });
+        setPendingNodePosition(flowPosition);
+        setContextMenu({ x: screenX, y: screenY, type: "pane" });
+      },
+      [setContextMenu]
+    );
 
     const addSubgraphPortRef = useRef<
       | ((
@@ -919,6 +935,34 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               <Controls />
               <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
             </ReactFlow>
+
+            {/* Add node button — upper right of canvas */}
+            {!isStreaming && (
+              <button
+                onClick={e => handleOpenCreateMenu(e.clientX, e.clientY)}
+                className="absolute top-4 right-4 z-30 w-12 h-12 rounded-xl border-2 border-dashed border-[rgba(119,119,119,0.4)] bg-[rgba(17,17,17,0.6)] hover:border-[rgba(119,119,119,0.7)] hover:bg-[rgba(17,17,17,0.8)] transition-colors cursor-pointer flex items-center justify-center"
+                title="Add node"
+              >
+                <Plus className="h-5 w-5 text-[#8c8c8d]" />
+              </button>
+            )}
+
+            {/* Empty state placeholder */}
+            {nodes.length === 0 && !isStreaming && initialLoadDone.current && (
+              <div className="absolute inset-0 flex items-center justify-center z-20 pointer-events-none">
+                <button
+                  onClick={e => handleOpenCreateMenu(e.clientX, e.clientY)}
+                  className="pointer-events-auto flex flex-col items-center gap-3 cursor-pointer group"
+                >
+                  <div className="w-28 h-28 rounded-xl border-2 border-dashed border-[rgba(119,119,119,0.3)] bg-[rgba(17,17,17,0.3)] flex items-center justify-center group-hover:border-[rgba(119,119,119,0.5)] transition-colors">
+                    <Plus className="h-8 w-8 text-[#555]" />
+                  </div>
+                  <span className="text-sm text-[#555] group-hover:text-[#777] transition-colors">
+                    Add first step…
+                  </span>
+                </button>
+              </div>
+            )}
 
             {contextMenu && !isStreaming && (
               <ContextMenu

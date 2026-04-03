@@ -416,5 +416,6 @@ export function useGraphState(
     cancelImport: persistence.cancelImport,
     reResolveImport: persistence.reResolveImport,
     loadGraphFromParsed: persistence.loadGraphFromParsed,
+    initialLoadDone: persistence.initialLoadDone,
   };
 }
