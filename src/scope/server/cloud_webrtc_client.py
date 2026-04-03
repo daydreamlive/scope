@@ -48,18 +48,37 @@ class FrameInputTrack(MediaStreamTrack):
         self._frame_count = 0
         self._start_time: float | None = None
         self._last_pts = 0
+        self._last_recv_time: float | None = None
 
     async def recv(self) -> VideoFrame:
         """Get the next frame to send to cloud."""
         if self._start_time is None:
             self._start_time = time.time()
 
-        # Wait for a frame with timeout
-        try:
-            frame = await asyncio.wait_for(self._queue.get(), timeout=1.0)
-        except TimeoutError:
-            # Return a black frame if no input
-            frame = self._create_black_frame()
+        # Pace output to target fps.  Without this, high-rate sources
+        # (Syphon at 60+ fps) cause the VP8 encoder to run uncapped,
+        # flooding the RTP layer and triggering packet loss / decode errors.
+        frame_interval = 1.0 / self._fps
+        if self._last_recv_time is not None:
+            elapsed = time.time() - self._last_recv_time
+            if elapsed < frame_interval:
+                await asyncio.sleep(frame_interval - elapsed)
+        self._last_recv_time = time.time()
+
+        # Drain the queue to always use the freshest frame.  Stale frames
+        # in the FIFO cause temporal jitter ("shaking") when high-rate
+        # sources like Syphon fill the queue faster than we consume it.
+        frame = None
+        while not self._queue.empty():
+            try:
+                frame = self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                break
+        if frame is None:
+            try:
+                frame = await asyncio.wait_for(self._queue.get(), timeout=1.0)
+            except TimeoutError:
+                frame = self._create_black_frame()
 
         if frame is None:
             # End of stream signal
@@ -80,16 +99,24 @@ class FrameInputTrack(MediaStreamTrack):
             frame: VideoFrame or numpy array (RGB24 format)
 
         Returns:
-            True if frame was queued, False if queue is full
+            True if frame was queued successfully.
         """
         if isinstance(frame, np.ndarray):
             frame = VideoFrame.from_ndarray(frame, format="rgb24")
 
         try:
             self._queue.put_nowait(frame)
-            return True
         except asyncio.QueueFull:
-            return False
+            # Evict the oldest frame so we always keep the freshest.
+            try:
+                self._queue.get_nowait()
+            except asyncio.QueueEmpty:
+                pass
+            try:
+                self._queue.put_nowait(frame)
+            except asyncio.QueueFull:
+                return False
+        return True
 
     def _create_black_frame(self) -> VideoFrame:
         """Create a black frame for when no input is available."""
@@ -204,6 +231,7 @@ class CloudWebRTCClient:
         self._connected = False
         self._receive_tasks: list[asyncio.Task] = []
         self._audio_receive_task: asyncio.Task | None = None
+        self._keyframe_task: asyncio.Task | None = None
 
         # Stats
         self._stats = {
@@ -338,7 +366,6 @@ class CloudWebRTCClient:
                         self._receive_frames(track, self.output_handlers[idx])
                     )
                     self._receive_tasks.append(task)
-                    asyncio.create_task(self._request_keyframe())
                 else:
                     logger.warning(f"No output handler for cloud video track {idx}")
             elif track.kind == "audio":
@@ -358,6 +385,12 @@ class CloudWebRTCClient:
                 self._connected = True
                 self._stats["connected_at"] = time.time()
                 logger.info("WebRTC connected to cloud")
+                # Start periodic keyframe requests so VP8 decoders can
+                # recover from any missed or corrupt frames.
+                if self._keyframe_task is None or self._keyframe_task.done():
+                    self._keyframe_task = asyncio.create_task(
+                        self._periodic_keyframe_loop()
+                    )
             elif state in ("disconnected", "failed", "closed"):
                 self._connected = False
 
@@ -527,34 +560,11 @@ class CloudWebRTCClient:
                 f"total frames: {self._stats['audio_frames_received']}"
             )
 
-    async def _request_keyframe(self):
-        """Request keyframes via PLI for all video receivers.
+    async def _send_pli_to_all_receivers(self) -> int:
+        """Send PLI to every video receiver that has remote streams.
 
-        VP8/VP9 decoders need a keyframe (I-frame) to start decoding.
-        After a new WebRTC connection, we may receive P-frames first,
-        causing decode errors. Sending PLI (Picture Loss Indication)
-        requests the remote end to send a keyframe for each track.
+        Returns the number of PLI requests successfully sent.
         """
-        # Poll until at least one receiver has remote_streams (RTP arrived)
-        timeout = 5.0
-        poll_interval = 0.1
-        elapsed = 0.0
-
-        while elapsed < timeout:
-            await asyncio.sleep(poll_interval)
-            elapsed += poll_interval
-            for r in self.pc.getReceivers():
-                if r.track and r.track.kind == "video":
-                    if r._RTCRtpReceiver__remote_streams:
-                        break
-            else:
-                continue
-            break
-        else:
-            logger.debug("No remote streams after %.1fs, skipping PLI", timeout)
-            return
-
-        # Send PLI for every video receiver that has remote streams
         pli_count = 0
         for r in self.pc.getReceivers():
             if not r.track or r.track.kind != "video":
@@ -568,9 +578,63 @@ class CloudWebRTCClient:
                 pli_count += 1
             except Exception as e:
                 logger.debug(f"Could not send PLI for receiver: {e}")
+        return pli_count
 
-        if pli_count:
-            logger.info(f"Sent PLI keyframe requests for {pli_count} video track(s)")
+    async def _periodic_keyframe_loop(self):
+        """Periodically request keyframes for all video tracks.
+
+        VP8/VP9 decoders need a keyframe (I-frame) to start decoding.
+        Sending PLI (Picture Loss Indication) requests the remote end
+        to send a keyframe for each track.  This loop:
+        1. Sends an initial burst of PLI requests right after connection.
+        2. Continues sending periodic PLI every few seconds so decoders
+           can recover from any corrupt or missed frames (e.g. when
+           Syphon/NDI sources start flowing after the connection is up).
+        """
+        try:
+            # Wait briefly for receivers to have remote streams
+            for _ in range(50):  # 5 seconds max
+                await asyncio.sleep(0.1)
+                if not self._connected:
+                    return
+                for r in self.pc.getReceivers():
+                    if (
+                        r.track
+                        and r.track.kind == "video"
+                        and r._RTCRtpReceiver__remote_streams
+                    ):
+                        break
+                else:
+                    continue
+                break
+            else:
+                logger.debug("No remote streams after 5s, giving up PLI loop")
+                return
+
+            # Initial burst: send PLI a few times quickly so every track
+            # gets a keyframe even if some are still being set up.
+            for _ in range(3):
+                pli_count = await self._send_pli_to_all_receivers()
+                if pli_count:
+                    logger.info(
+                        "Sent PLI keyframe requests for %d video track(s)", pli_count
+                    )
+                await asyncio.sleep(0.5)
+
+            # Periodic maintenance: request keyframes regularly so decoders
+            # recover quickly from intermittent VP8 corruption caused by
+            # RTP packet loss under high multi-stream load.
+            while self._connected:
+                await asyncio.sleep(2.0)
+                if not self._connected:
+                    break
+                pli_count = await self._send_pli_to_all_receivers()
+                if pli_count:
+                    logger.debug("Periodic PLI sent for %d track(s)", pli_count)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            logger.warning(f"Keyframe loop error: {e}")
 
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         """Send a frame to the primary (index 0) cloud input track."""
@@ -613,6 +677,14 @@ class CloudWebRTCClient:
         logger.info("Disconnecting from cloud...")
 
         self._connected = False
+
+        if self._keyframe_task:
+            self._keyframe_task.cancel()
+            try:
+                await self._keyframe_task
+            except asyncio.CancelledError:
+                pass
+            self._keyframe_task = None
 
         for task in self._receive_tasks:
             task.cancel()
