@@ -76,7 +76,9 @@ class CloudRelay:
         """Send a frame to a specific cloud source track."""
         if not self._video_mode:
             return False
-        track_idx = self._cloud_manager.get_source_track_index(source_node_id)
+        # Try multi-track API if available, otherwise fall back to generic send
+        get_idx = getattr(self._cloud_manager, "get_source_track_index", None)
+        track_idx = get_idx(source_node_id) if get_idx is not None else None
         if track_idx is not None:
             sent = self._cloud_manager.send_frame_to_track(rgb_frame, track_idx)
         else:
