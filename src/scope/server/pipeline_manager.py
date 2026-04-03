@@ -189,6 +189,7 @@ class PipelineManager:
             if key in self._pipelines:
                 if (
                     self._pipeline_statuses.get(key) == PipelineStatus.LOADED
+                    and self._pipeline_registry_ids.get(key) == pipeline_id
                     and current_params == new_params
                 ):
                     is_loaded = True
