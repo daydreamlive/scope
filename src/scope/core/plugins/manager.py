@@ -18,6 +18,7 @@ from .dependency_validator import DependencyValidator
 from .hookspecs import ScopeHookSpec
 from .plugins_config import (
     ensure_plugins_dir,
+    get_bundled_plugins_file,
     get_plugins_dir,
     get_plugins_file,
     get_resolved_file,
@@ -119,6 +120,27 @@ class PluginManager:
             for line in plugins_file.read_text().splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
+
+    def _read_bundled_plugins_file(self) -> list[str]:
+        """Read plugin specifiers from the bundled plugins file.
+
+        Bundled plugins are pre-installed and cannot be removed by users.
+        """
+        bundled_file = get_bundled_plugins_file()
+        if not bundled_file:
+            return []
+        return [
+            line.strip()
+            for line in bundled_file.read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+    def _get_bundled_package_names(self) -> set[str]:
+        """Get normalized names of bundled plugins."""
+        return {
+            self._normalize_package_name(self._extract_package_name(s))
+            for s in self._read_bundled_plugins_file()
+        }
 
     def _write_plugins_file(self, plugins: list[str]) -> None:
         """Write plugin specifiers to plugins.txt."""
@@ -229,6 +251,11 @@ class PluginManager:
         # Add plugins file if it exists and has content
         if plugins_file.exists() and plugins_file.read_text().strip():
             args.append(str(plugins_file))
+
+        # Add bundled plugins file if it exists
+        bundled_file = get_bundled_plugins_file()
+        if bundled_file:
+            args.append(str(bundled_file))
 
         constraints_file = self._generate_constraints()
         if constraints_file:
@@ -424,8 +451,28 @@ class PluginManager:
         This handles venv recreation (e.g., uv upgrade wiping .venv) by
         detecting missing plugin packages and reinstalling them from the
         persisted resolved.txt before plugin discovery runs.
+
+        Also checks bundled plugins (from DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE)
+        which are always required regardless of user plugins.txt state.
         """
-        plugins = self._read_plugins_file()
+        # Merge user plugins with bundled plugins
+        user_plugins = self._read_plugins_file()
+        bundled_plugins = self._read_bundled_plugins_file()
+
+        # Deduplicate: bundled specs take priority
+        seen_names: set[str] = set()
+        plugins: list[str] = []
+        for spec in bundled_plugins:
+            name = self._normalize_package_name(self._extract_package_name(spec))
+            if name not in seen_names:
+                seen_names.add(name)
+                plugins.append(spec)
+        for spec in user_plugins:
+            name = self._normalize_package_name(self._extract_package_name(spec))
+            if name not in seen_names:
+                seen_names.add(name)
+                plugins.append(spec)
+
         if not plugins:
             return
 
@@ -627,6 +674,7 @@ class PluginManager:
         from importlib.metadata import distributions
 
         plugins = []
+        bundled_names = self._get_bundled_package_names()
 
         with self._lock:
             for dist in distributions():
@@ -679,6 +727,10 @@ class PluginManager:
                         latest_version = update_info.get("latest_version")
                         update_available = update_info.get("update_available")
 
+                    is_bundled = (
+                        self._normalize_package_name(package_name) in bundled_names
+                    )
+
                     plugins.append(
                         {
                             "name": package_name,
@@ -693,6 +745,7 @@ class PluginManager:
                             "latest_version": latest_version,
                             "update_available": update_available,
                             "package_spec": package_spec,
+                            "bundled": is_bundled,
                         }
                     )
                 except Exception as e:
@@ -1259,6 +1312,12 @@ class PluginManager:
 
         if not plugin_info:
             raise PluginNotFoundError(f"Plugin '{name}' not found")
+
+        # Prevent uninstalling bundled plugins
+        if plugin_info.get("bundled"):
+            raise PluginInstallError(
+                f"Plugin '{name}' is bundled and cannot be uninstalled"
+            )
 
         logger.debug(f"Found plugin: {plugin_info}")
 
