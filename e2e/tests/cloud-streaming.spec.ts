@@ -47,16 +47,19 @@ test.describe("Cloud Streaming", () => {
     // Step 2: Wait for cloud connection
     await waitForCloudConnection(page);
 
-    // Step 3: Select passthrough model
+    // Step 3: Ensure app is in Perform Mode (Pipeline ID selector is only visible there)
+    await ensurePerformMode(page);
+
+    // Step 4: Select passthrough model
     await selectPassthroughModel(page);
 
-    // Step 4: Start streaming
+    // Step 5: Start streaming
     await startStream(page);
 
-    // Step 5: Verify frames are being processed
+    // Step 6: Verify frames are being processed
     await verifyStreamProcessing(page);
 
-    // Step 6: Stop stream
+    // Step 7: Stop stream
     await stopStream(page);
 
     console.log("✅ Cloud streaming test passed");
@@ -114,6 +117,33 @@ async function waitForCloudConnection(page: Page) {
   // Close the settings dialog
   await page.keyboard.press("Escape");
   await page.waitForTimeout(500);
+}
+
+/**
+ * Ensure the app is in Perform Mode (not Graph/Workflow Builder mode).
+ * The app defaults to Graph Mode; the SettingsPanel with Pipeline ID is only
+ * visible in Perform Mode. If the "Perform Mode" button is present in the
+ * header, click it to switch.
+ */
+async function ensurePerformMode(page: Page) {
+  console.log("Ensuring Perform Mode...");
+
+  // The header button reads "Perform Mode" when the app is in Graph Mode
+  // (clicking it switches to Perform Mode). If it reads "Workflow Builder",
+  // we're already in Perform Mode.
+  const performModeButton = page.getByRole("button", { name: /perform mode/i });
+
+  if (await performModeButton.isVisible({ timeout: 3000 }).catch(() => false)) {
+    await performModeButton.click();
+    // Wait for the SettingsPanel to appear (Pipeline ID heading)
+    await expect(page.locator("text=Pipeline ID")).toBeVisible({
+      timeout: 10000,
+    });
+    await page.screenshot({ path: "test-results/05b-perform-mode.png" });
+    console.log("✅ Switched to Perform Mode");
+  } else {
+    console.log("✅ Already in Perform Mode");
+  }
 }
 
 /**
