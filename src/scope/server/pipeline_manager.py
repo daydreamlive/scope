@@ -3,10 +3,11 @@
 import asyncio
 import gc
 import logging
+import re
 import threading
 import time
 from enum import Enum
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 import torch
@@ -791,6 +792,100 @@ class PipelineManager:
 
         return resolved
 
+    @staticmethod
+    def _sanitize_asset_path(path: str) -> str:
+        """Normalize a single asset path so it is resolvable on the current system.
+
+        When a Windows client sends ``i2v_image`` (or similar params) to a
+        Linux cloud worker, the path may be a Windows absolute path such as::
+
+            C:\\Users\\Joshu\\.daydream-scope\\assets\\ShinraFireForce.webp
+
+        These paths are meaningless on Linux. This method:
+
+        1. Detects platform-foreign absolute paths (Windows ``X:\\...`` /
+           ``X:/...`` / UNC ``\\\\server\\...``) or Unix absolute paths that
+           fall outside the configured assets directory.
+        2. Extracts the bare filename (e.g. ``ShinraFireForce.webp``).
+        3. Rebuilds the path relative to ``get_assets_dir()`` so the cloud
+           worker can locate the file.
+
+        Relative paths and already-valid absolute paths are left unchanged.
+
+        Args:
+            path: Asset path string to normalise.
+
+        Returns:
+            Normalised path string, or the original if no rewrite was needed.
+        """
+        from .models_config import get_assets_dir
+
+        assets_dir = get_assets_dir()
+        _windows_abs_re = re.compile(r"^(?:[A-Za-z]:[/\\]|\\\\)", re.ASCII)
+
+        needs_rewrite = False
+
+        if _windows_abs_re.match(path):
+            needs_rewrite = True
+            filename = PureWindowsPath(path).name
+        elif path.startswith("/"):
+            try:
+                abs_path = Path(path).resolve()
+                if not abs_path.is_relative_to(assets_dir.resolve()):
+                    needs_rewrite = True
+                    filename = Path(path).name
+            except Exception:
+                needs_rewrite = True
+                filename = Path(path).name
+
+        if needs_rewrite:
+            new_path = str(assets_dir / filename)
+            logger.warning(
+                "_sanitize_asset_path: asset path %r appears to be a local "
+                "absolute path from a different OS or filesystem. "
+                "Rewriting to %r.",
+                path,
+                new_path,
+            )
+            return new_path
+        return path
+
+    @staticmethod
+    def _sanitize_initial_params(params: dict) -> dict:
+        """Sanitize known asset path parameters in *params*.
+
+        Rewrites Windows / foreign-OS absolute paths for these keys so the
+        Linux cloud worker can locate the assets that were already uploaded to
+        ``get_assets_dir()``:
+
+        * ``i2v_image``        – str or None
+        * ``first_frame_image`` – str or None
+        * ``last_frame_image``  – str or None
+        * ``images``            – list[str] or None (each item sanitized)
+        * ``vace_ref_images``   – list[str] or None (each item sanitized)
+
+        Args:
+            params: Pipeline parameter dict (will not be mutated).
+
+        Returns:
+            A shallow copy of *params* with the above keys sanitized.
+        """
+        result = dict(params)
+
+        _str_keys = ("i2v_image", "first_frame_image", "last_frame_image")
+        for key in _str_keys:
+            if key in result and result[key] is not None:
+                result[key] = PipelineManager._sanitize_asset_path(result[key])
+
+        _list_keys = ("images", "vace_ref_images")
+        for key in _list_keys:
+            if key in result and result[key] is not None:
+                result[key] = [
+                    PipelineManager._sanitize_asset_path(p) for p in result[key]
+                ]
+
+        return result
+
     def unload_pipeline_by_id(
         self,
         pipeline_id: str,
@@ -914,8 +1009,10 @@ class PipelineManager:
             for name, field in config_class.model_fields.items():
                 if field.default is not None:
                     schema_defaults[name] = field.default
+            # Sanitize foreign OS asset paths before passing to the pipeline.
+            load_params = self._sanitize_initial_params(load_params or {})
             # Merge: load_params override schema defaults
-            merged_params = {**schema_defaults, **(load_params or {})}
+            merged_params = {**schema_defaults, **load_params}
             return pipeline_class(**merged_params)
 
         # Fall through to built-in pipeline initialization

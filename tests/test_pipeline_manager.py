@@ -341,3 +341,101 @@ class TestHelperMethods:
             "node_a", "longlive", {}, claimed_keys=set(), reserved_keys={"node_a"}
         )
         assert result == "node_a"
+
+
+# ---------------------------------------------------------------------------
+# Tests for _sanitize_asset_path and _sanitize_initial_params
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeAssetPaths:
+    """Tests for PipelineManager._sanitize_asset_path and _sanitize_initial_params."""
+
+    def test_windows_backslash_path_is_rewritten(self):
+        from pathlib import Path
+
+        with patch("scope.server.models_config.get_assets_dir") as mock_dir:
+            mock_dir.return_value = Path("/tmp/.daydream-scope/assets")
+            result = PipelineManager._sanitize_asset_path(
+                r"C:\Users\Joshu\.daydream-scope\assets\ShinraFireForce.webp"
+            )
+        assert result == "/tmp/.daydream-scope/assets/ShinraFireForce.webp"
+
+    def test_windows_forward_slash_drive_path_is_rewritten(self):
+        from pathlib import Path
+
+        with patch("scope.server.models_config.get_assets_dir") as mock_dir:
+            mock_dir.return_value = Path("/tmp/.daydream-scope/assets")
+            result = PipelineManager._sanitize_asset_path(
+                "C:/Users/Joshu/.daydream-scope/assets/ShinraFireForce.webp"
+            )
+        assert result == "/tmp/.daydream-scope/assets/ShinraFireForce.webp"
+
+    def test_unix_path_outside_assets_dir_is_rewritten(self):
+        from pathlib import Path
+
+        with patch("scope.server.models_config.get_assets_dir") as mock_dir:
+            mock_dir.return_value = Path("/tmp/.daydream-scope/assets")
+            result = PipelineManager._sanitize_asset_path(
+                "/home/user/.daydream-scope/assets/image.png"
+            )
+        assert result == "/tmp/.daydream-scope/assets/image.png"
+
+    def test_relative_path_unchanged(self):
+        from pathlib import Path
+
+        with patch("scope.server.models_config.get_assets_dir") as mock_dir:
+            mock_dir.return_value = Path("/tmp/.daydream-scope/assets")
+            result = PipelineManager._sanitize_asset_path("image.png")
+        assert result == "image.png"
+
+    def test_none_value_unchanged(self):
+        """_sanitize_initial_params should leave None values as None."""
+        from pathlib import Path
+
+        with patch("scope.server.models_config.get_assets_dir") as mock_dir:
+            mock_dir.return_value = Path("/tmp/.daydream-scope/assets")
+            result = PipelineManager._sanitize_initial_params({"i2v_image": None})
+        assert result["i2v_image"] is None
+
+    def test_sanitize_initial_params_i2v_image_windows_path(self):
+        from pathlib import Path
+
+        with patch("scope.server.models_config.get_assets_dir") as mock_dir:
+            mock_dir.return_value = Path("/tmp/.daydream-scope/assets")
+            params = {
+                "i2v_image": r"C:\Users\Joshu\.daydream-scope\assets\ShinraFireForce.webp",
+                "strength": 0.8,
+            }
+            result = PipelineManager._sanitize_initial_params(params)
+        assert (
+            result["i2v_image"]
+            == "/tmp/.daydream-scope/assets/ShinraFireForce.webp"
+        )
+        assert result["strength"] == 0.8
+
+    def test_sanitize_initial_params_images_list(self):
+        from pathlib import Path
+
+        with patch("scope.server.models_config.get_assets_dir") as mock_dir:
+            mock_dir.return_value = Path("/tmp/.daydream-scope/assets")
+            params = {
+                "images": [
+                    r"C:\Users\Joshu\.daydream-scope\assets\a.png",
+                    r"C:\Users\Joshu\.daydream-scope\assets\b.png",
+                ]
+            }
+            result = PipelineManager._sanitize_initial_params(params)
+        assert result["images"] == [
+            "/tmp/.daydream-scope/assets/a.png",
+            "/tmp/.daydream-scope/assets/b.png",
+        ]
+
+    def test_sanitize_initial_params_no_asset_params_unchanged(self):
+        from pathlib import Path
+
+        with patch("scope.server.models_config.get_assets_dir") as mock_dir:
+            mock_dir.return_value = Path("/tmp/.daydream-scope/assets")
+            params = {"strength": 0.9, "seed": 42}
+            result = PipelineManager._sanitize_initial_params(params)
+        assert result == {"strength": 0.9, "seed": 42}
