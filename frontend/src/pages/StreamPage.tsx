@@ -589,6 +589,16 @@ export function StreamPage() {
     [updateSettings]
   );
 
+  // Combined handler: update perform mode settings AND graph mode node params.
+  const handleParametersUpdated = useCallback(
+    (params: Record<string, unknown>) => {
+      applyBackendParamsToSettings(params);
+      const nodeId = params.node_id as string | undefined;
+      graphEditorRef.current?.applyExternalParams(params, nodeId);
+    },
+    [applyBackendParamsToSettings]
+  );
+
   // WebRTC for streaming (unified hook works in both local and cloud modes)
   const {
     remoteStream,
@@ -601,7 +611,7 @@ export function StreamPage() {
     sendParameterUpdate: sendParameterUpdateWebRTC,
     sessionId,
   } = useUnifiedWebRTC({
-    onParametersUpdated: applyBackendParamsToSettings,
+    onParametersUpdated: handleParametersUpdated,
     onTempoUpdate: updateTempoFromNotification,
   });
 
@@ -1641,6 +1651,15 @@ export function StreamPage() {
           }
           break;
         }
+      }
+
+      // Sync to graph mode nodes (no node_id = all pipeline nodes)
+      if (key === "prompt") {
+        graphEditorRef.current?.applyExternalParams({
+          __prompt: String(value),
+        });
+      } else {
+        graphEditorRef.current?.applyExternalParams({ [key]: value });
       }
     };
   });

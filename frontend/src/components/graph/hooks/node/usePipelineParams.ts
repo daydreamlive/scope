@@ -128,6 +128,41 @@ export function usePipelineParams({
     [resolveBackendId]
   );
 
+  // Apply parameter updates from external sources (REST API, OSC, MCP)
+  // without sending them back to the backend (they already have the values).
+  const applyExternalNodeParams = useCallback(
+    (params: Record<string, unknown>, targetNodeId?: string) => {
+      const patch: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(params)) {
+        if (k === "node_id") continue;
+        if (k === "prompts") {
+          const arr = v as Array<{ text: string; weight: number }>;
+          if (Array.isArray(arr) && arr.length > 0) {
+            patch.__prompt = arr[0].text;
+          }
+          continue;
+        }
+        patch[k] = v;
+      }
+      if (Object.keys(patch).length === 0) return;
+
+      setNodeParams(prev => {
+        const next = { ...prev };
+        if (targetNodeId) {
+          next[targetNodeId] = { ...(next[targetNodeId] || {}), ...patch };
+        } else {
+          for (const node of nodesRef.current) {
+            if (node.data.nodeType !== "pipeline") continue;
+            next[node.id] = { ...(next[node.id] || {}), ...patch };
+          }
+        }
+        return next;
+      });
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    []
+  );
+
   // Prompt handling
 
   const sendPromptToBackend = useCallback(
@@ -215,5 +250,6 @@ export function usePipelineParams({
     handlePromptSubmit,
     resolveBackendId,
     onNodeParamChangeRef,
+    applyExternalNodeParams,
   };
 }
