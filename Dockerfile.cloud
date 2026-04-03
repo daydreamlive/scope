@@ -45,6 +45,9 @@ RUN uv python install && \
 # Copy project files
 COPY src/ /app/src/
 
+# Pre-install the ltx-2 plugin
+RUN uv run daydream-scope install git+https://github.com/daydreamlive/scope-ltx-2.git
+
 # Expose port 8000 for RunPod HTTP proxy
 EXPOSE 8000
 
