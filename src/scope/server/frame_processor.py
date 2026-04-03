@@ -1104,10 +1104,19 @@ class FrameProcessor:
             if self.parameters.get("vace_enabled") and self.parameters.get(
                 "vace_use_input_video", True
             ):
+                # Only the *last* VACEEnabledPipeline in the chain should
+                # receive raw input video as vace_input_frames.  Earlier
+                # VACEEnabledPipeline instances (e.g. yolo_mask preprocessors)
+                # produce their own VACE frames that downstream pipelines
+                # consume — they must NOT also be wired to receive raw video
+                # on vace_input_frames, as that would create a fan-in conflict.
+                last_vace_pid: str | None = None
                 for pid in self.pipeline_ids:
                     pipeline = self.pipeline_manager.get_pipeline_by_id(pid)
                     if isinstance(pipeline, VACEEnabledPipeline):
-                        vace_input_video_ids.add(pid)
+                        last_vace_pid = pid
+                if last_vace_pid is not None:
+                    vace_input_video_ids.add(last_vace_pid)
 
             api_graph = build_linear_graph(
                 self.pipeline_ids,
