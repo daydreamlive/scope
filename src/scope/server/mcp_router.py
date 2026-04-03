@@ -59,12 +59,16 @@ async def update_session_parameters(
     if not params_dict:
         raise HTTPException(status_code=400, detail="No parameters provided")
 
+    # Copy before broadcast_parameter_update which mutates params_dict
+    # (frame_processor.update_parameters pops node_id).
+    notification_params = dict(params_dict)
+
     webrtc_manager.broadcast_parameter_update(params_dict)
     webrtc_manager.broadcast_notification(
-        {"type": "parameters_updated", "parameters": params_dict}
+        {"type": "parameters_updated", "parameters": notification_params}
     )
 
-    return {"status": "ok", "applied_parameters": params_dict}
+    return {"status": "ok", "applied_parameters": notification_params}
 
 
 @router.get("/session/parameters")

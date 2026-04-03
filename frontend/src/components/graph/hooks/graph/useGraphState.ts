@@ -391,6 +391,7 @@ export function useGraphState(
     handlePromptChange: params.handlePromptChange,
     handlePromptSubmit: params.handlePromptSubmit,
     resolveBackendId: params.resolveBackendId,
+    applyExternalNodeParams: params.applyExternalNodeParams,
     isStreamingRef,
     onNodeParamChangeRef: params.onNodeParamChangeRef,
     onOutputSinkChangeRef,

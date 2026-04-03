@@ -150,6 +150,10 @@ export interface GraphEditorHandle {
     workflow: import("../../lib/workflowApi").ScopeWorkflow
   ) => void;
   updateNodeParam: (nodeId: string, key: string, value: unknown) => void;
+  applyExternalParams: (
+    params: Record<string, unknown>,
+    targetNodeId?: string
+  ) => void;
   clearGraph: () => void;
 }
 
@@ -268,6 +272,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setSelectedNodeIds,
       handlePipelineSelect,
       handleNodeParameterChange,
+      applyExternalNodeParams,
       enrichDepsRef,
       handleEdgeDelete,
       resolveBackendId,
@@ -355,6 +360,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           );
         },
         updateNodeParam: handleNodeParameterChange,
+        applyExternalParams: applyExternalNodeParams,
         clearGraph: handleClear,
       }),
       [
@@ -365,6 +371,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         getGraphLoRASettings,
         loadGraphFromParsed,
         handleNodeParameterChange,
+        applyExternalNodeParams,
         handleClear,
       ]
     );
