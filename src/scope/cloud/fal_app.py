@@ -505,8 +505,6 @@ class ScopeApp(fal.App, keep_alive=300):
                         "0.0.0.0",
                         "--port",
                         str(SCOPE_PORT),
-                        "--install",
-                        "git+https://github.com/daydreamlive/scope-ltx-2.git",
                     ],
                     env=scope_env,
                     stdout=subprocess.PIPE,
