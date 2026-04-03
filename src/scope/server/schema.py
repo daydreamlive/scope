@@ -623,6 +623,10 @@ class PluginInfo(BaseModel):
         default=None,
         description="Package specifier for upgrades (git URL for git packages, name for PyPI)",
     )
+    bundled: bool = Field(
+        default=False,
+        description="Whether this plugin is bundled and cannot be uninstalled",
+    )
 
 
 class FailedPluginInfoSchema(BaseModel):
