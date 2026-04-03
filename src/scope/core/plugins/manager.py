@@ -110,6 +110,9 @@ class PluginManager:
         # Entry points that failed to load
         self._failed_plugins: list[FailedPluginInfo] = []
 
+        # Cache for bundled plugin names (file is immutable at runtime)
+        self._bundled_package_names: set[str] | None = None
+
     def _read_plugins_file(self) -> list[str]:
         """Read plugin specifiers from plugins.txt."""
         plugins_file = get_plugins_file()
@@ -136,11 +139,13 @@ class PluginManager:
         ]
 
     def _get_bundled_package_names(self) -> set[str]:
-        """Get normalized names of bundled plugins."""
-        return {
-            self._normalize_package_name(self._extract_package_name(s))
-            for s in self._read_bundled_plugins_file()
-        }
+        """Get normalized names of bundled plugins (cached)."""
+        if self._bundled_package_names is None:
+            self._bundled_package_names = {
+                self._normalize_package_name(self._extract_package_name(s))
+                for s in self._read_bundled_plugins_file()
+            }
+        return self._bundled_package_names
 
     def _write_plugins_file(self, plugins: list[str]) -> None:
         """Write plugin specifiers to plugins.txt."""
