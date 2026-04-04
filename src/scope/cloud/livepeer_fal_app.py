@@ -22,7 +22,9 @@ RUNNER_HOST = "127.0.0.1"
 RUNNER_PORT = int(os.getenv("LIVEPEER_RUNNER_PORT", "8001"))
 RUNNER_LOCAL_WS_URL = f"ws://{RUNNER_HOST}:{RUNNER_PORT}/ws"
 RUNNER_LOCAL_HTTP_URL = f"http://{RUNNER_HOST}:{RUNNER_PORT}"
-RUNNER_STARTUP_TIMEOUT_SECONDS = 90
+RUNNER_STARTUP_TIMEOUT_SECONDS = int(
+    os.getenv("LIVEPEER_RUNNER_STARTUP_TIMEOUT_SECONDS", "600")
+)
 RUNNER_RETRY_DELAY_SECONDS = 2.5
 RUNNER_MAX_FAILURES_PER_WINDOW = 20
 RUNNER_FAILURE_WINDOW_SECONDS = 60.0
@@ -288,6 +290,8 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         self.runner_process = process
 
         start = time.time()
+        last_log = start
+        LOG_INTERVAL_SECONDS = 30
         while time.time() - start < RUNNER_STARTUP_TIMEOUT_SECONDS:
             if process.poll() is not None:
                 raise RuntimeError(
@@ -295,12 +299,27 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
                     f"(code={process.returncode})"
                 )
             if _runner_is_ready():
-                print(f"Livepeer runner ready at {RUNNER_LOCAL_WS_URL}")
+                elapsed = time.time() - start
+                print(
+                    f"Livepeer runner ready at {RUNNER_LOCAL_WS_URL} "
+                    f"(took {elapsed:.1f}s)"
+                )
                 return
+            now = time.time()
+            if now - last_log >= LOG_INTERVAL_SECONDS:
+                elapsed = now - start
+                remaining = RUNNER_STARTUP_TIMEOUT_SECONDS - elapsed
+                print(
+                    f"Waiting for Livepeer runner... "
+                    f"{elapsed:.0f}s elapsed, {remaining:.0f}s remaining "
+                    f"(timeout={RUNNER_STARTUP_TIMEOUT_SECONDS}s)"
+                )
+                last_log = now
             time.sleep(1)
 
         raise RuntimeError(
-            f"Timed out waiting for Livepeer runner on {RUNNER_LOCAL_HTTP_URL}"
+            f"Timed out waiting for Livepeer runner on {RUNNER_LOCAL_HTTP_URL} "
+            f"after {RUNNER_STARTUP_TIMEOUT_SECONDS}s"
         )
 
     @fal.endpoint("/ws", is_websocket=True)
