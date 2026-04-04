@@ -82,8 +82,11 @@ class FrameProcessor:
         # Connection metadata (gpu_type, region, etc.) for Kafka events
         self.connection_info = connection_info
 
-        # Current parameters
-        self.parameters = initial_parameters or {}
+        # Current parameters – sanitize asset paths that may be Windows-style
+        # local paths sent by the client but meaningless on the Linux worker.
+        self.parameters = PipelineManager._sanitize_initial_params(
+            initial_parameters or {}
+        )
 
         self.running = False
 
