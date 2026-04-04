@@ -24,6 +24,7 @@ import type { ExtensionMode, InputMode, PipelineInfo } from "../types";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
+import { AudioManager } from "./AudioManager";
 import { ImageManager } from "./ImageManager";
 import { Button } from "./ui/button";
 import {
@@ -917,6 +918,30 @@ export function InputAndControlsPanel({
                           disabled={disabled}
                           maxImages={1}
                           hideLabel
+                        />
+                      </div>
+                    );
+                  }
+                  if (comp === "audio") {
+                    const path = value == null ? null : String(value);
+                    return (
+                      <div key={key} className="space-y-1">
+                        {ui.label != null && (
+                          <span className="text-xs text-muted-foreground">
+                            {ui.label}
+                          </span>
+                        )}
+                        <AudioManager
+                          audioPath={path}
+                          onAudioChange={p =>
+                            onSchemaFieldOverrideChange?.(
+                              key,
+                              p,
+                              isRuntimeParam
+                            )
+                          }
+                          disabled={disabled}
+                          label={ui.label ?? "Audio Input"}
                         />
                       </div>
                     );

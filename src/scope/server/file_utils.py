@@ -9,6 +9,7 @@ logger = logging.getLogger(__name__)
 
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
 LORA_EXTENSIONS = {".safetensors"}
 
 

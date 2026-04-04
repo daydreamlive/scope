@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { X, Upload, Film } from "lucide-react";
+import { X, Upload, Film, Music } from "lucide-react";
 import { Button } from "./ui/button";
 import {
   listAssets,
@@ -8,7 +8,7 @@ import {
   type AssetFileInfo,
 } from "../lib/api";
 import { useCloudStatus } from "../hooks/useCloudStatus";
-import { isVideoAsset } from "../lib/mediaUtils";
+import { isVideoAsset, isAudioAsset } from "../lib/mediaUtils";
 
 interface MediaPickerProps {
   isOpen: boolean;
@@ -16,7 +16,7 @@ interface MediaPickerProps {
   onSelectImage: (imagePath: string) => void;
   disabled?: boolean;
   /** Which asset types to show. Default "image". */
-  accept?: "image" | "video" | "all";
+  accept?: "image" | "video" | "audio" | "all";
 }
 
 export function MediaPicker({
@@ -36,13 +36,12 @@ export function MediaPicker({
     setIsLoading(true);
     try {
       if (accept === "all") {
-        // Fetch both image and video assets
-        const [imgRes, vidRes] = await Promise.all([
+        const [imgRes, vidRes, audRes] = await Promise.all([
           listAssets("image"),
           listAssets("video"),
+          listAssets("audio"),
         ]);
-        // Merge and sort by created_at descending
-        const merged = [...imgRes.assets, ...vidRes.assets].sort(
+        const merged = [...imgRes.assets, ...vidRes.assets, ...audRes.assets].sort(
           (a, b) => b.created_at - a.created_at
         );
         setAssets(merged);
@@ -103,7 +102,6 @@ export function MediaPicker({
     fileInputRef.current?.click();
   };
 
-  // Build the accept attribute and allowed MIME types based on `accept` prop
   const imageTypes = [
     "image/png",
     "image/jpeg",
@@ -112,13 +110,16 @@ export function MediaPicker({
     "image/bmp",
   ];
   const videoTypes = ["video/mp4", "video/webm", "video/quicktime"];
+  const audioTypes = ["audio/wav", "audio/mpeg", "audio/flac", "audio/ogg"];
 
   const allowedTypes =
     accept === "all"
-      ? [...imageTypes, ...videoTypes]
+      ? [...imageTypes, ...videoTypes, ...audioTypes]
       : accept === "video"
         ? videoTypes
-        : imageTypes;
+        : accept === "audio"
+          ? audioTypes
+          : imageTypes;
   const fileAcceptAttr = allowedTypes.join(",");
 
   const handleFileUpload = async (
@@ -166,6 +167,7 @@ export function MediaPicker({
   const titleMap = {
     image: "Image Picker",
     video: "Video Picker",
+    audio: "Audio Picker",
     all: "Media Picker",
   };
 
@@ -216,6 +218,7 @@ export function MediaPicker({
 
               {assets.map(asset => {
                 const isVideo = isVideoAsset(asset.name);
+                const isAudio = isAudioAsset(asset.name);
                 return (
                   <button
                     key={asset.path}
@@ -224,7 +227,14 @@ export function MediaPicker({
                     className="aspect-square border rounded-lg overflow-hidden hover:ring-2 hover:ring-primary disabled:opacity-50 disabled:cursor-not-allowed transition-all relative"
                     title={asset.name}
                   >
-                    {isVideo ? (
+                    {isAudio ? (
+                      <div className="w-full h-full flex flex-col items-center justify-center bg-[#1a1a1a]">
+                        <Music className="h-10 w-10 text-emerald-400 mb-1" />
+                        <span className="text-[10px] text-[#999] truncate max-w-[90%] px-1">
+                          {asset.name}
+                        </span>
+                      </div>
+                    ) : isVideo ? (
                       <div className="w-full h-full flex flex-col items-center justify-center bg-[#1a1a1a]">
                         <Film className="h-10 w-10 text-blue-400 mb-1" />
                         <span className="text-[10px] text-[#999] truncate max-w-[90%] px-1">
