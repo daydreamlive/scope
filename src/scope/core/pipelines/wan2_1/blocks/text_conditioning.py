@@ -39,11 +39,13 @@ class TextConditioningBlock(ModularPipelineBlocks):
             ),
             InputParam(
                 "prompts",
-                required=True,
-                type_hint=str | list[str] | list[dict],
+                required=False,
+                type_hint=str | list[str] | list[dict] | None,
                 description=(
                     "Prompts to condition denoising. Can be a string, list of strings, "
-                    "or list of dicts with 'text' and 'weight' keys. Strings are treated as weight 1.0."
+                    "or list of dicts with 'text' and 'weight' keys. Strings are treated as weight 1.0. "
+                    "When None (not yet provided), the block is a no-op and defers to current_prompts "
+                    "or a subsequent chunk that carries prompts."
                 ),
             ),
             InputParam(
@@ -116,6 +118,16 @@ class TextConditioningBlock(ModularPipelineBlocks):
     @torch.no_grad()
     def __call__(self, components, state: PipelineState) -> tuple[Any, PipelineState]:
         block_state = self.get_block_state(state)
+
+        # If no prompts have been provided yet (neither current nor incoming), skip encoding.
+        # This can happen when the pipeline starts processing chunks before the client has
+        # sent its first parameter update — the block is a no-op until prompts arrive.
+        if block_state.prompts is None and block_state.current_prompts is None:
+            logger.debug(
+                "TextConditioningBlock: no prompts available yet, deferring encoding"
+            )
+            return components, state
+
         self.check_inputs(block_state)
 
         if state.get("init_cache", False):
@@ -138,7 +150,11 @@ class TextConditioningBlock(ModularPipelineBlocks):
 
         # Detect if incoming prompts changed by comparing to last received value
         # (not current_prompts, which may differ due to completed transitions)
-        incoming_prompts_normalized = self._normalize_prompts(block_state.prompts)
+        # When prompts=None, treat as "no incoming change" and fall through to current_prompts.
+        if block_state.prompts is not None:
+            incoming_prompts_normalized = self._normalize_prompts(block_state.prompts)
+        else:
+            incoming_prompts_normalized = None
         last_incoming_prompts = state.get("_text_conditioning_last_incoming_prompts")
         last_incoming_normalized = (
             self._normalize_prompts(last_incoming_prompts)
@@ -147,8 +163,10 @@ class TextConditioningBlock(ModularPipelineBlocks):
         )
         incoming_prompts_changed = (
             last_incoming_normalized != incoming_prompts_normalized
+            and incoming_prompts_normalized is not None
         )
-        state.set("_text_conditioning_last_incoming_prompts", block_state.prompts)
+        if block_state.prompts is not None:
+            state.set("_text_conditioning_last_incoming_prompts", block_state.prompts)
 
         # Priority order for prompt selection:
         if transition is not None:
