@@ -200,7 +200,7 @@ class SourceManager:
             return
 
         if not source_class.is_available():
-            logger.error(
+            logger.warning(
                 f"Input source '{source_type}' is not available on this platform"
             )
             return
