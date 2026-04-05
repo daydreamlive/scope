@@ -209,6 +209,16 @@ class LongLivePipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         return self._generate(**kwargs)
 
     def _generate(self, **kwargs) -> dict:
+        # Guard: prompts are required for text-to-video generation.
+        # If neither kwargs nor accumulated state carries prompts, defer this chunk
+        # rather than propagating None into TextConditioningBlock and crashing
+        # deep in the model with an unhelpful error.
+        if kwargs.get("prompts") is None and self.state.get("prompts") is None:
+            logger.debug(
+                "LongLivePipeline._generate: prompts not yet available, skipping chunk"
+            )
+            return {}
+
         # Handle runtime LoRA scale updates before writing into state.
         lora_scales = kwargs.get("lora_scales")
         if lora_scales is not None:
