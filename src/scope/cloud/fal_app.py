@@ -4,8 +4,6 @@ fal.ai deployment for Scope.
 This runs the Scope backend and proxies WebRTC signaling + API calls through
 a single WebSocket connection to avoid fal spawning new runners for each request.
 
-Temporary guard-test edit.
-
 Based on:
 - https://docs.fal.ai/examples/serverless/deploy-models-with-custom-containers
 - https://github.com/fal-ai-community/fal-demos/blob/main/fal_demos/video/yolo_webcam_webrtc/yolo.py
