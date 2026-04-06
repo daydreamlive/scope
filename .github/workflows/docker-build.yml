@@ -153,6 +153,11 @@ jobs:
             | **WebSocket** | \`${livepeerFalWsUrl}\` |
             | **Auth** | \`private\` |
 
+            ### Livepeer Mode
+            \`\`\`
+            SCOPE_CLOUD_MODE=livepeer SCOPE_CLOUD_APP_ID="${livepeerFalAppId}/ws" uv run daydream-scope
+            \`\`\`
+
             `;
 
             const { data: comments } = await github.rest.issues.listComments({
