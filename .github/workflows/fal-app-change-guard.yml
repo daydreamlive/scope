@@ -1,6 +1,12 @@
 name: Fal App Change Guard
 
 on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
   pull_request_target:
     types:
       - opened
@@ -36,6 +42,8 @@ jobs:
             Cloud Relay Mode is no longer maintained.
 
             Please update either \`${livepeerFalAppPath}\` or \`${livepeerAppPath}\` going forward whenever \`${falAppPath}\` changes.`;
+            const dismissMessage =
+              'Dismissing previous guard review because the required Livepeer companion update is now present in the PR diff.';
 
             const files = await github.paginate(
               github.rest.pulls.listFiles,
@@ -59,11 +67,6 @@ jobs:
               `fal_app changed: ${falAppChanged}, livepeer_fal_app changed: ${livepeerFalAppChanged}, livepeer_app changed: ${livepeerAppChanged}, should flag: ${shouldFlag}`,
             );
 
-            if (!shouldFlag) {
-              core.info('Guard condition not met for current PR diff.');
-              return;
-            }
-
             const reviews = await github.paginate(
               github.rest.pulls.listReviews,
               {
@@ -74,14 +77,40 @@ jobs:
               },
             );
 
-            const existingReview = reviews.find(
+            const activeGuardReviews = reviews.filter(
               (review) =>
                 review.user?.type === 'Bot' &&
                 typeof review.body === 'string' &&
-                review.body.includes(marker),
+                review.body.includes(marker) &&
+                review.state === 'CHANGES_REQUESTED',
             );
 
-            if (existingReview) {
+            if (!shouldFlag) {
+              if (activeGuardReviews.length === 0) {
+                core.info('Guard condition not met and no active guard reviews to dismiss.');
+                return;
+              }
+
+              for (const review of activeGuardReviews) {
+                try {
+                  await github.rest.pulls.dismissReview({
+                    owner,
+                    repo,
+                    pull_number: pullNumber,
+                    review_id: review.id,
+                    message: dismissMessage,
+                  });
+                  core.info(`Dismissed guard review ${review.id}.`);
+                } catch (error) {
+                  core.warning(
+                    `Failed to dismiss guard review ${review.id}: ${error.message}`,
+                  );
+                }
+              }
+              return;
+            }
+
+            if (activeGuardReviews.length > 0) {
               core.info('Existing guard review found; skipping duplicate review.');
               return;
             }
