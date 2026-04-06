@@ -246,8 +246,8 @@ export function Header({
                   : "Connect to Cloud"}
             </span>
           </Button>
-          {/* Credit / Trial display — visible only when cloud-connected */}
-          {isConnected && billing.tier !== "free" && billing.credits && (
+          {/* Credit display — always visible when user has credits */}
+          {billing.credits && billing.credits.balance > 0 && (
             <Button
               variant="ghost"
               size="sm"
@@ -264,10 +264,34 @@ export function Header({
                     ? "text-amber-400"
                     : "text-red-500"
               }`}
-              title={`${Math.round(billing.credits.balance)} of ${Math.round(billing.credits.periodCredits)} credits. Using ${billing.creditsPerMin} credits/min while streaming.`}
+              title={`${Math.round(billing.credits.balance)} of ${Math.round(billing.credits.periodCredits)} credits${isConnected ? `. Using ${billing.creditsPerMin} credits/min while streaming.` : "."}`}
             >
               <Coins className="h-4 w-4" />
               {Math.round(billing.credits.balance)} credits
+            </Button>
+          )}
+          {/* Top up / Subscribe CTA */}
+          {billing.credits && billing.tier !== "free" && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => billing.openPortal()}
+              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Top up
+            </Button>
+          )}
+          {billing.tier === "free" && !billing.credits && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                billing.setPaywallReason("subscribe");
+                billing.setShowPaywall(true);
+              }}
+              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Subscribe
             </Button>
           )}
           {isConnected &&

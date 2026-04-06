@@ -60,6 +60,8 @@ class CloudConnectionManager:
         self._stop_event = asyncio.Event()
         # Connection ID from cloud.ai for log correlation
         self._connection_id: str | None = None
+        # GPU type reported by cloud runner (e.g. "h100", "4090")
+        self._gpu_type: str | None = None
         # User ID for log correlation (from fal token)
         self._user_id: str | None = None
 
@@ -175,6 +177,7 @@ class CloudConnectionManager:
                     raise RuntimeError(f"Expected 'ready' message, got: {data}")
                 # Extract connection_id for log correlation
                 self._connection_id = data.get("connection_id")
+                self._gpu_type = data.get("gpu_type")
                 set_fal_connection_id(self._connection_id)
             elif msg.type == aiohttp.WSMsgType.ERROR:
                 # Get the underlying exception for better diagnostics
@@ -582,6 +585,7 @@ class CloudConnectionManager:
         self._stop_event.set()
         self._connected = False
         self._connection_id = None
+        self._gpu_type = None
         set_fal_connection_id(None)
 
         # Stop WebRTC client first
@@ -757,6 +761,7 @@ class CloudConnectionManager:
             "connect_stage": self._connect_stage,
             "app_id": self.app_id if self.is_connected else None,
             "connection_id": self._connection_id if self.is_connected else None,
+            "gpu_type": self._gpu_type if self.is_connected else None,
             "webrtc_connected": self.webrtc_connected,
             "last_close_code": self._last_close_code,
             "last_close_reason": self._last_close_reason,

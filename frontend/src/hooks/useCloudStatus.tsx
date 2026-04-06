@@ -27,6 +27,7 @@ export interface CloudStatus {
   error: string | null;
   app_id: string | null;
   connection_id: string | null;
+  gpu_type: string | null;
   credentials_configured: boolean;
   last_close_code: number | null;
   last_close_reason: string | null;
@@ -39,6 +40,7 @@ const DEFAULT_STATUS: CloudStatus = {
   error: null,
   app_id: null,
   connection_id: null,
+  gpu_type: null,
   credentials_configured: false,
   last_close_code: null,
   last_close_reason: null,
@@ -158,6 +160,7 @@ export function useCloudStatus() {
     isConnected: status.connected,
     isConnecting: status.connecting,
     connectionId: status.connection_id,
+    gpuType: status.gpu_type,
     error: status.error,
     lastCloseCode: status.last_close_code,
     lastCloseReason: status.last_close_reason,

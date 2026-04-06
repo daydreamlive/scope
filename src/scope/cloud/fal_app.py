@@ -587,6 +587,7 @@ class ScopeApp(fal.App, keep_alive=300):
         # Must accept() before close() in Starlette — so we accept, send error, close.
         jwt_secret = os.getenv("INFERENCE_JWT_SECRET")
         user_id = None
+        token = None
 
         if jwt_secret:
             import jwt as pyjwt
@@ -652,8 +653,11 @@ class ScopeApp(fal.App, keep_alive=300):
         # Wait for any in-progress cleanup from the previous session before signaling ready
         await _get_cleanup_event().wait()
 
-        # Send ready message with connection_id
-        await ws.send_json({"type": "ready", "connection_id": connection_id})
+        # Normalize gpu_type for billing: "GPU-H100" → "h100"
+        gpu_type = ScopeApp.machine_type.replace("GPU-", "").lower()
+
+        # Send ready message with connection_id and gpu_type
+        await ws.send_json({"type": "ready", "connection_id": connection_id, "gpu_type": gpu_type})
 
         # Track WebRTC session ID for ICE candidate routing
         session_id = None
@@ -1167,6 +1171,43 @@ class ScopeApp(fal.App, keep_alive=300):
         # Log forwarder task — started after user_id is validated
         log_forwarder_task: asyncio.Task | None = None
 
+        # Credit heartbeat — periodically report usage to Daydream API for credit deduction
+        credit_heartbeat_task: asyncio.Task | None = None
+
+        async def credit_heartbeat_loop():
+            """Call Daydream API stream heartbeat every 15s to deduct credits."""
+            api_base = get_daydream_api_base()
+            while True:
+                await asyncio.sleep(15)
+                if not user_id:
+                    continue
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.post(
+                            f"{api_base}/credits/stream/heartbeat",
+                            json={
+                                "streamKey": connection_id,
+                                "durationSeconds": 15,
+                                "gpuType": gpu_type,
+                            },
+                            headers={"Authorization": f"Bearer {token}"},
+                            timeout=10.0,
+                        )
+                        if resp.status_code == 402:
+                            print(f"[{log_prefix()}] Credits exhausted — closing connection")
+                            await safe_send_json({
+                                "type": "credits_exhausted",
+                                "error": "Credits exhausted",
+                            })
+                            await ws.close(4020, "Credits exhausted")
+                            return
+                except Exception as e:
+                    print(f"[{log_prefix()}] Credit heartbeat failed: {e}")
+
+        # Start credit heartbeat if we have a user (JWT-authenticated)
+        if user_id and token:
+            credit_heartbeat_task = asyncio.create_task(credit_heartbeat_loop())
+
         # Main message loop
         try:
             while True:
@@ -1213,6 +1254,14 @@ class ScopeApp(fal.App, keep_alive=300):
             print(f"[{log_prefix()}] WebSocket error ({type(e).__name__}): {e}")
             await safe_send_json({"type": "error", "error": f"{type(e).__name__}: {e}"})
         finally:
+            # Cancel credit heartbeat task
+            if credit_heartbeat_task is not None:
+                credit_heartbeat_task.cancel()
+                try:
+                    await credit_heartbeat_task
+                except asyncio.CancelledError:
+                    pass
+
             # Cancel log forwarder task
             if log_forwarder_task is not None:
                 log_forwarder_task.cancel()

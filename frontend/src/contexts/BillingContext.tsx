@@ -102,7 +102,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     "trial_exhausted" | "credits_exhausted" | "subscribe" | null
   >(null);
 
-  const { isConnected } = useCloudStatus();
+  const { isConnected, gpuType } = useCloudStatus();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const prevTrialExhausted = useRef(false);
@@ -140,10 +140,14 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       const data = await fetchCreditsBalance(apiKey, deviceId);
       // creditsPerMin can be a number (old API) or Record<string, number> (new API)
       const rawRate = data.creditsPerMin;
-      const scopeRate =
+      const rateMap =
         typeof rawRate === "object" && rawRate !== null
-          ? (rawRate as Record<string, number>).scope ?? 7.5
-          : (rawRate as number);
+          ? (rawRate as Record<string, number>)
+          : null;
+      // Use cloud-reported GPU type when available, fall back to h100 (highest rate)
+      const scopeRate = rateMap
+        ? (rateMap[gpuType ?? "h100"] ?? rateMap.h100 ?? 7.5)
+        : (rawRate as number);
 
       setState({
         tier: data.tier as "free" | "basic" | "pro",
@@ -161,7 +165,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       console.error("[Billing] Failed to refresh:", err);
       setState(prev => ({ ...prev, isLoading: false }));
     }
-  }, []);
+  }, [gpuType]);
 
   // Poll balance every 15s when cloud-connected
   useEffect(() => {
