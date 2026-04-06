@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useRef, type RefObject } from "react";
 import {
   Play,
   Square,
@@ -19,7 +19,15 @@ import {
   DropdownMenuItem,
   DropdownMenuSeparator,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { trackEvent } from "../../lib/analytics";
+import { getShortcutById } from "../../lib/shortcuts";
+import { getEffectiveShortcuts } from "../../lib/shortcutOverrides";
 
 interface GraphToolbarProps {
   isStreaming: boolean;
@@ -35,6 +43,7 @@ interface GraphToolbarProps {
   onDefaultWorkflow?: () => void;
   onOpenSettings?: () => void;
   onOpenPlugins?: () => void;
+  fileInputRef?: RefObject<HTMLInputElement | null>;
 }
 
 export function GraphToolbar({
@@ -51,11 +60,18 @@ export function GraphToolbar({
   onDefaultWorkflow,
   onOpenSettings,
   onOpenPlugins,
+  fileInputRef: externalFileInputRef,
 }: GraphToolbarProps) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const internalFileInputRef = useRef<HTMLInputElement>(null);
+  const fileInputRef = externalFileInputRef ?? internalFileInputRef;
   const busy = isConnecting || isLoading;
 
+  const shortcuts = getEffectiveShortcuts();
+  const streamShortcut = getShortcutById("toggle-stream", shortcuts);
+  const exportShortcut = getShortcutById("export", shortcuts);
+
   return (
+    <TooltipProvider delayDuration={400}>
     <div data-tour="add-node" className={NODE_TOKENS.toolbar}>
       {/* ── Left: Menu dropdown ── */}
       <DropdownMenu>
@@ -78,6 +94,11 @@ export function GraphToolbar({
           >
             <Download className="h-4 w-4" />
             Export Workflow
+            {exportShortcut && (
+              <kbd className="ml-auto font-mono text-[10px] text-muted-foreground">
+                {exportShortcut.keys}
+              </kbd>
+            )}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onSelect={onOpenSettings}>
@@ -139,28 +160,40 @@ export function GraphToolbar({
       )}
 
       {/* ── Right: Hero Play / Stop button ── */}
-      <button
-        data-tour="play-button"
-        onClick={isStreaming ? onStopStream : onStartStream}
-        disabled={busy}
-        className={
-          busy
-            ? NODE_TOKENS.toolbarHeroBusy
-            : isStreaming
-              ? NODE_TOKENS.toolbarHeroStop
-              : NODE_TOKENS.toolbarHeroRun
-        }
-        title={isStreaming ? "Stop stream" : "Start stream"}
-      >
-        {busy ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : isStreaming ? (
-          <Square className="h-3.5 w-3.5" />
-        ) : (
-          <Play className="h-3.5 w-3.5" />
-        )}
-        {busy ? "Starting…" : isStreaming ? "Stop" : "Run"}
-      </button>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <button
+            data-tour="play-button"
+            onClick={isStreaming ? onStopStream : onStartStream}
+            disabled={busy}
+            className={
+              busy
+                ? NODE_TOKENS.toolbarHeroBusy
+                : isStreaming
+                  ? NODE_TOKENS.toolbarHeroStop
+                  : NODE_TOKENS.toolbarHeroRun
+            }
+          >
+            {busy ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : isStreaming ? (
+              <Square className="h-3.5 w-3.5" />
+            ) : (
+              <Play className="h-3.5 w-3.5" />
+            )}
+            {busy ? "Starting…" : isStreaming ? "Stop" : "Run"}
+          </button>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <span>{isStreaming ? "Stop stream" : "Start stream"}</span>
+          {streamShortcut && (
+            <kbd className="ml-1.5 inline-flex items-center rounded border border-border/50 bg-muted/50 px-1 py-0.5 font-mono text-[10px] text-muted-foreground">
+              {streamShortcut.keys}
+            </kbd>
+          )}
+        </TooltipContent>
+      </Tooltip>
     </div>
+    </TooltipProvider>
   );
 }
