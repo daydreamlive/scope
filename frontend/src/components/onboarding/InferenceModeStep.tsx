@@ -41,6 +41,9 @@ export function InferenceModeStep({ onSelect }: InferenceModeStepProps) {
           Welcome to Daydream Scope
         </h1>
         <p className="text-sm text-muted-foreground">
+          Real-time AI video for live streaming, recording, and interactive art.
+        </p>
+        <p className="text-sm text-muted-foreground/70">
           How would you like to proceed?
         </p>
       </div>

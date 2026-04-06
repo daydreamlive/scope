@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { Pause, Play, Volume2, VolumeX } from "lucide-react";
+import { Maximize2, Pause, Play, Volume2, VolumeX } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
@@ -72,6 +72,17 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
     [onPlayPauseToggle]
   );
 
+  const handleFullscreen = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation();
+    const v = videoRef.current;
+    if (!v) return;
+    if (document.fullscreenElement) {
+      document.exitFullscreen();
+    } else {
+      v.requestFullscreen();
+    }
+  }, []);
+
   const handleY = HEADER_H + BODY_PAD + PREVIEW_H / 2;
 
   return (
@@ -136,8 +147,11 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
                 `}</style>
               </div>
             ) : (
-              <div className="flex items-center justify-center h-full text-[10px] text-[#8c8c8d]">
-                No output stream
+              <div className="flex flex-col items-center justify-center h-full gap-1 text-[#8c8c8d]">
+                <span className="text-[10px]">No output stream</span>
+                <span className="text-[9px] text-[#666] text-center px-2">
+                  Resize node for a bigger preview · use Spout/NDI/Syphon for external output
+                </span>
               </div>
             )}
             {hasVideoTrack && (
@@ -157,6 +171,15 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
                     )}
                   </button>
                 )}
+                <button
+                  onClick={handleFullscreen}
+                  onPointerDown={e => e.stopPropagation()}
+                  className="flex items-center justify-center bg-black/60 px-1 rounded cursor-pointer"
+                  style={{ height: 16 }}
+                  title="Fullscreen"
+                >
+                  <Maximize2 className="h-2.5 w-2.5 text-white" />
+                </button>
                 {videoSize && (
                   <span
                     className="text-[9px] text-[#8c8c8d] bg-black/60 px-1 rounded leading-none"
