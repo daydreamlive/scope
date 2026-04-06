@@ -70,10 +70,6 @@ export function WorkflowPickerStep({
         <p className="text-sm text-muted-foreground">
           Choose one and you&rsquo;ll be generating in seconds.
         </p>
-        <p className="text-xs text-muted-foreground/60">
-          Scope outputs live — use it for live streams, interactive art, or recording sessions.
-          Route output via Spout/NDI/Syphon to any external app or broadcast tool.
-        </p>
       </div>
 
       {/* Workflow cards */}
