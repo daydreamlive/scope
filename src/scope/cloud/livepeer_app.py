@@ -830,8 +830,9 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
     session = LivepeerSession(ws=ws, connection_id=connection_id)
 
-    # Send ready message with connection_id
-    await ws.send_json({"type": "ready", "connection_id": connection_id})
+    # Send ready message with connection_id and gpu_type for billing
+    gpu_type = os.getenv("GPU_TYPE", "h100")
+    await ws.send_json({"type": "ready", "connection_id": connection_id, "gpu_type": gpu_type})
 
     try:
         raw = await ws.receive_text()

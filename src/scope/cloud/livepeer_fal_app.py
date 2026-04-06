@@ -228,6 +228,7 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
     requirements = [
         "websockets",
         "httpx",
+        "pyjwt",
     ]
 
     def setup(self):
@@ -260,6 +261,7 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             "NVIDIA_DRIVER_CAPABILITIES",
             "LD_LIBRARY_PATH",
             "DAYDREAM_API_BASE",
+            "INFERENCE_JWT_SECRET",
             "HF_TOKEN",
             "HF_HOME",
             "HUGGINGFACE_HUB_CACHE",
@@ -277,6 +279,10 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             "DAYDREAM_SCOPE_PLUGINS_DIR", ASSETS_DIR_PATH + "/plugins"
         )
         runner_env.setdefault("PYTHONUNBUFFERED", "1")
+        # Pass GPU type to runner subprocess for billing ready message
+        runner_env["GPU_TYPE"] = (
+            LivepeerScopeApp.machine_type.replace("GPU-", "").lower()
+        )
 
         runner_cmd = _build_runner_command()
         print(f"Starting Livepeer runner with command: {' '.join(runner_cmd)}")
@@ -308,13 +314,99 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         """WebSocket endpoint for Livepeer signaling and control traffic."""
         print("Livepeer fal websocket_handler invoked for /ws")
 
+        import json
+
+        import httpx
         from websockets.exceptions import (
             ConnectionClosed,
             InvalidHandshake,
             InvalidStatus,
         )
 
+        # ─── JWT validation ──────────────────────────────────────────────
+        jwt_secret = os.getenv("INFERENCE_JWT_SECRET")
+        user_id = None
+        token = None
+
+        if jwt_secret:
+            import jwt as pyjwt
+
+            token = client_ws.query_params.get("fal_jwt_token")
+            reject_reason = None
+
+            if not token:
+                reject_reason = "Missing inference token"
+            else:
+                try:
+                    payload = pyjwt.decode(
+                        token, jwt_secret, algorithms=["HS256"]
+                    )
+                    user_id = payload.get("sub")
+                    if not user_id:
+                        reject_reason = "Invalid token: missing sub claim"
+                    else:
+                        print(f"[Auth] JWT validated for user {user_id}")
+                except pyjwt.ExpiredSignatureError:
+                    reject_reason = "Token expired"
+                except pyjwt.InvalidTokenError as e:
+                    reject_reason = f"Invalid token: {e}"
+
+            if reject_reason:
+                print(f"[Auth] Rejecting WebSocket: {reject_reason}")
+                await client_ws.accept()
+                await client_ws.close(4001, reject_reason)
+                return
+        else:
+            print(
+                "[Auth] WARNING: INFERENCE_JWT_SECRET not set, "
+                "skipping token validation"
+            )
+
         await client_ws.accept()
+
+        # GPU type for billing
+        gpu_type = LivepeerScopeApp.machine_type.replace("GPU-", "").lower()
+
+        # ─── Credit heartbeat ────────────────────────────────────────────
+        credit_heartbeat_task: asyncio.Task | None = None
+
+        async def credit_heartbeat_loop() -> None:
+            api_base = os.getenv(
+                "DAYDREAM_API_BASE", "https://api.daydream.live"
+            )
+            while True:
+                await asyncio.sleep(15)
+                if not user_id:
+                    continue
+                try:
+                    async with httpx.AsyncClient() as client:
+                        resp = await client.post(
+                            f"{api_base}/credits/stream/heartbeat",
+                            json={
+                                "streamKey": "livepeer",
+                                "durationSeconds": 15,
+                                "gpuType": gpu_type,
+                            },
+                            headers={"Authorization": f"Bearer {token}"},
+                            timeout=10.0,
+                        )
+                        if resp.status_code == 402:
+                            print(
+                                "[Livepeer] Credits exhausted — closing connection"
+                            )
+                            await client_ws.send_text(
+                                json.dumps({
+                                    "type": "credits_exhausted",
+                                    "error": "Credits exhausted",
+                                })
+                            )
+                            await client_ws.close(4020, "Credits exhausted")
+                            return
+                except Exception as e:
+                    print(f"[Livepeer] Credit heartbeat failed: {e}")
+
+        if user_id and token:
+            credit_heartbeat_task = asyncio.create_task(credit_heartbeat_loop())
 
         # Ensure any previous session data is cleaned up
         event = _get_cleanup_event()
@@ -357,6 +449,12 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         except Exception as exc:
             print(f"Livepeer fal ws proxy error: {type(exc).__name__}: {exc}")
         finally:
+            if credit_heartbeat_task is not None:
+                credit_heartbeat_task.cancel()
+                try:
+                    await credit_heartbeat_task
+                except asyncio.CancelledError:
+                    pass
             await run_cleanup()
             with suppress(Exception):
                 await client_ws.close()
