@@ -153,7 +153,7 @@ jobs:
             | **WebSocket** | \`${livepeerFalWsUrl}\` |
             | **Auth** | \`private\` |
 
-            ### Livepeer Mode
+            ### Testing Livepeer Mode
             \`\`\`
             SCOPE_CLOUD_MODE=livepeer SCOPE_CLOUD_APP_ID="${livepeerFalAppId}/ws" uv run daydream-scope
             \`\`\`
