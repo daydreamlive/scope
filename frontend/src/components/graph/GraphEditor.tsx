@@ -275,6 +275,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setSelectedNodeIds,
       handlePipelineSelect,
       handleNodeParameterChange,
+      handlePromptChange,
       applyExternalNodeParams,
       enrichDepsRef,
       handleEdgeDelete,
@@ -570,6 +571,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         setSelectedNodeIds,
       });
 
+    const onPromptForwardRef = useRef(handlePromptChange);
+    onPromptForwardRef.current = handlePromptChange;
+
     useValueForwarding(
       nodes,
       edges,
@@ -577,7 +581,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       resolveBackendId,
       isStreaming,
       onNodeParamChangeRef,
-      setNodes
+      setNodes,
+      onPromptForwardRef
     );
 
     useKeyboardShortcuts(
