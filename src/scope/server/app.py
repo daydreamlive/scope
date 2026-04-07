@@ -2976,6 +2976,12 @@ async def connect_to_cloud(
         )
         await cloud_manager.connect_background(app_id, api_key, request.user_id)
 
+        # Invalidate cached pipeline schemas so that when the cloud connection
+        # completes, subsequent requests either proxy to the cloud (returning
+        # cloud pipelines) or rebuild from the local registry instead of
+        # serving stale cached data from a previous local-only fetch.
+        _invalidate_plugin_caches()
+
         credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
         return CloudStatusResponse(
             connected=False,
@@ -3000,6 +3006,10 @@ async def disconnect_from_cloud(
     """
     try:
         await cloud_manager.disconnect()
+        # Invalidate cached pipeline schemas so that post-disconnect requests
+        # rebuild the list from the local registry instead of returning stale
+        # cloud-era data.
+        _invalidate_plugin_caches()
         credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
         return CloudStatusResponse(
             connected=False,

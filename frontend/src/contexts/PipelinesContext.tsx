@@ -28,9 +28,15 @@ export function PipelinesProvider({ children }: { children: ReactNode }) {
   innerRefresh.current = pipelinesState.refreshPipelines;
 
   const refreshPipelines = useCallback(async () => {
-    const result = await innerRefresh.current();
-    setPipelinesVersion(v => v + 1);
-    return result;
+    try {
+      const result = await innerRefresh.current();
+      return result;
+    } finally {
+      // Always bump version so dependent effects (e.g. useGraphState) re-fetch
+      // pipeline schemas, even if this particular refresh failed (e.g. cloud
+      // proxy was momentarily unavailable during connection establishment).
+      setPipelinesVersion(v => v + 1);
+    }
   }, []);
 
   const value: PipelinesContextValue = {
