@@ -780,11 +780,7 @@ export function StreamPage() {
       // Import/restore calls this with (mode, nodeId). Clear the global
       // useVideoSource stream (e.g. test.mp4) when switching to server-side
       // capture — otherwise WebRTC still sends that track alongside Syphon/NDI/Spout.
-      if (
-        newMode === "spout" ||
-        newMode === "ndi" ||
-        newMode === "syphon"
-      ) {
+      if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
         void switchMode(newMode as "spout" | "ndi" | "syphon");
       }
       // For "video" (file) mode, the stream is set via handlePerNodeVideoFileUpload
