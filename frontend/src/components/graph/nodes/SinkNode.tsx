@@ -123,6 +123,17 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
                   playsInline
                   onResize={handleResize}
                 />
+                {/* Separate audio element for audio-only streams */}
+                {hasAudioTrack && !hasVideoTrack && (
+                  <audio
+                    autoPlay
+                    ref={el => {
+                      if (el && el.srcObject !== remoteStream) {
+                        el.srcObject = remoteStream;
+                      }
+                    }}
+                  />
+                )}
                 {!hasVideoTrack && (
                   <div className="flex flex-col items-center justify-center h-full gap-1 text-[#8c8c8d]">
                     <Volume2 className="h-5 w-5" />
