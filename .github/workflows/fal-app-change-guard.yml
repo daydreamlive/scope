@@ -1,0 +1,166 @@
+name: Fal App Change Guard
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  guard-fal-app-changes:
+    name: Guard fal app changes
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check PR file diff and enforce livepeer update
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pullNumber = context.payload.pull_request.number;
+
+            const falAppPath = 'src/scope/cloud/fal_app.py';
+            const livepeerFalAppPath = 'src/scope/cloud/livepeer_fal_app.py';
+            const livepeerAppPath = 'src/scope/cloud/livepeer_app.py';
+            const marker = '<!-- fal-app-change-guard -->';
+
+            const reviewBody = `${marker}
+            Cloud Relay Mode is no longer maintained.
+
+            Please update either \`${livepeerFalAppPath}\` or \`${livepeerAppPath}\` going forward whenever \`${falAppPath}\` changes.`;
+            const dismissMessage =
+              'Dismissing previous guard review because the required Livepeer companion update is now present in the PR diff.';
+
+            const files = await github.paginate(
+              github.rest.pulls.listFiles,
+              {
+                owner,
+                repo,
+                pull_number: pullNumber,
+                per_page: 100,
+              },
+            );
+
+            const changedFiles = new Set(files.map((file) => file.filename));
+            const falAppChanged = changedFiles.has(falAppPath);
+            const livepeerFalAppChanged = changedFiles.has(livepeerFalAppPath);
+            const livepeerAppChanged = changedFiles.has(livepeerAppPath);
+            const hasRequiredCompanionChange =
+              livepeerFalAppChanged || livepeerAppChanged;
+            const shouldFlag = falAppChanged && !hasRequiredCompanionChange;
+
+            core.info(
+              `fal_app changed: ${falAppChanged}, livepeer_fal_app changed: ${livepeerFalAppChanged}, livepeer_app changed: ${livepeerAppChanged}, should flag: ${shouldFlag}`,
+            );
+
+            const reviews = await github.paginate(
+              github.rest.pulls.listReviews,
+              {
+                owner,
+                repo,
+                pull_number: pullNumber,
+                per_page: 100,
+              },
+            );
+
+            const activeGuardReviews = reviews.filter(
+              (review) =>
+                review.user?.type === 'Bot' &&
+                typeof review.body === 'string' &&
+                review.body.includes(marker) &&
+                review.state === 'CHANGES_REQUESTED',
+            );
+
+            if (!shouldFlag) {
+              if (activeGuardReviews.length === 0) {
+                core.info('Guard condition not met and no active guard reviews to dismiss.');
+                return;
+              }
+
+              for (const review of activeGuardReviews) {
+                try {
+                  await github.rest.pulls.dismissReview({
+                    owner,
+                    repo,
+                    pull_number: pullNumber,
+                    review_id: review.id,
+                    message: dismissMessage,
+                  });
+                  core.info(`Dismissed guard review ${review.id}.`);
+                } catch (error) {
+                  core.warning(
+                    `Failed to dismiss guard review ${review.id}: ${error.message}`,
+                  );
+                }
+              }
+              return;
+            }
+
+            if (activeGuardReviews.length > 0) {
+              core.info('Existing guard review found; skipping duplicate review.');
+              return;
+            }
+
+            try {
+              await github.rest.pulls.createReview({
+                owner,
+                repo,
+                pull_number: pullNumber,
+                event: 'REQUEST_CHANGES',
+                body: reviewBody,
+              });
+              core.info('Requested changes on PR due to fal/livepeer mismatch.');
+            } catch (error) {
+              core.warning(
+                `Failed to create REQUEST_CHANGES review; falling back to PR comment. Error: ${error.message}`,
+              );
+
+              const comments = await github.paginate(
+                github.rest.issues.listComments,
+                {
+                  owner,
+                  repo,
+                  issue_number: pullNumber,
+                  per_page: 100,
+                },
+              );
+
+              const existingComment = comments.find(
+                (comment) =>
+                  comment.user?.type === 'Bot' &&
+                  typeof comment.body === 'string' &&
+                  comment.body.includes(marker),
+              );
+
+              if (existingComment) {
+                await github.rest.issues.updateComment({
+                  owner,
+                  repo,
+                  comment_id: existingComment.id,
+                  body: reviewBody,
+                });
+                core.info('Updated existing guard comment.');
+              } else {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: pullNumber,
+                  body: reviewBody,
+                });
+                core.info('Created new guard comment.');
+              }
+            }
