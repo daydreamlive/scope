@@ -2818,12 +2818,18 @@ export function StreamPage() {
       // video-only pipelines, and vice versa). Read from the ref (not React
       // state) to guarantee fresh values in the same tick loadPipeline resolved.
       const latestInfo = pipelineInfoRef.current;
-      if (pipelineIds.length > 0) {
-        initialParameters.produces_video = latestInfo?.produces_video ?? true;
-        initialParameters.produces_audio = latestInfo?.produces_audio ?? false;
-      } else {
-        // Node-only graph: let the backend detect audio/video from the graph
-        initialParameters.produces_audio = true;
+      initialParameters.produces_video = latestInfo?.produces_video ?? true;
+      initialParameters.produces_audio = latestInfo?.produces_audio ?? false;
+
+      // If the graph has custom nodes with audio ports, force audio on —
+      // the pipeline status only reflects loaded pipelines, not custom nodes.
+      if (graphConfigForStream) {
+        const hasAudioNode = graphConfigForStream.nodes.some(
+          n => n.type === "node"
+        );
+        if (hasAudioNode) {
+          initialParameters.produces_audio = true;
+        }
       }
 
       // VACE-specific parameters
