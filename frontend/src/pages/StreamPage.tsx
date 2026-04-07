@@ -784,10 +784,41 @@ export function StreamPage() {
       if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
         void switchMode(newMode as "spout" | "ndi" | "syphon");
       }
-      // For "video" (file) mode, the stream is set via handlePerNodeVideoFileUpload
+      // When switching to file mode during streaming, auto-load a sample
+      // video so the WebRTC track is replaced immediately.
+      if (newMode === "video" && isStreaming) {
+        const currentIndex = nodeSampleVideoIndexRef.current[nodeId] ?? 0;
+        const nextUrl = SAMPLE_VIDEOS[currentIndex % SAMPLE_VIDEOS.length];
+        const oldVideo = nodeVideoElementsRef.current[nodeId];
+        if (oldVideo) {
+          oldVideo.pause();
+          oldVideo.removeAttribute("src");
+          oldVideo.load();
+        }
+        const video = document.createElement("video");
+        video.src = nextUrl;
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        video
+          .play()
+          .then(() => {
+            nodeVideoElementsRef.current[nodeId] = video;
+            const stream = (
+              video as HTMLVideoElement & { captureStream(): MediaStream }
+            ).captureStream();
+            setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+          })
+          .catch(e => {
+            console.error(
+              `Failed to auto-load sample video for node ${nodeId}:`,
+              e
+            );
+          });
+      }
       // For spout/ndi/syphon, no local stream needed (server-side)
     },
-    [switchMode, createCameraStreamForNode]
+    [switchMode, createCameraStreamForNode, isStreaming]
   );
 
   // Handle per-node video file upload in graph mode
