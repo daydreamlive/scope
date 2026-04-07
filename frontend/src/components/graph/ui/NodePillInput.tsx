@@ -79,9 +79,7 @@ export function NodePillInput({
           dragRef.current.startValue + dx * sensitivity
         );
         onChange(
-          isInteger
-            ? Math.round(newVal)
-            : Math.round(newVal * 1000) / 1000
+          isInteger ? Math.round(newVal) : Math.round(newVal * 1000) / 1000
         );
       };
 
