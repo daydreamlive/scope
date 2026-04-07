@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, model_validator
 
 if TYPE_CHECKING:
     from .cloud_connection import CloudConnectionManager
@@ -223,6 +223,12 @@ class StartStreamRequest(BaseModel):
     input_source: dict | None = None
     graph: dict | None = None
 
+    @model_validator(mode="after")
+    def _require_pipeline_or_graph(self) -> "StartStreamRequest":
+        if self.pipeline_id is None and self.graph is None:
+            raise ValueError("Either pipeline_id or graph must be provided")
+        return self
+
 
 def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
     """Wire cloud WebRTC extra output handlers to FrameProcessor queues.
@@ -246,11 +252,12 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
     sink_ids = graph_config.get_sink_node_ids()
     record_ids = graph_config.get_record_node_ids()
 
-    # Create per-sink queues in the FrameProcessor so HeadlessSession
+    # Create per-sink queues in the SinkManager so HeadlessSession
     # can read from them via get_from_sink()
+    sink_queues = frame_processor.sink_manager._sink_queues_by_node
     for sid in sink_ids:
-        if sid not in frame_processor._sink_queues_by_node:
-            frame_processor._sink_queues_by_node[sid] = queue.Queue(maxsize=2)
+        if sid not in sink_queues:
+            sink_queues[sid] = queue.Queue(maxsize=2)
 
     # The first sink is the primary (track 0) — its frames come through
     # the main cloud callback → _cloud_output_queue. We need to also
@@ -258,11 +265,12 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
     # can find them.
     if sink_ids:
         primary_sink_id = sink_ids[0]
-        primary_q = frame_processor._sink_queues_by_node[primary_sink_id]
+        primary_q = sink_queues[primary_sink_id]
 
         import torch
 
-        original_callback = frame_processor._on_frame_from_cloud
+        cloud_relay = frame_processor._cloud_relay
+        original_callback = cloud_relay.on_frame_from_cloud
 
         def _primary_sink_callback(frame: VideoFrame) -> None:
             original_callback(frame)
@@ -280,21 +288,19 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
             except Exception as e:
                 logger.error(f"Error in primary sink callback: {e}")
 
-        cloud_manager.remove_frame_callback(frame_processor._on_frame_from_cloud)
+        cloud_manager.remove_frame_callback(original_callback)
         cloud_manager.add_frame_callback(_primary_sink_callback)
         # Store ref so stop() can deregister
-        frame_processor._on_frame_from_cloud = _primary_sink_callback
+        cloud_relay.on_frame_from_cloud = _primary_sink_callback
 
     # Wire extra sink output handlers (track index 1+)
     for i, sid in enumerate(sink_ids[1:], start=1):
-        handler = webrtc_client.extra_output_handlers.get(i)
-        if handler is None:
+        if i >= len(webrtc_client.output_handlers):
             continue
-        sink_q = frame_processor._sink_queues_by_node[sid]
+        handler = webrtc_client.output_handlers[i]
+        sink_q = sink_queues[sid]
 
         def _make_sink_cb(q, sink_id):
-            import torch
-
             def cb(frame: VideoFrame) -> None:
                 try:
                     frame_np = frame.to_ndarray(format="rgb24")
@@ -319,9 +325,9 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
     num_extra_sinks = max(0, len(sink_ids) - 1)
     for i, rec_id in enumerate(record_ids):
         handler_index = num_extra_sinks + 1 + i
-        handler = webrtc_client.extra_output_handlers.get(handler_index)
-        if handler is None:
+        if handler_index >= len(webrtc_client.output_handlers):
             continue
+        handler = webrtc_client.output_handlers[handler_index]
 
         def _make_rec_cb(fp, rid):
             def cb(frame: VideoFrame) -> None:
@@ -395,18 +401,14 @@ async def start_stream(
             "input_mode": request.input_mode,
             "graph": request.graph,
         }
-    elif request.pipeline_id is not None:
-        # Simple single-pipeline mode
+    else:
+        # Simple single-pipeline mode (pipeline_id guaranteed by model_validator)
+        assert request.pipeline_id is not None
         pipeline_id_list = [request.pipeline_id]
         initial_params = {
             "pipeline_ids": pipeline_id_list,
             "input_mode": request.input_mode,
         }
-    else:
-        raise HTTPException(
-            status_code=400,
-            detail="Either pipeline_id or graph must be provided",
-        )
 
     if request.prompts is not None:
         initial_params["prompts"] = request.prompts
@@ -435,8 +437,6 @@ async def start_stream(
         # can capture per-sink frames and per-record-node recordings.
         if use_cloud and request.graph is not None:
             _wire_cloud_outputs(cloud_manager, frame_processor, graph_config)
-        elif use_cloud:
-            graph_config = None  # no graph in simple mode
 
         if not frame_processor.running:
             raise HTTPException(
@@ -446,7 +446,7 @@ async def start_stream(
 
         session = HeadlessSession(
             frame_processor=frame_processor,
-            expect_audio=PipelineRegistry.chain_produces_audio([request.pipeline_id]),
+            expect_audio=PipelineRegistry.chain_produces_audio(pipeline_id_list),
         )
         session.start_frame_consumer()
         webrtc_manager.add_headless_session(session)
