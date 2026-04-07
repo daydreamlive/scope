@@ -62,6 +62,13 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
     }
   }, [isMuted]);
 
+  // Auto-unmute when audio arrives without video (audio-only workflow)
+  useEffect(() => {
+    if (hasAudioTrack && !hasVideoTrack) {
+      setIsMuted(false);
+    }
+  }, [hasAudioTrack, hasVideoTrack]);
+
   const toggleMute = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     setIsMuted(prev => !prev);
