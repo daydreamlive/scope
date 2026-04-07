@@ -7,7 +7,6 @@ import os
 import shutil
 import tempfile
 import threading
-import time
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -18,9 +17,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 RECORDING_MAX_FPS = 30.0
-VIDEO_CLOCK_RATE = 90_000
 AUDIO_CLOCK_RATE = 48_000
-AUDIO_FLUSH_SENTINEL = -1
 
 
 class HeadlessMediaSink:
@@ -83,7 +80,6 @@ class HeadlessTsStreamer(HeadlessMediaSink):
         self._initialized = False
         self._closed = False
         self._lock = threading.Lock()
-        self._video_start_time: float | None = None
         self._audio_samples_written = 0
 
     def _init_container(self, width: int, height: int):
@@ -122,11 +118,6 @@ class HeadlessTsStreamer(HeadlessMediaSink):
 
                 arr = np.pad(arr, ((0, pad_h), (0, pad_w), (0, 0)), mode="edge")
             frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
-            now = time.monotonic()
-            if self._video_start_time is None:
-                self._video_start_time = now
-            frame.pts = int((now - self._video_start_time) * VIDEO_CLOCK_RATE)
-            frame.time_base = fractions.Fraction(1, VIDEO_CLOCK_RATE)
             for packet in self._video_stream.encode(frame):
                 self._container.mux(packet)
 
@@ -137,11 +128,7 @@ class HeadlessTsStreamer(HeadlessMediaSink):
             return
         if audio_tensor is None:
             return
-        if (
-            sample_rate is None
-            or sample_rate <= 0
-            or sample_rate == AUDIO_FLUSH_SENTINEL
-        ):
+        if sample_rate is None or sample_rate <= 0:
             return
 
         import av
@@ -379,13 +366,19 @@ class HeadlessSession:
                 vf = VideoFrame.from_ndarray(frame_np, format="rgb24")
                 with self._frame_lock:
                     self._last_frame = vf
+                # Dispatch frame to active sinks (recorder, streamer, etc.)
                 for sink in self._get_sinks_snapshot():
                     try:
                         sink.on_video_frame(vf)
                     except Exception as e:
                         logger.warning("Headless video sink failed: %s", e)
                         self.remove_media_sink(sink)
-                        sink.close()
+                        try:
+                            sink.close()
+                        except Exception as close_err:
+                            logger.warning(
+                                "Failed to close headless sink: %s", close_err
+                            )
 
             while True:
                 audio_tensor, sample_rate = self.frame_processor.get_audio()
@@ -398,7 +391,12 @@ class HeadlessSession:
                     except Exception as e:
                         logger.warning("Headless audio sink failed: %s", e)
                         self.remove_media_sink(sink)
-                        sink.close()
+                        try:
+                            sink.close()
+                        except Exception as close_err:
+                            logger.warning(
+                                "Failed to close headless sink: %s", close_err
+                            )
 
             if consumed:
                 # Yield to event loop so HTTP handlers can run

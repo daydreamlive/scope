@@ -170,19 +170,13 @@ class SourceManager:
             self._create_and_connect(source_type, source_name)
 
         elif not enabled and self._source_enabled:
-            self._source_enabled = False
-            if self._source is not None:
-                self._source.close()
-                self._source = None
+            self._stop_primary_source()
             logger.info("Input source disabled")
 
         elif enabled and (
             source_type != self._source_type or config.get("reconnect", False)
         ):
-            self._source_enabled = False
-            if self._source is not None:
-                self._source.close()
-                self._source = None
+            self._stop_primary_source()
             self._create_and_connect(source_type, source_name)
 
     def _create_and_connect(self, source_type: str, source_name: str) -> None:
@@ -237,6 +231,36 @@ class SourceManager:
                 except Exception:
                     pass
             self._source = None
+            self._source_thread = None
+
+    def _stop_primary_source(self) -> None:
+        """Stop and clean up the primary input source safely.
+
+        Join the receiver thread before closing the source. If we close
+        PyAV/FFmpeg state while another thread is still inside
+        ``receive_frame()``/decode, teardown can block or wedge in native
+        FFmpeg cleanup/waits.
+
+        "Primary" here means the single non-per-node source stored on
+        ``self._source`` / ``self._source_thread`` (as opposed to entries in
+        ``self._sources_by_node`` for multi-source graph mode).
+        """
+        self._source_enabled = False
+
+        if self._source_thread and self._source_thread.is_alive():
+            self._source_thread.join(timeout=3.0)
+            if self._source_thread.is_alive():
+                logger.warning("Generic input source thread did not stop within 3s")
+        self._source_thread = None
+
+        if self._source is not None:
+            try:
+                self._source.close()
+            except Exception as e:
+                logger.error(f"Error closing input source: {e}")
+            finally:
+                self._source = None
+        self._source_type = ""
 
     def _receiver_loop(
         self,
@@ -368,13 +392,7 @@ class SourceManager:
         self._running = False
 
         # Generic input source
-        self._source_enabled = False
-        if self._source is not None:
-            try:
-                self._source.close()
-            except Exception as e:
-                logger.error(f"Error closing input source: {e}")
-            self._source = None
+        self._stop_primary_source()
 
         # Per-node input sources: join threads first to avoid closing the
         # source while the thread is still inside receive_frame() (causes
