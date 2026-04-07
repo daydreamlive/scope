@@ -8,6 +8,7 @@ import {
   Monitor,
   Clock,
   Coins,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
@@ -246,8 +247,8 @@ export function Header({
                   : "Connect to Cloud"}
             </span>
           </Button>
-          {/* Credit display — always visible when user has credits */}
-          {billing.credits && billing.credits.balance > 0 && (
+          {/* Credit display — visible when user has credits (including zero) */}
+          {billing.credits && (
             <Button
               variant="ghost"
               size="sm"
@@ -256,18 +257,24 @@ export function Header({
                 setSettingsOpen(true);
               }}
               className={`h-8 gap-1.5 px-2 text-xs font-medium ${
-                billing.credits.balance >
-                billing.credits.periodCredits * 0.2
+                billing.credits.balance > billing.credits.periodCredits * 0.2
                   ? "text-green-500"
                   : billing.credits.balance >
                       billing.credits.periodCredits * 0.05
                     ? "text-amber-400"
                     : "text-red-500"
               }`}
-              title={`${Math.round(billing.credits.balance)} of ${Math.round(billing.credits.periodCredits)} credits${isConnected ? `. Using ${billing.creditsPerMin} credits/min while streaming.` : "."}`}
+              title={`${Math.round(billing.credits.balance)} of ${Math.round(billing.credits.periodCredits)} credits${isConnected && billing.creditsPerMin > 0 ? `. Using ${billing.creditsPerMin} credits/min while streaming.` : "."}`}
             >
               <Coins className="h-4 w-4" />
               {Math.round(billing.credits.balance)} credits
+              {billing.creditsPerMin > 0 && billing.credits.balance > 0 && (
+                <span className="text-muted-foreground ml-0.5">
+                  (~
+                  {Math.round(billing.credits.balance / billing.creditsPerMin)}{" "}
+                  min)
+                </span>
+              )}
             </Button>
           )}
           {/* Top up / Subscribe CTA */}
@@ -277,8 +284,9 @@ export function Header({
               size="sm"
               onClick={() => billing.openPortal()}
               className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+              title="Add credits or manage your subscription"
             >
-              Top up
+              Add Credits
             </Button>
           )}
           {billing.tier === "free" && !billing.credits && (
@@ -300,10 +308,8 @@ export function Header({
             !billing.trial.exhausted && (
               <span
                 className={`flex items-center gap-1 text-xs font-medium px-2 ${
-                  billing.trial.secondsLimit - billing.trial.secondsUsed <
-                  300
-                    ? billing.trial.secondsLimit -
-                        billing.trial.secondsUsed <
+                  billing.trial.secondsLimit - billing.trial.secondsUsed < 300
+                    ? billing.trial.secondsLimit - billing.trial.secondsUsed <
                       60
                       ? "text-red-500"
                       : "text-amber-400"
@@ -311,9 +317,23 @@ export function Header({
                 }`}
               >
                 <Clock className="h-3.5 w-3.5" />
+                Trial:{" "}
                 {formatTrialTime(
-                  billing.trial.secondsLimit - billing.trial.secondsUsed,
+                  billing.trial.secondsLimit - billing.trial.secondsUsed
                 )}
+              </span>
+            )}
+          {/* Billing unavailable fallback */}
+          {isConnected &&
+            billing.billingError &&
+            !billing.credits &&
+            !billing.trial && (
+              <span
+                className="flex items-center gap-1 text-xs font-medium px-2 text-amber-400"
+                title="Unable to load billing status. Usage may not be tracked."
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Billing unavailable
               </span>
             )}
           <Button

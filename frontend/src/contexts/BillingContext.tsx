@@ -37,6 +37,7 @@ export interface BillingState {
   creditsPerMin: number;
   allRates: Record<string, number> | null;
   isLoading: boolean;
+  billingError: boolean;
 }
 
 interface BillingContextValue extends BillingState {
@@ -48,7 +49,7 @@ interface BillingContextValue extends BillingState {
   setShowPaywall: (show: boolean) => void;
   paywallReason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null;
   setPaywallReason: (
-    reason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null,
+    reason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null
   ) => void;
   /** Get a valid inference token (requests new one if expired) */
   getInferenceToken: () => Promise<string | null>;
@@ -62,6 +63,7 @@ const defaultState: BillingContextValue = {
   creditsPerMin: 7.5,
   allRates: null,
   isLoading: true,
+  billingError: false,
   refresh: async () => {},
   openCheckout: async () => {},
   openPortal: async () => {},
@@ -96,6 +98,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     creditsPerMin: 7.5,
     allRates: null,
     isLoading: true,
+    billingError: false,
   });
   const [showPaywall, setShowPaywall] = useState(false);
   const [paywallReason, setPaywallReason] = useState<
@@ -114,8 +117,11 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   } | null>(null);
 
   // Warning thresholds (tracked so we only toast once per threshold)
-  const creditWarningShown = useRef<"none" | "low" | "critical">("none");
+  const creditWarningShown = useRef<"none" | "low" | "critical" | "grace">(
+    "none"
+  );
   const trialWarningShown = useRef<"none" | "2min" | "30sec">("none");
+  const upsellShown = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -132,6 +138,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
           subscription: null,
           trial: { secondsUsed, secondsLimit, exhausted },
           isLoading: false,
+          billingError: false,
         }));
         return;
       }
@@ -160,10 +167,11 @@ export function BillingProvider({ children }: { children: ReactNode }) {
             ? (rawRate as Record<string, number>)
             : null,
         isLoading: false,
+        billingError: false,
       });
     } catch (err) {
       console.error("[Billing] Failed to refresh:", err);
-      setState(prev => ({ ...prev, isLoading: false }));
+      setState(prev => ({ ...prev, isLoading: false, billingError: true }));
     }
   }, [gpuType]);
 
@@ -183,7 +191,12 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
   // Trial heartbeat every 60s when streaming on free trial
   useEffect(() => {
-    if (isConnected && state.tier === "free" && state.trial && !state.trial.exhausted) {
+    if (
+      isConnected &&
+      state.tier === "free" &&
+      state.trial &&
+      !state.trial.exhausted
+    ) {
       heartbeatRef.current = setInterval(async () => {
         try {
           const apiKey = getDaydreamAPIKey();
@@ -219,20 +232,47 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     prevTrialExhausted.current = state.trial?.exhausted ?? false;
   }, [state.trial?.exhausted]);
 
-  // Low credit warnings — toast once per threshold
+  // Low credit warnings — toast once per threshold, with grace period warning
   useEffect(() => {
     if (!isConnected || !state.credits || state.tier === "free") {
       creditWarningShown.current = "none";
+      upsellShown.current = false;
       return;
     }
     const { balance, periodCredits } = state.credits;
     const pct = periodCredits > 0 ? balance / periodCredits : 1;
+    const minutesLeft =
+      state.creditsPerMin > 0 ? Math.round(balance / state.creditsPerMin) : 0;
 
-    if (pct <= 0.05 && creditWarningShown.current !== "critical") {
+    // Grace period: ~1 min of credits left — warn that stream will end soon
+    if (
+      minutesLeft <= 1 &&
+      balance > 0 &&
+      creditWarningShown.current !== "grace"
+    ) {
+      creditWarningShown.current = "grace";
+      toast.warning(
+        "Your stream will end in about 1 minute. Add credits to keep going.",
+        {
+          duration: 60000,
+          action: {
+            label: "Add Credits",
+            onClick: () => {
+              setPaywallReason("credits_exhausted");
+              setShowPaywall(true);
+            },
+          },
+        },
+      );
+    } else if (
+      pct <= 0.05 &&
+      creditWarningShown.current !== "critical" &&
+      creditWarningShown.current !== "grace"
+    ) {
       creditWarningShown.current = "critical";
       toast.warning(
-        `Credits critically low — ${Math.round(balance)} credits remaining (${state.creditsPerMin} credits/min)`,
-        { duration: 10000 },
+        `Credits critically low — ${Math.round(balance)} credits remaining (~${minutesLeft} min)`,
+        { duration: 10000 }
       );
     } else if (
       pct <= 0.15 &&
@@ -241,7 +281,21 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     ) {
       creditWarningShown.current = "low";
       toast.warning(
-        `Credits running low — ${Math.round(balance)} credits remaining`,
+        `Credits running low — ${Math.round(balance)} credits remaining (~${minutesLeft} min)`
+      );
+    }
+
+    // Proactive upsell at 80% usage for basic tier
+    if (
+      state.tier === "basic" &&
+      pct <= 0.2 &&
+      pct > 0.05 &&
+      !upsellShown.current
+    ) {
+      upsellShown.current = true;
+      toast.info(
+        "Running low on credits? Upgrade to Max for 3.5x more credits per month.",
+        { duration: 8000 }
       );
     }
   }, [isConnected, state.credits, state.tier, state.creditsPerMin]);
@@ -266,7 +320,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     ) {
       trialWarningShown.current = "2min";
       toast.warning(
-        "Free trial ending in 2 minutes. Subscribe or switch to local inference.",
+        "Free trial ending in 2 minutes. Subscribe or switch to local inference."
       );
     }
   }, [isConnected, state.trial]);
@@ -311,24 +365,24 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const openCheckout = useCallback(
-    async (tier: "basic" | "pro") => {
-      try {
-        const apiKey = getDaydreamAPIKey();
-        if (!apiKey) {
-          toast.error("Please sign in first");
-          return;
-        }
-        const { checkoutUrl } = await createCheckoutSession(apiKey, tier);
-        openExternalUrl(checkoutUrl);
-        toast.info("Opening Stripe Checkout in your browser...");
-      } catch (err) {
-        console.error("[Billing] Checkout failed:", err);
-        toast.error("Failed to open checkout. Please try again.");
+  const openCheckout = useCallback(async (tier: "basic" | "pro") => {
+    try {
+      const apiKey = getDaydreamAPIKey();
+      if (!apiKey) {
+        toast.error("Please sign in first");
+        return;
       }
-    },
-    [],
-  );
+      const { checkoutUrl } = await createCheckoutSession(apiKey, tier);
+      openExternalUrl(checkoutUrl);
+      toast.info("Opening Stripe Checkout in your browser...");
+    } catch (err) {
+      console.error("[Billing] Checkout failed:", err);
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to open checkout: ${msg}`, {
+        description: "If this persists, contact support@daydream.live",
+      });
+    }
+  }, []);
 
   const openPortal = useCallback(async () => {
     try {
@@ -342,7 +396,10 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       toast.info("Opening subscription management in your browser...");
     } catch (err) {
       console.error("[Billing] Portal failed:", err);
-      toast.error("Failed to open subscription management.");
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      toast.error(`Failed to open subscription management: ${msg}`, {
+        description: "If this persists, contact support@daydream.live",
+      });
     }
   }, []);
 
@@ -353,15 +410,18 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         if (!apiKey) return;
         await setOverageEnabled(apiKey, enabled);
         toast.success(
-          enabled ? "Overage billing enabled" : "Overage billing disabled",
+          enabled ? "Overage billing enabled" : "Overage billing disabled"
         );
         await refresh();
       } catch (err) {
         console.error("[Billing] Overage toggle failed:", err);
-        toast.error("Failed to update overage setting.");
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        toast.error(`Failed to update overage setting: ${msg}`, {
+          description: "If this persists, contact support@daydream.live",
+        });
       }
     },
-    [refresh],
+    [refresh]
   );
 
   return (

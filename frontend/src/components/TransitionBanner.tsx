@@ -2,17 +2,22 @@ import { useState } from "react";
 import { X } from "lucide-react";
 import { useBilling } from "../contexts/BillingContext";
 
-const DISMISSED_KEY = "billing_transition_dismissed";
+const DISMISSED_KEY = "billing_transition_dismissed_at";
+const DISMISS_DURATION_MS = 7 * 24 * 60 * 60 * 1000; // 7 days
+
+function isDismissed(): boolean {
+  try {
+    const ts = localStorage.getItem(DISMISSED_KEY);
+    if (!ts) return false;
+    return Date.now() - Number(ts) < DISMISS_DURATION_MS;
+  } catch {
+    return false;
+  }
+}
 
 export function TransitionBanner() {
   const { tier, credits } = useBilling();
-  const [dismissed, setDismissed] = useState(() => {
-    try {
-      return localStorage.getItem(DISMISSED_KEY) === "true";
-    } catch {
-      return false;
-    }
-  });
+  const [dismissed, setDismissed] = useState(isDismissed);
 
   // Only show for users with welcome grant credits but no subscription
   const hasWelcomeCredits =
@@ -23,7 +28,7 @@ export function TransitionBanner() {
   const handleDismiss = () => {
     setDismissed(true);
     try {
-      localStorage.setItem(DISMISSED_KEY, "true");
+      localStorage.setItem(DISMISSED_KEY, String(Date.now()));
     } catch {
       // ignore
     }

@@ -3,6 +3,17 @@ import { useBilling } from "../../contexts/BillingContext";
 import { redeemCreditCode } from "../../lib/billing";
 import { getDaydreamAPIKey } from "../../lib/auth";
 import { Button } from "../ui/button";
+import { Switch } from "../ui/switch";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../ui/alert-dialog";
 import { toast } from "sonner";
 
 function RedeemCodeSection({ onRedeemed }: { onRedeemed: () => void }) {
@@ -22,14 +33,12 @@ function RedeemCodeSection({ onRedeemed }: { onRedeemed: () => void }) {
       }
       const result = await redeemCreditCode(apiKey, trimmed);
       toast.success(
-        `${result.credits} credits added${result.label ? ` — ${result.label}` : ""}`,
+        `${result.credits} credits added${result.label ? ` — ${result.label}` : ""}`
       );
       setCode("");
       onRedeemed();
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to redeem code",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to redeem code");
     } finally {
       setIsRedeeming(false);
     }
@@ -68,6 +77,7 @@ export function BillingTab() {
     tier,
     credits,
     subscription,
+    creditsPerMin,
     openCheckout,
     openPortal,
     toggleOverage,
@@ -76,10 +86,17 @@ export function BillingTab() {
     setPaywallReason,
   } = useBilling();
 
+  const [showOverageConfirm, setShowOverageConfirm] = useState(false);
+
   const handleSubscribe = () => {
     setPaywallReason("subscribe");
     setShowPaywall(true);
   };
+
+  const estimatedMinutes =
+    credits && creditsPerMin > 0 && credits.balance > 0
+      ? Math.round(credits.balance / creditsPerMin)
+      : null;
 
   if (tier === "free") {
     return (
@@ -97,6 +114,12 @@ export function BillingTab() {
               {Math.round(credits.balance)}
             </span>{" "}
             welcome credits remaining
+            {estimatedMinutes !== null && (
+              <span className="text-muted-foreground">
+                {" "}
+                (~{estimatedMinutes} min)
+              </span>
+            )}
           </div>
         )}
         <Button size="sm" onClick={handleSubscribe}>
@@ -105,11 +128,20 @@ export function BillingTab() {
         <div className="pt-2 border-t border-border">
           <RedeemCodeSection onRedeemed={refresh} />
         </div>
+        <p className="text-xs text-muted-foreground">
+          Questions about billing?{" "}
+          <a
+            href="mailto:support@daydream.live"
+            className="underline hover:text-foreground transition-colors"
+          >
+            Contact support
+          </a>
+        </p>
       </div>
     );
   }
 
-  const tierLabel = tier === "basic" ? "Basic" : "Pro";
+  const tierLabel = tier === "basic" ? "Pro" : "Max";
   const tierPrice = tier === "basic" ? "$10/mo" : "$30/mo";
   const renewDate = subscription?.currentPeriodEnd
     ? new Date(subscription.currentPeriodEnd).toLocaleDateString("en-US", {
@@ -150,6 +182,12 @@ export function BillingTab() {
               {Math.round(credits.balance)}
             </span>{" "}
             of {Math.round(credits.periodCredits)} credits
+            {estimatedMinutes !== null && (
+              <span className="text-muted-foreground">
+                {" "}
+                (~{estimatedMinutes} min remaining)
+              </span>
+            )}
           </div>
           <div className="w-full h-1.5 bg-muted rounded-full overflow-hidden">
             <div
@@ -165,39 +203,71 @@ export function BillingTab() {
               }}
             />
           </div>
+          {creditsPerMin > 0 && (
+            <p className="text-xs text-muted-foreground">
+              Current rate: {creditsPerMin} credits/min
+            </p>
+          )}
         </div>
       )}
 
       {/* Overage toggle */}
       <div className="flex items-start gap-3">
-        <label className="relative inline-flex items-center cursor-pointer mt-0.5">
-          <input
-            type="checkbox"
-            className="sr-only peer"
-            checked={subscription?.overageEnabled ?? false}
-            onChange={e => {
-              if (e.target.checked) {
-                // Confirm before enabling — users should understand the cost
-                const ok = window.confirm(
-                  "Enable overage billing?\n\nWhen your monthly credits run out, you'll be automatically charged $10 for 300 additional credits. This can happen up to 5 times per billing cycle ($50 max).\n\nYou can disable this anytime in Settings.",
-                );
-                if (!ok) return;
-              }
-              toggleOverage(e.target.checked);
-            }}
-          />
-          <div className="w-9 h-5 bg-muted rounded-full peer peer-checked:bg-primary transition-colors after:content-[''] after:absolute after:top-0.5 after:start-[2px] after:bg-background after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:after:translate-x-full" />
-        </label>
+        <Switch
+          checked={subscription?.overageEnabled ?? false}
+          onCheckedChange={checked => {
+            if (checked) {
+              setShowOverageConfirm(true);
+            } else {
+              toggleOverage(false);
+            }
+          }}
+          className="mt-0.5"
+        />
         <div>
           <div className="text-sm font-medium text-foreground">
             Overage billing
           </div>
           <p className="text-xs text-muted-foreground">
-            When your monthly credits run out, automatically add 300 credits for
-            $10.
+            When your monthly credits run out, automatically add 500 credits for
+            $10 (up to 5 times per cycle, $50 max).
           </p>
         </div>
       </div>
+
+      {/* Overage confirmation dialog */}
+      <AlertDialog
+        open={showOverageConfirm}
+        onOpenChange={setShowOverageConfirm}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Enable overage billing?</AlertDialogTitle>
+            <AlertDialogDescription>
+              When your monthly credits run out, you'll be automatically charged{" "}
+              <span className="font-medium text-foreground">
+                $10 for 500 additional credits
+              </span>
+              . This can happen up to{" "}
+              <span className="font-medium text-foreground">
+                5 times per billing cycle ($50 max)
+              </span>
+              . You can disable this anytime in Settings.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                toggleOverage(true);
+                setShowOverageConfirm(false);
+              }}
+            >
+              Enable Overage
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Actions */}
       <div className="flex flex-wrap gap-2 pt-2">
@@ -208,17 +278,14 @@ export function BillingTab() {
           variant="outline"
           size="sm"
           onClick={() =>
-            window.open(
-              "https://app.daydream.live/dashboard/usage",
-              "_blank",
-            )
+            window.open("https://app.daydream.live/dashboard/usage", "_blank")
           }
         >
           View Detailed Usage
         </Button>
         {tier === "basic" && (
           <Button size="sm" onClick={() => openCheckout("pro")}>
-            Upgrade to Pro
+            Upgrade to Max
           </Button>
         )}
       </div>
@@ -227,6 +294,26 @@ export function BillingTab() {
       <div className="pt-2 border-t border-border">
         <RedeemCodeSection onRedeemed={refresh} />
       </div>
+
+      {/* Help & support */}
+      <p className="text-xs text-muted-foreground">
+        Questions about billing?{" "}
+        <a
+          href="mailto:support@daydream.live"
+          className="underline hover:text-foreground transition-colors"
+        >
+          Contact support
+        </a>
+        {" · "}
+        <a
+          href="https://docs.daydream.live/billing"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="underline hover:text-foreground transition-colors"
+        >
+          How credits work
+        </a>
+      </p>
     </div>
   );
 }

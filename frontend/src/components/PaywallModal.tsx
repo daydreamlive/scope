@@ -1,18 +1,22 @@
+import { useState } from "react";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { useBilling } from "../contexts/BillingContext";
+import { redeemCreditCode } from "../lib/billing";
+import { getDaydreamAPIKey } from "../lib/auth";
+import { toast } from "sonner";
 
 const TIERS = [
   {
     id: "basic" as const,
-    name: "Basic",
+    name: "Pro",
     price: "$10/mo",
     credits: "500 credits",
     recommended: false,
   },
   {
     id: "pro" as const,
-    name: "Pro",
+    name: "Max",
     price: "$30/mo",
     credits: "1,750 credits",
     recommended: true,
@@ -20,7 +24,7 @@ const TIERS = [
 ];
 
 function getHeadline(
-  reason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null,
+  reason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null
 ): string {
   switch (reason) {
     case "trial_exhausted":
@@ -42,7 +46,12 @@ export function PaywallModal() {
     openCheckout,
     toggleOverage,
     subscription,
+    creditsPerMin,
+    refresh,
   } = useBilling();
+
+  const [redeemCode, setRedeemCode] = useState("");
+  const [isRedeeming, setIsRedeeming] = useState(false);
 
   const handleTierClick = (tier: "basic" | "pro") => {
     openCheckout(tier);
@@ -53,6 +62,46 @@ export function PaywallModal() {
     toggleOverage(true);
     setShowPaywall(false);
   };
+
+  const handleRunLocally = async () => {
+    try {
+      await fetch("/api/v1/cloud/disconnect", { method: "POST" });
+      toast.info("Switched to local inference");
+    } catch {
+      // Cloud may already be disconnected
+    }
+    setShowPaywall(false);
+  };
+
+  const handleRedeem = async () => {
+    const trimmed = redeemCode.trim();
+    if (!trimmed) return;
+
+    setIsRedeeming(true);
+    try {
+      const apiKey = getDaydreamAPIKey();
+      if (!apiKey) {
+        toast.error("Please sign in to redeem a code");
+        return;
+      }
+      const result = await redeemCreditCode(apiKey, trimmed);
+      toast.success(
+        `${result.credits} credits added${result.label ? ` — ${result.label}` : ""}`
+      );
+      setRedeemCode("");
+      refresh();
+      setShowPaywall(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to redeem code");
+    } finally {
+      setIsRedeeming(false);
+    }
+  };
+
+  const rateDisplay =
+    creditsPerMin > 0
+      ? `Your current workflow uses ${creditsPerMin} credits/min.`
+      : "Credit usage varies by workflow and GPU type.";
 
   return (
     <Dialog
@@ -65,10 +114,7 @@ export function PaywallModal() {
             <h2 className="text-lg font-semibold text-foreground">
               {getHeadline(paywallReason)}
             </h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              Credits are used at different rates depending on your workflow.
-              Most workflows use 7.5 credits/min.
-            </p>
+            <p className="text-sm text-muted-foreground mt-1">{rateDisplay}</p>
           </div>
 
           <div className="grid gap-3">
@@ -111,13 +157,37 @@ export function PaywallModal() {
               className="w-full"
               onClick={handleOverage}
             >
-              Add 300 credits for $10
+              Enable overage — 500 credits for $10 (recurring when depleted)
             </Button>
+          )}
+
+          {/* Redeem code — show for trial exhausted or credits exhausted */}
+          {(paywallReason === "trial_exhausted" ||
+            paywallReason === "credits_exhausted") && (
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={redeemCode}
+                onChange={e => setRedeemCode(e.target.value.toUpperCase())}
+                onKeyDown={e => e.key === "Enter" && handleRedeem()}
+                placeholder="Have a code? DD-XXXX-XXXX"
+                className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                disabled={isRedeeming}
+              />
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleRedeem}
+                disabled={!redeemCode.trim() || isRedeeming}
+              >
+                {isRedeeming ? "..." : "Redeem"}
+              </Button>
+            </div>
           )}
 
           <div className="flex items-center justify-between pt-2 border-t border-border">
             <button
-              onClick={() => setShowPaywall(false)}
+              onClick={handleRunLocally}
               className="text-sm text-muted-foreground hover:text-foreground transition-colors"
             >
               Run locally instead
@@ -129,6 +199,16 @@ export function PaywallModal() {
               Maybe later
             </button>
           </div>
+
+          <p className="text-xs text-center text-muted-foreground">
+            Questions?{" "}
+            <a
+              href="mailto:support@daydream.live"
+              className="underline hover:text-foreground transition-colors"
+            >
+              Contact support
+            </a>
+          </p>
         </div>
       </DialogContent>
     </Dialog>
