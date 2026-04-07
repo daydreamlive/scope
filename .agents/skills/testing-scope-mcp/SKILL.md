@@ -117,6 +117,7 @@ When MCP tools are unavailable or the MCP server cannot be started, use these en
 | Pipeline status | `GET /api/v1/pipeline/status` |
 | Start session | `POST /api/v1/session/start` body: `{"pipeline_id": "name", ...}` |
 | Capture frame | `GET /api/v1/session/frame` (returns JPEG binary) |
+| Stream MPEG-TS | `GET /api/v1/session/output.ts` (streams `video/mp2t`; includes audio when pipeline produces it) |
 | Stop session | `POST /api/v1/session/stop` |
 | Start recording | `POST /api/v1/recordings/headless/start` |
 | Stop recording | `POST /api/v1/recordings/headless/stop` |

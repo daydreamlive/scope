@@ -9,7 +9,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from pydantic import BaseModel
 
 if TYPE_CHECKING:
@@ -120,6 +120,38 @@ async def capture_frame(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.get("/session/output.ts")
+async def stream_headless_output_ts(
+    webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
+):
+    """Stream the active headless session as MPEG-TS."""
+    session = webrtc_manager.headless_session
+    if session is None or not session.frame_processor.running:
+        raise HTTPException(
+            status_code=404,
+            detail="No active headless session",
+        )
+
+    streamer = session.create_ts_streamer()
+
+    async def stream_generator():
+        try:
+            async for chunk in streamer.iter_bytes():
+                yield chunk
+        finally:
+            session.remove_media_sink(streamer)
+            streamer.close()
+
+    return StreamingResponse(
+        stream_generator(),
+        media_type="video/mp2t",
+        headers={
+            "Cache-Control": "no-store",
+            "Connection": "keep-alive",
+        },
+    )
+
+
 # ---------------------------------------------------------------------------
 # Session Metrics
 # ---------------------------------------------------------------------------
@@ -193,6 +225,8 @@ async def start_stream(
     Use capture_frame to see output, update_parameters to control it,
     and POST /api/v1/session/stop to tear it down.
     """
+    from scope.core.pipelines.registry import PipelineRegistry
+
     from .frame_processor import FrameProcessor
     from .headless import HeadlessSession
 
@@ -221,6 +255,7 @@ async def start_stream(
 
         session = HeadlessSession(
             frame_processor=frame_processor,
+            expect_audio=PipelineRegistry.chain_produces_audio([request.pipeline_id]),
         )
         session.start_frame_consumer()
         webrtc_manager.add_headless_session(session)

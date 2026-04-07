@@ -71,7 +71,7 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
             "tools to manage pipelines, assets, LoRAs, plugins, and monitor the system.\n\n"
             "Typical workflows:\n"
             "- Setup: connect_to_scope(port) -> get_pipeline_status -> load_pipeline -> start_stream (headless) -> update_parameters\n"
-            "- Observe: capture_frame (see output), get_parameters (read state), get_session_metrics (fps/VRAM)\n"
+            "- Observe: capture_frame (see output), get_stream_url (MPEG-TS output URL), get_parameters (read state), get_session_metrics (fps/VRAM)\n"
             "- Cleanup: stop_stream (frees session resources)\n\n"
             "Key constraints:\n"
             "- You must call connect_to_scope first. The user will tell you which port Scope is running on.\n"
@@ -404,6 +404,26 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
         """Stop the active headless pipeline session and free its resources."""
         resp = await _client().post("/api/v1/session/stop")
         return await _json(resp)
+
+    # -------------------------------------------------------------------------
+    # Streaming Output
+    # -------------------------------------------------------------------------
+
+    @mcp.tool()
+    async def get_stream_url() -> str:
+        """Get the MPEG-TS streaming URL for the active headless session.
+        The URL streams H.264 video (and AAC audio when the pipeline
+        produces audio) as video/mp2t. Requires an active headless
+        stream started via start_stream.
+
+        Returns the full URL that can be opened with ffplay, VLC, or
+        any player that supports MPEG-TS over HTTP.
+        """
+        base_url = _client().base_url
+        return json.dumps(
+            {"stream_url": f"{base_url}/api/v1/session/output.ts"},
+            indent=2,
+        )
 
     # -------------------------------------------------------------------------
     # Recording
