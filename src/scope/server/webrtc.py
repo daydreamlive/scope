@@ -337,16 +337,19 @@ class WebRTCManager:
                 sink_node_ids,
                 webrtc_source_node_ids,
                 _,  # all_sink_node_ids
-                all_source_node_ids,
+                _,  # all_source_node_ids (browser tracks map to webrtc sources only)
                 record_node_ids,
                 has_non_webrtc_sources,
             ) = _parse_graph_node_ids(initial_parameters)
 
-            # On the cloud, hardware source frames (Syphon/NDI/Spout) arrive
-            # via WebRTC tracks relayed by the local instance.  Use the full
-            # source list so on_track routes every incoming track to the
-            # correct source queue — not just the ones the browser sent.
-            all_source_node_ids_for_routing = all_source_node_ids
+            # The browser only sends WebRTC video for file/camera sources.
+            # Syphon/NDI/Spout are captured on the server and do not consume an
+            # incoming track index. Route incoming tracks by webrtc source
+            # order (same order as graph nodes, excluding hardware-only sources).
+            # Using all_source_node_ids would map track 0 to the first graph
+            # source even when that source is Syphon, mis-delivering file video
+            # into the wrong pipeline (multi-chain graphs).
+            all_source_node_ids_for_routing = webrtc_source_node_ids
 
             # If the graph has pipeline nodes, ensure they are loaded keyed by
             # node_id so build_graph can find them via node.id.  The pipeline
@@ -508,10 +511,9 @@ class WebRTCManager:
                 logger.info(f"Track received: {track.kind} for session {session.id}")
                 if track.kind == "video" and video_track is not None:
                     if all_source_node_ids_for_routing:
-                        # Multi-source: route each track via SourceInputHandler.
-                        # Uses all_source_node_ids (not just WebRTC ones) so
-                        # hardware-source tracks relayed from the local cloud
-                        # client are routed to the correct source queues.
+                        # Multi-source: route each incoming browser track via
+                        # SourceInputHandler (one track per file/camera source;
+                        # hardware sources do not use this path).
                         idx = received_video_count[0]
                         received_video_count[0] += 1
                         if idx < len(all_source_node_ids_for_routing):
