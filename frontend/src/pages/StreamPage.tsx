@@ -801,6 +801,19 @@ export function StreamPage() {
     [handleVideoFileUpload]
   );
 
+  // When a per-node stream changes mid-stream, replace the WebRTC track.
+  // Falls back to the global localStream when nodeLocalStreams is empty
+  // (e.g. user switched from Camera to File — the Source node also falls
+  // back to localStream via enrichment).
+  useEffect(() => {
+    if (!isStreaming || !graphMode) return;
+    const entries = Object.entries(nodeLocalStreams);
+    const stream = entries.length > 0 ? entries[0][1] : localStream;
+    if (stream) {
+      updateVideoTrack(stream);
+    }
+  }, [nodeLocalStreams, localStream, isStreaming, graphMode, updateVideoTrack]);
+
   // Clean up per-node streams on unmount
   useEffect(() => {
     return () => {
@@ -2480,7 +2493,14 @@ export function StreamPage() {
           ? localStream || undefined
           : undefined;
 
-      if (needsVideoInput && !isServerSideInput && !localStream) {
+      const hasPerNodeStreams =
+        graphMode && Object.keys(nodeLocalStreams).length > 0;
+      if (
+        needsVideoInput &&
+        !isServerSideInput &&
+        !localStream &&
+        !hasPerNodeStreams
+      ) {
         console.error("Video input required but no local stream available");
         return false;
       }
@@ -2734,7 +2754,7 @@ export function StreamPage() {
             (n.source_mode || "video") !== "ndi" &&
             (n.source_mode || "video") !== "syphon"
         );
-        if (webrtcSourceNodes.length > 1) {
+        if (webrtcSourceNodes.length > 0) {
           const streams: Record<string, MediaStream> = {};
           for (const node of webrtcSourceNodes) {
             const nodeStream = nodeLocalStreams[node.id];
