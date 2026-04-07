@@ -400,14 +400,6 @@ class FrameProcessor:
         source_node_id is None for the generic (non-graph) input source.
         """
         if self._cloud_relay is not None:
-            if self._cloud_relay.frames_to_cloud == 0:
-                logger.info(
-                    "[FRAME-PROCESSOR] First hardware source frame received "
-                    "(source_node_id=%s, shape=%s, cloud_mode=True, video_mode=%s)",
-                    source_node_id,
-                    rgb_frame.shape,
-                    self._cloud_relay.video_mode,
-                )
             if source_node_id is not None:
                 self._cloud_relay.send_frame_to_source(rgb_frame, source_node_id)
             else:
