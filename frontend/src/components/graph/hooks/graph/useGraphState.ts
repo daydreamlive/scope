@@ -70,7 +70,7 @@ export interface GraphEditorCallbacks {
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
-  onCycleSampleVideo?: () => void;
+  onCycleSampleVideo?: (nodeId?: string) => void;
   onOutputSinkChange?: (
     sinkType: string,
     config: { enabled: boolean; name: string }

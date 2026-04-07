@@ -172,7 +172,7 @@ interface GraphEditorProps {
   remoteStreams?: Record<string, MediaStream>;
   sinkStats?: Record<string, { fps: number; bitrate: number }>;
   onVideoFileUpload?: (file: File, nodeId?: string) => Promise<boolean>;
-  onCycleSampleVideo?: () => void;
+  onCycleSampleVideo?: (nodeId?: string) => void;
   isPlaying?: boolean;
   onStartStream?: () => void;
   onStopStream?: () => void;
