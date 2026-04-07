@@ -24,11 +24,10 @@ logger = logging.getLogger(__name__)
 def compute_relay_video_mode(initial_parameters: dict | None) -> bool:
     """Return whether ``CloudRelay`` should forward frames to the cloud runner.
 
-    ``input_mode == "video"`` is the primary signal, but it is often omitted
-    (``None``) in serialized WebRTC params. Graph workflows with Source nodes
-    or enabled server-side capture (Syphon/NDI/Spout/video file) always produce
-    frames that must be relayed; without this, :class:`CloudRelay` drops every
-    frame when ``video_mode`` is false (e.g. Syphon works locally but not in cloud).
+    ``input_mode == "video"`` is the primary signal for classic (non-graph)
+    sessions. Graph workflows with at least one Source node always have video
+    input to relay. Without this, :class:`CloudRelay` drops every frame when
+    ``video_mode`` is false (e.g. Syphon works locally but not in cloud).
     """
     params = initial_parameters or {}
     if params.get("input_mode") == "video":
@@ -38,11 +37,6 @@ def compute_relay_video_mode(initial_parameters: dict | None) -> bool:
         for node in graph_data.get("nodes", []):
             if node.get("type") == "source":
                 return True
-    inp = params.get("input_source")
-    if isinstance(inp, dict) and inp.get("enabled"):
-        st = inp.get("source_type") or ""
-        if st in ("spout", "ndi", "syphon", "video_file"):
-            return True
     return False
 
 
