@@ -27,6 +27,7 @@ export interface ParameterPortDef {
   label?: string;
   min?: number;
   max?: number;
+  step?: number;
   enum?: unknown[];
   isLoadParam?: boolean;
 }
@@ -542,6 +543,16 @@ export function extractParameterPorts(
 
     if (!paramType) continue;
 
+    // Detect integer type from schema (direct type or non-null anyOf variant)
+    const isInteger =
+      schemaProp.type === "integer" ||
+      (anyOf?.some(
+        v =>
+          (v as Record<string, unknown>).type === "integer" &&
+          (v as Record<string, unknown>).type !== "null"
+      ) ??
+        false);
+
     const ui = schemaProp.ui;
     const label = ui?.label || key;
     const baseEnumValues = Array.isArray(schemaProp.enum)
@@ -555,15 +566,34 @@ export function extractParameterPorts(
     const enumValues =
       baseEnumValues && isNullable ? [null, ...baseEnumValues] : baseEnumValues;
 
+    // For nullable numbers, pull min/max from the non-null anyOf variant
+    let minimum = schemaProp.minimum;
+    let maximum = schemaProp.maximum;
+    if (minimum === undefined || maximum === undefined) {
+      if (anyOf?.length) {
+        const numVariant = anyOf.find(
+          v =>
+            ((v as Record<string, unknown>).type === "integer" ||
+              (v as Record<string, unknown>).type === "number") &&
+            (v as Record<string, unknown>).type !== "null"
+        ) as Record<string, unknown> | undefined;
+        if (numVariant) {
+          if (minimum === undefined && typeof numVariant.minimum === "number")
+            minimum = numVariant.minimum;
+          if (maximum === undefined && typeof numVariant.maximum === "number")
+            maximum = numVariant.maximum;
+        }
+      }
+    }
+
     params.push({
       name: key,
       type: paramType,
       defaultValue: schemaProp.default,
       label,
-      min:
-        typeof schemaProp.minimum === "number" ? schemaProp.minimum : undefined,
-      max:
-        typeof schemaProp.maximum === "number" ? schemaProp.maximum : undefined,
+      min: typeof minimum === "number" ? minimum : undefined,
+      max: typeof maximum === "number" ? maximum : undefined,
+      step: paramType === "number" && isInteger ? 1 : undefined,
       enum: enumValues,
       isLoadParam: ui?.is_load_param,
     });
