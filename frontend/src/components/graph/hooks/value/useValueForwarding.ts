@@ -421,7 +421,7 @@ export function useValueForwarding(
           // stream-start initialisation use the connected value, not the
           // stale default that was set when the pipeline was first selected.
           const promptText = Array.isArray(entry.value)
-            ? entry.value[0]?.text ?? ""
+            ? (entry.value[0]?.text ?? "")
             : String(entry.value);
           onPromptForwardRef?.current?.(edge.target, promptText);
         } else {
