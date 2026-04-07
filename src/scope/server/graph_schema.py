@@ -156,9 +156,8 @@ class GraphConfig(BaseModel):
                 errors.append(f"Duplicate node ID: '{nid}'")
             seen.add(nid)
 
-        # At least one sink (unless the graph is node-only with audio output)
-        has_custom_nodes = any(n.type == "node" for n in self.nodes)
-        if not self.get_sink_node_ids() and not has_custom_nodes:
+        # At least one sink
+        if not self.get_sink_node_ids():
             errors.append("Graph must have at least one sink node")
 
         # Pipeline nodes must have pipeline_id; backend nodes need node_type_id

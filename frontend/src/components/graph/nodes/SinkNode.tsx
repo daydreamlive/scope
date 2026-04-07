@@ -238,6 +238,17 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
         }
       />
       <Handle
+        type="target"
+        position={Position.Left}
+        id="stream:audio"
+        className="!w-2.5 !h-2.5 !border-0"
+        style={
+          collapsed
+            ? collapsedHandleStyle("left")
+            : { top: (handleY ?? 0) + 16, left: 0, backgroundColor: "#22c55e" }
+        }
+      />
+      <Handle
         type="source"
         position={Position.Right}
         id="stream:out"
