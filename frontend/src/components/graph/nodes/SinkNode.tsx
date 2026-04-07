@@ -23,6 +23,7 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   const isPlaying = (data.isPlaying as boolean | undefined) ?? true;
   const onPlayPauseToggle = data.onPlayPauseToggle as (() => void) | undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [videoSize, setVideoSize] = useState<{
     width: number;
     height: number;
@@ -40,14 +41,26 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   }, []);
 
   useEffect(() => {
-    if (videoRef.current && remoteStream instanceof MediaStream) {
-      videoRef.current.srcObject = remoteStream;
+    if (remoteStream instanceof MediaStream) {
+      if (videoRef.current) {
+        videoRef.current.srcObject = remoteStream;
+      }
       setHasAudioTrack(remoteStream.getAudioTracks().length > 0);
       setHasVideoTrack(remoteStream.getVideoTracks().length > 0);
+
+      // Also attach to audio element for reliable audio-only playback
+      if (audioRef.current) {
+        audioRef.current.srcObject = remoteStream;
+        audioRef.current.play().catch(() => {});
+      }
 
       const handleTrackAdded = () => {
         setHasAudioTrack(remoteStream.getAudioTracks().length > 0);
         setHasVideoTrack(remoteStream.getVideoTracks().length > 0);
+        if (audioRef.current && audioRef.current.srcObject !== remoteStream) {
+          audioRef.current.srcObject = remoteStream;
+          audioRef.current.play().catch(() => {});
+        }
       };
       remoteStream.addEventListener("addtrack", handleTrackAdded);
       return () => {
@@ -123,17 +136,8 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
                   playsInline
                   onResize={handleResize}
                 />
-                {/* Separate audio element for audio-only streams */}
-                {hasAudioTrack && !hasVideoTrack && (
-                  <audio
-                    autoPlay
-                    ref={el => {
-                      if (el && el.srcObject !== remoteStream) {
-                        el.srcObject = remoteStream;
-                      }
-                    }}
-                  />
-                )}
+                {/* Always-present audio element for reliable audio playback */}
+                <audio ref={audioRef} autoPlay style={{ display: "none" }} />
                 {!hasVideoTrack && (
                   <div className="flex flex-col items-center justify-center h-full gap-1 text-[#8c8c8d]">
                     <Volume2 className="h-5 w-5" />
