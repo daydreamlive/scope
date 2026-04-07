@@ -126,6 +126,18 @@ function getVaceParams(
   return {};
 }
 
+/** When every source node is Spout/NDI/Syphon, the browser must not send a WebRTC video track. */
+function graphHasOnlyServerSideSources(graph: GraphConfig | null): boolean {
+  const nodes = graph?.nodes;
+  if (!nodes?.length) return false;
+  const sources = nodes.filter(n => n.type === "source");
+  if (sources.length === 0) return false;
+  return sources.every(n => {
+    const sm = n.source_mode || "video";
+    return sm === "spout" || sm === "ndi" || sm === "syphon";
+  });
+}
+
 export function StreamPage() {
   // Onboarding state
   const { state: onboardingState, isOverlayVisible: showOnboardingOverlay } =
@@ -765,6 +777,16 @@ export function StreamPage() {
       if (newMode === "camera") {
         createCameraStreamForNode(nodeId);
       }
+      // Import/restore calls this with (mode, nodeId). Clear the global
+      // useVideoSource stream (e.g. test.mp4) when switching to server-side
+      // capture — otherwise WebRTC still sends that track alongside Syphon/NDI/Spout.
+      if (
+        newMode === "spout" ||
+        newMode === "ndi" ||
+        newMode === "syphon"
+      ) {
+        void switchMode(newMode as "spout" | "ndi" | "syphon");
+      }
       // For "video" (file) mode, the stream is set via handlePerNodeVideoFileUpload
       // For spout/ndi/syphon, no local stream needed (server-side)
     },
@@ -807,6 +829,13 @@ export function StreamPage() {
   // back to localStream via enrichment).
   useEffect(() => {
     if (!isStreaming || !graphMode) return;
+    const graph = graphEditorRef.current?.getCurrentGraphConfig() ?? null;
+    if (
+      graphHasOnlyServerSideSources(graph) &&
+      Object.keys(nodeLocalStreams).length === 0
+    ) {
+      return;
+    }
     const entries = Object.entries(nodeLocalStreams);
     const stream = entries.length > 0 ? entries[0][1] : localStream;
     if (stream) {
