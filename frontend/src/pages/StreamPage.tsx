@@ -126,6 +126,18 @@ function getVaceParams(
   return {};
 }
 
+/** When every source node is Spout/NDI/Syphon, the browser must not send a WebRTC video track. */
+function graphHasOnlyServerSideSources(graph: GraphConfig | null): boolean {
+  const nodes = graph?.nodes;
+  if (!nodes?.length) return false;
+  const sources = nodes.filter(n => n.type === "source");
+  if (sources.length === 0) return false;
+  return sources.every(n => {
+    const sm = n.source_mode || "video";
+    return sm === "spout" || sm === "ndi" || sm === "syphon";
+  });
+}
+
 export function StreamPage() {
   // Onboarding state
   const { state: onboardingState, isOverlayVisible: showOnboardingOverlay } =
@@ -765,6 +777,12 @@ export function StreamPage() {
       if (newMode === "camera") {
         createCameraStreamForNode(nodeId);
       }
+      // Import/restore calls this with (mode, nodeId). Clear the global
+      // useVideoSource stream (e.g. test.mp4) when switching to server-side
+      // capture — otherwise WebRTC still sends that track alongside Syphon/NDI/Spout.
+      if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
+        void switchMode(newMode as "spout" | "ndi" | "syphon");
+      }
       // For "video" (file) mode, the stream is set via handlePerNodeVideoFileUpload
       // For spout/ndi/syphon, no local stream needed (server-side)
     },
@@ -807,6 +825,13 @@ export function StreamPage() {
   // back to localStream via enrichment).
   useEffect(() => {
     if (!isStreaming || !graphMode) return;
+    const graph = graphEditorRef.current?.getCurrentGraphConfig() ?? null;
+    if (
+      graphHasOnlyServerSideSources(graph) &&
+      Object.keys(nodeLocalStreams).length === 0
+    ) {
+      return;
+    }
     const entries = Object.entries(nodeLocalStreams);
     const stream = entries.length > 0 ? entries[0][1] : localStream;
     if (stream) {
@@ -2048,6 +2073,8 @@ export function StreamPage() {
       } | null = null;
       // Sink node IDs for multi-track WebRTC
       const graphSinkNodeIds: string[] = [];
+      // Record nodes need recvonly transceivers too (same order as backend: sinks then records)
+      const graphRecordNodeIds: string[] = [];
       // The graph config to pass via initialParameters (sent over WebRTC)
       let graphConfigForStream: ReturnType<
         NonNullable<typeof graphEditorRef.current>["getCurrentGraphConfig"]
@@ -2085,6 +2112,9 @@ export function StreamPage() {
             // Extract sink node IDs for multi-track WebRTC
             graphSinkNodeIds.push(
               ...graphNodes.filter(n => n.type === "sink").map(n => n.id)
+            );
+            graphRecordNodeIds.push(
+              ...graphNodes.filter(n => n.type === "record").map(n => n.id)
             );
 
             // Extract source mode from all source nodes and normalize
@@ -2370,6 +2400,11 @@ export function StreamPage() {
         graphSinkNodeIds.push(
           ...graphConfigForStream.nodes
             .filter(n => n.type === "sink")
+            .map(n => n.id)
+        );
+        graphRecordNodeIds.push(
+          ...graphConfigForStream.nodes
+            .filter(n => n.type === "record")
             .map(n => n.id)
         );
       }
@@ -2771,11 +2806,16 @@ export function StreamPage() {
       }
 
       // Pipeline is loaded, now start WebRTC stream
-      // Pass sink node IDs for multi-track WebRTC support
+      // Pass sink + record node IDs so recvonly transceivers match backend
+      // (extra outputs: sink[1..] then record nodes).
+      const webrtcMultiOutputNodeIds =
+        graphSinkNodeIds.length > 0 || graphRecordNodeIds.length > 0
+          ? [...graphSinkNodeIds, ...graphRecordNodeIds]
+          : undefined;
       startStream(
         initialParameters,
         sourceNodeStreamsForWebRTC ? undefined : streamToSend,
-        graphSinkNodeIds.length > 0 ? graphSinkNodeIds : undefined,
+        webrtcMultiOutputNodeIds,
         sourceNodeStreamsForWebRTC
       );
 

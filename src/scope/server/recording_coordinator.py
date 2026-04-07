@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 class _RecordingEntry:
     manager: object  # RecordingManager
     track: object  # QueueVideoTrack
+    stopped_file: str | None = None  # File path after stop (before download)
 
 
 class RecordingCoordinator:
@@ -137,15 +138,38 @@ class RecordingCoordinator:
         entry = self._entries.get(node_id)
         if entry is None:
             return False
+        # Save the recording file path before stop clears it
+        entry.stopped_file = entry.manager.recording_file
         await entry.manager.stop_recording()
         logger.info(f"Stopped recording for record node {node_id}")
         return True
 
     async def download_recording(self, node_id: str) -> str | None:
         """Finalize and return the recording file path for a record node."""
+        import os
+        import shutil
+        import tempfile
+
         entry = self._entries.get(node_id)
         if entry is None:
             return None
+
+        # Try finalize first (if recording is still active)
         path = await entry.manager.finalize_and_get_recording(restart_after=False)
+
+        # Fall back to the stopped file path
+        if not path and entry.stopped_file and os.path.exists(entry.stopped_file):
+            # Copy to a download file
+            fd, download_path = tempfile.mkstemp(
+                suffix=".mp4", prefix="scope_download_"
+            )
+            os.close(fd)
+            shutil.copy2(entry.stopped_file, download_path)
+            try:
+                os.remove(entry.stopped_file)
+            except Exception as e:
+                logger.warning(f"Failed to remove recording file: {e}")
+            path = download_path
+
         self._entries.pop(node_id, None)
         return path

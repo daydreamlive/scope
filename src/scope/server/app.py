@@ -1259,6 +1259,14 @@ async def close_webrtc_session(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+def _session_has_graph_record_nodes(session) -> bool:
+    """True when the session uses graph record-node queues (per-node MP4)."""
+    fp = session.frame_processor
+    if fp is None:
+        return False
+    return bool(fp.sink_manager.recording.get_node_ids())
+
+
 @app.get("/api/v1/recordings/{session_id}")
 async def download_recording(
     http_request: Request,
@@ -1266,16 +1274,61 @@ async def download_recording(
     background_tasks: BackgroundTasks,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
     cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+    node_id: str | None = Query(
+        None,
+        description="Record node id for graph mode (per-node recording file)",
+    ),
 ):
     """Download the recording file for the specified session.
 
     Local-first: if the session has a local recording, serve it directly.
     Falls back to cloud proxy only when there is no local recording and
     cloud is connected (pure cloud mode where recording happens remotely).
+
+    When the graph has record nodes, pass ``node_id`` to download that node's file.
     """
     try:
         session = webrtc_manager.get_session(session_id)
-        has_local_recording = session and session.recording_manager
+        if not session:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Session {session_id} not found",
+            )
+
+        if node_id:
+            if not _session_has_graph_record_nodes(session):
+                raise HTTPException(
+                    status_code=400,
+                    detail="This session has no graph record nodes; omit node_id.",
+                )
+            coord = session.frame_processor.sink_manager.recording
+            if node_id not in coord.get_node_ids():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown record node {node_id!r}",
+                )
+            download_file = await coord.download_recording(node_id)
+            if not download_file or not Path(download_file).exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail="Recording file not available",
+                )
+            background_tasks.add_task(cleanup_temp_file, download_file)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"recording-{node_id}-{timestamp}.mp4"
+            return FileResponse(
+                download_file,
+                media_type="video/mp4",
+                filename=filename,
+            )
+
+        if _session_has_graph_record_nodes(session):
+            raise HTTPException(
+                status_code=400,
+                detail="This session uses graph record nodes; add ?node_id=<record node id>.",
+            )
+
+        has_local_recording = session.recording_manager
 
         if has_local_recording:
             download_file = await session.recording_manager.finalize_and_get_recording()
@@ -1304,7 +1357,7 @@ async def download_recording(
 
         raise HTTPException(
             status_code=404,
-            detail=f"Session {session_id} not found or no recording available",
+            detail="No recording available for this session",
         )
     except HTTPException:
         raise
@@ -1317,16 +1370,48 @@ async def download_recording(
 async def start_recording(
     session_id: str,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    node_id: str | None = Query(
+        None,
+        description="Record node id for graph mode (per-node recording)",
+    ),
 ):
     """Start recording for the specified session.
 
-    Creates a RecordingManager if one does not already exist.
+    Creates a RecordingManager if one does not already exist (session-level).
+    For graph record nodes, pass ``node_id`` to record that node's feed.
     """
     try:
         session = webrtc_manager.get_session(session_id)
         if not session:
             raise HTTPException(
                 status_code=404, detail=f"Session {session_id} not found"
+            )
+
+        if node_id:
+            if not _session_has_graph_record_nodes(session):
+                raise HTTPException(
+                    status_code=400,
+                    detail="This session has no graph record nodes; omit node_id.",
+                )
+            coord = session.frame_processor.sink_manager.recording
+            if node_id not in coord.get_node_ids():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown record node {node_id!r}",
+                )
+            fps = session.frame_processor.get_fps()
+            ok = await coord.start_recording(node_id, fps)
+            if not ok:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to start recording for record node {node_id!r}",
+                )
+            return {"status": "started"}
+
+        if _session_has_graph_record_nodes(session):
+            raise HTTPException(
+                status_code=400,
+                detail="This session uses graph record nodes; pass node_id=<record node id>.",
             )
 
         if not session.recording_manager:
@@ -1355,6 +1440,10 @@ async def start_recording(
 async def stop_recording(
     session_id: str,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    node_id: str | None = Query(
+        None,
+        description="Record node id for graph mode (per-node recording)",
+    ),
 ):
     """Stop recording for the specified session without downloading."""
     try:
@@ -1363,6 +1452,28 @@ async def stop_recording(
             raise HTTPException(
                 status_code=404, detail=f"Session {session_id} not found"
             )
+
+        if node_id:
+            if not _session_has_graph_record_nodes(session):
+                raise HTTPException(
+                    status_code=400,
+                    detail="This session has no graph record nodes; omit node_id.",
+                )
+            coord = session.frame_processor.sink_manager.recording
+            if node_id not in coord.get_node_ids():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown record node {node_id!r}",
+                )
+            ok = await coord.stop_recording(node_id)
+            return {"status": "stopped" if ok else "not_recording"}
+
+        if _session_has_graph_record_nodes(session):
+            raise HTTPException(
+                status_code=400,
+                detail="This session uses graph record nodes; pass node_id=<record node id>.",
+            )
+
         if not session.recording_manager:
             raise HTTPException(
                 status_code=404,
