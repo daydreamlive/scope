@@ -194,6 +194,8 @@ export interface FlowNodeData {
   onCycleSampleVideo?: () => void;
   /** For sink nodes: remote output stream */
   remoteStream?: MediaStream | null;
+  /** For sink nodes: per-sink WebRTC stats (FPS, bitrate) */
+  sinkStats?: { fps: number; bitrate: number };
   /** For pipeline nodes: whether the selected pipeline supports prompts */
   supportsPrompts?: boolean;
   /** For pipeline nodes: whether the selected pipeline supports cache management (shows Reset Cache button) */
@@ -208,9 +210,9 @@ export interface FlowNodeData {
   isStreaming?: boolean;
 
   /* ── Record node fields ── */
-  /** For record nodes: callback to start recording */
+  /** For record nodes: callback to start recording (node_id is bound by enrichment) */
   onStartRecording?: () => void;
-  /** For record nodes: callback to stop recording */
+  /** For record nodes: callback to stop recording (node_id is bound by enrichment) */
   onStopRecording?: () => void;
   /** For record nodes: incoming trigger value from connected nodes */
   triggerValue?: boolean;
@@ -614,8 +616,13 @@ export function graphConfigToFlow(
   const pipelines = graph.nodes.filter(
     n => n.type === "pipeline" && !isSubgraphInnerNode(n.id)
   );
+  // Separate regular sinks from output-sink nodes (sink_mode set).
+  // Output-sink nodes are restored from ui_state as OutputNodes.
+  const outputSinkNodes = graph.nodes.filter(
+    n => n.type === "sink" && !isSubgraphInnerNode(n.id) && n.sink_mode
+  );
   const sinks = graph.nodes.filter(
-    n => n.type === "sink" && !isSubgraphInnerNode(n.id)
+    n => n.type === "sink" && !isSubgraphInnerNode(n.id) && !n.sink_mode
   );
 
   const nodes: Node<FlowNodeData>[] = [];
@@ -796,6 +803,29 @@ export function graphConfigToFlow(
     }
   }
 
+  // Fallback: create OutputNodes for sink_mode nodes not restored from ui_state
+  const restoredIds = new Set(nodes.map(n => n.id));
+  for (const n of outputSinkNodes) {
+    if (restoredIds.has(n.id)) continue;
+    const savedX = n.x ?? undefined;
+    const savedY = n.y ?? undefined;
+    nodes.push({
+      id: n.id,
+      type: "output",
+      position: {
+        x: savedX !== undefined ? savedX : START_X + COLUMN_GAP * 2 + 300,
+        y: savedY !== undefined ? savedY : START_Y,
+      },
+      data: {
+        label: n.sink_name || "Output",
+        nodeType: "output",
+        outputSinkType: n.sink_mode ?? "spout",
+        outputSinkEnabled: true,
+        outputSinkName: n.sink_name ?? "",
+      },
+    });
+  }
+
   return { nodes, edges };
 }
 
@@ -831,6 +861,7 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
 const NON_SERIALIZABLE_KEYS = new Set<string>([
   "localStream",
   "remoteStream",
+  "sinkStats",
   "onVideoFileUpload",
   "onSourceModeChange",
   "onSpoutSourceChange",
@@ -1105,7 +1136,9 @@ export function flowToGraphConfig(
           ? "source"
           : n.data.nodeType === "sink"
             ? "sink"
-            : "pipeline",
+            : n.data.nodeType === "record"
+              ? "record"
+              : "pipeline",
       pipeline_id:
         n.data.nodeType === "pipeline"
           ? (n.data.pipelineId ?? null)
@@ -1121,6 +1154,37 @@ export function flowToGraphConfig(
       tempo_sync: tempoConnectedPipelineIds.has(n.id) || undefined,
     };
   });
+
+  // Convert enabled OutputNodes to backend sink nodes with sink_mode/sink_name.
+  // This allows the backend's multi-sink system to create per-node Syphon/Spout/NDI
+  // senders, each receiving frames from the specific pipeline they're connected to.
+  for (const n of flatNodes) {
+    if (n.data.nodeType !== "output") continue;
+    const enabled = (n.data.outputSinkEnabled as boolean) ?? false;
+    if (!enabled) continue;
+
+    const sinkType = (n.data.outputSinkType as string) || "spout";
+    const sinkName = (n.data.outputSinkName as string) || "";
+    const ow =
+      n.width ??
+      n.measured?.width ??
+      (typeof n.style?.width === "number" ? n.style.width : undefined);
+    const oh =
+      n.height ??
+      n.measured?.height ??
+      (typeof n.style?.height === "number" ? n.style.height : undefined);
+
+    graphNodes.push({
+      id: n.id,
+      type: "sink",
+      x: n.position.x,
+      y: n.position.y,
+      w: ow && !Number.isNaN(ow) ? ow : undefined,
+      h: oh && !Number.isNaN(oh) ? oh : undefined,
+      sink_mode: sinkType,
+      sink_name: sinkName,
+    });
+  }
 
   // Filter edges to only include those where both source and target exist in graphNodes
   const graphNodeIds = new Set(graphNodes.map(n => n.id));
@@ -1182,10 +1246,13 @@ export function flowToGraphConfig(
         };
       });
 
-    // Edges that touch at least one frontend-only node (and aren't already in graphEdges)
+    // Edges that touch at least one frontend-only node but aren't already
+    // in graphEdges (both endpoints in graphNodeIds means it's a backend edge)
     const uiEdges: UIStateEdge[] = edges
       .filter(
-        e => frontendNodeIds.has(e.source) || frontendNodeIds.has(e.target)
+        e =>
+          (frontendNodeIds.has(e.source) || frontendNodeIds.has(e.target)) &&
+          !(graphNodeIds.has(e.source) && graphNodeIds.has(e.target))
       )
       .map(e => ({
         id: e.id,

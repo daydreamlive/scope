@@ -87,7 +87,7 @@ import { useGraphState } from "./hooks/graph/useGraphState";
 import { useConnectionLogic } from "./hooks/connection/useConnectionLogic";
 import { useNodeFactories } from "./hooks/node/useNodeFactories";
 import { useValueForwarding } from "./hooks/value/useValueForwarding";
-import { useOutputSinkSync } from "./hooks/value/useOutputSinkSync";
+
 import { useKeyboardShortcuts } from "./hooks/graph/useKeyboardShortcuts";
 import { useGraphNavigation } from "./hooks/subgraph/useGraphNavigation";
 import { useParentValueBridge } from "./hooks/value/useParentValueBridge";
@@ -167,14 +167,17 @@ interface GraphEditorProps {
   onGraphChange?: () => void;
   onGraphClear?: () => void;
   localStream?: MediaStream | null;
+  localStreams?: Record<string, MediaStream>;
   remoteStream?: MediaStream | null;
-  onVideoFileUpload?: (file: File) => Promise<boolean>;
+  remoteStreams?: Record<string, MediaStream>;
+  sinkStats?: Record<string, { fps: number; bitrate: number }>;
+  onVideoFileUpload?: (file: File, nodeId?: string) => Promise<boolean>;
   onCycleSampleVideo?: () => void;
   isPlaying?: boolean;
   onStartStream?: () => void;
   onStopStream?: () => void;
   onPlayPauseToggle?: () => void;
-  onSourceModeChange?: (mode: string) => void;
+  onSourceModeChange?: (mode: string, nodeId?: string) => void;
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
   syphonAvailable?: boolean;
@@ -185,14 +188,12 @@ interface GraphEditorProps {
     sinkType: string,
     config: { enabled: boolean; name: string }
   ) => void;
-  onOutputSinkBulkChange?: (
-    sinks: Record<string, { enabled: boolean; name: string }>
-  ) => void;
+
   spoutOutputAvailable?: boolean;
   ndiOutputAvailable?: boolean;
   syphonOutputAvailable?: boolean;
-  onStartRecording?: () => void;
-  onStopRecording?: () => void;
+  onStartRecording?: (nodeId?: string) => void;
+  onStopRecording?: (nodeId?: string) => void;
   onOpenSettings?: () => void;
   onOpenPlugins?: () => void;
   tempoState?: import("../../hooks/useTempoSync").TempoState;
@@ -217,7 +218,10 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onGraphChange,
       onGraphClear,
       localStream,
+      localStreams,
       remoteStream,
+      remoteStreams,
+      sinkStats,
       onVideoFileUpload,
       onCycleSampleVideo,
       isPlaying = true,
@@ -232,7 +236,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onNdiSourceChange,
       onSyphonSourceChange,
       onOutputSinkChange,
-      onOutputSinkBulkChange,
       spoutOutputAvailable = false,
       ndiOutputAvailable = false,
       syphonOutputAvailable = false,
@@ -277,7 +280,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       handleEdgeDelete,
       resolveBackendId,
       onNodeParamChangeRef,
-      onOutputSinkBulkChangeRef,
       handleClear,
       handleSave,
       handleImport,
@@ -308,7 +310,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onNdiSourceChange,
         onSyphonSourceChange,
         onOutputSinkChange,
-        onOutputSinkBulkChange,
         onStartRecording,
         onStopRecording,
         onEnableTempo,
@@ -318,10 +319,11 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       },
       {
         localStream,
+        localStreams,
         remoteStream,
+        remoteStreams,
+        sinkStats,
         isStreaming,
-        isLoading,
-        loadingStage,
         isPlaying,
         onPlayPauseToggle,
       },
@@ -578,7 +580,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       setNodes
     );
 
-    useOutputSinkSync(nodes, onOutputSinkBulkChangeRef);
     useKeyboardShortcuts(
       reactFlowInstanceRef,
       setPendingNodePosition,
