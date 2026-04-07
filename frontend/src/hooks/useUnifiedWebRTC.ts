@@ -85,6 +85,8 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   const queuedCandidatesRef = useRef<RTCIceCandidate[]>([]);
   const sinkNodeIdsRef = useRef<string[]>([]);
   const sinkMidMapRef = useRef<Record<string, string>>({});
+  /** Maps source node ID → RTCRtpSender for per-node track replacement */
+  const sourceNodeSendersRef = useRef<Record<string, RTCRtpSender>>({});
 
   // Helper to get ICE servers
   const fetchIceServers = useCallback(async (): Promise<RTCConfiguration> => {
@@ -252,6 +254,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           ? Object.entries(sourceNodeStreams)
           : [];
 
+        sourceNodeSendersRef.current = {};
         if (sourceEntries.length > 0) {
           // Multi-source: add each source node's stream as a separate track
           for (let i = 0; i < sourceEntries.length; i++) {
@@ -264,6 +267,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
                 `[UnifiedWebRTC] Adding primary video track for source ${nodeId}`
               );
               const sender = pc.addTrack(videoTrack, nodeStream);
+              sourceNodeSendersRef.current[nodeId] = sender;
               transceiver = pc.getTransceivers().find(t => t.sender === sender);
             } else {
               console.log(
@@ -273,6 +277,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
                 direction: "sendonly",
                 streams: [nodeStream],
               });
+              sourceNodeSendersRef.current[nodeId] = t.sender;
               if (vp8Codecs.length > 0) {
                 t.setCodecPreferences(vp8Codecs);
               }
@@ -613,6 +618,33 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
     [isStreaming]
   );
 
+  const updateSourceNodeTrack = useCallback(
+    async (nodeId: string, newStream: MediaStream) => {
+      if (!peerConnectionRef.current || !isStreaming) return false;
+      try {
+        const videoTrack = newStream.getVideoTracks()[0];
+        if (!videoTrack) return false;
+
+        const sender = sourceNodeSendersRef.current[nodeId];
+        if (sender) {
+          console.log(
+            `[UnifiedWebRTC] Replacing video track for source ${nodeId}`
+          );
+          await sender.replaceTrack(videoTrack);
+          return true;
+        }
+        return false;
+      } catch (error) {
+        console.error(
+          `[UnifiedWebRTC] Failed to replace track for source ${nodeId}:`,
+          error
+        );
+        return false;
+      }
+    },
+    [isStreaming]
+  );
+
   const sendParameterUpdate = useCallback(
     (params: {
       prompts?: string[] | PromptItem[];
@@ -716,6 +748,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
     startStream,
     stopStream,
     updateVideoTrack,
+    updateSourceNodeTrack,
     sendParameterUpdate,
   };
 }

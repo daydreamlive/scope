@@ -27,7 +27,7 @@ import { LogPanel } from "../components/LogPanel";
 import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useTempoSync } from "../hooks/useTempoSync";
 import { MIDIProvider } from "../contexts/MIDIContext";
-import { useVideoSource } from "../hooks/useVideoSource";
+import { useVideoSource, SAMPLE_VIDEOS } from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
 import { usePipeline } from "../hooks/usePipeline";
@@ -623,6 +623,7 @@ export function StreamPage() {
     startStream,
     stopStream,
     updateVideoTrack,
+    updateSourceNodeTrack,
     sendParameterUpdate: sendParameterUpdateWebRTC,
     sessionId,
   } = useUnifiedWebRTC({
@@ -783,10 +784,41 @@ export function StreamPage() {
       if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
         void switchMode(newMode as "spout" | "ndi" | "syphon");
       }
-      // For "video" (file) mode, the stream is set via handlePerNodeVideoFileUpload
+      // When switching to file mode during streaming, auto-load a sample
+      // video so the WebRTC track is replaced immediately.
+      if (newMode === "video" && isStreaming) {
+        const currentIndex = nodeSampleVideoIndexRef.current[nodeId] ?? 0;
+        const nextUrl = SAMPLE_VIDEOS[currentIndex % SAMPLE_VIDEOS.length];
+        const oldVideo = nodeVideoElementsRef.current[nodeId];
+        if (oldVideo) {
+          oldVideo.pause();
+          oldVideo.removeAttribute("src");
+          oldVideo.load();
+        }
+        const video = document.createElement("video");
+        video.src = nextUrl;
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        video
+          .play()
+          .then(() => {
+            nodeVideoElementsRef.current[nodeId] = video;
+            const stream = (
+              video as HTMLVideoElement & { captureStream(): MediaStream }
+            ).captureStream();
+            setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+          })
+          .catch(e => {
+            console.error(
+              `Failed to auto-load sample video for node ${nodeId}:`,
+              e
+            );
+          });
+      }
       // For spout/ndi/syphon, no local stream needed (server-side)
     },
-    [switchMode, createCameraStreamForNode]
+    [switchMode, createCameraStreamForNode, isStreaming]
   );
 
   // Handle per-node video file upload in graph mode
@@ -819,10 +851,59 @@ export function StreamPage() {
     [handleVideoFileUpload]
   );
 
-  // When a per-node stream changes mid-stream, replace the WebRTC track.
-  // Falls back to the global localStream when nodeLocalStreams is empty
-  // (e.g. user switched from Camera to File — the Source node also falls
-  // back to localStream via enrichment).
+  // Track per-node sample video cycle index (start at 0 so first cycle advances to 1,
+  // avoiding a no-op when the node already shows the default test.mp4)
+  const nodeSampleVideoIndexRef = useRef<Record<string, number>>({});
+  // Track per-node <video> elements so we can clean up the previous one on each cycle
+  const nodeVideoElementsRef = useRef<Record<string, HTMLVideoElement>>({});
+
+  // Handle per-node sample video cycling in graph mode
+  const handlePerNodeCycleSampleVideo = useCallback(
+    async (nodeId?: string) => {
+      if (!nodeId) {
+        cycleSampleVideo();
+        return;
+      }
+      const currentIndex = nodeSampleVideoIndexRef.current[nodeId] ?? 0;
+      const nextIndex = (currentIndex + 1) % SAMPLE_VIDEOS.length;
+      nodeSampleVideoIndexRef.current[nodeId] = nextIndex;
+      const nextUrl = SAMPLE_VIDEOS[nextIndex];
+      try {
+        const oldStream = nodeLocalStreamsRef.current[nodeId];
+        if (oldStream) {
+          oldStream.getTracks().forEach(t => t.stop());
+        }
+        // Clean up previous video element to avoid leaking decode resources
+        const oldVideo = nodeVideoElementsRef.current[nodeId];
+        if (oldVideo) {
+          oldVideo.pause();
+          oldVideo.removeAttribute("src");
+          oldVideo.load();
+        }
+        const video = document.createElement("video");
+        video.src = nextUrl;
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        await video.play();
+        nodeVideoElementsRef.current[nodeId] = video;
+        const stream = (
+          video as HTMLVideoElement & { captureStream(): MediaStream }
+        ).captureStream();
+        setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+      } catch (e) {
+        console.error(`Failed to cycle sample video for node ${nodeId}:`, e);
+      }
+    },
+    [cycleSampleVideo]
+  );
+
+  // Track the last stream track ID sent per node so we only call
+  // updateSourceNodeTrack when the track actually changed.
+  const lastSentTrackIdsRef = useRef<Record<string, string>>({});
+
+  // When a per-node stream changes mid-stream, replace the corresponding
+  // WebRTC sender's track. Only updates nodes whose track actually changed.
   useEffect(() => {
     if (!isStreaming || !graphMode) return;
     const graph = graphEditorRef.current?.getCurrentGraphConfig() ?? null;
@@ -833,17 +914,38 @@ export function StreamPage() {
       return;
     }
     const entries = Object.entries(nodeLocalStreams);
-    const stream = entries.length > 0 ? entries[0][1] : localStream;
-    if (stream) {
-      updateVideoTrack(stream);
+    if (entries.length > 0) {
+      for (const [nodeId, stream] of entries) {
+        const trackId = stream.getVideoTracks()[0]?.id;
+        if (trackId && trackId !== lastSentTrackIdsRef.current[nodeId]) {
+          lastSentTrackIdsRef.current[nodeId] = trackId;
+          updateSourceNodeTrack(nodeId, stream);
+        }
+      }
+    } else if (localStream) {
+      updateVideoTrack(localStream);
     }
-  }, [nodeLocalStreams, localStream, isStreaming, graphMode, updateVideoTrack]);
+  }, [
+    nodeLocalStreams,
+    localStream,
+    isStreaming,
+    graphMode,
+    updateVideoTrack,
+    updateSourceNodeTrack,
+  ]);
 
-  // Clean up per-node streams on unmount
+  // Clean up per-node streams and video elements on unmount
   useEffect(() => {
+    const streamsRef = nodeLocalStreamsRef;
+    const videosRef = nodeVideoElementsRef;
     return () => {
-      Object.values(nodeLocalStreamsRef.current).forEach(stream => {
+      Object.values(streamsRef.current).forEach(stream => {
         stream.getTracks().forEach(t => t.stop());
+      });
+      Object.values(videosRef.current).forEach(video => {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
       });
     };
   }, []);
@@ -3094,7 +3196,7 @@ export function StreamPage() {
             remoteStreams={remoteStreams}
             sinkStats={perSinkStats}
             onVideoFileUpload={handlePerNodeVideoFileUpload}
-            onCycleSampleVideo={cycleSampleVideo}
+            onCycleSampleVideo={handlePerNodeCycleSampleVideo}
             isPlaying={!settings.paused}
             onStartStream={() => handleStartStream()}
             onStopStream={stopStream}
