@@ -820,8 +820,11 @@ export function StreamPage() {
     [handleVideoFileUpload]
   );
 
-  // Track per-node sample video cycle index
+  // Track per-node sample video cycle index (start at 0 so first cycle advances to 1,
+  // avoiding a no-op when the node already shows the default test.mp4)
   const nodeSampleVideoIndexRef = useRef<Record<string, number>>({});
+  // Track per-node <video> elements so we can clean up the previous one on each cycle
+  const nodeVideoElementsRef = useRef<Record<string, HTMLVideoElement>>({});
 
   // Handle per-node sample video cycling in graph mode
   const handlePerNodeCycleSampleVideo = useCallback(
@@ -830,7 +833,7 @@ export function StreamPage() {
         cycleSampleVideo();
         return;
       }
-      const currentIndex = nodeSampleVideoIndexRef.current[nodeId] ?? -1;
+      const currentIndex = nodeSampleVideoIndexRef.current[nodeId] ?? 0;
       const nextIndex = (currentIndex + 1) % SAMPLE_VIDEOS.length;
       nodeSampleVideoIndexRef.current[nodeId] = nextIndex;
       const nextUrl = SAMPLE_VIDEOS[nextIndex];
@@ -839,12 +842,20 @@ export function StreamPage() {
         if (oldStream) {
           oldStream.getTracks().forEach(t => t.stop());
         }
+        // Clean up previous video element to avoid leaking decode resources
+        const oldVideo = nodeVideoElementsRef.current[nodeId];
+        if (oldVideo) {
+          oldVideo.pause();
+          oldVideo.removeAttribute("src");
+          oldVideo.load();
+        }
         const video = document.createElement("video");
         video.src = nextUrl;
         video.loop = true;
         video.muted = true;
         video.playsInline = true;
         await video.play();
+        nodeVideoElementsRef.current[nodeId] = video;
         const stream = (
           video as HTMLVideoElement & { captureStream(): MediaStream }
         ).captureStream();
@@ -856,9 +867,12 @@ export function StreamPage() {
     [cycleSampleVideo]
   );
 
+  // Track the last stream track ID sent per node so we only call
+  // updateSourceNodeTrack when the track actually changed.
+  const lastSentTrackIdsRef = useRef<Record<string, string>>({});
+
   // When a per-node stream changes mid-stream, replace the corresponding
-  // WebRTC sender's track. Each source node has its own sender, so we
-  // update them individually rather than overwriting the first sender.
+  // WebRTC sender's track. Only updates nodes whose track actually changed.
   useEffect(() => {
     if (!isStreaming || !graphMode) return;
     const graph = graphEditorRef.current?.getCurrentGraphConfig() ?? null;
@@ -871,18 +885,36 @@ export function StreamPage() {
     const entries = Object.entries(nodeLocalStreams);
     if (entries.length > 0) {
       for (const [nodeId, stream] of entries) {
-        updateSourceNodeTrack(nodeId, stream);
+        const trackId = stream.getVideoTracks()[0]?.id;
+        if (trackId && trackId !== lastSentTrackIdsRef.current[nodeId]) {
+          lastSentTrackIdsRef.current[nodeId] = trackId;
+          updateSourceNodeTrack(nodeId, stream);
+        }
       }
     } else if (localStream) {
       updateVideoTrack(localStream);
     }
-  }, [nodeLocalStreams, localStream, isStreaming, graphMode, updateVideoTrack, updateSourceNodeTrack]);
+  }, [
+    nodeLocalStreams,
+    localStream,
+    isStreaming,
+    graphMode,
+    updateVideoTrack,
+    updateSourceNodeTrack,
+  ]);
 
-  // Clean up per-node streams on unmount
+  // Clean up per-node streams and video elements on unmount
   useEffect(() => {
+    const streamsRef = nodeLocalStreamsRef;
+    const videosRef = nodeVideoElementsRef;
     return () => {
-      Object.values(nodeLocalStreamsRef.current).forEach(stream => {
+      Object.values(streamsRef.current).forEach(stream => {
         stream.getTracks().forEach(t => t.stop());
+      });
+      Object.values(videosRef.current).forEach(video => {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
       });
     };
   }, []);
