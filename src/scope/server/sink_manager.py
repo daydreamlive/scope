@@ -444,13 +444,6 @@ class SinkManager:
         """Access the recording coordinator for record-node operations."""
         return self._recording
 
-    def put_to_record(self, record_node_id: str, frame) -> bool:
-        """Write a frame into a record node's queue (cloud mode).
-
-        Delegates to RecordingCoordinator.put().
-        """
-        return self._recording.put(record_node_id, frame)
-
     def setup_cloud_graph(self, graph: Any) -> None:
         """Set up record queues from a graph config (cloud mode).
 
