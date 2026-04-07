@@ -2809,15 +2809,22 @@ export function StreamPage() {
       }
 
       // Pipeline chain: preprocessors + main pipeline (already built above)
-      initialParameters.pipeline_ids = pipelineIds;
+      if (pipelineIds.length > 0) {
+        initialParameters.pipeline_ids = pipelineIds;
+      }
 
       // Media modalities from pipeline status — used by the backend to decide
       // which tracks to create (avoids unnecessary audio processing for
       // video-only pipelines, and vice versa). Read from the ref (not React
       // state) to guarantee fresh values in the same tick loadPipeline resolved.
       const latestInfo = pipelineInfoRef.current;
-      initialParameters.produces_video = latestInfo?.produces_video ?? true;
-      initialParameters.produces_audio = latestInfo?.produces_audio ?? false;
+      if (pipelineIds.length > 0) {
+        initialParameters.produces_video = latestInfo?.produces_video ?? true;
+        initialParameters.produces_audio = latestInfo?.produces_audio ?? false;
+      } else {
+        // Node-only graph: let the backend detect audio/video from the graph
+        initialParameters.produces_audio = true;
+      }
 
       // VACE-specific parameters
       if (graphMode || nonLinearGraph) {
