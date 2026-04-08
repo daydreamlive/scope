@@ -154,6 +154,17 @@ class PipelineManager:
             )
             return True
 
+    def set_pipeline_instance(self, key: str, pipeline_instance: Any) -> None:
+        """Force-register a pipeline instance under the given key.
+
+        Unlike ``alias_pipeline``, this always overwrites any existing entry,
+        which is needed when a graph node ID collides with a loaded pipeline ID
+        but refers to a different pipeline type.
+        """
+        with self._lock:
+            self._pipelines[key] = pipeline_instance
+            self._pipeline_statuses[key] = PipelineStatus.LOADED
+
     async def _load_pipeline_by_id(
         self,
         pipeline_id: str,

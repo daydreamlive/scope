@@ -334,33 +334,66 @@ class WebRTCManager:
 
             # Parse graph from initial parameters to find sink/source/record node IDs
             (
-                sink_node_ids,
+                _,  # webrtc_sink_node_ids (unused — see below)
                 webrtc_source_node_ids,
-                _,  # all_sink_node_ids
+                sink_node_ids,
                 _,  # all_source_node_ids (browser tracks map to webrtc sources only)
                 record_node_ids,
                 has_non_webrtc_sources,
             ) = _parse_graph_node_ids(initial_parameters)
+            # Use all_sink_node_ids (not webrtc_sink_node_ids) so that
+            # SinkOutputTracks are created for every sink, including
+            # NDI/Spout/Syphon ones. In cloud relay mode the cloud sends
+            # all sink output back via WebRTC; in browser mode, the extra
+            # tracks are harmless (attached via addTrack fallback, ignored
+            # by the browser).  The graph executor creates separate
+            # hardware queues for NDI/Spout/Syphon output threads, so
+            # SinkOutputTrack reads from the WebRTC queue without conflict.
 
-            # The browser only sends WebRTC video for file/camera sources.
-            # Syphon/NDI/Spout are captured on the server and do not consume an
-            # incoming track index. Route incoming tracks by webrtc source
-            # order (same order as graph nodes, excluding hardware-only sources).
-            # Using all_source_node_ids would map track 0 to the first graph
-            # source even when that source is Syphon, mis-delivering file video
-            # into the wrong pipeline (multi-chain graphs).
-            all_source_node_ids_for_routing = webrtc_source_node_ids
+            # In cloud relay mode the local instance sends WebRTC tracks for
+            # ALL sources (including NDI/Syphon/Spout) and signals this via
+            # ``source_track_order`` in initial_parameters. Use that list so
+            # incoming tracks are mapped to the correct source nodes.
+            #
+            # In browser mode there is no ``source_track_order``; the browser
+            # only sends tracks for file/camera sources. Use
+            # webrtc_source_node_ids so track indices align with the reduced
+            # set of non-hardware sources.
+            all_source_node_ids_for_routing = initial_parameters.get(
+                "source_track_order", webrtc_source_node_ids
+            )
 
             # If the graph has pipeline nodes, ensure they are loaded keyed by
             # node_id so build_graph can find them via node.id.  The pipeline
             # may already be loaded under its pipeline_id (e.g. from the
             # load_pipeline API), so we re-register it under the node_id key.
+            #
+            # Snapshot original instances first: if a node_id matches an
+            # already-loaded pipeline_id (e.g. node "passthrough" wants
+            # pipeline_id "split-screen", but "passthrough" is also loaded),
+            # a plain alias_pipeline would silently skip the override.  By
+            # snapshotting we guarantee each node gets the correct instance
+            # even when names collide.
             graph_data = initial_parameters.get("graph")
             if graph_data and isinstance(graph_data, dict):
+                original_instances: dict[str, Any] = {}
                 for node in graph_data.get("nodes", []):
                     if node.get("type") == "pipeline" and node.get("pipeline_id"):
                         pid = node["pipeline_id"]
-                        if pipeline_manager.alias_pipeline(node["id"], pid):
+                        if pid not in original_instances:
+                            try:
+                                original_instances[pid] = (
+                                    pipeline_manager.get_pipeline_by_id(pid)
+                                )
+                            except Exception:
+                                pass
+                for node in graph_data.get("nodes", []):
+                    if node.get("type") == "pipeline" and node.get("pipeline_id"):
+                        pid = node["pipeline_id"]
+                        if pid in original_instances:
+                            pipeline_manager.set_pipeline_instance(
+                                node["id"], original_instances[pid]
+                            )
                             logger.info(
                                 f"Re-keyed pipeline {pid} as {node['id']} for graph"
                             )
@@ -766,9 +799,9 @@ class WebRTCManager:
 
             # Parse graph from initial parameters for multi-source/sink/record
             (
-                sink_node_ids,
+                _,  # webrtc_sink_node_ids (unused — use all_sink_node_ids)
                 webrtc_source_node_ids,
-                _,  # all_sink_node_ids
+                sink_node_ids,
                 _,  # all_source_node_ids
                 record_node_ids,
                 has_non_webrtc_sources,

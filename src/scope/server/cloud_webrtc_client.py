@@ -292,6 +292,15 @@ class CloudWebRTCClient:
             num_sources, num_extra_outputs, self.source_node_to_track_index = (
                 self._parse_graph(graph_data)
             )
+            # Tell the cloud which source nodes have WebRTC tracks and
+            # in what order. The cloud relay receives tracks for ALL
+            # sources (including hardware ones like NDI/Syphon/Spout),
+            # unlike a browser which only sends file/camera tracks.
+            if initial_parameters is not None and self.source_node_to_track_index:
+                initial_parameters["source_track_order"] = sorted(
+                    self.source_node_to_track_index,
+                    key=self.source_node_to_track_index.__getitem__,
+                )
 
         # Create input track(s) — one per source node
         self.input_tracks = []
