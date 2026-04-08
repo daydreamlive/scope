@@ -905,6 +905,14 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                     continue
                 if not pending.done():
                     pending.set_result(message)
+            elif msg_type == "ping":
+                await ws.send_json(
+                    {
+                        "type": "pong",
+                        "request_id": message.get("request_id"),
+                        "timestamp": message.get("timestamp"),
+                    }
+                )
             else:
                 logger.debug("Ignoring websocket message type: %s", msg_type)
 
