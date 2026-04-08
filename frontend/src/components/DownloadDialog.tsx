@@ -77,7 +77,7 @@ export function DownloadDialog({
                 ? currentDownloadPipeline
                   ? `Downloading models for ${currentPipelineInfo?.name || currentDownloadPipeline}...`
                   : "Please wait while models are downloaded."
-                : "The following model(s) require files to be downloaded:"}
+                : "The following pipeline(s) require models to be downloaded:"}
           </DialogDescription>
         </DialogHeader>
 

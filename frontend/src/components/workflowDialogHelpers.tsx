@@ -19,9 +19,9 @@ export const statusIcon = (status: ResolutionItem["status"]) => {
 export const kindLabel = (kind: ResolutionItem["kind"]) => {
   switch (kind) {
     case "pipeline":
-      return "Model";
+      return "Pipeline";
     case "plugin":
-      return "Node";
+      return "Plugin";
     case "lora":
       return "LoRA";
   }

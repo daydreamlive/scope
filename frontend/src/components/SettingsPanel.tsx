@@ -518,14 +518,14 @@ export function SettingsPanel({
           </div>
         )}
         <div className="space-y-2">
-          <h3 className="text-sm font-medium">Model</h3>
+          <h3 className="text-sm font-medium">Pipeline ID</h3>
           <Select
             value={pipelineId}
             onValueChange={handlePipelineIdChange}
             disabled={isStreaming || isLoading || nonLinearGraph}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select a model" />
+              <SelectValue placeholder="Select a pipeline" />
             </SelectTrigger>
             <SelectContent>
               {pipelines &&
@@ -540,7 +540,7 @@ export function SettingsPanel({
                       {builtIn.length > 0 && (
                         <SelectGroup>
                           <SelectLabel className="text-xs text-muted-foreground font-bold">
-                            Built-in Models
+                            Built-in Pipelines
                           </SelectLabel>
                           {builtIn.map(([id]) => (
                             <SelectItem key={id} value={id}>
@@ -555,7 +555,7 @@ export function SettingsPanel({
                       {plugin.length > 0 && (
                         <SelectGroup>
                           <SelectLabel className="text-xs text-muted-foreground font-bold">
-                            Node Models
+                            Plugin Pipelines
                           </SelectLabel>
                           {plugin.map(([id]) => (
                             <SelectItem key={id} value={id}>

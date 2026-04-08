@@ -146,7 +146,7 @@ export function GraphToolbar({
               className="text-xs text-[#8c8c8d] animate-fade-in"
               key={loadingStage}
             >
-              {loadingStage || "Loading model…"}
+              {loadingStage || "Loading pipeline…"}
             </span>
             <span className="text-[10px] text-[#b0b0b0]">
               Models may take up to a minute to load, only on the first run.
