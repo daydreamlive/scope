@@ -444,10 +444,12 @@ export function extractParameterPorts(
 
     // Skip complex component fields that get special handling in the node
     // (e.g. manage_cache has component "cache" and is replaced by a Reset Cache button,
-    //  vace_context_scale has component "vace" and is handled by the VACE node)
+    //  vace_context_scale has component "vace" and is handled by the VACE node,
+    //  lora_merge_strategy has component "lora" and is handled by the LoRA node)
     if (
       schemaProp.ui.component === "cache" ||
-      schemaProp.ui.component === "vace"
+      schemaProp.ui.component === "vace" ||
+      schemaProp.ui.component === "lora"
     )
       continue;
 
