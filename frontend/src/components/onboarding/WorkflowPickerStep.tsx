@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { Play, Camera } from "lucide-react";
+import { Play, Camera, AlertTriangle } from "lucide-react";
 import { Button } from "../ui/button";
 import { getWorkflowsForStyle, type StarterWorkflow } from "./starterWorkflows";
 import { useOnboarding } from "../../contexts/OnboardingContext";
@@ -24,8 +24,9 @@ export function WorkflowPickerStep({
   onStartFromScratch,
   onImportWorkflow,
 }: WorkflowPickerStepProps) {
-  const { state } = useOnboarding();
+  const { state, selectInferenceMode } = useOnboarding();
   const [hasGpu, setHasGpu] = useState<boolean | null>(null);
+  const [dismissedNoGpuWarning, setDismissedNoGpuWarning] = useState(false);
 
   // When running locally, check if the backend has a GPU
   useEffect(() => {
@@ -71,6 +72,40 @@ export function WorkflowPickerStep({
           Choose one and you&rsquo;ll be generating in seconds.
         </p>
       </div>
+
+      {/* No-GPU explanation card */}
+      {isLocal && hasGpu === false && !dismissedNoGpuWarning && (
+        <div className="w-full rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 flex gap-3">
+          <AlertTriangle className="h-5 w-5 text-amber-400 shrink-0 mt-0.5" />
+          <div className="flex-1 space-y-2">
+            <p className="text-sm font-medium text-amber-300">
+              No compatible GPU detected
+            </p>
+            <p className="text-xs text-amber-200/70 leading-relaxed">
+              Your machine does not meet the GPU requirements for real-time AI
+              generation. You can still use Camera Preview to explore the
+              interface, or switch to Daydream Cloud to run AI models without
+              local hardware.
+            </p>
+            <div className="flex items-center gap-3 pt-1">
+              <Button
+                size="sm"
+                onClick={() => selectInferenceMode("cloud")}
+                className="bg-amber-500/20 hover:bg-amber-500/30 text-amber-200 border border-amber-500/40 h-7 px-3 text-xs"
+                variant="ghost"
+              >
+                Try Cloud
+              </Button>
+              <button
+                onClick={() => setDismissedNoGpuWarning(true)}
+                className="text-xs text-amber-400/70 hover:text-amber-300 transition-colors"
+              >
+                Continue with Camera Preview
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Workflow cards */}
       <div
