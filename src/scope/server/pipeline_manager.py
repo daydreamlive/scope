@@ -653,7 +653,24 @@ class PipelineManager:
                 if key not in new_key_set:
                     del self._pipeline_statuses[key]
 
-        # Phase 3: Load new entries
+        # Phase 3: Load new entries.
+        # First, unload any stale instances that sit at keys scheduled for
+        # a fresh load.  Phase 2 skips these because the key IS in
+        # new_key_set, but the old instance has incompatible params (e.g.
+        # different resolution) and must be freed before the new one is
+        # created — otherwise the old GPU tensors remain allocated and the
+        # new load may OOM.
+        if entries_needing_load:
+            with self._lock:
+                for node_id, _pid, _lp in entries_needing_load:
+                    if node_id in self._pipelines:
+                        self._unload_pipeline_by_id_unsafe(
+                            node_id,
+                            connection_id=connection_id,
+                            connection_info=connection_info,
+                            user_id=user_id,
+                        )
+
         success = True
         for node_id, pipeline_id, load_params in entries_needing_load:
             try:
