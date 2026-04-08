@@ -10,6 +10,8 @@ interface ScopeAPI {
     callback: (data: DeepLinkActionData) => void
   ) => () => void;
   getEnvTelemetryDisabled?: () => boolean;
+  onServerStatus?: (callback: (isRunning: boolean) => void) => () => void;
+  onServerError?: (callback: (error: string) => void) => () => void;
 }
 
 declare global {

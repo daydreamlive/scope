@@ -6,12 +6,14 @@ import {
   Plug,
   Workflow,
   Monitor,
+  ServerCrash,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
 import { PluginsDialog } from "./PluginsDialog";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import { useBackendHealth } from "../hooks/useBackendHealth";
 interface HeaderProps {
   className?: string;
   onPipelinesRefresh?: () => Promise<unknown>;
@@ -55,6 +57,8 @@ export function Header({
   // Use shared cloud status hook - single source of truth
   const { isConnected, isConnecting, lastCloseCode, lastCloseReason } =
     useCloudStatus();
+
+  const { isHealthy: isBackendHealthy } = useBackendHealth();
 
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
@@ -196,6 +200,15 @@ export function Header({
           )}
         </div>
         <div className="flex items-center gap-1">
+          {!isBackendHealthy && (
+            <span
+              className="flex items-center gap-1.5 px-2 h-8 text-xs font-medium text-red-500"
+              title="Backend is not responding. Please restart the app."
+            >
+              <ServerCrash className="h-4 w-4" />
+              Backend offline
+            </span>
+          )}
           <Button
             variant="ghost"
             size="sm"

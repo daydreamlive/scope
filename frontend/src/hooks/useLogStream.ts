@@ -3,6 +3,7 @@ import { useCloudContext } from "../lib/cloudContext";
 
 const MAX_LOG_LINES = 2000;
 const LOCAL_POLL_INTERVAL_MS = 2000;
+const LOG_POLL_FAILURE_THRESHOLD = 3;
 
 export type LogLevel = "ERROR" | "WARNING" | "INFO" | "DEBUG" | "UNKNOWN";
 
@@ -59,6 +60,9 @@ export function useLogStream() {
   useEffect(() => {
     if (isCloudMode) return;
 
+    let consecutiveFailures = 0;
+    let disconnectedLogShown = false;
+
     const poll = async () => {
       try {
         const resp = await fetch(
@@ -70,9 +74,24 @@ export function useLogStream() {
             addLines(data.lines);
           }
           offsetRef.current = data.offset;
+          if (disconnectedLogShown) {
+            // Backend came back — add a reconnected marker
+            addLines(["--- Backend reconnected ---"]);
+            disconnectedLogShown = false;
+          }
+          consecutiveFailures = 0;
+        } else {
+          consecutiveFailures++;
         }
       } catch {
-        // Silently ignore polling errors
+        consecutiveFailures++;
+      }
+      if (
+        consecutiveFailures >= LOG_POLL_FAILURE_THRESHOLD &&
+        !disconnectedLogShown
+      ) {
+        addLines(["--- Backend disconnected or not responding ---"]);
+        disconnectedLogShown = true;
       }
     };
 

@@ -7,6 +7,7 @@ import { PluginsProvider } from "./contexts/PluginsContext";
 import { ServerInfoProvider } from "./contexts/ServerInfoContext";
 import { CloudProvider } from "./lib/cloudContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
+import { BackendHealthProvider } from "./hooks/useBackendHealth";
 import { OnboardingProvider } from "./contexts/OnboardingContext";
 import {
   handleOAuthCallback,
@@ -106,6 +107,7 @@ function App() {
 
   return (
     <TelemetryProvider>
+      <BackendHealthProvider>
       <CloudStatusProvider>
         <PipelinesProvider>
           <LoRAsProvider>
@@ -122,6 +124,7 @@ function App() {
           </LoRAsProvider>
         </PipelinesProvider>
       </CloudStatusProvider>
+      </BackendHealthProvider>
     </TelemetryProvider>
   );
 }
