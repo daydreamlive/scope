@@ -35,6 +35,7 @@ export function OnboardingOverlay({
     completeAuth,
     cloudConnected,
     startFromScratch,
+    selectWorkflow,
     workflowReady,
     importWorkflowReady,
     goBack,
@@ -60,13 +61,15 @@ export function OnboardingOverlay({
       onActivateGraphMode();
       // Remember which starter was chosen so the chip can suggest a different one
       localStorage.setItem("scope_starter_chosen_id", wf.id);
+      // Set the workflow ID before completing so the analytics event captures it
+      selectWorkflow(wf.id);
       // Complete onboarding FIRST so the overlay dismisses and the
       // WorkflowImportDialog (which renders at a lower z-index) becomes
       // visible and interactive.
       workflowReady();
       onSelectWorkflow(wf);
     },
-    [onActivateGraphMode, onSelectWorkflow, workflowReady]
+    [onActivateGraphMode, onSelectWorkflow, selectWorkflow, workflowReady]
   );
 
   const handleStartFromScratch = useCallback(() => {

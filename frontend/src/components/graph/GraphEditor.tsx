@@ -3,6 +3,7 @@ import {
   useCallback,
   useEffect,
   useImperativeHandle,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -87,8 +88,12 @@ import { useGraphState } from "./hooks/graph/useGraphState";
 import { useConnectionLogic } from "./hooks/connection/useConnectionLogic";
 import { useNodeFactories } from "./hooks/node/useNodeFactories";
 import { useValueForwarding } from "./hooks/value/useValueForwarding";
-
-import { useKeyboardShortcuts } from "./hooks/graph/useKeyboardShortcuts";
+import {
+  useKeyboardShortcuts,
+  type KeyboardShortcutHandlers,
+} from "./hooks/graph/useKeyboardShortcuts";
+import { useGraphHistory } from "./hooks/graph/useGraphHistory";
+import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
 import { useGraphNavigation } from "./hooks/subgraph/useGraphNavigation";
 import { useParentValueBridge } from "./hooks/value/useParentValueBridge";
 import { useSubgraphEval } from "./hooks/subgraph/useSubgraphEval";
@@ -346,6 +351,15 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       resetNavigationRef
     );
 
+    const { undo, redo } = useGraphHistory(
+      nodes,
+      edges,
+      setNodes,
+      setEdges,
+      enrichDepsRef,
+      handleEdgeDelete
+    );
+
     useImperativeHandle(
       ref,
       () => ({
@@ -385,6 +399,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     const [showDefaultConfirm, setShowDefaultConfirm] = useState(false);
     const [showExportDialog, setShowExportDialog] = useState(false);
     const [showWorkflowExport, setShowWorkflowExport] = useState(false);
+    const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const [isDaydreamAuthenticated, setIsDaydreamAuthenticated] = useState(
       checkIsAuthenticated()
     );
@@ -585,16 +601,118 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       onPromptForwardRef
     );
 
-    useKeyboardShortcuts(
-      reactFlowInstanceRef,
-      setPendingNodePosition,
-      setShowAddNodeModal,
+    const shortcutHandlers: KeyboardShortcutHandlers = useMemo(
+      () => ({
+        "zoom-in": () => reactFlowInstanceRef.current?.zoomIn(),
+        "zoom-out": () => reactFlowInstanceRef.current?.zoomOut(),
+        "zoom-reset": () =>
+          reactFlowInstanceRef.current?.setViewport(
+            { x: 0, y: 0, zoom: 1 },
+            { duration: 300 }
+          ),
+        "fit-view": () =>
+          reactFlowInstanceRef.current?.fitView({
+            padding: 0.1,
+            duration: 300,
+          }),
+        "fit-view-home": () =>
+          reactFlowInstanceRef.current?.fitView({
+            padding: 0.1,
+            duration: 300,
+          }),
+        "open-add-node": () => {
+          const rf = reactFlowInstanceRef.current;
+          if (rf) {
+            const vp = rf.getViewport();
+            const wrapper = document.querySelector(".react-flow");
+            const rect = wrapper?.getBoundingClientRect();
+            if (rect) {
+              setPendingNodePosition(
+                rf.screenToFlowPosition({
+                  x: rect.left + rect.width / 2,
+                  y: rect.top + rect.height / 2,
+                })
+              );
+            } else {
+              setPendingNodePosition({
+                x: -vp.x / vp.zoom,
+                y: -vp.y / vp.zoom,
+              });
+            }
+          }
+          setShowAddNodeModal(true);
+        },
+        undo,
+        redo,
+        save: handleSave,
+        export: () => setShowExportDialog(true),
+        "toggle-stream": () =>
+          isStreaming ? onStopStream?.() : onStartStream?.(),
+        "show-shortcuts": () => setShowShortcutsDialog(true),
+        "select-all": () =>
+          setNodes(nds => nds.map(n => ({ ...n, selected: true }))),
+        deselect: () =>
+          setNodes(nds =>
+            nds.map(n => (n.selected ? { ...n, selected: false } : n))
+          ),
+        "lock-node": () =>
+          setNodes(nds =>
+            nds.map(n =>
+              n.selected
+                ? {
+                    ...n,
+                    draggable: n.draggable === false ? true : false,
+                    data: {
+                      ...n.data,
+                      locked: !n.data.locked,
+                    },
+                  }
+                : n
+            )
+          ),
+        "pin-node": () =>
+          setNodes(nds =>
+            nds.map(n =>
+              n.selected
+                ? {
+                    ...n,
+                    data: {
+                      ...n.data,
+                      pinned: !n.data.pinned,
+                    },
+                  }
+                : n
+            )
+          ),
+        "group-nodes": () => {
+          if (selectedNodeIds.length >= 2) {
+            createSubgraphFromSelection(nodes, edges, selectedNodeIds);
+          }
+        },
+      }),
+      [
+        undo,
+        redo,
+        handleSave,
+        isStreaming,
+        onStartStream,
+        onStopStream,
+        setNodes,
+        selectedNodeIds,
+        nodes,
+        edges,
+        createSubgraphFromSelection,
+      ]
+    );
+
+    useKeyboardShortcuts({
       nodes,
       edges,
       setNodes,
       setEdges,
-      handleSave
-    );
+      isStreaming,
+      handlers: shortcutHandlers,
+    });
 
     const {
       depth: navDepth,
@@ -890,6 +1008,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             onDefaultWorkflow={() => setShowDefaultConfirm(true)}
             onOpenSettings={onOpenSettings}
             onOpenPlugins={onOpenPlugins}
+            fileInputRef={fileInputRef}
           />
 
           <BreadcrumbNav
@@ -1159,6 +1278,11 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             open={showWorkflowExport}
             onClose={() => setShowWorkflowExport(false)}
             buildWorkflow={buildCurrentWorkflow}
+          />
+
+          <KeyboardShortcutsDialog
+            open={showShortcutsDialog}
+            onOpenChange={setShowShortcutsDialog}
           />
         </div>
       </div>
