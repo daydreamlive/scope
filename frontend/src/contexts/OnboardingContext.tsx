@@ -12,7 +12,6 @@ import {
   setInferenceMode as persistInferenceMode,
 } from "../lib/onboardingStorage";
 import { trackEvent } from "../lib/analytics";
-import { isDisclosed as checkTelemetryDisclosed } from "../lib/telemetry";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -24,7 +23,6 @@ export type OnboardingPhase =
   | "inference" // step 1: local vs cloud
   | "cloud_auth" // step 2a: sign in (only if cloud chosen)
   | "cloud_connecting" // step 2b: waiting for cloud relay connection
-  | "telemetry_disclosure" // telemetry opt-in disclosure (local mode only)
   | "workflow" // step 3: starter workflow picker
   | "downloading" // step 3b: workflow downloading
   | "completed"; // persist and transition to idle
@@ -56,7 +54,6 @@ type OnboardingAction =
   | { type: "IMPORT_WORKFLOW_READY" }
   | { type: "GO_BACK" }
   | { type: "COMPLETE" }
-  | { type: "TELEMETRY_DISCLOSED" }
   | {
       type: "SET_SURVEY_ANSWERS";
       referralSource: string | null;
@@ -89,16 +86,8 @@ function reducer(
       return {
         ...state,
         inferenceMode: action.mode,
-        phase:
-          action.mode === "cloud"
-            ? "cloud_auth"
-            : checkTelemetryDisclosed()
-              ? "workflow"
-              : "telemetry_disclosure",
+        phase: action.mode === "cloud" ? "cloud_auth" : "workflow",
       };
-
-    case "TELEMETRY_DISCLOSED":
-      return { ...state, phase: "workflow" };
 
     case "COMPLETE_AUTH":
       return { ...state, phase: "cloud_connecting" };
@@ -198,9 +187,7 @@ function reducer(
         if (resumeMode === "local") {
           return {
             ...state,
-            phase: checkTelemetryDisclosed()
-              ? "workflow"
-              : "telemetry_disclosure",
+            phase: "workflow",
             inferenceMode: "local",
           };
         }
@@ -234,7 +221,6 @@ interface OnboardingContextValue {
   startFromScratch: () => void;
   importWorkflowReady: () => void;
   goBack: () => void;
-  telemetryDisclosed: () => void;
   setSurveyAnswers: (
     referralSource: string | null,
     useCase: string | null
@@ -315,10 +301,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     []
   );
   const goBack = useCallback(() => dispatch({ type: "GO_BACK" }), []);
-  const telemetryDisclosed = useCallback(
-    () => dispatch({ type: "TELEMETRY_DISCLOSED" }),
-    []
-  );
   const setSurveyAnswers = useCallback(
     (referralSource: string | null, useCase: string | null) =>
       dispatch({ type: "SET_SURVEY_ANSWERS", referralSource, useCase }),
@@ -331,7 +313,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     "inference",
     "cloud_auth",
     "cloud_connecting",
-    "telemetry_disclosure",
     "workflow",
   ].includes(state.phase);
 
@@ -352,7 +333,6 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         startFromScratch,
         importWorkflowReady,
         goBack,
-        telemetryDisclosed,
         setSurveyAnswers,
       }}
     >

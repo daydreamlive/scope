@@ -81,6 +81,7 @@ import { toast } from "sonner";
 import { useOnboarding } from "../contexts/OnboardingContext";
 import { OnboardingOverlay } from "../components/onboarding/OnboardingOverlay";
 import { WorkspaceTour } from "../components/onboarding/WorkspaceTour";
+import { TelemetryBanner } from "../components/TelemetryBanner";
 
 import {
   isAuthenticated as checkIsAuthenticated,
@@ -698,6 +699,19 @@ export function StreamPage() {
     sinkNodeIdsRef,
     sinkMidMapRef,
   });
+
+  // Track whether any frame has ever been received this session (for telemetry banner)
+  const [hasReceivedFrames, setHasReceivedFrames] = useState(false);
+  const hasReceivedFramesRef = useRef(false);
+  useEffect(() => {
+    if (
+      !hasReceivedFramesRef.current &&
+      Object.values(perSinkStats).some(s => s.fps > 0)
+    ) {
+      hasReceivedFramesRef.current = true;
+      setHasReceivedFrames(true);
+    }
+  }, [perSinkStats]);
 
   // Video container ref for controller input pointer lock
   const videoContainerRef = useRef<HTMLDivElement>(null);
@@ -3774,6 +3788,11 @@ export function StreamPage() {
             onboardingStyle={onboardingState.onboardingStyle}
             dialogOpen={showWorkflowImport}
           />
+        )}
+
+        {/* Telemetry banner — shown after first frame output for local users */}
+        {!showOnboardingOverlay && (
+          <TelemetryBanner hasReceivedFrames={hasReceivedFrames} />
         )}
       </div>
     </MIDIProvider>
