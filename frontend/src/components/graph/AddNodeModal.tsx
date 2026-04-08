@@ -85,8 +85,8 @@ const NODE_CATALOG: NodeCatalogItem[] = [
   },
   {
     type: "pipeline",
-    name: "Pipeline",
-    description: "Processing pipeline node",
+    name: "Model",
+    description: "Processing model node",
     color: "#60a5fa",
     category: "I/O",
   },
