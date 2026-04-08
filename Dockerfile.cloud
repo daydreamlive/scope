@@ -45,6 +45,11 @@ RUN uv python install && \
 # Copy project files
 COPY src/ /app/src/
 
+# Pre-install bundled plugins (cannot be removed by users)
+ENV DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE="/app/bundled-plugins.txt"
+RUN echo "git+https://github.com/daydreamlive/scope-ltx-2.git" > /app/bundled-plugins.txt
+RUN uv run daydream-scope install git+https://github.com/daydreamlive/scope-ltx-2.git
+
 # Expose port 8000 for RunPod HTTP proxy
 EXPOSE 8000
 

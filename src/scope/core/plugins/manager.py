@@ -8,6 +8,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -18,6 +19,7 @@ from .dependency_validator import DependencyValidator
 from .hookspecs import ScopeHookSpec
 from .plugins_config import (
     ensure_plugins_dir,
+    get_bundled_plugins_file,
     get_plugins_dir,
     get_plugins_file,
     get_resolved_file,
@@ -109,6 +111,20 @@ class PluginManager:
         # Entry points that failed to load
         self._failed_plugins: list[FailedPluginInfo] = []
 
+        # Cache for bundled plugin names (file is immutable at runtime)
+        self._bundled_package_names: set[str] | None = None
+
+        # TTL cache for plugin update checks: {name: (result_dict, timestamp)}
+        self._update_check_cache: dict[str, tuple[dict[str, Any], float]] = {}
+        self._update_check_ttl: float = 600.0  # 10 minutes
+
+    def clear_update_check_cache(self) -> None:
+        """Clear the TTL cache for plugin update checks.
+
+        Should be called after plugin install/uninstall/upgrade.
+        """
+        self._update_check_cache.clear()
+
     def _read_plugins_file(self) -> list[str]:
         """Read plugin specifiers from plugins.txt."""
         plugins_file = get_plugins_file()
@@ -119,6 +135,29 @@ class PluginManager:
             for line in plugins_file.read_text().splitlines()
             if line.strip() and not line.strip().startswith("#")
         ]
+
+    def _read_bundled_plugins_file(self) -> list[str]:
+        """Read plugin specifiers from the bundled plugins file.
+
+        Bundled plugins are pre-installed and cannot be removed by users.
+        """
+        bundled_file = get_bundled_plugins_file()
+        if not bundled_file:
+            return []
+        return [
+            line.strip()
+            for line in bundled_file.read_text().splitlines()
+            if line.strip() and not line.strip().startswith("#")
+        ]
+
+    def _get_bundled_package_names(self) -> set[str]:
+        """Get normalized names of bundled plugins (cached)."""
+        if self._bundled_package_names is None:
+            self._bundled_package_names = {
+                self._normalize_package_name(self._extract_package_name(s))
+                for s in self._read_bundled_plugins_file()
+            }
+        return self._bundled_package_names
 
     def _write_plugins_file(self, plugins: list[str]) -> None:
         """Write plugin specifiers to plugins.txt."""
@@ -229,6 +268,11 @@ class PluginManager:
         # Add plugins file if it exists and has content
         if plugins_file.exists() and plugins_file.read_text().strip():
             args.append(str(plugins_file))
+
+        # Add bundled plugins file if it exists
+        bundled_file = get_bundled_plugins_file()
+        if bundled_file:
+            args.append(str(bundled_file))
 
         constraints_file = self._generate_constraints()
         if constraints_file:
@@ -424,8 +468,28 @@ class PluginManager:
         This handles venv recreation (e.g., uv upgrade wiping .venv) by
         detecting missing plugin packages and reinstalling them from the
         persisted resolved.txt before plugin discovery runs.
+
+        Also checks bundled plugins (from DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE)
+        which are always required regardless of user plugins.txt state.
         """
-        plugins = self._read_plugins_file()
+        # Merge user plugins with bundled plugins
+        user_plugins = self._read_plugins_file()
+        bundled_plugins = self._read_bundled_plugins_file()
+
+        # Deduplicate: bundled specs take priority
+        seen_names: set[str] = set()
+        plugins: list[str] = []
+        for spec in bundled_plugins:
+            name = self._normalize_package_name(self._extract_package_name(spec))
+            if name not in seen_names:
+                seen_names.add(name)
+                plugins.append(spec)
+        for spec in user_plugins:
+            name = self._normalize_package_name(self._extract_package_name(spec))
+            if name not in seen_names:
+                seen_names.add(name)
+                plugins.append(spec)
+
         if not plugins:
             return
 
@@ -613,20 +677,27 @@ class PluginManager:
         # Default to PyPI
         return ("pypi", False, None, None)
 
-    async def list_plugins_async(self) -> list[dict[str, Any]]:
+    async def list_plugins_async(
+        self, *, skip_update_check: bool = False
+    ) -> list[dict[str, Any]]:
         """Get all installed plugins with metadata.
 
         Returns:
             List of plugin info dictionaries
         """
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, self.list_plugins_sync)
+        return await loop.run_in_executor(
+            None, lambda: self.list_plugins_sync(skip_update_check=skip_update_check)
+        )
 
-    def list_plugins_sync(self) -> list[dict[str, Any]]:
+    def list_plugins_sync(
+        self, *, skip_update_check: bool = False
+    ) -> list[dict[str, Any]]:
         """Synchronous implementation of list_plugins."""
         from importlib.metadata import distributions
 
         plugins = []
+        bundled_names = self._get_bundled_package_names()
 
         with self._lock:
             for dist in distributions():
@@ -669,7 +740,7 @@ class PluginManager:
                     )
 
                     # Check for updates (skip local/editable plugins)
-                    if source == "local" or editable:
+                    if skip_update_check or source == "local" or editable:
                         latest_version = None
                         update_available = None
                     else:
@@ -678,6 +749,10 @@ class PluginManager:
                         )
                         latest_version = update_info.get("latest_version")
                         update_available = update_info.get("update_available")
+
+                    is_bundled = (
+                        self._normalize_package_name(package_name) in bundled_names
+                    )
 
                     plugins.append(
                         {
@@ -693,6 +768,7 @@ class PluginManager:
                             "latest_version": latest_version,
                             "update_available": update_available,
                             "package_spec": package_spec,
+                            "bundled": is_bundled,
                         }
                     )
                 except Exception as e:
@@ -721,6 +797,9 @@ class PluginManager:
         Compares current resolved.txt with a fresh compile using --upgrade-package
         to find if a newer version is available that respects project constraints.
 
+        Results are cached for ``_update_check_ttl`` seconds to avoid repeated
+        expensive subprocess calls.
+
         Args:
             name: Package name (used for version lookup)
             package_spec: Package specifier (not used in compile approach, kept for API compat)
@@ -730,14 +809,25 @@ class PluginManager:
         """
         import tempfile
 
+        # Return cached result if still fresh
+        cached = self._update_check_cache.get(name)
+        if cached is not None:
+            result_dict, timestamp = cached
+            if time.monotonic() - timestamp < self._update_check_ttl:
+                return result_dict
+
         resolved_file = get_resolved_file()
 
         # Get current version from resolved.txt (if it exists)
         current_version = self._get_version_from_resolved(name, str(resolved_file))
 
+        def _cache_and_return(r: dict[str, Any]) -> dict[str, Any]:
+            self._update_check_cache[name] = (r, time.monotonic())
+            return r
+
         # If no resolved file exists, we can't check for updates via compile
         if not resolved_file.exists():
-            return {"latest_version": None, "update_available": None}
+            return _cache_and_return({"latest_version": None, "update_available": None})
 
         # Create temp file for upgrade check
         try:
@@ -751,7 +841,9 @@ class PluginManager:
             pyproject = project_root / "pyproject.toml"
 
             if not pyproject.exists():
-                return {"latest_version": None, "update_available": None}
+                return _cache_and_return(
+                    {"latest_version": None, "update_available": None}
+                )
 
             args = [
                 "uv",
@@ -783,19 +875,25 @@ class PluginManager:
             )
 
             if result.returncode != 0:
-                return {"latest_version": None, "update_available": None}
+                return _cache_and_return(
+                    {"latest_version": None, "update_available": None}
+                )
 
             # Get new version from temp resolved file
             new_version = self._get_version_from_resolved(name, temp_resolved)
 
             if new_version and new_version != current_version:
-                return {"latest_version": new_version, "update_available": True}
+                return _cache_and_return(
+                    {"latest_version": new_version, "update_available": True}
+                )
 
-            return {"latest_version": None, "update_available": False}
+            return _cache_and_return(
+                {"latest_version": None, "update_available": False}
+            )
 
         except Exception as e:
             logger.warning(f"Failed to check updates for {name}: {e}")
-            return {"latest_version": None, "update_available": None}
+            return _cache_and_return({"latest_version": None, "update_available": None})
         finally:
             Path(temp_resolved).unlink(missing_ok=True)
 
@@ -1259,6 +1357,12 @@ class PluginManager:
 
         if not plugin_info:
             raise PluginNotFoundError(f"Plugin '{name}' not found")
+
+        # Prevent uninstalling bundled plugins
+        if plugin_info.get("bundled"):
+            raise PluginInstallError(
+                f"Plugin '{name}' is bundled and cannot be uninstalled"
+            )
 
         logger.debug(f"Found plugin: {plugin_info}")
 

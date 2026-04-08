@@ -50,6 +50,7 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "tempo",
   "prompt_list",
   "prompt_blend",
+  "scheduler",
 ]);
 
 const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
@@ -62,8 +63,11 @@ const UI_INPUT_TYPES = new Set<FlowNodeData["nodeType"]>([
   "vace",
   "pipeline",
   "record",
+  "control",
+  "bool",
   "prompt_list",
   "prompt_blend",
+  "scheduler",
 ]);
 
 function resolveSubgraphTarget(
@@ -132,7 +136,10 @@ export function useValueForwarding(
   onNodeParamChangeRef: React.RefObject<
     ((nodeId: string, key: string, value: unknown) => void) | undefined
   >,
-  setNodes?: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>
+  setNodes?: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>,
+  onPromptForwardRef?: React.RefObject<
+    ((nodeId: string, text: string) => void) | undefined
+  >
 ) {
   const lastForwardTimeRef = useRef<Record<string, number>>({});
 
@@ -143,6 +150,22 @@ export function useValueForwarding(
   // duplicate sends when the RAF loop's setNodes triggers a re-render
   // that re-fires this effect with identical producer values.
   const lastSentRef = useRef<Map<string, unknown>>(new Map());
+
+  // Debounce prompt sends from primitive nodes so intermediate keystrokes
+  // don't spam the pipeline.  Key = "backendId\0prompts", value = timeout handle.
+  const PROMPT_DEBOUNCE_MS = 1000;
+  const promptDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
+
+  // Clean up any pending debounce timers on unmount.
+  useEffect(() => {
+    const ref = promptDebounceRef.current;
+    return () => {
+      ref.forEach(t => clearTimeout(t));
+      ref.clear();
+    };
+  }, []);
 
   // Detect streaming session start (false→true) and clear dedup state so the
   // new backend session receives all parameter values, even if they haven't
@@ -157,11 +180,15 @@ export function useValueForwarding(
     return 0;
   }, [isStreaming]);
 
+  const lastSessionTickRef = useRef(0);
+
   useEffect(() => {
     if (!isStreaming || !onNodeParamChangeRef.current) return;
 
-    // On new session start, clear dedup state so all params are re-sent.
-    if (sessionTick > 0) {
+    // On new session start, clear dedup state so all params are re-sent —
+    // but only once per session, not on every effect re-run.
+    if (sessionTick > 0 && sessionTick !== lastSessionTickRef.current) {
+      lastSessionTickRef.current = sessionTick;
       lastSentRef.current.clear();
       prevNodeDataRef.current.clear();
     }
@@ -207,7 +234,17 @@ export function useValueForwarding(
       }> = [];
 
       if (node.data.nodeType === "primitive") {
-        valuesToForward.push({ handleName: null, value: node.data.value });
+        if (node.data.primitiveAutoSend === false) {
+          // Manual send mode: only forward the committed value, skip if none yet
+          if (node.data.committedValue !== undefined) {
+            valuesToForward.push({
+              handleName: null,
+              value: node.data.committedValue,
+            });
+          }
+        } else {
+          valuesToForward.push({ handleName: null, value: node.data.value });
+        }
       } else if (node.data.nodeType === "reroute") {
         valuesToForward.push({ handleName: null, value: node.data.value });
       } else if (
@@ -293,6 +330,24 @@ export function useValueForwarding(
           handleName: "prompts",
           value: node.data.promptBlendItems ?? [],
         });
+      } else if (node.data.nodeType === "scheduler") {
+        valuesToForward.push({
+          handleName: "elapsed",
+          value: node.data.schedulerElapsed ?? 0,
+        });
+        valuesToForward.push({
+          handleName: "is_playing",
+          value: (node.data.schedulerIsPlaying as boolean) ? 1 : 0,
+        });
+        valuesToForward.push({
+          handleName: "tick",
+          value: node.data.schedulerTickCount ?? 0,
+        });
+        const fireCounts =
+          (node.data.schedulerFireCounts as Record<string, number>) ?? {};
+        for (const [port, count] of Object.entries(fireCounts)) {
+          valuesToForward.push({ handleName: port, value: count });
+        }
       } else if (
         node.data.nodeType === "subgraph_input" ||
         node.data.nodeType === "subgraph"
@@ -306,7 +361,8 @@ export function useValueForwarding(
       const isAnimated =
         node.data.nodeType === "control" ||
         node.data.nodeType === "math" ||
-        node.data.nodeType === "tempo";
+        node.data.nodeType === "tempo" ||
+        node.data.nodeType === "scheduler";
       if (isAnimated) {
         const now = Date.now();
         const lastTime = lastForwardTimeRef.current[node.id] || 0;
@@ -372,20 +428,56 @@ export function useValueForwarding(
         if (!entry || entry.value === undefined) continue;
 
         if (resolvedParamName === "__prompt") {
-          if (Array.isArray(entry.value)) {
-            sendParam(resolvedBackendId, "prompts", entry.value);
-            const srcNode = nodes.find(n => n.id === edge.source);
-            if (srcNode?.data.nodeType === "prompt_blend") {
-              sendParam(
-                resolvedBackendId,
-                "prompt_interpolation_method",
-                srcNode.data.promptBlendMethod ?? "linear"
-              );
+          // Keep nodeParams.__prompt in sync immediately so
+          // getGraphNodePrompts and stream-start initialisation use the
+          // connected value, not the stale default.
+          const promptText = Array.isArray(entry.value)
+            ? (entry.value[0]?.text ?? "")
+            : String(entry.value);
+          onPromptForwardRef?.current?.(edge.target, promptText);
+
+          const capturedValue = entry.value;
+          const capturedBackendId = resolvedBackendId;
+          const capturedSource = nodes.find(n => n.id === edge.source);
+
+          const sendPrompt = () => {
+            if (Array.isArray(capturedValue)) {
+              sendParam(capturedBackendId, "prompts", capturedValue);
+              if (capturedSource?.data.nodeType === "prompt_blend") {
+                sendParam(
+                  capturedBackendId,
+                  "prompt_interpolation_method",
+                  capturedSource.data.promptBlendMethod ?? "linear"
+                );
+              }
+            } else {
+              sendParam(capturedBackendId, "prompts", [
+                { text: String(capturedValue), weight: 100 },
+              ]);
             }
+          };
+
+          // Only debounce prompts coming from auto-send primitives so
+          // intermediate keystrokes don't spam the pipeline.  Manual
+          // sends (committedValue) and non-primitive sources fire
+          // immediately.
+          const isPrimitiveAutoSend =
+            node.data.nodeType === "primitive" &&
+            node.data.primitiveAutoSend !== false;
+
+          if (isPrimitiveAutoSend) {
+            const debounceKey = `${resolvedBackendId}\0prompts`;
+            const existingTimer = promptDebounceRef.current.get(debounceKey);
+            if (existingTimer) clearTimeout(existingTimer);
+            promptDebounceRef.current.set(
+              debounceKey,
+              setTimeout(() => {
+                promptDebounceRef.current.delete(debounceKey);
+                sendPrompt();
+              }, PROMPT_DEBOUNCE_MS)
+            );
           } else {
-            sendParam(resolvedBackendId, "prompts", [
-              { text: String(entry.value), weight: 100 },
-            ]);
+            sendPrompt();
           }
         } else {
           sendParam(resolvedBackendId, resolvedParamName, entry.value);
@@ -464,6 +556,11 @@ export function useValueForwarding(
           targetParsed.name === "value"
         ) {
           nodeUpdates["value"] = sourceValue;
+          // When value comes from upstream, always treat it as committed
+          // so it propagates downstream regardless of autoSend setting
+          if (targetNode.data.primitiveAutoSend === false) {
+            nodeUpdates["committedValue"] = sourceValue;
+          }
         } else if (
           targetNode.data.nodeType === "slider" &&
           targetParsed.name === "value"
@@ -543,6 +640,157 @@ export function useValueForwarding(
         ) {
           nodeUpdates["triggerValue"] = Boolean(sourceValue);
         } else if (
+          targetNode.data.nodeType === "bool" &&
+          targetParsed.name === "trigger"
+        ) {
+          // Trigger input for bool node – detect fire, then gate/toggle
+          const mode =
+            (nodeUpdates["boolMode"] as string) ??
+            (targetNode.data.boolMode as string) ??
+            "gate";
+          let shouldFire = false;
+          if (typeof sourceValue === "boolean") {
+            const wasArmed =
+              nodeUpdates["boolTriggerArmed"] !== undefined
+                ? Boolean(nodeUpdates["boolTriggerArmed"])
+                : Boolean(targetNode.data.boolTriggerArmed);
+            if (sourceValue && !wasArmed) shouldFire = true;
+            if (sourceValue) {
+              nodeUpdates["boolTriggerArmed"] = true;
+            } else if (nodeUpdates["boolTriggerArmed"] === undefined) {
+              nodeUpdates["boolTriggerArmed"] = false;
+            }
+          } else {
+            const counter = Number(sourceValue) || 0;
+            const counters = (nodeUpdates["_boolTriggerCounters"] as Record<
+              string,
+              number
+            >) ?? {
+              ...((targetNode.data._boolTriggerCounters as Record<
+                string,
+                number
+              >) ?? {}),
+            };
+            const lastSeen = counters[edge.id] ?? 0;
+            if (counter > 0 && counter !== lastSeen) shouldFire = true;
+            counters[edge.id] = counter;
+            nodeUpdates["_boolTriggerCounters"] = counters;
+          }
+
+          if (shouldFire) {
+            if (mode === "toggle") {
+              const prev =
+                nodeUpdates["value"] !== undefined
+                  ? Boolean(nodeUpdates["value"])
+                  : Boolean(targetNode.data.value);
+              nodeUpdates["value"] = !prev;
+            } else {
+              // Gate: flip on, record timestamp for auto-reset
+              nodeUpdates["value"] = true;
+              nodeUpdates["_boolGateTimer"] = Date.now();
+            }
+          }
+
+          // Gate auto-reset after 150ms
+          const gateTimer =
+            (nodeUpdates["_boolGateTimer"] as number) ??
+            (targetNode.data._boolGateTimer as number);
+          if (mode === "gate" && gateTimer && !shouldFire) {
+            const elapsed = Date.now() - gateTimer;
+            if (elapsed >= 150) {
+              nodeUpdates["value"] = false;
+              nodeUpdates["_boolGateTimer"] = undefined;
+            }
+          }
+        } else if (
+          targetNode.data.nodeType === "control" &&
+          targetParsed.name === "trigger"
+        ) {
+          let shouldAdvance = false;
+          if (typeof sourceValue === "boolean") {
+            const wasArmed =
+              nodeUpdates["controlTriggerArmed"] !== undefined
+                ? Boolean(nodeUpdates["controlTriggerArmed"])
+                : Boolean(targetNode.data.controlTriggerArmed);
+            if (sourceValue && !wasArmed) shouldAdvance = true;
+            if (sourceValue) {
+              nodeUpdates["controlTriggerArmed"] = true;
+            } else if (nodeUpdates["controlTriggerArmed"] === undefined) {
+              nodeUpdates["controlTriggerArmed"] = false;
+            }
+          } else {
+            const counter = Number(sourceValue) || 0;
+            const counters = (nodeUpdates["_controlTriggerCounters"] as Record<
+              string,
+              number
+            >) ?? {
+              ...((targetNode.data._controlTriggerCounters as Record<
+                string,
+                number
+              >) ?? {}),
+            };
+            const lastSeen = counters[edge.id] ?? 0;
+            if (counter > 0 && counter !== lastSeen) shouldAdvance = true;
+            counters[edge.id] = counter;
+            nodeUpdates["_controlTriggerCounters"] = counters;
+          }
+          if (shouldAdvance) {
+            const items = (targetNode.data.controlItems as string[]) ?? [
+              "item1",
+            ];
+            const currentIdx =
+              nodeUpdates["controlSwitchIndex"] !== undefined
+                ? (nodeUpdates["controlSwitchIndex"] as number)
+                : ((targetNode.data.controlSwitchIndex as number) ?? 0);
+            const nextIdx = (currentIdx + 1) % items.length;
+            nodeUpdates["controlSwitchIndex"] = nextIdx;
+            nodeUpdates["currentValue"] = items[nextIdx] ?? "";
+          }
+        } else if (
+          targetNode.data.nodeType === "prompt_list" &&
+          targetParsed.name === "trigger"
+        ) {
+          let shouldAdvance = false;
+          if (typeof sourceValue === "boolean") {
+            const wasArmed =
+              nodeUpdates["promptListTriggerArmed"] !== undefined
+                ? Boolean(nodeUpdates["promptListTriggerArmed"])
+                : Boolean(targetNode.data.promptListTriggerArmed);
+            if (sourceValue && !wasArmed) shouldAdvance = true;
+            if (sourceValue) {
+              nodeUpdates["promptListTriggerArmed"] = true;
+            } else if (nodeUpdates["promptListTriggerArmed"] === undefined) {
+              nodeUpdates["promptListTriggerArmed"] = false;
+            }
+          } else {
+            const counter = Number(sourceValue) || 0;
+            const counters = (nodeUpdates["_promptTriggerCounters"] as Record<
+              string,
+              number
+            >) ?? {
+              ...((targetNode.data._promptTriggerCounters as Record<
+                string,
+                number
+              >) ?? {}),
+            };
+            const lastSeen = counters[edge.id] ?? 0;
+            if (counter > 0 && counter !== lastSeen) {
+              shouldAdvance = true;
+            }
+            counters[edge.id] = counter;
+            nodeUpdates["_promptTriggerCounters"] = counters;
+          }
+          if (shouldAdvance) {
+            const items = (targetNode.data.promptListItems as string[]) ?? [""];
+            const currentIdx =
+              nodeUpdates["promptListActiveIndex"] !== undefined
+                ? (nodeUpdates["promptListActiveIndex"] as number)
+                : ((targetNode.data.promptListActiveIndex as number) ?? 0);
+            const nextIdx = (currentIdx + 1) % items.length;
+            nodeUpdates["promptListActiveIndex"] = nextIdx;
+            nodeUpdates["promptListActiveText"] = items[nextIdx] ?? "";
+          }
+        } else if (
           targetNode.data.nodeType === "prompt_list" &&
           targetParsed.name === "cycle"
         ) {
@@ -605,6 +853,40 @@ export function useValueForwarding(
                 }
               }
               nodeUpdates["promptBlendItems"] = items;
+            }
+          }
+        } else if (targetNode.data.nodeType === "scheduler") {
+          if (targetParsed.name === "start" || targetParsed.name === "reset") {
+            const counterKey =
+              targetParsed.name === "start"
+                ? "_schedulerStartCount"
+                : "_schedulerResetCount";
+            const armedKey =
+              targetParsed.name === "start"
+                ? "_schedulerStartArmed"
+                : "_schedulerResetArmed";
+            if (typeof sourceValue === "boolean") {
+              const wasArmed =
+                nodeUpdates[armedKey] !== undefined
+                  ? Boolean(nodeUpdates[armedKey])
+                  : Boolean(targetNode.data[armedKey]);
+              if (sourceValue && !wasArmed) {
+                const prev =
+                  (nodeUpdates[counterKey] as number) ??
+                  (targetNode.data[counterKey] as number) ??
+                  0;
+                nodeUpdates[counterKey] = prev + 1;
+              }
+              nodeUpdates[armedKey] = sourceValue;
+            } else {
+              const counter = Number(sourceValue) || 0;
+              const prev =
+                (nodeUpdates[counterKey] as number) ??
+                (targetNode.data[counterKey] as number) ??
+                0;
+              if (counter > 0 && counter !== prev) {
+                nodeUpdates[counterKey] = counter;
+              }
             }
           }
         } else if (targetNode.data.nodeType === "pipeline") {

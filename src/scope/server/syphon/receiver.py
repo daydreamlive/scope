@@ -168,7 +168,9 @@ class SyphonReceiver:
                 for s in raw_servers:
                     uuid = str(s.get("SyphonServerDescriptionUUIDKey", ""))
                     app = str(s.get("SyphonServerDescriptionAppNameKey", ""))
-                    if uuid == identifier or app == identifier:
+                    name = str(s.get("SyphonServerDescriptionNameKey", ""))
+                    info = SyphonServerInfo(uuid=uuid, name=name, app_name=app)
+                    if identifier in (uuid, app, name, info.display_name):
                         target_raw = s
                         break
 

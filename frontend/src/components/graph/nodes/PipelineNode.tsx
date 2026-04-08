@@ -34,7 +34,7 @@ function getPortColorHex(portName: string): string {
 }
 
 function getParamTypeColor(
-  type: "string" | "number" | "boolean" | "list_number"
+  type: "string" | "number" | "boolean" | "list_number" | "trigger"
 ): string {
   return PARAM_TYPE_COLORS[type] || COLOR_DEFAULT;
 }
@@ -309,6 +309,7 @@ export function PipelineNode({
                       }
                       min={param.min}
                       max={param.max}
+                      step={param.step}
                       disabled={disabled}
                     />
                   ) : (
@@ -432,9 +433,12 @@ export function PipelineNode({
                   Prompt
                 </p>
                 {isPromptConnected ? (
-                  <NodePill className="opacity-50 break-all">
-                    {promptText || "—"}
-                  </NodePill>
+                  <NodePillTextarea
+                    value={promptText || "—"}
+                    onChange={() => {}}
+                    disabled
+                    className="opacity-50"
+                  />
                 ) : (
                   <div className="flex flex-col gap-1">
                     <NodePillTextarea

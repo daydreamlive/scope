@@ -27,7 +27,13 @@ import { LogPanel } from "../components/LogPanel";
 import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useTempoSync } from "../hooks/useTempoSync";
 import { MIDIProvider } from "../contexts/MIDIContext";
-import { useVideoSource } from "../hooks/useVideoSource";
+import {
+  useVideoSource,
+  SAMPLE_VIDEOS,
+  FPS,
+  MIN_FPS,
+  MAX_FPS,
+} from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
 import { usePipeline } from "../hooks/usePipeline";
@@ -124,6 +130,18 @@ function getVaceParams(
     };
   }
   return {};
+}
+
+/** When every source node is Spout/NDI/Syphon, the browser must not send a WebRTC video track. */
+function graphHasOnlyServerSideSources(graph: GraphConfig | null): boolean {
+  const nodes = graph?.nodes;
+  if (!nodes?.length) return false;
+  const sources = nodes.filter(n => n.type === "source");
+  if (sources.length === 0) return false;
+  return sources.every(n => {
+    const sm = n.source_mode || "video";
+    return sm === "spout" || sm === "ndi" || sm === "syphon";
+  });
 }
 
 export function StreamPage() {
@@ -589,19 +607,33 @@ export function StreamPage() {
     [updateSettings]
   );
 
+  // Combined handler: update perform mode settings AND graph mode node params.
+  const handleParametersUpdated = useCallback(
+    (params: Record<string, unknown>) => {
+      applyBackendParamsToSettings(params);
+      const nodeId = params.node_id as string | undefined;
+      graphEditorRef.current?.applyExternalParams(params, nodeId);
+    },
+    [applyBackendParamsToSettings]
+  );
+
   // WebRTC for streaming (unified hook works in both local and cloud modes)
   const {
     remoteStream,
+    remoteStreams,
     isStreaming,
     isConnecting,
     peerConnectionRef,
+    sinkNodeIdsRef,
+    sinkMidMapRef,
     startStream,
     stopStream,
     updateVideoTrack,
+    updateSourceNodeTrack,
     sendParameterUpdate: sendParameterUpdateWebRTC,
     sessionId,
   } = useUnifiedWebRTC({
-    onParametersUpdated: applyBackendParamsToSettings,
+    onParametersUpdated: handleParametersUpdated,
     onTempoUpdate: updateTempoFromNotification,
   });
 
@@ -659,10 +691,12 @@ export function StreamPage() {
   const isLoading =
     isDownloading || isPipelineLoading || isConnecting || isCloudConnecting;
 
-  // Get WebRTC stats for FPS
-  const webrtcStats = useWebRTCStats({
+  // Get per-sink WebRTC stats (FPS / bitrate)
+  const { perSinkStats } = useWebRTCStats({
     peerConnectionRef,
     isStreaming,
+    sinkNodeIdsRef,
+    sinkMidMapRef,
   });
 
   // Video container ref for controller input pointer lock
@@ -708,6 +742,240 @@ export function StreamPage() {
       });
     },
   });
+
+  // Per-node local streams for multi-source graph mode
+  const [nodeLocalStreams, setNodeLocalStreams] = useState<
+    Record<string, MediaStream>
+  >({});
+  const nodeLocalStreamsRef = useRef(nodeLocalStreams);
+  nodeLocalStreamsRef.current = nodeLocalStreams;
+
+  // Shared camera stream ref so multiple source nodes (or repeated mode
+  // switches) reuse the same getUserMedia stream instead of prompting again.
+  const sharedCameraStreamRef = useRef<MediaStream | null>(null);
+
+  // Create (or reuse) a camera stream for a specific source node
+  const createCameraStreamForNode = useCallback(async (nodeId: string) => {
+    try {
+      // Reuse existing shared camera stream if it's still active
+      const existing = sharedCameraStreamRef.current;
+      if (
+        existing &&
+        existing.getVideoTracks().some(t => t.readyState === "live")
+      ) {
+        // Clone the stream so each node gets an independent MediaStream object
+        // while sharing the same underlying track (no new permission prompt).
+        setNodeLocalStreams(prev => ({ ...prev, [nodeId]: existing.clone() }));
+        return;
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: {
+          width: { ideal: 512, min: 256, max: 512 },
+          height: { ideal: 512, min: 256, max: 512 },
+          frameRate: { ideal: FPS, min: MIN_FPS, max: MAX_FPS },
+        },
+        audio: false,
+      });
+      sharedCameraStreamRef.current = stream;
+      setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+    } catch (e) {
+      console.error(`Failed to get camera for node ${nodeId}:`, e);
+    }
+  }, []);
+
+  // Handle per-node source mode changes in graph mode
+  const handlePerNodeSourceModeChange = useCallback(
+    (newMode: string, nodeId?: string) => {
+      if (!nodeId) {
+        // Fallback: global mode switch (perform mode)
+        switchMode(newMode as "video" | "camera" | "spout" | "ndi" | "syphon");
+        return;
+      }
+      // Stop any existing stream for this node
+      const oldStream = nodeLocalStreamsRef.current[nodeId];
+      if (oldStream) {
+        oldStream.getTracks().forEach(t => t.stop());
+        setNodeLocalStreams(prev => {
+          const next = { ...prev };
+          delete next[nodeId];
+          return next;
+        });
+      }
+      if (newMode === "camera") {
+        createCameraStreamForNode(nodeId);
+      }
+      // Import/restore calls this with (mode, nodeId). Clear the global
+      // useVideoSource stream (e.g. test.mp4) when switching to server-side
+      // capture — otherwise WebRTC still sends that track alongside Syphon/NDI/Spout.
+      if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
+        void switchMode(newMode as "spout" | "ndi" | "syphon");
+      }
+      // When switching to file mode during streaming, auto-load a sample
+      // video so the WebRTC track is replaced immediately.
+      if (newMode === "video" && isStreaming) {
+        const currentIndex = nodeSampleVideoIndexRef.current[nodeId] ?? 0;
+        const nextUrl = SAMPLE_VIDEOS[currentIndex % SAMPLE_VIDEOS.length];
+        const oldVideo = nodeVideoElementsRef.current[nodeId];
+        if (oldVideo) {
+          oldVideo.pause();
+          oldVideo.removeAttribute("src");
+          oldVideo.load();
+        }
+        const video = document.createElement("video");
+        video.src = nextUrl;
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        video
+          .play()
+          .then(() => {
+            nodeVideoElementsRef.current[nodeId] = video;
+            const stream = (
+              video as HTMLVideoElement & { captureStream(): MediaStream }
+            ).captureStream();
+            setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+          })
+          .catch(e => {
+            console.error(
+              `Failed to auto-load sample video for node ${nodeId}:`,
+              e
+            );
+          });
+      }
+      // For spout/ndi/syphon, no local stream needed (server-side)
+    },
+    [switchMode, createCameraStreamForNode, isStreaming]
+  );
+
+  // Handle per-node video file upload in graph mode
+  const handlePerNodeVideoFileUpload = useCallback(
+    async (file: File, nodeId?: string): Promise<boolean> => {
+      if (!nodeId) {
+        return handleVideoFileUpload(file);
+      }
+      try {
+        const video = document.createElement("video");
+        video.src = URL.createObjectURL(file);
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        await video.play();
+        const stream = (
+          video as HTMLVideoElement & { captureStream(): MediaStream }
+        ).captureStream();
+        const oldStream = nodeLocalStreamsRef.current[nodeId];
+        if (oldStream) {
+          oldStream.getTracks().forEach(t => t.stop());
+        }
+        setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+        return true;
+      } catch (e) {
+        console.error(`Failed to create video stream for node ${nodeId}:`, e);
+        return false;
+      }
+    },
+    [handleVideoFileUpload]
+  );
+
+  // Track per-node sample video cycle index (start at 0 so first cycle advances to 1,
+  // avoiding a no-op when the node already shows the default test.mp4)
+  const nodeSampleVideoIndexRef = useRef<Record<string, number>>({});
+  // Track per-node <video> elements so we can clean up the previous one on each cycle
+  const nodeVideoElementsRef = useRef<Record<string, HTMLVideoElement>>({});
+
+  // Handle per-node sample video cycling in graph mode
+  const handlePerNodeCycleSampleVideo = useCallback(
+    async (nodeId?: string) => {
+      if (!nodeId) {
+        cycleSampleVideo();
+        return;
+      }
+      const currentIndex = nodeSampleVideoIndexRef.current[nodeId] ?? 0;
+      const nextIndex = (currentIndex + 1) % SAMPLE_VIDEOS.length;
+      nodeSampleVideoIndexRef.current[nodeId] = nextIndex;
+      const nextUrl = SAMPLE_VIDEOS[nextIndex];
+      try {
+        const oldStream = nodeLocalStreamsRef.current[nodeId];
+        if (oldStream) {
+          oldStream.getTracks().forEach(t => t.stop());
+        }
+        // Clean up previous video element to avoid leaking decode resources
+        const oldVideo = nodeVideoElementsRef.current[nodeId];
+        if (oldVideo) {
+          oldVideo.pause();
+          oldVideo.removeAttribute("src");
+          oldVideo.load();
+        }
+        const video = document.createElement("video");
+        video.src = nextUrl;
+        video.loop = true;
+        video.muted = true;
+        video.playsInline = true;
+        await video.play();
+        nodeVideoElementsRef.current[nodeId] = video;
+        const stream = (
+          video as HTMLVideoElement & { captureStream(): MediaStream }
+        ).captureStream();
+        setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+      } catch (e) {
+        console.error(`Failed to cycle sample video for node ${nodeId}:`, e);
+      }
+    },
+    [cycleSampleVideo]
+  );
+
+  // Track the last stream track ID sent per node so we only call
+  // updateSourceNodeTrack when the track actually changed.
+  const lastSentTrackIdsRef = useRef<Record<string, string>>({});
+
+  // When a per-node stream changes mid-stream, replace the corresponding
+  // WebRTC sender's track. Only updates nodes whose track actually changed.
+  useEffect(() => {
+    if (!isStreaming || !graphMode) return;
+    const graph = graphEditorRef.current?.getCurrentGraphConfig() ?? null;
+    if (
+      graphHasOnlyServerSideSources(graph) &&
+      Object.keys(nodeLocalStreams).length === 0
+    ) {
+      return;
+    }
+    const entries = Object.entries(nodeLocalStreams);
+    if (entries.length > 0) {
+      for (const [nodeId, stream] of entries) {
+        const trackId = stream.getVideoTracks()[0]?.id;
+        if (trackId && trackId !== lastSentTrackIdsRef.current[nodeId]) {
+          lastSentTrackIdsRef.current[nodeId] = trackId;
+          updateSourceNodeTrack(nodeId, stream);
+        }
+      }
+    } else if (localStream) {
+      updateVideoTrack(localStream);
+    }
+  }, [
+    nodeLocalStreams,
+    localStream,
+    isStreaming,
+    graphMode,
+    updateVideoTrack,
+    updateSourceNodeTrack,
+  ]);
+
+  // Clean up per-node streams and video elements on unmount
+  useEffect(() => {
+    const streamsRef = nodeLocalStreamsRef;
+    const videosRef = nodeVideoElementsRef;
+    return () => {
+      Object.values(streamsRef.current).forEach(stream => {
+        stream.getTracks().forEach(t => t.stop());
+      });
+      Object.values(videosRef.current).forEach(video => {
+        video.pause();
+        video.removeAttribute("src");
+        video.load();
+      });
+    };
+  }, []);
 
   const handlePromptsSubmit = (prompts: PromptItem[]) => {
     setPromptItems(prompts);
@@ -1285,17 +1553,6 @@ export function StreamPage() {
     }
   };
 
-  const handleOutputSinkBulkChange = (
-    sinks: Record<string, { enabled: boolean; name: string }>
-  ) => {
-    updateSettings({ outputSinks: sinks });
-    if (isStreaming) {
-      sendParameterUpdate({
-        output_sinks: sinks,
-      });
-    }
-  };
-
   // Handle Spout input name change from InputAndControlsPanel
   const handleSpoutSourceChange = (name: string) => {
     updateSettings({
@@ -1642,6 +1899,15 @@ export function StreamPage() {
           break;
         }
       }
+
+      // Sync to graph mode nodes (no node_id = all pipeline nodes)
+      if (key === "prompt") {
+        graphEditorRef.current?.applyExternalParams({
+          __prompt: String(value),
+        });
+      } else {
+        graphEditorRef.current?.applyExternalParams({ [key]: value });
+      }
     };
   });
 
@@ -1934,6 +2200,10 @@ export function StreamPage() {
         source_type: string;
         source_name: string;
       } | null = null;
+      // Sink node IDs for multi-track WebRTC
+      const graphSinkNodeIds: string[] = [];
+      // Record nodes need recvonly transceivers too (same order as backend: sinks then records)
+      const graphRecordNodeIds: string[] = [];
       // The graph config to pass via initialParameters (sent over WebRTC)
       let graphConfigForStream: ReturnType<
         NonNullable<typeof graphEditorRef.current>["getCurrentGraphConfig"]
@@ -1968,24 +2238,34 @@ export function StreamPage() {
               pipelineIdToUse = mainPid ?? graphPipelineIds[0];
             }
 
-            // Extract source mode from the graph's source node and normalize
+            // Extract sink node IDs for multi-track WebRTC
+            graphSinkNodeIds.push(
+              ...graphNodes.filter(n => n.type === "sink").map(n => n.id)
+            );
+            graphRecordNodeIds.push(
+              ...graphNodes.filter(n => n.type === "record").map(n => n.id)
+            );
+
+            // Extract source mode from all source nodes and normalize
             // to a valid InputMode. All source_mode values (video, camera,
             // spout, ndi, syphon) need video input, so graphSourceMode is
             // always "video". For server-side sources we also capture the
             // input source config so the backend receives it.
-            const sourceNode = graphNodes.find(n => n.type === "source");
-            if (sourceNode) {
-              const sm = sourceNode.source_mode || "video";
-              // All graph source modes require video InputMode
+            const sourceNodes = graphNodes.filter(n => n.type === "source");
+            if (sourceNodes.length > 0) {
               graphSourceMode = "video";
 
-              // For server-side sources, capture input source config
-              if (sm === "spout" || sm === "ndi" || sm === "syphon") {
-                graphInputSource = {
-                  enabled: true,
-                  source_type: sm,
-                  source_name: sourceNode.source_name ?? "",
-                };
+              // Use first server-side source for backward compat input_source param
+              for (const sourceNode of sourceNodes) {
+                const sm = sourceNode.source_mode || "video";
+                if (sm === "spout" || sm === "ndi" || sm === "syphon") {
+                  graphInputSource = {
+                    enabled: true,
+                    source_type: sm,
+                    source_name: sourceNode.source_name ?? "",
+                  };
+                  break;
+                }
               }
             }
           }
@@ -2244,6 +2524,18 @@ export function StreamPage() {
           settings.postprocessorIds ?? [],
           vaceInputVideoIds.size > 0 ? vaceInputVideoIds : undefined
         );
+
+        // Extract sink node IDs so WebRTC stats can map tracks to sinks
+        graphSinkNodeIds.push(
+          ...graphConfigForStream.nodes
+            .filter(n => n.type === "sink")
+            .map(n => n.id)
+        );
+        graphRecordNodeIds.push(
+          ...graphConfigForStream.nodes
+            .filter(n => n.type === "record")
+            .map(n => n.id)
+        );
       }
 
       // Build PipelineLoadItem[] from graph nodes (always available at this
@@ -2365,7 +2657,14 @@ export function StreamPage() {
           ? localStream || undefined
           : undefined;
 
-      if (needsVideoInput && !isServerSideInput && !localStream) {
+      const hasPerNodeStreams =
+        graphMode && Object.keys(nodeLocalStreams).length > 0;
+      if (
+        needsVideoInput &&
+        !isServerSideInput &&
+        !localStream &&
+        !hasPerNodeStreams
+      ) {
         console.error("Video input required but no local stream available");
         return false;
       }
@@ -2608,8 +2907,46 @@ export function StreamPage() {
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 
+      // Build per-source-node streams for multi-source WebRTC
+      // Each WebRTC source node gets its own video track sent to the backend
+      let sourceNodeStreamsForWebRTC: Record<string, MediaStream> | undefined;
+      if (graphConfigForStream) {
+        const webrtcSourceNodes = (graphConfigForStream.nodes ?? []).filter(
+          n =>
+            n.type === "source" &&
+            (n.source_mode || "video") !== "spout" &&
+            (n.source_mode || "video") !== "ndi" &&
+            (n.source_mode || "video") !== "syphon"
+        );
+        if (webrtcSourceNodes.length > 0) {
+          const streams: Record<string, MediaStream> = {};
+          for (const node of webrtcSourceNodes) {
+            const nodeStream = nodeLocalStreams[node.id];
+            if (nodeStream) {
+              streams[node.id] = nodeStream;
+            } else if (localStream) {
+              streams[node.id] = localStream;
+            }
+          }
+          if (Object.keys(streams).length > 0) {
+            sourceNodeStreamsForWebRTC = streams;
+          }
+        }
+      }
+
       // Pipeline is loaded, now start WebRTC stream
-      startStream(initialParameters, streamToSend);
+      // Pass sink + record node IDs so recvonly transceivers match backend
+      // (extra outputs: sink[1..] then record nodes).
+      const webrtcMultiOutputNodeIds =
+        graphSinkNodeIds.length > 0 || graphRecordNodeIds.length > 0
+          ? [...graphSinkNodeIds, ...graphRecordNodeIds]
+          : undefined;
+      startStream(
+        initialParameters,
+        sourceNodeStreamsForWebRTC ? undefined : streamToSend,
+        webrtcMultiOutputNodeIds,
+        sourceNodeStreamsForWebRTC
+      );
 
       trackEvent("generation_started", {
         surface: graphMode ? "graph_mode" : "performance_mode",
@@ -2644,31 +2981,37 @@ export function StreamPage() {
     }
   };
 
-  const handleStartRecording = useCallback(async () => {
-    if (!sessionId) return;
-    try {
-      await api.startRecording(sessionId);
-    } catch (error) {
-      console.error("Error starting recording:", error);
-      toast.error("Failed to start recording");
-    }
-  }, [sessionId, api]);
+  const handleStartRecording = useCallback(
+    async (nodeId?: string) => {
+      if (!sessionId) return;
+      try {
+        await api.startRecording(sessionId, nodeId);
+      } catch (error) {
+        console.error("Error starting recording:", error);
+        toast.error("Failed to start recording");
+      }
+    },
+    [sessionId, api]
+  );
 
-  const handleStopRecording = useCallback(async () => {
-    if (!sessionId) return;
-    try {
-      await api.downloadRecording(sessionId);
-    } catch (error) {
-      console.error("Error downloading recording:", error);
-      toast.error("Failed to save recording");
-    }
-    try {
-      await api.stopRecording(sessionId);
-    } catch (error) {
-      console.error("Error stopping recording:", error);
-      toast.error("Failed to stop recording");
-    }
-  }, [sessionId, api]);
+  const handleStopRecording = useCallback(
+    async (nodeId?: string) => {
+      if (!sessionId) return;
+      try {
+        await api.downloadRecording(sessionId, nodeId);
+      } catch (error) {
+        console.error("Error downloading recording:", error);
+        toast.error("Failed to save recording");
+      }
+      try {
+        await api.stopRecording(sessionId, nodeId);
+      } catch (error) {
+        console.error("Error stopping recording:", error);
+        toast.error("Failed to stop recording");
+      }
+    },
+    [sessionId, api]
+  );
 
   // Handle workflow import: load settings, timeline, and prompt state
   const handleWorkflowLoad = useCallback(
@@ -2875,18 +3218,17 @@ export function StreamPage() {
             onGraphChange={handleGraphChange}
             onGraphClear={handleGraphClear}
             localStream={localStream}
+            localStreams={nodeLocalStreams}
             remoteStream={remoteStream}
-            onVideoFileUpload={handleVideoFileUpload}
-            onCycleSampleVideo={cycleSampleVideo}
+            remoteStreams={remoteStreams}
+            sinkStats={perSinkStats}
+            onVideoFileUpload={handlePerNodeVideoFileUpload}
+            onCycleSampleVideo={handlePerNodeCycleSampleVideo}
             isPlaying={!settings.paused}
             onStartStream={() => handleStartStream()}
             onStopStream={stopStream}
             onPlayPauseToggle={handlePlayPauseToggle}
-            onSourceModeChange={mode =>
-              handleModeChange(
-                mode as "video" | "camera" | "spout" | "ndi" | "syphon"
-              )
-            }
+            onSourceModeChange={handlePerNodeSourceModeChange}
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiAvailable}
             syphonAvailable={syphonAvailable}
@@ -2894,7 +3236,6 @@ export function StreamPage() {
             onNdiSourceChange={handleNdiSourceChange}
             onSyphonSourceChange={handleSyphonSourceChange}
             onOutputSinkChange={handleOutputSinkChange}
-            onOutputSinkBulkChange={handleOutputSinkBulkChange}
             spoutOutputAvailable={spoutAvailable}
             ndiOutputAvailable={ndiOutputAvailable}
             syphonOutputAvailable={syphonOutputAvailable}
@@ -3361,11 +3702,12 @@ export function StreamPage() {
 
         {/* Status Bar */}
         <StatusBar
-          fps={webrtcStats.fps}
-          bitrate={webrtcStats.bitrate}
+          fps={Object.values(perSinkStats)[0]?.fps ?? 0}
+          bitrate={Object.values(perSinkStats)[0]?.bitrate ?? 0}
           onLogToggle={toggleLogPanel}
           isLogOpen={isLogPanelOpen}
           logUnreadCount={logUnreadCount}
+          hideMetrics={graphMode}
         />
 
         {/* Download Dialog */}

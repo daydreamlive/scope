@@ -130,6 +130,41 @@ class PipelineManager:
                 )
             return self._pipelines[pipeline_id]
 
+    def alias_pipeline(self, alias_key: str, pipeline_id: str) -> bool:
+        """Register an existing pipeline under an additional key.
+
+        Returns True if the alias was created, False if *pipeline_id* is not loaded.
+        """
+        with self._lock:
+            # Graph loads already register each pipeline under the node id
+            # (instance_key). Do not replace that entry with whatever is keyed by
+            # the bare registry name (e.g. "passthrough") — that can be a stale
+            # singleton and would make multiple graph nodes share the wrong
+            # pipeline instance.
+            if alias_key in self._pipelines:
+                return True
+            existing = self._pipelines.get(pipeline_id)
+            if alias_key in self._pipelines:
+                return self._pipelines[alias_key] is existing
+            if existing is None:
+                return False
+            self._pipelines[alias_key] = existing
+            self._pipeline_statuses[alias_key] = self._pipeline_statuses.get(
+                pipeline_id, PipelineStatus.LOADED
+            )
+            return True
+
+    def set_pipeline_instance(self, key: str, pipeline_instance: Any) -> None:
+        """Force-register a pipeline instance under the given key.
+
+        Unlike ``alias_pipeline``, this always overwrites any existing entry,
+        which is needed when a graph node ID collides with a loaded pipeline ID
+        but refers to a different pipeline type.
+        """
+        with self._lock:
+            self._pipelines[key] = pipeline_instance
+            self._pipeline_statuses[key] = PipelineStatus.LOADED
+
     async def _load_pipeline_by_id(
         self,
         pipeline_id: str,
@@ -189,6 +224,7 @@ class PipelineManager:
             if key in self._pipelines:
                 if (
                     self._pipeline_statuses.get(key) == PipelineStatus.LOADED
+                    and self._pipeline_registry_ids.get(key) == pipeline_id
                     and current_params == new_params
                 ):
                     is_loaded = True
@@ -617,7 +653,24 @@ class PipelineManager:
                 if key not in new_key_set:
                     del self._pipeline_statuses[key]
 
-        # Phase 3: Load new entries
+        # Phase 3: Load new entries.
+        # First, unload any stale instances that sit at keys scheduled for
+        # a fresh load.  Phase 2 skips these because the key IS in
+        # new_key_set, but the old instance has incompatible params (e.g.
+        # different resolution) and must be freed before the new one is
+        # created — otherwise the old GPU tensors remain allocated and the
+        # new load may OOM.
+        if entries_needing_load:
+            with self._lock:
+                for node_id, _pid, _lp in entries_needing_load:
+                    if node_id in self._pipelines:
+                        self._unload_pipeline_by_id_unsafe(
+                            node_id,
+                            connection_id=connection_id,
+                            connection_info=connection_info,
+                            user_id=user_id,
+                        )
+
         success = True
         for node_id, pipeline_id, load_params in entries_needing_load:
             try:

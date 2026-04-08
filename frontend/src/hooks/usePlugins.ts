@@ -1,5 +1,6 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useRef, useEffect } from "react";
 import { listPlugins } from "@/lib/api";
+import { useCloudStatus } from "./useCloudStatus";
 import type { PluginInfo, FailedPluginInfo } from "@/lib/api";
 
 export interface UsePluginsReturn {
@@ -10,9 +11,11 @@ export interface UsePluginsReturn {
 }
 
 export function usePlugins(): UsePluginsReturn {
+  const { isConnected: isCloudConnected } = useCloudStatus();
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [failedPlugins, setFailedPlugins] = useState<FailedPluginInfo[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const prevCloudConnectedRef = useRef<boolean | null>(null);
 
   const refresh = useCallback(async () => {
     setIsLoading(true);
@@ -31,6 +34,20 @@ export function usePlugins(): UsePluginsReturn {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Refresh when cloud connection state changes
+  useEffect(() => {
+    if (prevCloudConnectedRef.current === null) {
+      prevCloudConnectedRef.current = isCloudConnected;
+      return;
+    }
+
+    if (prevCloudConnectedRef.current !== isCloudConnected) {
+      refresh();
+    }
+
+    prevCloudConnectedRef.current = isCloudConnected;
+  }, [isCloudConnected, refresh]);
 
   return {
     plugins,

@@ -5,10 +5,12 @@ interface NodePillInputProps {
   type: "text" | "number";
   value: string | number;
   onChange: (value: string | number) => void;
+  onSubmit?: () => void;
   disabled?: boolean;
   placeholder?: string;
   min?: number;
   max?: number;
+  step?: number;
   className?: string;
 }
 
@@ -16,10 +18,12 @@ export function NodePillInput({
   type,
   value,
   onChange,
+  onSubmit,
   disabled = false,
   placeholder,
   min,
   max,
+  step,
   className = "",
 }: NodePillInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -29,11 +33,13 @@ export function NodePillInput({
     hasDragged: boolean;
   } | null>(null);
 
+  const isInteger = step !== undefined && step >= 1;
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (type === "number") {
       const numValue = Number(e.target.value);
       if (!Number.isNaN(numValue)) {
-        onChange(numValue);
+        onChange(isInteger ? Math.round(numValue) : numValue);
       }
     } else {
       onChange(e.target.value);
@@ -48,6 +54,17 @@ export function NodePillInput({
       return clamped;
     },
     [min, max]
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onSubmit?.();
+        inputRef.current?.blur();
+      }
+    },
+    [onSubmit]
   );
 
   const handleMouseDown = useCallback(
@@ -75,9 +92,7 @@ export function NodePillInput({
           dragRef.current.startValue + dx * sensitivity
         );
         onChange(
-          sensitivity >= 1
-            ? Math.round(newVal)
-            : Math.round(newVal * 1000) / 1000
+          isInteger ? Math.round(newVal) : Math.round(newVal * 1000) / 1000
         );
       };
 
@@ -94,7 +109,7 @@ export function NodePillInput({
       document.addEventListener("mousemove", onMove);
       document.addEventListener("mouseup", onUp);
     },
-    [type, disabled, value, min, max, clampValue, onChange]
+    [type, disabled, value, min, max, clampValue, onChange, isInteger]
   );
 
   const isNumber = type === "number";
@@ -105,11 +120,13 @@ export function NodePillInput({
       type={type}
       value={value}
       onChange={handleChange}
+      onKeyDown={onSubmit ? handleKeyDown : undefined}
       onMouseDown={isNumber ? handleMouseDown : undefined}
       disabled={disabled}
       placeholder={placeholder}
       min={min}
       max={max}
+      step={step}
       className={`${NODE_TOKENS.pillInput} ${isNumber ? NODE_TOKENS.pillInputNumber : NODE_TOKENS.pillInputText} ${isNumber && !disabled ? "cursor-ew-resize focus:cursor-text" : ""} ${isNumber ? "nodrag" : ""} ${className}`}
     />
   );

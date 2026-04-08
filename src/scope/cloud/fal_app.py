@@ -469,6 +469,8 @@ class ScopeApp(fal.App, keep_alive=300):
             "HF_TOKEN",
             "HF_HOME",
             "HUGGINGFACE_HUB_CACHE",
+            # Bundled plugins
+            "DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE",
         ]
         scope_env = {k: os.environ[k] for k in ENV_WHITELIST if k in os.environ}
 

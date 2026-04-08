@@ -18,11 +18,19 @@ export interface EnrichNodesDeps {
   handlePromptSubmit: (nodeId: string) => void;
   nodeParamsRef: React.RefObject<Record<string, Record<string, unknown>>>;
   localStream?: MediaStream | null;
+  /** Per-source-node local streams (multi-source) */
+  localStreams?: Record<string, MediaStream>;
   remoteStream?: MediaStream | null;
+  /** Per-sink-node remote streams (multi-sink) */
+  remoteStreams?: Record<string, MediaStream>;
+  /** Per-sink-node WebRTC stats */
+  sinkStats?: Record<string, { fps: number; bitrate: number }>;
   onVideoFileUploadRef: React.RefObject<
-    ((file: File) => Promise<boolean>) | undefined
+    ((file: File, nodeId?: string) => Promise<boolean>) | undefined
   >;
-  onSourceModeChangeRef: React.RefObject<((mode: string) => void) | undefined>;
+  onSourceModeChangeRef: React.RefObject<
+    ((mode: string, nodeId?: string) => void) | undefined
+  >;
   onSpoutSourceChangeRef: React.RefObject<((name: string) => void) | undefined>;
   onNdiSourceChangeRef: React.RefObject<
     ((identifier: string) => void) | undefined
@@ -30,7 +38,9 @@ export interface EnrichNodesDeps {
   onSyphonSourceChangeRef: React.RefObject<
     ((identifier: string) => void) | undefined
   >;
-  onCycleSampleVideoRef: React.RefObject<(() => void) | undefined>;
+  onCycleSampleVideoRef: React.RefObject<
+    ((nodeId?: string) => void) | undefined
+  >;
   spoutAvailable: boolean;
   ndiAvailable: boolean;
   syphonAvailable: boolean;
@@ -43,8 +53,8 @@ export interface EnrichNodesDeps {
   loadingStage?: string | null;
   isPlaying?: boolean;
   onPlayPauseToggleRef: React.RefObject<(() => void) | undefined>;
-  onStartRecordingRef: React.RefObject<(() => void) | undefined>;
-  onStopRecordingRef: React.RefObject<(() => void) | undefined>;
+  onStartRecordingRef: React.RefObject<((nodeId?: string) => void) | undefined>;
+  onStopRecordingRef: React.RefObject<((nodeId?: string) => void) | undefined>;
   tempoState?: {
     enabled: boolean;
     bpm: number | null;
@@ -143,15 +153,18 @@ export function enrichNodes(
       };
     }
     if (n.data.nodeType === "source") {
+      // Per-node stream if available (multi-source), else fall back to global
+      const nodeStream = deps.localStreams?.[n.id] ?? deps.localStream;
       return {
         ...n,
         data: {
           ...n.data,
-          localStream: deps.localStream,
+          localStream: nodeStream,
           onVideoFileUpload: (file: File) =>
-            deps.onVideoFileUploadRef.current?.(file) ?? Promise.resolve(false),
+            deps.onVideoFileUploadRef.current?.(file, n.id) ??
+            Promise.resolve(false),
           onSourceModeChange: (mode: string) =>
-            deps.onSourceModeChangeRef.current?.(mode),
+            deps.onSourceModeChangeRef.current?.(mode, n.id),
           spoutAvailable: deps.spoutAvailable,
           ndiAvailable: deps.ndiAvailable,
           syphonAvailable: deps.syphonAvailable,
@@ -161,17 +174,21 @@ export function enrichNodes(
             deps.onNdiSourceChangeRef.current?.(identifier),
           onSyphonSourceChange: (identifier: string) =>
             deps.onSyphonSourceChangeRef.current?.(identifier),
-          onCycleSampleVideo: () => deps.onCycleSampleVideoRef.current?.(),
+          onCycleSampleVideo: () => deps.onCycleSampleVideoRef.current?.(n.id),
           isStreaming: deps.isStreaming,
         },
       };
     }
     if (n.data.nodeType === "sink") {
+      // Per-node remote stream and stats (multi-sink)
+      const nodeRemoteStream = deps.remoteStreams?.[n.id] ?? deps.remoteStream;
+      const nodeStats = deps.sinkStats?.[n.id];
       return {
         ...n,
         data: {
           ...n.data,
-          remoteStream: deps.remoteStream,
+          remoteStream: nodeRemoteStream,
+          sinkStats: nodeStats,
           isPlaying: deps.isPlaying,
           isLoading: deps.isLoading,
           loadingStage: deps.loadingStage,
@@ -180,13 +197,14 @@ export function enrichNodes(
       };
     }
     if (n.data.nodeType === "record") {
+      const nodeId = n.id;
       return {
         ...n,
         data: {
           ...n.data,
           isStreaming: deps.isStreaming,
-          onStartRecording: deps.onStartRecordingRef.current,
-          onStopRecording: deps.onStopRecordingRef.current,
+          onStartRecording: () => deps.onStartRecordingRef.current?.(nodeId),
+          onStopRecording: () => deps.onStopRecordingRef.current?.(nodeId),
         },
       };
     }

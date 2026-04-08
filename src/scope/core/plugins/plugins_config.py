@@ -18,6 +18,9 @@ DEFAULT_PLUGINS_DIR = "~/.daydream-scope/plugins"
 # Environment variable for overriding plugins directory
 PLUGINS_DIR_ENV_VAR = "DAYDREAM_SCOPE_PLUGINS_DIR"
 
+# Environment variable for bundled (pre-installed, non-removable) plugins file
+BUNDLED_PLUGINS_FILE_ENV_VAR = "DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE"
+
 
 def get_plugins_dir() -> Path:
     """
@@ -88,6 +91,25 @@ def get_resolved_backup_file() -> Path:
         Path: Absolute path to resolved.txt.bak
     """
     return get_plugins_dir() / "resolved.txt.bak"
+
+
+def get_bundled_plugins_file() -> Path | None:
+    """
+    Get the path to the bundled plugins file.
+
+    Bundled plugins are pre-installed and cannot be removed by users.
+    The file is specified via the DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE
+    environment variable and contains one plugin specifier per line.
+
+    Returns:
+        Path if the env var is set and the file exists, None otherwise
+    """
+    env_file = os.environ.get(BUNDLED_PLUGINS_FILE_ENV_VAR)
+    if env_file:
+        path = Path(env_file).expanduser().resolve()
+        if path.exists():
+            return path
+    return None
 
 
 def get_freeze_backup_file() -> Path:

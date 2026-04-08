@@ -8,7 +8,7 @@ import {
 } from "../../utils/subgraphSerialization";
 import { buildEdgeStyle } from "../../constants";
 import type { Blueprint } from "../../../../data/blueprints/types";
-import { toast } from "sonner";
+
 import type { EnrichNodesDeps } from "../graph/useGraphPersistence";
 import { enrichNodes } from "../graph/useGraphPersistence";
 
@@ -42,7 +42,8 @@ type NodeTypeKey =
   | "record"
   | "tempo"
   | "prompt_list"
-  | "prompt_blend";
+  | "prompt_blend"
+  | "scheduler";
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -435,6 +436,27 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       parameterOutputs: [{ name: "prompts", type: "string", defaultValue: "" }],
     },
   },
+  scheduler: {
+    type: "scheduler",
+    idPrefix: "scheduler",
+    defaultX: 50,
+    data: {
+      label: "Scheduler",
+      nodeType: "scheduler",
+      schedulerTriggers: [],
+      schedulerDuration: 30,
+      schedulerLoop: false,
+      schedulerElapsed: 0,
+      schedulerIsPlaying: false,
+      schedulerFireCounts: {},
+      schedulerTickCount: 0,
+      parameterOutputs: [
+        { name: "elapsed", type: "number", defaultValue: 0 },
+        { name: "is_playing", type: "number", defaultValue: 0 },
+        { name: "tick", type: "number", defaultValue: 0 },
+      ],
+    },
+  },
 };
 
 interface UseNodeFactoriesArgs {
@@ -528,36 +550,11 @@ export function useNodeFactories({
         | "record"
         | "tempo"
         | "prompt_list"
-        | "prompt_blend",
+        | "prompt_blend"
+        | "scheduler",
       subType?: string
     ) => {
       if (!pendingNodePosition) return;
-
-      // Enforce single source and single sink
-      if (type === "source") {
-        const hasSource = nodes.some(n => n.data.nodeType === "source");
-        if (hasSource) {
-          toast.warning("Only one Source node is allowed");
-          setPendingNodePosition(null);
-          return;
-        }
-      }
-      if (type === "sink") {
-        const hasSink = nodes.some(n => n.data.nodeType === "sink");
-        if (hasSink) {
-          toast.warning("Only one Sink node is allowed");
-          setPendingNodePosition(null);
-          return;
-        }
-      }
-      if (type === "record") {
-        const hasRecord = nodes.some(n => n.data.nodeType === "record");
-        if (hasRecord) {
-          toast.warning("Only one Record node is allowed");
-          setPendingNodePosition(null);
-          return;
-        }
-      }
 
       if (type === "control") {
         if (subType === "float" || subType === "int" || subType === "string") {

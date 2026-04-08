@@ -1,27 +1,12 @@
 import { useEffect, useState, useRef, useCallback } from "react";
-import { Loader2, CheckCircle2 } from "lucide-react";
+import { Loader2, CheckCircle2, AlertCircle } from "lucide-react";
 import { useCloudStatus } from "../../hooks/useCloudStatus";
-import { getDaydreamUserId } from "../../lib/auth";
+import { connectToCloud } from "../../lib/cloudApi";
 import { persistSurveyAnswers } from "../../lib/onboardingStorage";
 import { useOnboarding } from "../../contexts/OnboardingContext";
 import { useTelemetry } from "../../contexts/TelemetryContext";
 import { CloudSurveyScreens, type SurveyAnswers } from "./CloudSurveyScreens";
 import { TelemetryDisclosure } from "./TelemetryDisclosure";
-
-/** Fire-and-forget: tell the backend to connect to the cloud relay. */
-async function activateCloudRelay() {
-  const userId = getDaydreamUserId();
-  if (!userId) return;
-  try {
-    await fetch("/api/v1/cloud/connect", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ user_id: userId }),
-    });
-  } catch (err) {
-    console.error("[Onboarding] Failed to auto-connect to cloud:", err);
-  }
-}
 
 interface CloudConnectingStepProps {
   onConnected: () => void;
@@ -32,8 +17,9 @@ export function CloudConnectingStep({
   onConnected,
   onBack,
 }: CloudConnectingStepProps) {
-  const { isConnected, isConnecting, connectStage, refresh } = useCloudStatus();
-  const { setOnboardingStyle } = useOnboarding();
+  const { isConnected, isConnecting, connectStage, error, refresh } =
+    useCloudStatus();
+  const { setOnboardingStyle, setSurveyAnswers } = useOnboarding();
   const {
     isDisclosed: telemetryDisclosed,
     markDisclosed,
@@ -47,7 +33,7 @@ export function CloudConnectingStep({
   const [localTelemetryDisclosed, setLocalTelemetryDisclosed] =
     useState(telemetryDisclosed);
   const [telemetrySkippedSurvey, setTelemetrySkippedSurvey] = useState(false);
-  const [surveyAnswers, setSurveyAnswers] = useState<SurveyAnswers | null>(
+  const [surveyAnswers, setSurveyAnswersLocal] = useState<SurveyAnswers | null>(
     null
   );
 
@@ -55,7 +41,9 @@ export function CloudConnectingStep({
   useEffect(() => {
     if (didConnect.current) return;
     didConnect.current = true;
-    activateCloudRelay().then(() => refresh());
+    connectToCloud()
+      .catch(e => console.error("[Onboarding] Cloud connect failed:", e))
+      .then(() => refresh());
   }, [refresh]);
 
   // Keep polling while this step is visible
@@ -77,6 +65,7 @@ export function CloudConnectingStep({
         use_case: surveyAnswers.useCase,
       });
       setOnboardingStyle(surveyAnswers.onboardingStyle);
+      setSurveyAnswers(surveyAnswers.referralSource, surveyAnswers.useCase);
       const timer = setTimeout(onConnected, 500);
       return () => clearTimeout(timer);
     }
@@ -89,6 +78,7 @@ export function CloudConnectingStep({
         use_case: null,
       });
       setOnboardingStyle(surveyAnswers.onboardingStyle);
+      setSurveyAnswers(null, null);
       const timer = setTimeout(onConnected, 500);
       return () => clearTimeout(timer);
     }
@@ -100,10 +90,11 @@ export function CloudConnectingStep({
     telemetrySkippedSurvey,
     onConnected,
     setOnboardingStyle,
+    setSurveyAnswers,
   ]);
 
   const handleSurveyComplete = useCallback((answers: SurveyAnswers) => {
-    setSurveyAnswers(answers);
+    setSurveyAnswersLocal(answers);
     setSurveyDone(true);
   }, []);
 
@@ -209,6 +200,18 @@ export function CloudConnectingStep({
 
   // --- Survey done, waiting for cloud ---
   if (!isConnected) {
+    if (error) {
+      return (
+        <div className="flex flex-col items-center gap-4 w-full max-w-md mx-auto text-center">
+          <AlertCircle className="h-8 w-8 text-destructive" />
+          <h2 className="text-2xl font-semibold text-foreground">
+            Cloud connection failed
+          </h2>
+          <p className="text-sm text-destructive">{error}</p>
+        </div>
+      );
+    }
+
     return (
       <div className="flex flex-col items-center gap-6 w-full max-w-md mx-auto text-center">
         <h2 className="text-2xl font-semibold text-foreground">

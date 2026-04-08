@@ -927,12 +927,22 @@ def get_daydream_api_base() -> str:
     return os.getenv("DAYDREAM_API_BASE", "https://api.daydream.live")
 
 
+def _is_dev_mode() -> bool:
+    value = os.getenv("LIVEPEER_DEV_MODE")
+    if value is None:
+        return False
+    return True
+
+
 async def validate_user_access(user_id: str | None) -> bool:
     """Validate that a user has access to cloud mode."""
     import urllib.error
     import urllib.request
 
     if not user_id:
+        if _is_dev_mode():
+            logger.info("LIVEPEER_DEV_MODE enabled; skipping user access validation")
+            return True
         logger.warning("Access denied: no user ID provided")
         return False
 

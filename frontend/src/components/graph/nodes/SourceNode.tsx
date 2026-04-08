@@ -56,8 +56,6 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const onCycleSampleVideo = data.onCycleSampleVideo as
     | (() => void)
     | undefined;
-  const isStreaming = data.isStreaming ?? false;
-
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [ndiSources, setNdiSources] = useState<DiscoveredSource[]>([]);
@@ -318,7 +316,6 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                   <button
                     type="button"
                     onClick={() => onCycleSampleVideo?.()}
-                    disabled={isStreaming}
                     className="w-5 h-5 flex items-center justify-center bg-[#2a2a2a]/80 hover:bg-[#2a2a2a] text-[#fafafa] rounded border border-[rgba(119,119,119,0.35)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Cycle sample video"
                   >
@@ -340,7 +337,6 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                   <button
                     type="button"
                     onClick={handleFileClick}
-                    disabled={isStreaming}
                     className="w-5 h-5 flex items-center justify-center bg-[#2a2a2a]/80 hover:bg-[#2a2a2a] text-[#fafafa] rounded border border-[rgba(119,119,119,0.35)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                     title="Upload video file"
                   >

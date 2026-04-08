@@ -51,7 +51,7 @@ export function NodePillTextarea({
       ref={textareaRef}
       value={value}
       onChange={handleChange}
-      onKeyDown={handleKeyDown}
+      onKeyDown={onSubmit ? handleKeyDown : undefined}
       onWheel={handleWheel}
       disabled={disabled}
       placeholder={placeholder}

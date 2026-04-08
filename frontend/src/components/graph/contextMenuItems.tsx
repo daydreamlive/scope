@@ -28,6 +28,7 @@ import {
   Zap,
   Circle,
   Layers,
+  Clock,
 } from "lucide-react";
 import type { Node, Edge } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
@@ -60,7 +61,8 @@ type NodeTypeSelectFn = (
     | "record"
     | "tempo"
     | "prompt_list"
-    | "prompt_blend",
+    | "prompt_blend"
+    | "scheduler",
   subType?: string
 ) => void;
 
@@ -209,6 +211,19 @@ export function buildPaneMenuItems(deps: {
           icon: <Zap />,
           onClick: () => handleNodeTypeSelect("tempo"),
           keywords: ["tempo", "bpm", "beat", "clock", "sync", "link", "midi"],
+        },
+        {
+          label: "Scheduler",
+          icon: <Clock />,
+          onClick: () => handleNodeTypeSelect("scheduler"),
+          keywords: [
+            "scheduler",
+            "timeline",
+            "trigger",
+            "time",
+            "cue",
+            "sequence",
+          ],
         },
         {
           label: "Prompt Cycle",

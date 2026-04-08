@@ -36,7 +36,7 @@ export function usePromptManager(
   const {
     initialPrompts = [],
     prompts: controlledPrompts,
-    maxPrompts = 4,
+    maxPrompts = 50,
     defaultWeight = 100,
     onPromptsChange,
   } = options;

@@ -20,6 +20,7 @@ export const STRIP_KEYS = new Set([
   "onEnterSubgraph",
   "_savedWidth",
   "_savedHeight",
+  "committedValue",
 ]);
 
 export interface StripOptions {

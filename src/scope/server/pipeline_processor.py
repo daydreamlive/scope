@@ -78,6 +78,10 @@ class PipelineProcessor:
         self.output_queues: dict[str, list[queue.Queue]] = {}
         # Lock to protect input_queues assignment for thread-safe reference swapping
         self.input_queue_lock = threading.Lock()
+        # External dict references that hold output queues (e.g. sink_queues_by_node,
+        # record_queues_by_node). Updated by _resize_output_queue so cached
+        # references stay in sync when a queue object is replaced.
+        self.external_queue_refs: list[tuple[dict, str]] = []
 
         # Audio output queue: (audio_tensor, sample_rate) tuples.
         # Consumed by FrameProcessor.get_audio() on the sink processor.
@@ -176,6 +180,11 @@ class PipelineProcessor:
                 with consumer.input_queue_lock:
                     if consumer.input_queues.get(consumer_port) is old_q:
                         consumer.input_queues[consumer_port] = new_q
+
+            # Update external references (sink/record queues in SinkManager)
+            for ref_dict, ref_key in self.external_queue_refs:
+                if ref_dict.get(ref_key) is old_q:
+                    ref_dict[ref_key] = new_q
 
         if resized:
             self.output_queues[port] = new_list
