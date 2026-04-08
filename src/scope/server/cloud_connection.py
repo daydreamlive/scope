@@ -234,6 +234,10 @@ class CloudConnectionManager:
         Unlike connect(), this returns immediately and runs the connection
         in an asyncio task. Check get_status() for connection progress.
 
+        Automatically retries on transient failures (e.g. cold-start timeouts)
+        with a short delay between attempts so the user doesn't have to manually
+        retry when the cloud runner is still warming up.
+
         Args:
             app_id: The cloud app ID
             api_key: The cloud API key
@@ -250,18 +254,57 @@ class CloudConnectionManager:
         self._connecting = True
         self._connect_error = None
 
+        max_attempts = 3
+        retry_delay = 5.0  # seconds between attempts
+
         async def _do_connect():
-            try:
-                await self.connect(app_id, api_key, user_id)
-                self._connecting = False
-            except Exception as e:
-                self._connecting = False
-                self._connect_error = str(e)
-                self._connect_stage = None
-                logger.error(f"Background cloud connection failed: {e}")
-                self._publish_cloud_error(
-                    str(e), type(e).__name__, error_type="cloud_connection_failed"
-                )
+            last_error: Exception | None = None
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    if attempt > 1:
+                        logger.info(
+                            f"Retrying cloud connection (attempt {attempt}/{max_attempts}) "
+                            f"in {retry_delay:.0f}s..."
+                        )
+                        self._connect_stage = (
+                            f"Retrying connection (attempt {attempt}/{max_attempts})..."
+                        )
+                        await asyncio.sleep(retry_delay)
+                    await self.connect(app_id, api_key, user_id)
+                    self._connecting = False
+                    return
+                except asyncio.CancelledError:
+                    raise
+                except Exception as e:
+                    last_error = e
+                    logger.warning(
+                        f"Cloud connection attempt {attempt}/{max_attempts} failed: {e}"
+                    )
+                    if attempt < max_attempts:
+                        # Only retry on transient errors (timeouts, network issues)
+                        # Don't retry on auth/config errors
+                        error_str = str(e).lower()
+                        is_transient = any(
+                            kw in error_str
+                            for kw in ("timeout", "connection", "network", "refused", "reset")
+                        )
+                        if not is_transient:
+                            logger.info(
+                                f"Non-transient error, not retrying: {e}"
+                            )
+                            break
+
+            # All attempts exhausted
+            self._connecting = False
+            error_msg = str(last_error) if last_error else "Unknown error"
+            self._connect_error = error_msg
+            self._connect_stage = None
+            logger.error(f"Background cloud connection failed: {last_error}")
+            self._publish_cloud_error(
+                error_msg,
+                type(last_error).__name__ if last_error else "UnknownError",
+                error_type="cloud_connection_failed",
+            )
 
         self._connect_task = asyncio.create_task(_do_connect())
 
