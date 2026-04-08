@@ -151,6 +151,12 @@ export function useValueForwarding(
   // that re-fires this effect with identical producer values.
   const lastSentRef = useRef<Map<string, unknown>>(new Map());
 
+  // Debounce prompt sends: wait 1s of no changes before sending to backend.
+  // Key = "backendId\0prompts", value = timeout handle.
+  const promptDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
+    new Map()
+  );
+
   // Detect streaming session start (false→true) and clear dedup state so the
   // new backend session receives all parameter values, even if they haven't
   // changed since the previous session.
@@ -218,7 +224,17 @@ export function useValueForwarding(
       }> = [];
 
       if (node.data.nodeType === "primitive") {
-        valuesToForward.push({ handleName: null, value: node.data.value });
+        if (node.data.primitiveAutoSend === false) {
+          // Manual send mode: only forward the committed value, skip if none yet
+          if (node.data.committedValue !== undefined) {
+            valuesToForward.push({
+              handleName: null,
+              value: node.data.committedValue,
+            });
+          }
+        } else {
+          valuesToForward.push({ handleName: null, value: node.data.value });
+        }
       } else if (node.data.nodeType === "reroute") {
         valuesToForward.push({ handleName: null, value: node.data.value });
       } else if (
@@ -402,28 +418,43 @@ export function useValueForwarding(
         if (!entry || entry.value === undefined) continue;
 
         if (resolvedParamName === "__prompt") {
-          if (Array.isArray(entry.value)) {
-            sendParam(resolvedBackendId, "prompts", entry.value);
-            const srcNode = nodes.find(n => n.id === edge.source);
-            if (srcNode?.data.nodeType === "prompt_blend") {
-              sendParam(
-                resolvedBackendId,
-                "prompt_interpolation_method",
-                srcNode.data.promptBlendMethod ?? "linear"
-              );
-            }
-          } else {
-            sendParam(resolvedBackendId, "prompts", [
-              { text: String(entry.value), weight: 100 },
-            ]);
-          }
-          // Keep nodeParams.__prompt in sync so getGraphNodePrompts and
-          // stream-start initialisation use the connected value, not the
-          // stale default that was set when the pipeline was first selected.
+          // Keep nodeParams.__prompt in sync immediately so
+          // getGraphNodePrompts and stream-start initialisation use the
+          // connected value, not the stale default.
           const promptText = Array.isArray(entry.value)
             ? (entry.value[0]?.text ?? "")
             : String(entry.value);
           onPromptForwardRef?.current?.(edge.target, promptText);
+
+          // Debounce the actual backend send by 1s so intermediate
+          // keystrokes don't spam the pipeline.
+          const debounceKey = `${resolvedBackendId}\0prompts`;
+          const existingTimer = promptDebounceRef.current.get(debounceKey);
+          if (existingTimer) clearTimeout(existingTimer);
+
+          const capturedValue = entry.value;
+          const capturedBackendId = resolvedBackendId;
+          const capturedSource = nodes.find(n => n.id === edge.source);
+          promptDebounceRef.current.set(
+            debounceKey,
+            setTimeout(() => {
+              promptDebounceRef.current.delete(debounceKey);
+              if (Array.isArray(capturedValue)) {
+                sendParam(capturedBackendId, "prompts", capturedValue);
+                if (capturedSource?.data.nodeType === "prompt_blend") {
+                  sendParam(
+                    capturedBackendId,
+                    "prompt_interpolation_method",
+                    capturedSource.data.promptBlendMethod ?? "linear"
+                  );
+                }
+              } else {
+                sendParam(capturedBackendId, "prompts", [
+                  { text: String(capturedValue), weight: 100 },
+                ]);
+              }
+            }, 1000)
+          );
         } else {
           sendParam(resolvedBackendId, resolvedParamName, entry.value);
         }
@@ -501,6 +532,11 @@ export function useValueForwarding(
           targetParsed.name === "value"
         ) {
           nodeUpdates["value"] = sourceValue;
+          // When value comes from upstream, always treat it as committed
+          // so it propagates downstream regardless of autoSend setting
+          if (targetNode.data.primitiveAutoSend === false) {
+            nodeUpdates["committedValue"] = sourceValue;
+          }
         } else if (
           targetNode.data.nodeType === "slider" &&
           targetParsed.name === "value"

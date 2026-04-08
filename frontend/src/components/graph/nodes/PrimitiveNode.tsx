@@ -1,5 +1,6 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
+import { ArrowUp } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
@@ -16,6 +17,7 @@ import {
   collapsedHandleStyle,
 } from "../ui";
 import { PARAM_TYPE_COLORS } from "../nodeColors";
+import { NODE_TOKENS } from "../ui/tokens";
 
 type PrimitiveNodeType = Node<FlowNodeData, "primitive">;
 
@@ -40,11 +42,28 @@ export function PrimitiveNode({
   const { collapsed, toggleCollapse } = useNodeCollapse();
   const valueType = data.valueType || "string";
   const currentValue = data.value ?? getDefaultForType(valueType);
+  const autoSend = data.primitiveAutoSend !== false;
 
   const color = PARAM_TYPE_COLORS[valueType] || "#9ca3af";
 
   const handleValueChange = (newValue: unknown) => {
-    updateData({ value: newValue });
+    if (autoSend) {
+      updateData({ value: newValue, committedValue: newValue });
+    } else {
+      updateData({ value: newValue });
+    }
+  };
+
+  const handleSend = () => {
+    updateData({ committedValue: data.value });
+  };
+
+  const handleAutoSendToggle = (checked: boolean) => {
+    if (checked) {
+      updateData({ primitiveAutoSend: true, committedValue: data.value });
+    } else {
+      updateData({ primitiveAutoSend: false });
+    }
   };
 
   const handleTypeChange = (newType: string | number) => {
@@ -53,6 +72,7 @@ export function PrimitiveNode({
     updateData({
       valueType: vt,
       value: defaultVal,
+      committedValue: defaultVal,
       parameterOutputs: [{ name: "value", type: vt, defaultValue: defaultVal }],
     });
   };
@@ -79,6 +99,7 @@ export function PrimitiveNode({
               <NodePillTextarea
                 value={String(currentValue)}
                 onChange={handleValueChange}
+                onSubmit={!autoSend ? handleSend : undefined}
                 placeholder="Enter text…"
               />
             </div>
@@ -89,6 +110,7 @@ export function PrimitiveNode({
                 type="number"
                 value={Number(currentValue)}
                 onChange={handleValueChange}
+                onSubmit={!autoSend ? handleSend : undefined}
               />
             </NodeParamRow>
           )}
@@ -100,6 +122,30 @@ export function PrimitiveNode({
               />
             </NodeParamRow>
           )}
+          <div className="flex items-center gap-1 mt-1">
+            {!autoSend && (
+              <button
+                type="button"
+                onClick={handleSend}
+                className={`${NODE_TOKENS.pill} flex-1 flex items-center justify-center gap-1 cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
+                title="Send value (Enter)"
+              >
+                <ArrowUp className="h-3 w-3 text-[#fafafa]" />
+                <span className={NODE_TOKENS.primaryText}>Send</span>
+              </button>
+            )}
+            <button
+              type="button"
+              onClick={() => handleAutoSendToggle(!autoSend)}
+              className={`${NODE_TOKENS.pill} flex items-center gap-1 cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors ${autoSend ? "flex-1 justify-center" : ""}`}
+              title={autoSend ? "Auto-send is on (click to disable)" : "Auto-send is off (click to enable)"}
+            >
+              <span
+                className={`inline-block w-1.5 h-1.5 rounded-full ${autoSend ? "bg-emerald-400" : "bg-[#555]"}`}
+              />
+              <span className={NODE_TOKENS.primaryText}>Auto-send</span>
+            </button>
+          </div>
         </NodeBody>
       )}
       <Handle
