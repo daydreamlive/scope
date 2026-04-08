@@ -251,6 +251,31 @@ for name, color in [('test', (0,0,255)), ('test1', (0,255,0)), ('test2', (255,0,
 | Stop recording | `POST /api/v1/recordings/headless/stop?node_id=<id>` |
 | Download recording | `GET /api/v1/recordings/headless?node_id=<id>` (returns MP4 binary) |
 | Logs | `GET /api/v1/logs/tail?lines=30` |
+| List input source types | `GET /api/v1/input-sources` |
+| Discover NDI sources | `GET /api/v1/input-sources/ndi/sources?timeout_ms=5000` |
+
+**NDI sources and sinks in graphs:**
+
+- Use `"source_mode": "ndi"` and `"source_name": "<NDI identifier>"` for NDI input sources
+- Use `"sink_mode": "ndi"` and `"sink_name": "<sender name>"` for NDI output sinks
+- Discover NDI sources: `GET /api/v1/input-sources/ndi/sources?timeout_ms=5000`
+- NDI identifiers include a machine UUID prefix, e.g. `"69F966CD-... (MySource)"`
+- Create NDI test senders with `scope.core.outputs.ndi.NDIOutputSink` (create, send_frame in loop)
+- Verify NDI outputs by receiving frames with `scope.core.inputs.ndi.NDIInputSource` (connect, receive_frame)
+
+**Example graph with NDI sources + NDI sinks:**
+
+```json
+{
+  "nodes": [
+    {"id": "input", "type": "source", "source_mode": "video_file", "source_name": "/tmp/test.mp4"},
+    {"id": "ndi_in", "type": "source", "source_mode": "ndi", "source_name": "<NDI identifier>"},
+    {"id": "my_pipeline", "type": "pipeline", "pipeline_id": "split-screen"},
+    {"id": "output", "type": "sink", "sink_mode": "ndi", "sink_name": "My NDI Output"}
+  ],
+  "edges": [...]
+}
+```
 
 **Debugging:**
 
