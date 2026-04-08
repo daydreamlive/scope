@@ -173,7 +173,7 @@ export function DownloadDialog({
         {/* Show remaining pipelines count if downloading */}
         {isDownloading && currentDownloadPipeline && pipelineIds.length > 1 && (
           <p className="text-sm text-muted-foreground">
-            {pipelineIds.length - 1} more pipeline(s) will be downloaded after
+            {pipelineIds.length - 1} more model(s) will be downloaded after
             this one.
           </p>
         )}
