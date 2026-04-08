@@ -3258,7 +3258,10 @@ export function StreamPage() {
         {!graphMode && (
           <div className="flex-1 flex gap-4 px-4 pb-4 min-h-0 overflow-hidden">
             {/* Left Panel - Input & Controls */}
-            <div className="w-1/5 flex flex-col gap-3 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
+            <div
+              data-tour="input-controls-panel"
+              className="w-1/5 flex flex-col gap-3 min-h-0 overflow-y-auto [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400"
+            >
               <InputAndControlsPanel
                 className=""
                 pipelines={pipelines}

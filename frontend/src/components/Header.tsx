@@ -169,6 +169,7 @@ export function Header({
           </h1>
           {onGraphModeToggle && (
             <Button
+              data-tour="perform-mode-toggle"
               variant="ghost"
               size="sm"
               onClick={() => {
