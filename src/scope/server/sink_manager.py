@@ -124,6 +124,20 @@ class SinkManager:
             return proc.get_fps()
         return None
 
+    def get_sink_queue_maxsize(self, sink_node_id: str) -> int | None:
+        """Return current queue capacity for a sink node."""
+        sink_q = self._sink_queues_by_node.get(sink_node_id)
+        if sink_q is None:
+            return None
+        return sink_q.maxsize
+
+    def get_record_queue_maxsize(self, record_node_id: str) -> int | None:
+        """Return current queue capacity for a record node."""
+        rec_q = self._recording._record_queues.get(record_node_id)
+        if rec_q is None:
+            return None
+        return rec_q.maxsize
+
     # ------------------------------------------------------------------
     # Generic output sinks info
     # ------------------------------------------------------------------

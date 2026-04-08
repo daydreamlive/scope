@@ -343,10 +343,15 @@ async def _media_output_loop(
 
     # Queue size should be large enough to absorb bursts. Encoder will drop
     # frames if it's draining slower than realtime, so large queues are OK
+    publisher_queue_size = 30
     publisher = MediaPublish(
         publish_url,
-        config=MediaPublishConfig(tracks=[VideoOutputConfig(fps=fps, queue_size=30)]),
+        config=MediaPublishConfig(
+            tracks=[VideoOutputConfig(fps=fps, queue_size=publisher_queue_size)]
+        ),
     )
+    video_tracks = publisher.get_tracks("video")
+    publisher_track = video_tracks[0] if video_tracks else None
     if output_track_index >= len(session.media_publishes):
         session.media_publishes.extend(
             [None] * (output_track_index + 1 - len(session.media_publishes))
@@ -367,6 +372,47 @@ async def _media_output_loop(
             if frame_tensor is None:
                 await asyncio.sleep(0.01)  # no frame yet, wait a bit
                 continue
+
+            target_queue_size: int | None = None
+            # TODO: Unify sink/record queue-size lookup into a single output-track path.
+            if sink_node_id is not None:
+                target_queue_size = frame_processor.sink_manager.get_sink_queue_maxsize(
+                    sink_node_id
+                )
+            elif record_node_id is not None:
+                target_queue_size = (
+                    frame_processor.sink_manager.get_record_queue_maxsize(
+                        record_node_id
+                    )
+                )
+
+            # TODO: Queue sizing policy currently exists in both graph_executor.py
+            # and pipeline_processor.py; centralize this in one place later.
+            if (
+                publisher_track is not None
+                and target_queue_size is not None
+                and target_queue_size > publisher_queue_size
+            ):
+                try:
+                    publisher_track.resize(target_queue_size)
+                    logger.info(
+                        "Resized Livepeer output track queue %d -> %d "
+                        "(output_track_index=%d sink_node_id=%s record_node_id=%s)",
+                        publisher_queue_size,
+                        target_queue_size,
+                        output_track_index,
+                        sink_node_id,
+                        record_node_id,
+                    )
+                    publisher_queue_size = target_queue_size
+                except Exception as exc:
+                    logger.warning(
+                        "Failed to resize Livepeer output track queue to %d "
+                        "(output_track_index=%d): %s",
+                        target_queue_size,
+                        output_track_index,
+                        exc,
+                    )
 
             if sink_node_id is not None:
                 sink_fps = frame_processor.get_fps_for_sink(sink_node_id)
