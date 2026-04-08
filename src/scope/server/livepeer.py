@@ -120,8 +120,6 @@ class LivepeerConnection:
             app_id=app_id,
             api_key=api_key,
         )
-        client.add_frame_callback(self._on_frame_from_livepeer)
-        client.add_audio_callback(self._on_audio_from_livepeer)
 
         try:
             connect_params: dict[str, Any] = {}
@@ -179,6 +177,9 @@ class LivepeerConnection:
         if self._client is None or not self._client.is_connected:
             raise RuntimeError("Livepeer backend is not connected")
         await self._client.start_media(initial_parameters=initial_parameters)
+        # Register callbacks after start_media() so handlers are initialized.
+        self._client.output_handlers[0].add_callback(self._on_frame_from_livepeer)
+        self._client.audio_output_handler.add_callback(self._on_audio_from_livepeer)
 
     async def stop_webrtc(self) -> None:
         """Stop active media channels for the current Livepeer job."""
@@ -215,8 +216,23 @@ class LivepeerConnection:
     def send_frame(self, frame: VideoFrame | np.ndarray) -> bool:
         if self._client is None or not self._client.is_connected:
             return False
-        success = self._client.send_frame(frame)
+        success = self._client.send_frame_to_track(frame, 0)
         return success
+
+    def send_frame_to_track(
+        self, frame: VideoFrame | np.ndarray, track_index: int
+    ) -> bool:
+        if self._client is None or not self._client.is_connected:
+            return False
+        return self._client.send_frame_to_track(frame, track_index)
+
+    def get_webrtc_client(self):
+        return self._client
+
+    def get_source_track_index(self, node_id: str) -> int | None:
+        if self._client is None:
+            return None
+        return self._client.source_node_to_track_index.get(node_id)
 
     def send_parameters(self, params: dict[str, Any]) -> None:
         if self._client is not None and self._client.is_connected:

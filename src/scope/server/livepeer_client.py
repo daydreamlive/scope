@@ -12,19 +12,24 @@ import logging
 import os
 import time
 import uuid
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlparse
 
 import numpy as np
-from av import AudioFrame, VideoFrame
+from av import VideoFrame
 from livepeer_gateway.channel_reader import JSONLReader
 from livepeer_gateway.channel_writer import JSONLWriter
 from livepeer_gateway.errors import SkipPaymentCycle
 from livepeer_gateway.media_output import MediaOutput
-from livepeer_gateway.media_publish import MediaPublish, MediaPublishConfig
+from livepeer_gateway.media_publish import (
+    MediaPublish,
+    MediaPublishConfig,
+    VideoOutputConfig,
+)
 from livepeer_gateway.scope import StartJobRequest, start_scope
+
+from .cloud_webrtc_client import AudioOutputHandler, FrameOutputHandler
 
 logger = logging.getLogger(__name__)
 LIVEPEER_ORCH_URL_ENV = "LIVEPEER_ORCH_URL"
@@ -49,9 +54,9 @@ PAYMENT_SEND_INTERVAL_S = 10.0
 
 @dataclass(slots=True)
 class _MediaHandles:
-    subscriber_task: asyncio.Task | None
-    publisher: MediaPublish | None
-    output: MediaOutput | None
+    subscriber_tasks: list[asyncio.Task]
+    publishers: list[MediaPublish | None]
+    outputs: list[MediaOutput | None]
 
 
 class LivepeerClient:
@@ -82,16 +87,14 @@ class LivepeerClient:
         self._ws_url = env_ws_url or ws_url
 
         self._job = None
-        self._media_publisher: MediaPublish | None = None
-        self._media_output: MediaOutput | None = None
+        self._media_publishers: list[MediaPublish | None] = []
+        self._media_outputs: list[MediaOutput | None] = []
         self._control_writer: JSONLWriter | None = None
-        self._media_subscriber_task: asyncio.Task | None = None
+        self._media_subscriber_tasks: list[asyncio.Task] = []
         self._events_task: asyncio.Task | None = None
         self._ping_task: asyncio.Task | None = None
         self._payment_task: asyncio.Task | None = None
         self._pending_requests: dict[str, asyncio.Future] = {}
-        self._callbacks: list[Callable[[VideoFrame], None]] = []
-        self._audio_callbacks: list[Callable[[AudioFrame], None]] = []
         self._loop: asyncio.AbstractEventLoop | None = None
         self._connected = False
         self._media_connected = False
@@ -99,6 +102,13 @@ class LivepeerClient:
         self._shutdown_lock = asyncio.Lock()
         self._runner_ready_event = asyncio.Event()
         self._connection_id: str | None = None
+
+        # TODO: Relay interface is currently duck-typed by CloudTrack. Keep
+        # these members aligned until a dedicated backend abstraction exists.
+        self.input_tracks: list[Any] = []
+        self.output_handlers: list[FrameOutputHandler] = [FrameOutputHandler()]
+        self.audio_output_handler = AudioOutputHandler()
+        self.source_node_to_track_index: dict[str, int] = {}
 
         self._stats = {
             "connected_at": None,
@@ -115,10 +125,7 @@ class LivepeerClient:
         return (
             self.is_connected
             and self._media_connected
-            and (
-                self._media_publisher is not None
-                or self._media_subscriber_task is not None
-            )
+            and (bool(self._media_publishers) or bool(self._media_subscriber_tasks))
         )
 
     @property
@@ -268,6 +275,52 @@ class LivepeerClient:
             raise ValueError("Invalid ws_url. Expected a valid ws:// or wss:// URL.")
         return ws_url
 
+    @staticmethod
+    def _parse_browser_graph(
+        initial_parameters: dict[str, Any] | None,
+    ) -> tuple[dict[str, int], list[str], list[str]]:
+        """Return source map, webrtc sink IDs, and record IDs."""
+        source_node_to_track_index: dict[str, int] = {}
+        sink_node_ids: list[str] = []
+        record_node_ids: list[str] = []
+        if not initial_parameters:
+            return source_node_to_track_index, sink_node_ids, record_node_ids
+        graph_data = initial_parameters.get("graph")
+        if not isinstance(graph_data, dict):
+            return source_node_to_track_index, sink_node_ids, record_node_ids
+        src_count = 0
+        for node in graph_data.get("nodes", []):
+            if not isinstance(node, dict):
+                continue
+            node_id = node.get("id")
+            if not isinstance(node_id, str):
+                continue
+            node_type = node.get("type")
+            if node_type == "source":
+                source_mode = node.get("source_mode", "video")
+                if source_mode not in ("spout", "ndi", "syphon"):
+                    source_node_to_track_index[node_id] = src_count
+                    src_count += 1
+            elif node_type == "sink":
+                sink_mode = node.get("sink_mode")
+                if sink_mode not in ("spout", "ndi", "syphon"):
+                    sink_node_ids.append(node_id)
+            elif node_type == "record":
+                record_node_ids.append(node_id)
+        return source_node_to_track_index, sink_node_ids, record_node_ids
+
+    def _make_input_track_handle(self, track_index: int):
+        """Create a minimal sync put_frame handle expected by CloudSourceInputHandler."""
+        handle = type("LivepeerInputTrackHandle", (), {})()
+        handle.put_frame = lambda frame, idx=track_index: self.send_frame_to_track(
+            frame, idx
+        )
+        return handle
+
+    @staticmethod
+    def _build_video_publish_config(fps: float) -> MediaPublishConfig:
+        return MediaPublishConfig(tracks=[VideoOutputConfig(fps=fps, queue_size=30)])
+
     async def start_media(self, initial_parameters: dict | None = None) -> None:
         """Start media I/O and notify runner about stream start parameters."""
         if not self.is_connected or self._job is None:
@@ -306,45 +359,79 @@ class LivepeerClient:
         channels = response.get("channels")
         if not isinstance(channels, list):
             raise RuntimeError("stream_started response missing channels list")
+        (
+            source_node_to_track_index,
+            sink_node_ids,
+            record_node_ids,
+        ) = self._parse_browser_graph(initial_parameters)
+        self.source_node_to_track_index = source_node_to_track_index
+        num_input_tracks = max(len(source_node_to_track_index), 1)
+        num_output_tracks = max(len(sink_node_ids), 1) + len(record_node_ids)
 
-        input_url: str | None = None
-        output_url: str | None = None
+        input_urls_by_track: dict[int, str] = {}
+        output_urls_by_track: dict[int, str] = {}
         for channel in channels:
             if not isinstance(channel, dict):
                 continue
             url = channel.get("url")
             direction = channel.get("direction")
+            role = channel.get("role")
             if not isinstance(url, str) or not isinstance(direction, str):
                 continue
             if direction == "in":
-                input_url = url
+                if role not in (None, "input"):
+                    continue
+                idx_val = channel.get("input_track_index")
+                track_index = (
+                    idx_val if isinstance(idx_val, int) and idx_val >= 0 else 0
+                )
+                input_urls_by_track[track_index] = url
             elif direction == "out":
-                output_url = url
+                if role not in (None, "output"):
+                    continue
+                idx_val = channel.get("output_track_index")
+                track_index = (
+                    idx_val if isinstance(idx_val, int) and idx_val >= 0 else 0
+                )
+                output_urls_by_track[track_index] = url
 
-        if input_url is None and output_url is None:
+        if not input_urls_by_track and not output_urls_by_track:
             raise RuntimeError("stream_started response missing usable channels")
 
-        publisher: MediaPublish | None = None
-        if input_url is not None:
-            publisher = MediaPublish(
-                input_url, config=MediaPublishConfig(fps=self._fps)
-            )
+        self._media_publishers = [None] * num_input_tracks
+        self._media_outputs = [None] * num_output_tracks
+        self._media_subscriber_tasks = []
+        self.input_tracks = [
+            self._make_input_track_handle(i) for i in range(num_input_tracks)
+        ]
+        self.output_handlers = [FrameOutputHandler() for _ in range(num_output_tracks)]
+        if not self.output_handlers:
+            self.output_handlers = [FrameOutputHandler()]
 
-        media_output: MediaOutput | None = None
-        subscriber: asyncio.Task | None = None
-        if output_url is not None:
+        publish_config = self._build_video_publish_config(self._fps)
+        for input_idx in range(num_input_tracks):
+            input_url = input_urls_by_track.get(input_idx)
+            if input_url is None:
+                continue
+            publisher = MediaPublish(input_url, config=publish_config)
+            self._media_publishers[input_idx] = publisher
+
+        for output_idx in range(num_output_tracks):
+            output_url = output_urls_by_track.get(output_idx)
+            if output_url is None:
+                continue
             media_output = MediaOutput(output_url, start_seq=-1)
-            subscriber = asyncio.create_task(self._receive_loop(media_output))
+            self._media_outputs[output_idx] = media_output
+            subscriber = asyncio.create_task(
+                self._receive_loop(media_output, output_track_index=output_idx)
+            )
+            self._media_subscriber_tasks.append(subscriber)
 
-        self._media_connected = True
-
-        self._media_publisher = publisher
-        self._media_output = media_output
-        self._media_subscriber_task = subscriber
+        self._media_connected = any(self._media_publishers) or any(self._media_outputs)
         logger.info(
-            "Media channels started (input=%s output=%s)",
-            bool(input_url),
-            bool(output_url),
+            "Media channels started (inputs=%s outputs=%s)",
+            sum(1 for p in self._media_publishers if p is not None),
+            sum(1 for o in self._media_outputs if o is not None),
         )
 
     async def stop_media(self, current_task: asyncio.Task | None = None) -> None:
@@ -383,7 +470,7 @@ class LivepeerClient:
 
         logger.info("Media channels stopped")
 
-    async def _receive_loop(self, output: MediaOutput) -> None:
+    async def _receive_loop(self, output: MediaOutput, output_track_index: int) -> None:
         """Consume output frames from Livepeer and notify callbacks."""
         prev_video_ts: float | None = None
         prev_dispatch_time: float | None = None
@@ -398,13 +485,7 @@ class LivepeerClient:
 
                 decoded_kind = getattr(decoded, "kind", None)
                 if decoded_kind == "audio":
-                    for callback in list(self._audio_callbacks):
-                        try:
-                            callback(frame)
-                        except (
-                            Exception
-                        ) as e:  # pragma: no cover - defensive callback guard
-                            logger.error(f"Audio callback failed: {e}")
+                    self.audio_output_handler.handle_frame(frame)
                     continue
                 if decoded_kind != "video":
                     continue
@@ -426,13 +507,13 @@ class LivepeerClient:
                             await asyncio.sleep(wait)
                 prev_video_ts = video_ts
                 prev_dispatch_time = time.monotonic()
-                for callback in list(self._callbacks):
-                    try:
-                        callback(frame)
-                    except (
-                        Exception
-                    ) as e:  # pragma: no cover - defensive callback guard
-                        logger.error(f"Frame callback failed: {e}")
+                if 0 <= output_track_index < len(self.output_handlers):
+                    self.output_handlers[output_track_index].handle_frame(frame)
+                else:
+                    logger.debug(
+                        "Dropping frame for unknown output track index %s",
+                        output_track_index,
+                    )
         except asyncio.CancelledError:
             pass
         except Exception as e:
@@ -443,9 +524,12 @@ class LivepeerClient:
                 await output.close()
             except Exception as e:
                 logger.warning(f"Error while closing media output: {e}")
-            # Avoid clearing a newer media output when stop/start races with this loop.
-            if self._media_output is output:
-                self._media_output = None
+            # Avoid clearing newer media outputs when stop/start races.
+            if (
+                0 <= output_track_index < len(self._media_outputs)
+                and self._media_outputs[output_track_index] is output
+            ):
+                self._media_outputs[output_track_index] = None
             if self._media_connected and not self._shutdown_started:
                 if unexpected_reason is None:
                     unexpected_reason = "Livepeer output loop stopped unexpectedly"
@@ -529,10 +613,12 @@ class LivepeerClient:
                 except Exception as e:
                     logger.debug(f"Failed to send keepalive ping: {e}")
                 if self._media_connected:
-                    if self._media_publisher is not None:
-                        logger.info(self._media_publisher.get_stats())
-                    if self._media_output is not None:
-                        logger.info(self._media_output.get_stats())
+                    for publisher in self._media_publishers:
+                        if publisher is not None:
+                            logger.info(publisher.get_stats())
+                    for media_output in self._media_outputs:
+                        if media_output is not None:
+                            logger.info(media_output.get_stats())
         except asyncio.CancelledError:
             pass
 
@@ -646,21 +732,33 @@ class LivepeerClient:
 
         Returns False if no active job or publishing fails.
         """
-        if not self.media_connected or self._media_publisher is None:
-            return False
+        return self.send_frame_to_track(frame, 0)
 
+    def send_frame_to_track(
+        self, frame: VideoFrame | np.ndarray, track_index: int
+    ) -> bool:
+        """Send a frame to the requested Livepeer input track."""
+        if not self.media_connected:
+            return False
+        if track_index < 0 or track_index >= len(self._media_publishers):
+            return False
+        publisher = self._media_publishers[track_index]
+        if publisher is None:
+            return False
         if isinstance(frame, np.ndarray):
             frame = VideoFrame.from_ndarray(frame, format="rgb24")
-
         try:
-            result = self._media_publisher.write_frame(frame)
+            tracks = publisher.get_tracks("video")
+            if not tracks:
+                return False
+            result = tracks[0].write_frame(frame)
             if inspect.isawaitable(result):
                 if self._loop is None:
                     return False
                 asyncio.run_coroutine_threadsafe(result, self._loop)
             return True
         except Exception as e:
-            logger.debug(f"Failed to send frame: {e}")
+            logger.debug(f"Failed to send frame for track {track_index}: {e}")
             return False
 
     def send_parameters(self, params: dict[str, Any]) -> None:
@@ -686,20 +784,6 @@ class LivepeerClient:
     async def disconnect(self) -> None:
         """Close Livepeer channels and background tasks."""
         await self._shutdown()
-
-    def add_frame_callback(self, callback: Callable[[VideoFrame], None]) -> None:
-        self._callbacks.append(callback)
-
-    def remove_frame_callback(self, callback: Callable[[VideoFrame], None]) -> None:
-        if callback in self._callbacks:
-            self._callbacks.remove(callback)
-
-    def add_audio_callback(self, callback: Callable[[AudioFrame], None]) -> None:
-        self._audio_callbacks.append(callback)
-
-    def remove_audio_callback(self, callback: Callable[[AudioFrame], None]) -> None:
-        if callback in self._audio_callbacks:
-            self._audio_callbacks.remove(callback)
 
     def get_stats(self) -> dict[str, Any]:
         stats = dict(self._stats)
@@ -755,20 +839,24 @@ class LivepeerClient:
     def _media_is_stopped(self) -> bool:
         return (
             not self._media_connected
-            and self._media_subscriber_task is None
-            and self._media_publisher is None
-            and self._media_output is None
+            and not self._media_subscriber_tasks
+            and not any(self._media_publishers)
+            and not any(self._media_outputs)
         )
 
     def _take_media_handles(self) -> _MediaHandles:
         handles = _MediaHandles(
-            subscriber_task=self._media_subscriber_task,
-            publisher=self._media_publisher,
-            output=self._media_output,
+            subscriber_tasks=list(self._media_subscriber_tasks),
+            publishers=list(self._media_publishers),
+            outputs=list(self._media_outputs),
         )
-        self._media_subscriber_task = None
-        self._media_publisher = None
-        self._media_output = None
+        self._media_subscriber_tasks = []
+        self._media_publishers = []
+        self._media_outputs = []
+        self.input_tracks = []
+        self.output_handlers = [FrameOutputHandler()]
+        self.audio_output_handler = AudioOutputHandler()
+        self.source_node_to_track_index = {}
         self._media_connected = False
         return handles
 
@@ -778,19 +866,18 @@ class LivepeerClient:
         *,
         current_task: asyncio.Task | None,
     ) -> None:
-        """Close media resources and let the subscriber exit before cancelling it."""
-        output = handles.output
-        subscriber_task = handles.subscriber_task
-
-        if output is not None and subscriber_task is not current_task:
-            await self._close_resource("media output", output.close())
-
-        await self._drain_or_cancel_task(
-            "media subscriber", subscriber_task, current_task
-        )
-
-        if handles.publisher is not None:
-            await self._close_resource("media publisher", handles.publisher.close())
+        """Close media resources and let subscribers exit before cancellation."""
+        for output, subscriber_task in zip(
+            handles.outputs, handles.subscriber_tasks, strict=False
+        ):
+            if output is not None and subscriber_task is not current_task:
+                await self._close_resource("media output", output.close())
+            await self._drain_or_cancel_task(
+                "media subscriber", subscriber_task, current_task
+            )
+        for publisher in handles.publishers:
+            if publisher is not None:
+                await self._close_resource("media publisher", publisher.close())
 
     async def _drain_or_cancel_task(
         self,

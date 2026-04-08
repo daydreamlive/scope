@@ -32,7 +32,11 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from livepeer_gateway.channel_reader import JSONLReader
 from livepeer_gateway.channel_writer import JSONLWriter
 from livepeer_gateway.media_output import MediaOutput
-from livepeer_gateway.media_publish import MediaPublish, MediaPublishConfig
+from livepeer_gateway.media_publish import (
+    MediaPublish,
+    MediaPublishConfig,
+    VideoOutputConfig,
+)
 from pydantic import BaseModel
 
 import scope.server.app as scope_app_module
@@ -90,20 +94,23 @@ class LivepeerSession:
     """Per-connection runner session state."""
 
     ws: WebSocket | None = None
-    publish_url: str | None = None
-    subscribe_url: str | None = None
-    active_channels: list[dict[str, str]] = field(default_factory=list)
+    input_subscribe_urls: list[str | None] = field(default_factory=list)
+    output_publish_urls: list[str | None] = field(default_factory=list)
+    input_source_node_ids: list[str | None] = field(default_factory=list)
+    output_sink_node_ids: list[str | None] = field(default_factory=list)
+    output_record_node_ids: list[str | None] = field(default_factory=list)
+    active_channels: list[dict[str, Any]] = field(default_factory=list)
     ws_pending_responses: dict[str, asyncio.Future[dict[str, Any]]] = field(
         default_factory=dict
     )
     frame_processor: FrameProcessor | None = None
-    media_input_task: asyncio.Task | None = None
-    media_output_task: asyncio.Task | None = None
+    media_input_tasks: list[asyncio.Task] = field(default_factory=list)
+    media_output_tasks: list[asyncio.Task] = field(default_factory=list)
     media_stats_task: asyncio.Task | None = None
     media_stop_event: asyncio.Event = field(default_factory=asyncio.Event)
     stream_stop_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
-    media_output: MediaOutput | None = None
-    media_publish: MediaPublish | None = None
+    media_outputs: list[MediaOutput | None] = field(default_factory=list)
+    media_publishes: list[MediaPublish | None] = field(default_factory=list)
     user_id: str | None = None
     connection_id: str | None = None
 
@@ -151,22 +158,106 @@ async def _shutdown_task(
         logger.warning("Task %s failed after cancellation: %s", task_name, exc)
 
 
+def _parse_browser_graph_routes(
+    params: dict[str, Any],
+) -> tuple[list[str | None], list[str], list[str]]:
+    """Return browser source IDs, sink IDs, and record IDs."""
+    source_ids: list[str | None] = []
+    sink_ids: list[str] = []
+    record_ids: list[str] = []
+    graph = params.get("graph")
+    if isinstance(graph, dict):
+        for node in graph.get("nodes", []):
+            if not isinstance(node, dict):
+                continue
+            node_id = node.get("id")
+            if not isinstance(node_id, str):
+                continue
+            node_type = node.get("type")
+            if node_type == "source":
+                source_mode = node.get("source_mode", "video")
+                if source_mode not in ("spout", "ndi", "syphon"):
+                    source_ids.append(node_id)
+            elif node_type == "sink":
+                sink_mode = node.get("sink_mode")
+                if sink_mode not in ("spout", "ndi", "syphon"):
+                    sink_ids.append(node_id)
+            elif node_type == "record":
+                record_ids.append(node_id)
+    if not source_ids:
+        source_ids = [None]
+    return source_ids, sink_ids, record_ids
+
+
+async def _request_stream_channels(
+    session: LivepeerSession,
+    *,
+    direction: str,
+) -> list[dict[str, Any]]:
+    """Request media channels from orchestrator over websocket."""
+    ws_request_id = str(uuid.uuid4())
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[dict[str, Any]] = loop.create_future()
+    session.ws_pending_responses[ws_request_id] = future
+    await session.ws.send_json(
+        {
+            "type": "create_channels",
+            "request_id": ws_request_id,
+            "mime_type": "video/MP2T",
+            "direction": direction,
+        }
+    )
+    try:
+        ws_response = await asyncio.wait_for(future, timeout=5.0)
+    finally:
+        pending = session.ws_pending_responses.pop(ws_request_id, None)
+        if pending is not None and not pending.done():
+            pending.cancel()
+    channels = ws_response.get("channels")
+    if not isinstance(channels, list):
+        raise RuntimeError("Invalid new_channels payload: channels must be a list")
+    normalized: list[dict[str, Any]] = []
+    for channel in channels:
+        if not isinstance(channel, dict):
+            continue
+        url = channel.get("url")
+        ch_direction = channel.get("direction")
+        mime_type = channel.get("mime_type")
+        if not isinstance(url, str) or not isinstance(ch_direction, str):
+            continue
+        normalized.append(
+            {
+                "url": url,
+                "direction": ch_direction,
+                "mime_type": mime_type if isinstance(mime_type, str) else "",
+            }
+        )
+    return normalized
+
+
 async def _stop_stream(session: LivepeerSession) -> None:
     """Stop frame processor and media tasks."""
     async with session.stream_stop_lock:
         session.media_stop_event.set()
 
-        media_input_task = session.media_input_task
-        media_output_task = session.media_output_task
+        media_input_tasks = list(session.media_input_tasks)
+        media_output_tasks = list(session.media_output_tasks)
         media_stats_task = session.media_stats_task
-        session.media_input_task = None
-        session.media_output_task = None
+        session.media_input_tasks = []
+        session.media_output_tasks = []
         session.media_stats_task = None
-        session.media_output = None
-        session.media_publish = None
+        session.media_outputs = []
+        session.media_publishes = []
+        session.input_subscribe_urls = []
+        session.output_publish_urls = []
+        session.input_source_node_ids = []
+        session.output_sink_node_ids = []
+        session.output_record_node_ids = []
 
-        await _shutdown_task(media_input_task, task_name="media_input")
-        await _shutdown_task(media_output_task, task_name="media_output")
+        for i, task in enumerate(media_input_tasks):
+            await _shutdown_task(task, task_name=f"media_input[{i}]")
+        for i, task in enumerate(media_output_tasks):
+            await _shutdown_task(task, task_name=f"media_output[{i}]")
         await _shutdown_task(media_stats_task, task_name="media_stats")
 
         if session.frame_processor is not None:
@@ -187,17 +278,24 @@ async def _stop_stream(session: LivepeerSession) -> None:
 
 async def _media_input_loop(
     session: LivepeerSession,
+    *,
+    subscribe_url: str,
+    source_node_id: str | None,
+    input_track_index: int,
 ) -> None:
     """Receive decoded trickle frames and push into FrameProcessor."""
-    subscribe_url = session.subscribe_url
     frame_processor = session.frame_processor
     stop_event = session.media_stop_event
-    if subscribe_url is None or frame_processor is None:
+    if frame_processor is None:
         logger.error("Media input loop started without complete session state")
         return
 
     media_output = MediaOutput(subscribe_url)
-    session.media_output = media_output
+    if input_track_index >= len(session.media_outputs):
+        session.media_outputs.extend(
+            [None] * (input_track_index + 1 - len(session.media_outputs))
+        )
+    session.media_outputs[input_track_index] = media_output
     try:
         async for decoded in media_output.frames():
             if stop_event.is_set():
@@ -207,7 +305,10 @@ async def _media_input_loop(
             frame = getattr(decoded, "frame", None)
             if frame is None:
                 continue
-            frame_processor.put(frame)
+            if source_node_id is None:
+                frame_processor.put(frame)
+            else:
+                frame_processor.put_to_source(frame, source_node_id)
     except asyncio.CancelledError:
         raise
     except Exception as exc:
@@ -217,38 +318,62 @@ async def _media_input_loop(
             await media_output.close()
         except Exception as exc:
             logger.warning("Media output close failed: %s", exc)
-        if session.media_output is media_output:
-            session.media_output = None
+        if (
+            input_track_index < len(session.media_outputs)
+            and session.media_outputs[input_track_index] is media_output
+        ):
+            session.media_outputs[input_track_index] = None
 
 
 async def _media_output_loop(
     session: LivepeerSession,
+    *,
+    publish_url: str,
+    output_track_index: int,
+    sink_node_id: str | None = None,
+    record_node_id: str | None = None,
     fps: float = 30.0,
 ) -> None:
     """Read processed frames from FrameProcessor and publish over trickle."""
-    publish_url = session.publish_url
     frame_processor = session.frame_processor
     stop_event = session.media_stop_event
-    if publish_url is None or frame_processor is None:
+    if frame_processor is None:
         logger.error("Media output loop started without complete session state")
         return
 
     # Queue size should be large enough to absorb bursts. Encoder will drop
     # frames if it's draining slower than realtime, so large queues are OK
     publisher = MediaPublish(
-        publish_url, config=MediaPublishConfig(fps=fps, queue_size=30)
+        publish_url,
+        config=MediaPublishConfig(tracks=[VideoOutputConfig(fps=fps, queue_size=30)]),
     )
-    session.media_publish = publisher
+    if output_track_index >= len(session.media_publishes):
+        session.media_publishes.extend(
+            [None] * (output_track_index + 1 - len(session.media_publishes))
+        )
+    session.media_publishes[output_track_index] = publisher
     next_pts = 0
     try:
         while not stop_event.is_set():
             # TODO make this blocking; we busy-wait a LOT
-            frame_tensor = frame_processor.get()
+            if record_node_id is not None:
+                frame_tensor = frame_processor.sink_manager.recording.get(
+                    record_node_id
+                )
+            elif sink_node_id is not None:
+                frame_tensor = frame_processor.get_from_sink(sink_node_id)
+            else:
+                frame_tensor = frame_processor.get()
             if frame_tensor is None:
                 await asyncio.sleep(0.01)  # no frame yet, wait a bit
                 continue
 
-            frame_ptime = 1.0 / frame_processor.get_fps()
+            if sink_node_id is not None:
+                sink_fps = frame_processor.get_fps_for_sink(sink_node_id)
+                frame_ptime = 1.0 / sink_fps if sink_fps > 0 else 1.0 / fps
+            else:
+                stream_fps = frame_processor.get_fps()
+                frame_ptime = 1.0 / stream_fps if stream_fps > 0 else 1.0 / fps
 
             video_frame = VideoFrame.from_ndarray(frame_tensor.numpy(), format="rgb24")
             video_frame.pts = next_pts
@@ -264,8 +389,11 @@ async def _media_output_loop(
             await publisher.close()
         except Exception as exc:
             logger.warning("Media publisher close failed: %s", exc)
-        if session.media_publish is publisher:
-            session.media_publish = None
+        if (
+            output_track_index < len(session.media_publishes)
+            and session.media_publishes[output_track_index] is publisher
+        ):
+            session.media_publishes[output_track_index] = None
 
 
 async def _media_stats_loop(session: LivepeerSession) -> None:
@@ -275,12 +403,12 @@ async def _media_stats_loop(session: LivepeerSession) -> None:
             await asyncio.sleep(MEDIA_STATS_INTERVAL_S)
             if session.media_stop_event.is_set():
                 break
-            pub = session.media_publish
-            out = session.media_output
-            if pub is not None:
-                logger.info(pub.get_stats())
-            if out is not None:
-                logger.info(out.get_stats())
+            for publisher in session.media_publishes:
+                if publisher is not None:
+                    logger.info(publisher.get_stats())
+            for output in session.media_outputs:
+                if output is not None:
+                    logger.info(output.get_stats())
     except asyncio.CancelledError:
         pass
 
@@ -513,104 +641,82 @@ async def _handle_control_message(
                 "error": "No pipeline loaded. Load a pipeline before start_stream.",
             }
 
-        # Each create_channels handshake gets a unique request_id so we can match
-        # the corresponding response from the websocket listener.
-        ws_request_id = str(uuid.uuid4())
-        loop = asyncio.get_running_loop()
-        new_channels_future: asyncio.Future[dict[str, Any]] = loop.create_future()
-        session.ws_pending_responses[ws_request_id] = new_channels_future
-
-        # Ask the orchestrator to create stream channels. Text mode only needs
-        # output media, while video mode keeps bidirectional media.
         input_mode = params.get("input_mode")
-        channels_direction = "out" if input_mode == "text" else "bidirectional"
-        # request_id is echoed back on a generic response so we can resolve the
-        # correct pending future.
-        await session.ws.send_json(
-            {
-                "type": "create_channels",
-                "request_id": ws_request_id,
-                "mime_type": "video/MP2T",
-                "direction": channels_direction,
-            }
+        source_node_ids, sink_node_ids, record_node_ids = _parse_browser_graph_routes(
+            params
+        )
+
+        output_sink_node_ids: list[str | None]
+        if sink_node_ids:
+            output_sink_node_ids = [sink_node_ids[0], *sink_node_ids[1:]]
+        else:
+            output_sink_node_ids = [None]
+        output_record_node_ids = [None] * len(output_sink_node_ids) + list(
+            record_node_ids
+        )
+
+        active_channels: list[dict[str, Any]] = []
+        input_subscribe_urls: list[str | None] = [None] * len(source_node_ids)
+        output_publish_urls: list[str | None] = [None] * (
+            len(output_sink_node_ids) + len(record_node_ids)
         )
 
         try:
-            # Wait for the websocket listener to resolve this request_id. Keep the
-            # timeout tight so control calls fail fast when the orchestrator stalls.
-            ws_response = await asyncio.wait_for(
-                new_channels_future,
-                timeout=5.0,
-            )
-        except asyncio.CancelledError:
-            raise
+            if input_mode != "text":
+                for input_idx, source_node_id in enumerate(source_node_ids):
+                    channels = await _request_stream_channels(
+                        session, direction="bidirectional"
+                    )
+                    inbound_url: str | None = None
+                    for channel in channels:
+                        ch = {
+                            **channel,
+                            "role": "input",
+                            "input_track_index": input_idx,
+                            "source_node_id": source_node_id,
+                        }
+                        active_channels.append(ch)
+                        if channel["direction"] == "in":
+                            inbound_url = channel["url"]
+                    if inbound_url is None:
+                        raise RuntimeError("response did not include input track URL")
+                    input_subscribe_urls[input_idx] = inbound_url
+
+            for output_idx in range(len(output_publish_urls)):
+                channels = await _request_stream_channels(session, direction="out")
+                outbound_url: str | None = None
+                sink_node_id = (
+                    output_sink_node_ids[output_idx]
+                    if output_idx < len(output_sink_node_ids)
+                    else None
+                )
+                record_node_id = (
+                    None
+                    if output_idx < len(output_sink_node_ids)
+                    else record_node_ids[output_idx - len(output_sink_node_ids)]
+                )
+                for channel in channels:
+                    ch = {
+                        **channel,
+                        "role": "output",
+                        "output_track_index": output_idx,
+                        "sink_node_id": sink_node_id,
+                        "record_node_id": record_node_id,
+                    }
+                    active_channels.append(ch)
+                    if channel["direction"] == "out":
+                        outbound_url = channel["url"]
+                if outbound_url is None:
+                    raise RuntimeError("response did not include output track URL")
+                output_publish_urls[output_idx] = outbound_url
         except TimeoutError:
             return {
                 "type": "error",
                 "request_id": request_id,
                 "error": "Timed out waiting for websocket response from orchestrator",
             }
-        finally:
-            # Always remove this request from the pending map. If it was never
-            # fulfilled, cancel the future so nothing can resolve it later.
-            pending = session.ws_pending_responses.pop(ws_request_id, None)
-            if pending is not None and not pending.done():
-                pending.cancel()
-
-        # Validate and normalize channel metadata from the orchestrator response.
-        # We need both directions to wire media input and output endpoints.
-        channels = ws_response.get("channels")
-        if not isinstance(channels, list):
-            return {
-                "type": "error",
-                "request_id": request_id,
-                "error": "Invalid new_channels payload: channels must be a list",
-            }
-
-        outbound_url: str | None = None
-        inbound_url: str | None = None
-        active_channels: list[dict[str, str]] = []
-        for channel in channels:
-            if not isinstance(channel, dict):
-                continue
-            url = channel.get("url")
-            direction = channel.get("direction")
-            mime_type = channel.get("mime_type")
-            if not isinstance(url, str) or not isinstance(direction, str):
-                continue
-            active_channels.append(
-                {
-                    "url": url,
-                    "direction": direction,
-                    "mime_type": mime_type if isinstance(mime_type, str) else "",
-                }
-            )
-            if direction == "out":
-                outbound_url = url
-            elif direction == "in":
-                inbound_url = url
-
-        if input_mode == "text":
-            if not outbound_url:
-                return {
-                    "type": "error",
-                    "request_id": request_id,
-                    "error": "response did not include out URL",
-                }
-        else:
-            # Bidirectional streaming requires both in and out channels.
-            if not outbound_url or not inbound_url:
-                return {
-                    "type": "error",
-                    "request_id": request_id,
-                    "error": "response did not include in and out URLs",
-                }
-
-        # Persist URLs so _stop_stream can send full URLs back in stop_stream and
-        # so media loops know where to read/write frames for this stream session.
-        session.active_channels = active_channels
-        session.subscribe_url = inbound_url
-        session.publish_url = outbound_url
+        except RuntimeError as exc:
+            return {"type": "error", "request_id": request_id, "error": str(exc)}
 
         session.frame_processor = FrameProcessor(
             pipeline_manager=pipeline_manager,
@@ -618,22 +724,59 @@ async def _handle_control_message(
         )
         session.frame_processor.start()
         session.media_stop_event.clear()
+        session.active_channels = active_channels
+        session.input_subscribe_urls = input_subscribe_urls
+        session.output_publish_urls = output_publish_urls
+        session.input_source_node_ids = source_node_ids
+        session.output_sink_node_ids = output_sink_node_ids
+        session.output_record_node_ids = output_record_node_ids
+        session.media_input_tasks = []
+        session.media_output_tasks = []
+        session.media_outputs = [None] * len(input_subscribe_urls)
+        session.media_publishes = [None] * len(output_publish_urls)
         if input_mode != "text":
-            session.media_input_task = asyncio.create_task(_media_input_loop(session))
-        else:
-            session.media_input_task = None
+            for input_idx, subscribe_url in enumerate(input_subscribe_urls):
+                if subscribe_url is None:
+                    continue
+                source_node_id = source_node_ids[input_idx]
+                session.media_input_tasks.append(
+                    asyncio.create_task(
+                        _media_input_loop(
+                            session,
+                            subscribe_url=subscribe_url,
+                            source_node_id=source_node_id,
+                            input_track_index=input_idx,
+                        )
+                    )
+                )
         fps = float(params.get("fps", 30.0))
-        session.media_output_task = asyncio.create_task(
-            _media_output_loop(
-                session,
-                fps=fps,
+        for output_idx, publish_url in enumerate(output_publish_urls):
+            if publish_url is None:
+                continue
+            sink_node_id = output_sink_node_ids[output_idx]
+            record_node_id = (
+                record_node_ids[output_idx - len(output_sink_node_ids)]
+                if output_idx >= len(output_sink_node_ids)
+                else None
             )
-        )
+            session.media_output_tasks.append(
+                asyncio.create_task(
+                    _media_output_loop(
+                        session,
+                        publish_url=publish_url,
+                        output_track_index=output_idx,
+                        sink_node_id=sink_node_id,
+                        record_node_id=record_node_id,
+                        fps=fps,
+                    )
+                )
+            )
         session.media_stats_task = asyncio.create_task(_media_stats_loop(session))
         logger.info(
-            "Started stream with pipeline_ids=%s direction=%s",
+            "Started stream with pipeline_ids=%s inputs=%s outputs=%s",
             pipeline_ids,
-            channels_direction,
+            len(input_subscribe_urls),
+            len(output_publish_urls),
         )
         return {
             "type": "stream_started",
