@@ -39,6 +39,7 @@ interface GraphToolbarProps {
   onExport: () => void;
   onClear: () => void;
   onDefaultWorkflow?: () => void;
+  onDebugNodes?: () => void;
   fileInputRef?: RefObject<HTMLInputElement | null>;
 }
 
@@ -54,6 +55,7 @@ export function GraphToolbar({
   onExport,
   onClear,
   onDefaultWorkflow,
+  onDebugNodes,
   fileInputRef: externalFileInputRef,
 }: GraphToolbarProps) {
   const internalFileInputRef = useRef<HTMLInputElement>(null);
@@ -106,6 +108,17 @@ export function GraphToolbar({
               <Trash2 className="h-4 w-4" />
               Clear Graph
             </DropdownMenuItem>
+            {import.meta.env.DEV && onDebugNodes && (
+              <>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={onDebugNodes}
+                  className="text-[#8c8c8d] focus:text-[#ccc]"
+                >
+                  Debug Nodes (dev)
+                </DropdownMenuItem>
+              </>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
 

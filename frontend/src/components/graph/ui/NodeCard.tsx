@@ -19,7 +19,7 @@ export function NodeCard({
   children,
   selected,
   className = "",
-  autoMinHeight = false,
+  autoMinHeight = true,
   minWidth = 240,
   minHeight: minHeightProp = 60,
   collapsed = false,
@@ -57,7 +57,7 @@ export function NodeCard({
   if (collapsed) {
     return (
       <div
-        className={`group bg-[#181717] border border-[rgba(119,119,119,0.55)] rounded-full relative flex flex-col ${
+        className={`group bg-[#1e1e1e] border border-[rgba(255,255,255,0.06)] rounded-full shadow-[0_1px_4px_rgba(0,0,0,0.25)] relative flex flex-col ${
           selected ? NODE_TOKENS.cardSelected : ""
         } ${className}`}
       >
@@ -80,7 +80,7 @@ export function NodeCard({
           autoMinHeight ? Math.max(minHeightProp, minH) : minHeightProp
         }
         lineClassName="!border-transparent"
-        handleClassName="!w-2 !h-2 !bg-transparent !border !border-blue-400/20 hover:!border-blue-400/40 !rounded-sm"
+        handleClassName="!w-2 !h-2 !bg-transparent !border !border-blue-400/30 hover:!border-blue-400/60 !rounded-sm"
       />
       {autoMinHeight ? (
         <div

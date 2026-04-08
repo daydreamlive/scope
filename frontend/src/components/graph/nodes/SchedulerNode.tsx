@@ -423,13 +423,24 @@ export function SchedulerNode({
         <NodeBody withGap>
           {/* Transport row */}
           <div className="flex items-center gap-2 text-[10px]">
-            <label className="flex items-center gap-1 text-[#8c8c8d]">
-              <input
-                type="checkbox"
-                checked={loop}
-                onChange={toggleLoop}
-                className="w-3 h-3 accent-blue-500"
-              />
+            <label className="flex items-center gap-1.5 text-[#8c8c8d] cursor-pointer select-none">
+              <button
+                type="button"
+                role="checkbox"
+                aria-checked={loop}
+                onClick={toggleLoop}
+                className={`w-3.5 h-3.5 rounded-[3px] border flex items-center justify-center transition-colors ${
+                  loop
+                    ? "bg-blue-500 border-blue-500"
+                    : "bg-[#1a1a1a] border-[rgba(255,255,255,0.15)] hover:border-[rgba(255,255,255,0.3)]"
+                }`}
+              >
+                {loop && (
+                  <svg className="w-2.5 h-2.5 text-white" viewBox="0 0 12 12" fill="none">
+                    <path d="M2.5 6L5 8.5L9.5 3.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                )}
+              </button>
               Loop
             </label>
             <span className="text-[#8c8c8d]">Duration:</span>
@@ -438,7 +449,7 @@ export function SchedulerNode({
               value={duration}
               onChange={e => updateDuration(parseFloat(e.target.value) || 1)}
               onPointerDown={e => e.stopPropagation()}
-              className="w-[50px] bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] rounded px-1.5 py-0.5 text-[10px] text-[#fafafa] text-center appearance-none focus:outline-none focus:ring-1 focus:ring-blue-400/50 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+              className="w-[50px] bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)] rounded px-1.5 py-0.5 text-[10px] text-[#fafafa] text-center appearance-none focus:outline-none focus:ring-1 focus:ring-blue-400/60 [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
             />
             <span className="text-[#666]">s</span>
           </div>

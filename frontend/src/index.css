@@ -37,6 +37,12 @@
   }
 }
 
+/* Translucent nodes while dragging */
+.react-flow__node.dragging {
+  opacity: 0.7;
+  transition: opacity 150ms ease;
+}
+
 /* Hide edge delete dots while streaming */
 .streaming .edge-delete-dot {
   display: none;

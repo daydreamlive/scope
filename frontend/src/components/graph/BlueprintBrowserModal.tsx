@@ -28,7 +28,7 @@ function BlueprintCard({
   onInsert: () => void;
 }) {
   return (
-    <div className="flex flex-col gap-2 p-3 rounded-xl bg-[#242424] border border-[rgba(119,119,119,0.12)] hover:border-[rgba(119,119,119,0.3)] transition-colors">
+    <div className="flex flex-col gap-2 p-3 rounded-lg bg-[#242424] border border-[rgba(255,255,255,0.04)] hover:border-[rgba(255,255,255,0.1)] transition-colors">
       <div className="flex items-center gap-2">
         <div
           className="w-2.5 h-2.5 rounded-full shrink-0"
@@ -37,7 +37,7 @@ function BlueprintCard({
         <span className="text-[12px] font-medium text-[#e0e0e0] truncate flex-1">
           {blueprint.name}
         </span>
-        <span className="text-[10px] text-[#666] shrink-0 bg-[#1a1a1a] px-1.5 py-0.5 rounded-full border border-[rgba(119,119,119,0.12)]">
+        <span className="text-[10px] text-[#666] shrink-0 bg-[#1a1a1a] px-1.5 py-0.5 rounded-md border border-[rgba(255,255,255,0.06)]">
           {blueprint.category}
         </span>
       </div>
@@ -52,7 +52,7 @@ function BlueprintCard({
         </span>
         <button
           onClick={onInsert}
-          className="px-3 py-1 rounded-full bg-[#fafafa] text-[#111] text-[11px] font-medium hover:bg-[#e0e0e0] transition-colors"
+          className="px-3 py-1 rounded-md bg-[#fafafa] text-[#111] text-[11px] font-medium hover:bg-[#e0e0e0] transition-colors"
         >
           Insert
         </button>
@@ -96,7 +96,7 @@ export function BlueprintBrowserModal({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="!max-w-xl w-full p-0 overflow-hidden bg-[#1a1a1a] border border-[rgba(119,119,119,0.2)] rounded-2xl">
+      <DialogContent className="!max-w-xl w-full p-0 overflow-hidden bg-[#1a1a1a] border border-[rgba(119,119,119,0.2)] rounded-xl">
         <DialogHeader className="sr-only">
           <DialogTitle>Blueprint Library</DialogTitle>
           <DialogDescription>
@@ -138,7 +138,7 @@ export function BlueprintBrowserModal({
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                   activeCategory === cat
                     ? "bg-[#fafafa] text-[#111]"
                     : "text-[#888] hover:text-[#ccc]"
@@ -173,7 +173,7 @@ export function BlueprintBrowserModal({
           <div className="flex items-center justify-between px-4 py-3 border-t border-[rgba(119,119,119,0.12)]">
             <button
               onClick={handleClose}
-              className="px-5 py-2 rounded-full bg-[#2a2a2a] border border-[rgba(119,119,119,0.2)] text-xs font-medium text-[#fafafa] hover:bg-[#333] transition-colors"
+              className="px-5 py-2 rounded-md bg-[#2a2a2a] border border-[rgba(255,255,255,0.06)] text-xs font-medium text-[#fafafa] hover:bg-[#333] transition-colors"
             >
               Cancel
             </button>

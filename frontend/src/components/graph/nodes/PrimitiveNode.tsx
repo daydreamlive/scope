@@ -18,6 +18,7 @@ import {
 } from "../ui";
 import { PARAM_TYPE_COLORS } from "../nodeColors";
 import { NODE_TOKENS } from "../ui/tokens";
+import { useHandlePositions } from "../hooks/node/useHandlePositions";
 
 type PrimitiveNodeType = Node<FlowNodeData, "primitive">;
 
@@ -42,6 +43,11 @@ export function PrimitiveNode({
   const { collapsed, toggleCollapse } = useNodeCollapse();
   const valueType = data.valueType || "string";
   const currentValue = data.value ?? getDefaultForType(valueType);
+  const { setRowRef, rowPositions } = useHandlePositions([
+    collapsed,
+    valueType,
+    currentValue,
+  ]);
   const autoSend = data.primitiveAutoSend !== false;
 
   const color = PARAM_TYPE_COLORS[valueType] || "#9ca3af";
@@ -94,34 +100,36 @@ export function PrimitiveNode({
               options={TYPE_OPTIONS}
             />
           </NodeParamRow>
-          {valueType === "string" && (
-            <div className="mt-1">
-              <NodePillTextarea
-                value={String(currentValue)}
-                onChange={handleValueChange}
-                onSubmit={!autoSend ? handleSend : undefined}
-                placeholder="Enter text…"
-              />
-            </div>
-          )}
-          {valueType === "number" && (
-            <NodeParamRow label="Value">
-              <NodePillInput
-                type="number"
-                value={Number(currentValue)}
-                onChange={handleValueChange}
-                onSubmit={!autoSend ? handleSend : undefined}
-              />
-            </NodeParamRow>
-          )}
-          {valueType === "boolean" && (
-            <NodeParamRow label="Value">
-              <NodePillToggle
-                checked={Boolean(currentValue)}
-                onChange={handleValueChange}
-              />
-            </NodeParamRow>
-          )}
+          <div ref={setRowRef("value")}>
+            {valueType === "string" && (
+              <div className="mt-1">
+                <NodePillTextarea
+                  value={String(currentValue)}
+                  onChange={handleValueChange}
+                  onSubmit={!autoSend ? handleSend : undefined}
+                  placeholder="Enter text…"
+                />
+              </div>
+            )}
+            {valueType === "number" && (
+              <NodeParamRow label="Value">
+                <NodePillInput
+                  type="number"
+                  value={Number(currentValue)}
+                  onChange={handleValueChange}
+                  onSubmit={!autoSend ? handleSend : undefined}
+                />
+              </NodeParamRow>
+            )}
+            {valueType === "boolean" && (
+              <NodeParamRow label="Value">
+                <NodePillToggle
+                  checked={Boolean(currentValue)}
+                  onChange={handleValueChange}
+                />
+              </NodeParamRow>
+            )}
+          </div>
           {valueType !== "boolean" && (
             <div className="flex items-center gap-1 mt-1">
               {!autoSend && (
@@ -162,7 +170,7 @@ export function PrimitiveNode({
         style={
           collapsed
             ? collapsedHandleStyle("left")
-            : { top: 44, left: 0, backgroundColor: color }
+            : { top: rowPositions["value"] ?? 44, left: 0, backgroundColor: color }
         }
       />
       <Handle
@@ -173,7 +181,7 @@ export function PrimitiveNode({
         style={
           collapsed
             ? collapsedHandleStyle("right")
-            : { top: 44, right: 0, backgroundColor: color }
+            : { top: rowPositions["value"] ?? 44, right: 0, backgroundColor: color }
         }
       />
     </NodeCard>

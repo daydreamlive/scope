@@ -140,7 +140,7 @@ export function ContextMenu({
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 min-w-[180px] rounded-lg bg-[#111111] border border-[rgba(255,255,255,0.08)] shadow-xl overflow-visible"
+      className="fixed z-50 min-w-[180px] rounded-lg bg-[#141414] border border-[rgba(255,255,255,0.06)] shadow-[0_4px_24px_rgba(0,0,0,0.5)] overflow-visible"
       style={{ left: `${pos.left}px`, top: `${pos.top}px` }}
     >
       {/* Search */}
@@ -154,7 +154,7 @@ export function ContextMenu({
             setActiveSubmenu(null);
           }}
           placeholder="Search…"
-          className="w-full px-2 py-1 text-[12px] bg-[#1a1a1a] border border-[rgba(255,255,255,0.08)] rounded-md text-[#e0e0e0] placeholder-[#444] focus:outline-none focus:border-[rgba(255,255,255,0.18)]"
+          className="w-full px-2 py-1 text-[12px] bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)] rounded-md text-[#e0e0e0] placeholder-[#444] focus:outline-none focus:border-[rgba(255,255,255,0.18)]"
           onMouseDown={e => e.stopPropagation()}
         />
       </div>
@@ -178,8 +178,8 @@ export function ContextMenu({
                 onClick={() => handleSelect(item)}
                 className={`w-full text-left px-3 py-1.5 text-[13px] flex items-center gap-2.5 transition-colors ${
                   item.danger
-                    ? "text-red-400 hover:bg-[#1f1f1f] hover:text-red-300"
-                    : "text-[#e0e0e0] hover:bg-[#1f1f1f]"
+                    ? "text-red-400 hover:bg-[rgba(255,255,255,0.05)] hover:text-red-300"
+                    : "text-[#e0e0e0] hover:bg-[rgba(255,255,255,0.05)]"
                 }`}
               >
                 {item.icon && (
@@ -212,8 +212,8 @@ export function ContextMenu({
                 }}
                 className={`w-full text-left px-3 py-1.5 text-[13px] flex items-center gap-2.5 transition-colors ${
                   item.danger
-                    ? "text-red-400 hover:bg-[#1f1f1f] hover:text-red-300"
-                    : "text-[#e0e0e0] hover:bg-[#1f1f1f]"
+                    ? "text-red-400 hover:bg-[rgba(255,255,255,0.05)] hover:text-red-300"
+                    : "text-[#e0e0e0] hover:bg-[rgba(255,255,255,0.05)]"
                 }`}
               >
                 {item.icon && (
@@ -307,12 +307,12 @@ function SubmenuPanel({
 
   return (
     <div ref={ref} style={style}>
-      <div className="min-w-[140px] rounded-lg bg-[#111111] border border-[rgba(255,255,255,0.08)] shadow-xl py-1.5">
+      <div className="min-w-[140px] rounded-lg bg-[#141414] border border-[rgba(255,255,255,0.06)] shadow-[0_4px_24px_rgba(0,0,0,0.5)] py-1.5">
         {items.map((child, ci) => (
           <button
             key={ci}
             onClick={() => onSelect(child)}
-            className="w-full text-left px-3 py-1.5 text-[13px] flex items-center gap-2.5 text-[#e0e0e0] hover:bg-[#1f1f1f] transition-colors"
+            className="w-full text-left px-3 py-1.5 text-[13px] flex items-center gap-2.5 text-[#e0e0e0] hover:bg-[rgba(255,255,255,0.05)] transition-colors"
           >
             {child.icon && (
               <span className="text-[#777] shrink-0 [&_svg]:w-[15px] [&_svg]:h-[15px]">

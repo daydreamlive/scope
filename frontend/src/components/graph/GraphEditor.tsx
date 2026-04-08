@@ -73,6 +73,7 @@ import { createDaydreamImportSession } from "../../lib/daydreamExport";
 import { openExternalUrl } from "../../lib/openExternal";
 import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
 import type { FlowNodeData } from "../../lib/graphUtils";
+import { generateNodeId } from "../../lib/graphUtils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -588,6 +589,74 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         setSelectedNodeIds,
       });
 
+    const handleDebugNodes = useCallback(() => {
+      const DEBUG_NODE_TYPES: Array<{
+        type: string;
+        nodeType: string;
+        extra?: Partial<FlowNodeData>;
+      }> = [
+        { type: "source", nodeType: "source" },
+        { type: "pipeline", nodeType: "pipeline" },
+        { type: "sink", nodeType: "sink" },
+        { type: "record", nodeType: "record" },
+        { type: "primitive", nodeType: "primitive" },
+        { type: "bool", nodeType: "bool" },
+        { type: "slider", nodeType: "slider" },
+        { type: "knobs", nodeType: "knobs" },
+        { type: "xypad", nodeType: "xypad" },
+        {
+          type: "control",
+          nodeType: "control",
+          extra: { controlType: "float" },
+        },
+        { type: "control", nodeType: "control", extra: { controlType: "int" } },
+        {
+          type: "control",
+          nodeType: "control",
+          extra: { controlType: "string" },
+        },
+        { type: "math", nodeType: "math" },
+        { type: "tuple", nodeType: "tuple" },
+        { type: "output", nodeType: "output" },
+        { type: "image", nodeType: "image" },
+        { type: "vace", nodeType: "vace" },
+        { type: "lora", nodeType: "lora" },
+        { type: "midi", nodeType: "midi" },
+        { type: "trigger", nodeType: "trigger" },
+        { type: "tempo", nodeType: "tempo" },
+        { type: "prompt_list", nodeType: "prompt_list" },
+        { type: "prompt_blend", nodeType: "prompt_blend" },
+        { type: "scheduler", nodeType: "scheduler" },
+        { type: "note", nodeType: "note" },
+        { type: "reroute", nodeType: "reroute" },
+      ];
+
+      const cols = 5;
+      const spacingX = 320;
+      const spacingY = 300;
+      const ids = new Set<string>();
+
+      const debugNodes = DEBUG_NODE_TYPES.map((def, idx) => {
+        const col = idx % cols;
+        const row = Math.floor(idx / cols);
+        const id = generateNodeId(def.nodeType, ids);
+        ids.add(id);
+        return {
+          id,
+          type: def.type,
+          position: { x: 50 + col * spacingX, y: 50 + row * spacingY },
+          data: {
+            label: id,
+            nodeType: def.nodeType,
+            ...def.extra,
+          } as FlowNodeData,
+        };
+      });
+
+      setNodes(debugNodes as any);
+      setEdges([]);
+    }, [setNodes, setEdges]);
+
     const onPromptForwardRef = useRef(handlePromptChange);
     onPromptForwardRef.current = handlePromptChange;
 
@@ -1007,6 +1076,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             onExport={() => setShowExportDialog(true)}
             onClear={() => setShowClearConfirm(true)}
             onDefaultWorkflow={() => setShowDefaultConfirm(true)}
+            onDebugNodes={handleDebugNodes}
             fileInputRef={fileInputRef}
           />
 
@@ -1064,14 +1134,19 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               deleteKeyCode={isStreaming ? [] : ["Backspace", "Delete"]}
             >
               <Controls />
-              <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={20}
+                size={1.2}
+                color="rgba(255,255,255,0.07)"
+              />
             </ReactFlow>
 
             {/* Add node button — upper right of canvas */}
             {!isStreaming && (
               <button
                 onClick={e => handleOpenCreateMenu(e.clientX, e.clientY)}
-                className="absolute top-4 right-4 z-30 w-12 h-12 rounded-xl border-2 border-dashed border-[rgba(119,119,119,0.4)] bg-[rgba(17,17,17,0.6)] hover:border-[rgba(119,119,119,0.7)] hover:bg-[rgba(17,17,17,0.8)] transition-colors cursor-pointer flex items-center justify-center"
+                className="absolute top-4 right-4 z-30 w-12 h-12 rounded-lg border-2 border-dashed border-[rgba(119,119,119,0.3)] bg-[rgba(17,17,17,0.6)] hover:border-[rgba(119,119,119,0.6)] hover:bg-[rgba(17,17,17,0.8)] transition-colors cursor-pointer flex items-center justify-center"
                 title="Add node"
               >
                 <Plus className="h-5 w-5 text-[#8c8c8d]" />
@@ -1085,7 +1160,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                   onClick={e => handleOpenCreateMenu(e.clientX, e.clientY)}
                   className="pointer-events-auto flex flex-col items-center gap-3 cursor-pointer group"
                 >
-                  <div className="w-28 h-28 rounded-xl border-2 border-dashed border-[rgba(119,119,119,0.3)] bg-[rgba(17,17,17,0.3)] flex items-center justify-center group-hover:border-[rgba(119,119,119,0.5)] transition-colors">
+                  <div className="w-28 h-28 rounded-lg border-2 border-dashed border-[rgba(119,119,119,0.2)] bg-[rgba(17,17,17,0.3)] flex items-center justify-center group-hover:border-[rgba(119,119,119,0.4)] transition-colors">
                     <Plus className="h-8 w-8 text-[#555]" />
                   </div>
                   <span className="text-sm text-[#555] group-hover:text-[#777] transition-colors">

@@ -54,6 +54,7 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
   const { setRowRef, rowPositions } = useHandlePositions([
     minIn.connected,
     maxIn.connected,
+    collapsed,
   ]);
 
   return (
@@ -71,6 +72,7 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
       {!collapsed && (
         <NodeBody withGap>
           {/* Slider track */}
+          <div ref={setRowRef("slider")}>
           <div
             ref={sliderRef}
             className="relative w-full h-5 rounded-full cursor-pointer select-none"
@@ -94,6 +96,7 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
                 boxShadow: `0 0 4px ${COLOR}`,
               }}
             />
+          </div>
           </div>
 
           {/* Current value display */}
@@ -149,7 +152,7 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
         style={
           collapsed
             ? collapsedHandleStyle("left")
-            : { top: 44, left: 0, backgroundColor: COLOR }
+            : { top: rowPositions["slider"] ?? 44, left: 0, backgroundColor: COLOR }
         }
       />
 
@@ -203,7 +206,7 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
         style={
           collapsed
             ? collapsedHandleStyle("right")
-            : { top: 44, right: 0, backgroundColor: COLOR }
+            : { top: rowPositions["slider"] ?? 44, right: 0, backgroundColor: COLOR }
         }
       />
     </NodeCard>

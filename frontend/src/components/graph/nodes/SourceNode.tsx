@@ -189,7 +189,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   }));
 
   return (
-    <NodeCard selected={selected} collapsed={collapsed}>
+    <NodeCard selected={selected} collapsed={collapsed} autoMinHeight={false}>
       <NodeHeader
         title={data.customTitle || "Source"}
         onTitleChange={newTitle => updateData({ customTitle: newTitle })}

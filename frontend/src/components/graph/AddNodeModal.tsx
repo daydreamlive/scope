@@ -343,7 +343,7 @@ function NodeTile({
         onClick={onSelect}
         onMouseEnter={handleMouseEnter}
         onMouseLeave={handleMouseLeave}
-        className="flex items-center gap-1.5 p-2 h-[56px] rounded-lg bg-[#242424] border border-[rgba(119,119,119,0.12)] hover:bg-[#2e2e2e] hover:border-[rgba(119,119,119,0.35)] transition-colors text-left group"
+        className="flex items-center gap-1.5 p-2 h-[56px] rounded-md bg-[#222222] border border-[rgba(255,255,255,0.04)] hover:bg-[#2a2a2a] hover:border-[rgba(255,255,255,0.1)] transition-colors text-left group"
       >
         <div
           className="w-2.5 h-2.5 rounded-full shrink-0 transition-transform group-hover:scale-125"
@@ -363,7 +363,7 @@ function NodeTile({
             transform: "translate(-50%, -100%)",
           }}
         >
-          <div className="px-2.5 py-1.5 rounded-lg bg-[#111] border border-[rgba(119,119,119,0.3)] text-[11px] text-[#ccc] max-w-[180px] text-center shadow-lg">
+          <div className="px-2.5 py-1.5 rounded-md bg-[#141414] border border-[rgba(255,255,255,0.08)] text-[11px] text-[#ccc] max-w-[180px] text-center shadow-lg">
             {tooltip.text}
           </div>
           <div
@@ -417,7 +417,7 @@ export function AddNodeModal({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="!max-w-xl w-full p-0 overflow-hidden bg-[#1a1a1a] border border-[rgba(119,119,119,0.2)] rounded-2xl">
+      <DialogContent className="!max-w-xl w-full p-0 overflow-hidden bg-[#1a1a1a] border border-[rgba(119,119,119,0.2)] rounded-xl">
         <DialogHeader className="sr-only">
           <DialogTitle>Add Node</DialogTitle>
           <DialogDescription>
@@ -461,7 +461,7 @@ export function AddNodeModal({
               <button
                 key={cat}
                 onClick={() => setActiveCategory(cat)}
-                className={`px-3 py-1 rounded-full text-xs font-medium transition-colors ${
+                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
                   activeCategory === cat
                     ? "bg-[#fafafa] text-[#111]"
                     : "text-[#888] hover:text-[#ccc]"
@@ -495,7 +495,7 @@ export function AddNodeModal({
           <div className="flex items-center justify-between px-4 py-3 border-t border-[rgba(119,119,119,0.12)]">
             <button
               onClick={handleClose}
-              className="px-5 py-2 rounded-full bg-[#2a2a2a] border border-[rgba(119,119,119,0.2)] text-xs font-medium text-[#fafafa] hover:bg-[#333] transition-colors"
+              className="px-5 py-2 rounded-md bg-[#2a2a2a] border border-[rgba(255,255,255,0.06)] text-xs font-medium text-[#fafafa] hover:bg-[#333] transition-colors"
             >
               Cancel
             </button>
