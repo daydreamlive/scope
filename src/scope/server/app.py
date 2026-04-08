@@ -14,7 +14,6 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from functools import wraps
 from importlib.metadata import version
-from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -72,6 +71,7 @@ from .livepeer import is_livepeer_enabled
 from .logs_config import (
     LOG_FORMAT,
     FalConnectionFilter,
+    ResilientRotatingFileHandler,
     cleanup_old_logs,
     ensure_logs_dir,
     get_current_log_file,
@@ -171,12 +171,12 @@ def _configure_logging():
     for handler in root_logger.handlers:
         handler.addFilter(_fal_filter)
         if isinstance(handler, logging.StreamHandler) and not isinstance(
-            handler, RotatingFileHandler
+            handler, ResilientRotatingFileHandler
         ):
             handler.setLevel(logging.INFO)
 
-    # Add rotating file handler
-    file_handler = RotatingFileHandler(
+    # Add rotating file handler (resilient: auto-recreates if /tmp cleanup deletes the file)
+    file_handler = ResilientRotatingFileHandler(
         log_file,
         maxBytes=5 * 1024 * 1024,  # 5 MB per file
         backupCount=5,  # Keep 5 backup files

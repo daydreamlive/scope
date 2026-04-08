@@ -153,7 +153,7 @@ class CloudConnectionManager:
         self._session = aiohttp.ClientSession()
         try:
             self.ws = await asyncio.wait_for(
-                self._session.ws_connect(ws_url),
+                self._session.ws_connect(ws_url, heartbeat=30.0),
                 timeout=30.0,
             )
         except TimeoutError:
