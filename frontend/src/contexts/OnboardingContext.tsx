@@ -25,6 +25,7 @@ export type OnboardingPhase =
   | "cloud_auth" // step 2a: sign in (only if cloud chosen)
   | "cloud_connecting" // step 2b: waiting for cloud relay connection
   | "telemetry_disclosure" // telemetry opt-in disclosure (local mode only)
+  | "onboarding_style" // style picker: guided vs jump-in (all users)
   | "workflow" // step 3: starter workflow picker
   | "downloading" // step 3b: workflow downloading
   | "completed"; // persist and transition to idle
@@ -93,21 +94,21 @@ function reducer(
           action.mode === "cloud"
             ? "cloud_auth"
             : checkTelemetryDisclosed()
-              ? "workflow"
+              ? "onboarding_style"
               : "telemetry_disclosure",
       };
 
     case "TELEMETRY_DISCLOSED":
-      return { ...state, phase: "workflow" };
+      return { ...state, phase: "onboarding_style" };
 
     case "COMPLETE_AUTH":
       return { ...state, phase: "cloud_connecting" };
 
     case "CLOUD_CONNECTED":
-      return { ...state, phase: "workflow" };
+      return { ...state, phase: "onboarding_style" };
 
     case "SET_ONBOARDING_STYLE":
-      return { ...state, onboardingStyle: action.style };
+      return { ...state, onboardingStyle: action.style, phase: "workflow" };
 
     case "SELECT_WORKFLOW":
       return { ...state, selectedWorkflowId: action.workflowId };
@@ -162,10 +163,12 @@ function reducer(
           return { ...state, phase: "inference", inferenceMode: null };
         case "cloud_connecting":
           return { ...state, phase: "cloud_auth" };
-        case "workflow":
+        case "onboarding_style":
           if (state.inferenceMode === "cloud")
             return { ...state, phase: "cloud_connecting" };
           return { ...state, phase: "inference", inferenceMode: null };
+        case "workflow":
+          return { ...state, phase: "onboarding_style" };
         default:
           return state;
       }
@@ -199,7 +202,7 @@ function reducer(
           return {
             ...state,
             phase: checkTelemetryDisclosed()
-              ? "workflow"
+              ? "onboarding_style"
               : "telemetry_disclosure",
             inferenceMode: "local",
           };
@@ -332,6 +335,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     "cloud_auth",
     "cloud_connecting",
     "telemetry_disclosure",
+    "onboarding_style",
     "workflow",
   ].includes(state.phase);
 

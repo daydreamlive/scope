@@ -33,7 +33,7 @@ export function CloudConnectingStep({
   onBack,
 }: CloudConnectingStepProps) {
   const { isConnected, isConnecting, connectStage, refresh } = useCloudStatus();
-  const { setOnboardingStyle, setSurveyAnswers } = useOnboarding();
+  const { setSurveyAnswers } = useOnboarding();
   const {
     isDisclosed: telemetryDisclosed,
     markDisclosed,
@@ -65,31 +65,23 @@ export function CloudConnectingStep({
     return () => clearInterval(timer);
   }, [isConnected, refresh]);
 
-  // Advance when survey (or skip), connection, and telemetry disclosure are done
+  // Advance when connection and telemetry disclosure are done, plus survey
   useEffect(() => {
     if (!isConnected || !localTelemetryDisclosed) return;
 
     // Path A: survey completed normally
     if (surveyDone && surveyAnswers) {
       persistSurveyAnswers({
-        onboarding_style: surveyAnswers.onboardingStyle,
         referral_source: surveyAnswers.referralSource,
         use_case: surveyAnswers.useCase,
       });
-      setOnboardingStyle(surveyAnswers.onboardingStyle);
       setSurveyAnswers(surveyAnswers.referralSource, surveyAnswers.useCase);
       const timer = setTimeout(onConnected, 500);
       return () => clearTimeout(timer);
     }
 
-    // Path B: telemetry declined → survey skipped, onboarding_style selected via inline picker
-    if (telemetrySkippedSurvey && surveyAnswers) {
-      persistSurveyAnswers({
-        onboarding_style: surveyAnswers.onboardingStyle,
-        referral_source: null,
-        use_case: null,
-      });
-      setOnboardingStyle(surveyAnswers.onboardingStyle);
+    // Path B: telemetry declined → survey skipped
+    if (telemetrySkippedSurvey) {
       setSurveyAnswers(null, null);
       const timer = setTimeout(onConnected, 500);
       return () => clearTimeout(timer);
@@ -101,7 +93,6 @@ export function CloudConnectingStep({
     localTelemetryDisclosed,
     telemetrySkippedSurvey,
     onConnected,
-    setOnboardingStyle,
     setSurveyAnswers,
   ]);
 
@@ -121,7 +112,7 @@ export function CloudConnectingStep({
     markDisclosed();
     dropQueue();
     setLocalTelemetryDisclosed(true);
-    // "No thanks" = skip the survey, go straight to onboarding style picker
+    // Skip the survey when telemetry is declined
     setTelemetrySkippedSurvey(true);
   }, [markDisclosed, dropQueue]);
 
@@ -153,7 +144,7 @@ export function CloudConnectingStep({
     );
   }
 
-  // --- Step 2a: Full survey (if user accepted telemetry) ---
+  // --- Step 2: Full survey (if user accepted telemetry) ---
   if (!surveyDone && !telemetrySkippedSurvey) {
     return (
       <div className="flex flex-col items-center gap-6 w-full max-w-md mx-auto">
@@ -182,35 +173,7 @@ export function CloudConnectingStep({
     );
   }
 
-  // --- Step 2b: Telemetry declined → skip survey, show only onboarding style picker ---
-  if (telemetrySkippedSurvey && !surveyAnswers) {
-    return (
-      <div className="flex flex-col items-center gap-6 w-full max-w-md mx-auto">
-        <CloudSurveyScreens
-          onComplete={handleSurveyComplete}
-          initialScreen="onboarding_style"
-        />
-        {/* Small connection status at bottom */}
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {isConnected ? (
-            <>
-              <CheckCircle2 className="h-3 w-3 text-green-500" />
-              <span>Connected</span>
-            </>
-          ) : (
-            <>
-              <Loader2 className="h-3 w-3 animate-spin" />
-              <span>
-                {isConnecting && connectStage ? connectStage : "Connecting..."}
-              </span>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // --- Survey done, waiting for cloud ---
+  // --- Survey done or skipped, waiting for cloud ---
   if (!isConnected) {
     return (
       <div className="flex flex-col items-center gap-6 w-full max-w-md mx-auto text-center">

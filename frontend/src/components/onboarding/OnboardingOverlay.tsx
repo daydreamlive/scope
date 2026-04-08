@@ -2,9 +2,11 @@ import { useCallback } from "react";
 import { ArrowLeft } from "lucide-react";
 import { useOnboarding } from "../../contexts/OnboardingContext";
 import { useTelemetry } from "../../contexts/TelemetryContext";
+import { persistOnboardingStyle } from "../../lib/onboardingStorage";
 import { InferenceModeStep } from "./InferenceModeStep";
 import { CloudAuthStep } from "./CloudAuthStep";
 import { CloudConnectingStep } from "./CloudConnectingStep";
+import { OnboardingStyleStep } from "./OnboardingStyleStep";
 import { WorkflowPickerStep } from "./WorkflowPickerStep";
 import { TelemetryDisclosure } from "./TelemetryDisclosure";
 import { FogOfWarBackground } from "./FogOfWarBackground";
@@ -34,6 +36,7 @@ export function OnboardingOverlay({
     selectInferenceMode,
     completeAuth,
     cloudConnected,
+    setOnboardingStyle,
     startFromScratch,
     selectWorkflow,
     workflowReady,
@@ -83,20 +86,37 @@ export function OnboardingOverlay({
     onOpenImportDialog();
   }, [onOpenImportDialog, importWorkflowReady]);
 
+  const handleStyleSelect = useCallback(
+    (style: "teaching" | "simple") => {
+      persistOnboardingStyle(style);
+      setOnboardingStyle(style);
+    },
+    [setOnboardingStyle]
+  );
+
   // Phase-dependent step indicator
-  const phaseIndex =
-    state.phase === "inference"
-      ? 0
-      : state.phase === "cloud_auth"
-        ? 1
-        : state.phase === "cloud_connecting"
-          ? 2
-          : state.phase === "telemetry_disclosure"
-            ? 1
-            : state.inferenceMode === "cloud"
-              ? 3
-              : 2;
-  const totalSteps = state.inferenceMode === "cloud" ? 4 : 3;
+  // Local path:  inference(0) → telemetry(1) → style(2) → workflow(3)  = 4 steps
+  // Cloud path:  inference(0) → cloud_auth(1) → cloud_connecting(2) → style(3) → workflow(4) = 5 steps
+  const isCloud = state.inferenceMode === "cloud";
+  const phaseIndex = (() => {
+    switch (state.phase) {
+      case "inference":
+        return 0;
+      case "cloud_auth":
+        return 1;
+      case "cloud_connecting":
+        return 2;
+      case "telemetry_disclosure":
+        return 1;
+      case "onboarding_style":
+        return isCloud ? 3 : 2;
+      case "workflow":
+        return isCloud ? 4 : 3;
+      default:
+        return 0;
+    }
+  })();
+  const totalSteps = isCloud ? 5 : 4;
 
   return (
     <div className="fixed inset-0 z-[100] bg-background animate-in fade-in-0 duration-300">
@@ -162,6 +182,10 @@ export function OnboardingOverlay({
             onAccept={handleTelemetryAccept}
             onDecline={handleTelemetryDecline}
           />
+        )}
+
+        {state.phase === "onboarding_style" && (
+          <OnboardingStyleStep onSelect={handleStyleSelect} />
         )}
 
         {state.phase === "workflow" && (

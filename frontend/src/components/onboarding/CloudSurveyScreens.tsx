@@ -1,17 +1,15 @@
 import { useState, useCallback } from "react";
-import { MessageCircle, GraduationCap, Zap, ArrowLeft } from "lucide-react";
-import { Button } from "../ui/button";
+import { MessageCircle, ArrowLeft } from "lucide-react";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
-type SurveyScreen = "intro" | "referral" | "use_case" | "onboarding_style";
+type SurveyScreen = "intro" | "referral" | "use_case";
 
 export interface SurveyAnswers {
   referralSource: string | null;
   useCase: string | null;
-  onboardingStyle: "teaching" | "simple";
 }
 
 interface CloudSurveyScreensProps {
@@ -41,9 +39,6 @@ export function CloudSurveyScreens({
   const [screen, setScreen] = useState<SurveyScreen>(initialScreen);
   const [referralSource, setReferralSource] = useState<string | null>(null);
   const [useCase, setUseCase] = useState<string | null>(null);
-  const [selectedStyle, setSelectedStyle] = useState<
-    "teaching" | "simple" | null
-  >(null);
   const [transitioning, setTransitioning] = useState(false);
 
   // Advance with a brief delay so the user sees their selection highlight
@@ -65,10 +60,15 @@ export function CloudSurveyScreens({
 
   const handleUseCaseSelect = useCallback(
     (option: string) => {
-      setUseCase(option);
-      advanceAfterDelay("onboarding_style");
+      const newUseCase = option;
+      setUseCase(newUseCase);
+      setTransitioning(true);
+      setTimeout(() => {
+        onComplete({ referralSource, useCase: newUseCase });
+        setTransitioning(false);
+      }, 300);
     },
-    [advanceAfterDelay]
+    [referralSource, onComplete]
   );
 
   const goBackSurvey = useCallback(() => {
@@ -82,26 +82,12 @@ export function CloudSurveyScreens({
       case "use_case":
         setScreen("referral");
         break;
-      case "onboarding_style":
-        setScreen("use_case");
-        break;
     }
   }, [screen, onBack]);
 
   const handleSkip = useCallback(() => {
-    setReferralSource(null);
-    setUseCase(null);
-    setScreen("onboarding_style");
-  }, []);
-
-  const handleStyleConfirm = useCallback(() => {
-    if (!selectedStyle) return;
-    onComplete({
-      referralSource,
-      useCase,
-      onboardingStyle: selectedStyle,
-    });
-  }, [selectedStyle, referralSource, useCase, onComplete]);
+    onComplete({ referralSource: null, useCase: null });
+  }, [onComplete]);
 
   // Shared card wrapper — key on screen name to re-trigger entrance animation
   return (
@@ -199,80 +185,6 @@ export function CloudSurveyScreens({
                   </button>
                 ))}
               </div>
-            </>
-          )}
-
-          {/* ---- Onboarding Style ---- */}
-          {screen === "onboarding_style" && (
-            <>
-              <h3 className="text-sm font-medium text-foreground">
-                Choose an onboarding style
-              </h3>
-              <div className="flex flex-col gap-3">
-                <button
-                  onClick={() => setSelectedStyle("teaching")}
-                  className={`w-full flex items-start gap-3 p-4 rounded-lg border-2 text-left transition-all cursor-pointer ${
-                    selectedStyle === "teaching"
-                      ? "border-foreground/30 bg-card ring-2 ring-foreground/10"
-                      : "border-border bg-card/50 hover:border-border/80 hover:bg-card"
-                  }`}
-                >
-                  <div
-                    className={`mt-0.5 flex items-center justify-center h-8 w-8 rounded-lg shrink-0 transition-colors ${
-                      selectedStyle === "teaching"
-                        ? "bg-foreground/10"
-                        : "bg-muted"
-                    }`}
-                  >
-                    <GraduationCap className="h-4 w-4 text-foreground" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-foreground">
-                      Teaching Mode
-                    </p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Interactive onboarding, recommended for anyone already
-                      familiar with node-based AI tools
-                    </p>
-                  </div>
-                </button>
-
-                <button
-                  onClick={() => setSelectedStyle("simple")}
-                  className={`w-full flex items-start gap-3 p-4 rounded-lg border-2 text-left transition-all cursor-pointer ${
-                    selectedStyle === "simple"
-                      ? "border-foreground/30 bg-card ring-2 ring-foreground/10"
-                      : "border-border bg-card/50 hover:border-border/80 hover:bg-card"
-                  }`}
-                >
-                  <div
-                    className={`mt-0.5 flex items-center justify-center h-8 w-8 rounded-lg shrink-0 transition-colors ${
-                      selectedStyle === "simple"
-                        ? "bg-foreground/10"
-                        : "bg-muted"
-                    }`}
-                  >
-                    <Zap className="h-4 w-4 text-foreground" />
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-sm font-medium text-foreground">
-                      Simple
-                    </p>
-                    <p className="text-xs text-muted-foreground leading-relaxed">
-                      Get a good result fast, recommended if you&rsquo;re new to
-                      real-time AI
-                    </p>
-                  </div>
-                </button>
-              </div>
-
-              <Button
-                onClick={handleStyleConfirm}
-                disabled={!selectedStyle}
-                className="w-full"
-              >
-                Continue
-              </Button>
             </>
           )}
         </div>

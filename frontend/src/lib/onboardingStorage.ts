@@ -57,7 +57,6 @@ export async function setInferenceMode(mode: "local" | "cloud"): Promise<void> {
 
 /** Persist survey answers collected during cloud connecting. */
 export async function persistSurveyAnswers(answers: {
-  onboarding_style: "teaching" | "simple";
   referral_source: string | null;
   use_case: string | null;
 }): Promise<void> {
@@ -66,6 +65,21 @@ export async function persistSurveyAnswers(answers: {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(answers),
+    });
+  } catch {
+    // no-op
+  }
+}
+
+/** Persist the onboarding style chosen during the universal style step. */
+export async function persistOnboardingStyle(
+  style: "teaching" | "simple"
+): Promise<void> {
+  try {
+    await fetch("/api/v1/onboarding/status", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ onboarding_style: style }),
     });
   } catch {
     // no-op
