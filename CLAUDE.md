@@ -277,12 +277,27 @@ for name, color in [('test', (0,0,255)), ('test1', (0,255,0)), ('test2', (255,0,
 }
 ```
 
+**Syphon sources in graphs (macOS only):**
+
+- Use `"source_mode": "syphon"` and `"source_name": "<display name>"` for Syphon input sources
+- Discover Syphon sources: `GET /api/v1/input-sources/syphon/sources`
+- Syphon display names use the format `"AppName - ServerName"` (e.g., `"TouchDesigner - Scope1"`)
+- The `source_name` must match the `name` field from the discovery response (the display name), NOT the UUID `identifier`
+- Workflow JSON may use `"source_mode": "camera"` for Syphon sources — convert to `"source_mode": "syphon"` in the API call
+
+**OpenCV dependency:** `cv2` may not be installed in the venv despite appearing in `pip list`. If `import cv2` fails, run `uv pip install opencv-python` first.
+
+**Port conflicts:** On macOS, port 8022 may be used by Cursor IDE. If `[Errno 48] address already in use` appears in logs, use a different port (e.g., 8033). Always check with `lsof -i :<port>` before starting.
+
+**Cloud mode recording timing:** In cloud mode, start recordings shortly after the session starts (within ~5s). If WebRTC output tracks end before recording starts, only ~30 buffered frames (~1s) will be captured.
+
 **Debugging:**
 
 - Check frame flow with `GET /api/v1/session/metrics`
 - Check logs with `GET /api/v1/logs/tail?lines=50`
 - `frames_in > 0, frames_out = 0` → pipeline processing failing
 - All sinks return same frame → per-sink routing issue in HeadlessSession
+- Syphon source black/missing → check logs for `"Syphon server not found"` — verify source_name matches display name from discovery
 
 ## MCP Server Testing with Local Cloud Dev
 
@@ -292,34 +307,36 @@ Test the cloud relay flow locally by running two Scope instances — one acting 
 
 **Setup (two instances):**
 
+NOTE: Port 8022 is often used by Cursor IDE on macOS. Use port 8033 instead for the local instance.
+
 ```bash
-lsof -ti:8002 -ti:8022 | xargs kill -9 2>/dev/null
+lsof -ti:8002 -ti:8033 | xargs kill -9 2>/dev/null
 
 # Cloud instance (start first):
 CUDA_VISIBLE_DEVICES="" SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002 > /tmp/cloud.log 2>&1 &
 for i in $(seq 1 30); do curl -s http://localhost:8002/health > /dev/null 2>&1 && break; sleep 1; done
 
 # Local instance (start after cloud is healthy):
-CUDA_VISIBLE_DEVICES="" SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022 > /tmp/local.log 2>&1 &
-for i in $(seq 1 30); do curl -s http://localhost:8022/health > /dev/null 2>&1 && break; sleep 1; done
+CUDA_VISIBLE_DEVICES="" SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8033 > /tmp/local.log 2>&1 &
+for i in $(seq 1 30); do curl -s http://localhost:8033/health > /dev/null 2>&1 && break; sleep 1; done
 ```
 
 **Additional cloud-specific steps (before resolve/load):**
 
 ```bash
 # Connect to cloud:
-curl -s -X POST http://localhost:8022/api/v1/cloud/connect -H 'Content-Type: application/json' -d '{"app_id": "local"}'
+curl -s -X POST http://localhost:8033/api/v1/cloud/connect -H 'Content-Type: application/json' -d '{"app_id": "local"}'
 # Wait and verify:
-sleep 2 && curl -s http://localhost:8022/api/v1/cloud/status
+sleep 2 && curl -s http://localhost:8033/api/v1/cloud/status
 ```
 
-Then follow the same test sequence as single-instance mode above. All session/frame/recording endpoints go to port 8022 (local), not 8002 (cloud). Pipeline load is automatically proxied to cloud.
+Then follow the same test sequence as single-instance mode above. All session/frame/recording endpoints go to port 8033 (local), not 8002 (cloud). Pipeline load is automatically proxied to cloud.
 
 **Cloud-specific debugging:**
 
 - `frames_to_cloud > 0, frames_from_cloud = 0` → cloud is not sending output back; check cloud logs
 - Both instances write separate log files to `~/.daydream-scope/logs/` — the `/api/v1/logs/tail` endpoint returns the most recent file alphabetically, which may be the wrong instance's logs. Read the actual log files with `ls -t ~/.daydream-scope/logs/scope-logs-*.log | head -2` to find both
-- Cloud status: `GET /api/v1/cloud/status` on port 8022
+- Cloud status: `GET /api/v1/cloud/status` on port 8033
 
 ## Contributing Requirements
 
