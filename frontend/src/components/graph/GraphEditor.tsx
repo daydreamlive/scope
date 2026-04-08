@@ -1017,6 +1017,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           />
 
           <div
+            data-tour="graph-canvas"
             className={`flex-1 relative${isStreaming ? " streaming" : ""}`}
             onMouseDown={handleRightMouseDown}
             onDoubleClick={handleWrapperDoubleClick}

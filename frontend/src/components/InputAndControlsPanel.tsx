@@ -314,7 +314,7 @@ export function InputAndControlsPanel({
   };
 
   return (
-    <Card className={className}>
+    <Card data-tour="input-controls-panel" className={className}>
       <CardHeader>
         <CardTitle className="text-base font-medium">
           Input & Controls
