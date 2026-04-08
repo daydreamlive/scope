@@ -7,6 +7,7 @@ import { CloudAuthStep } from "./CloudAuthStep";
 import { CloudConnectingStep } from "./CloudConnectingStep";
 import { WorkflowPickerStep } from "./WorkflowPickerStep";
 import { TelemetryDisclosure } from "./TelemetryDisclosure";
+import { WelcomeSplashStep } from "./WelcomeSplashStep";
 import { FogOfWarBackground } from "./FogOfWarBackground";
 import type { StarterWorkflow } from "./starterWorkflows";
 
@@ -31,6 +32,7 @@ export function OnboardingOverlay({
 }: OnboardingOverlayProps) {
   const {
     state,
+    advanceWelcome,
     selectInferenceMode,
     completeAuth,
     cloudConnected,
@@ -110,9 +112,10 @@ export function OnboardingOverlay({
 
       {/* Content layer — above the fog canvas + blur veil */}
       <div className="relative z-10 flex flex-col items-center justify-center h-full p-6">
-        {/* Back button — visible after the first step (hidden during survey
-            screens which handle their own internal back navigation) */}
-        {state.phase !== "inference" &&
+        {/* Back button — visible after the first step (hidden during welcome,
+            loading, and survey screens which handle their own navigation) */}
+        {state.phase !== "welcome" &&
+          state.phase !== "inference" &&
           state.phase !== "loading" &&
           state.phase !== "cloud_connecting" && (
             <button
@@ -124,21 +127,27 @@ export function OnboardingOverlay({
             </button>
           )}
 
-        {/* Step indicator */}
-        <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-2">
-          {Array.from({ length: totalSteps }).map((_, i) => (
-            <div
-              key={i}
-              className={`h-1 rounded-full transition-all ${
-                i <= phaseIndex
-                  ? "w-8 bg-foreground/40"
-                  : "w-8 bg-foreground/10"
-              }`}
-            />
-          ))}
-        </div>
+        {/* Step indicator — hidden during welcome phase */}
+        {state.phase !== "welcome" && (
+          <div className="absolute top-6 left-1/2 -translate-x-1/2 flex items-center gap-2">
+            {Array.from({ length: totalSteps }).map((_, i) => (
+              <div
+                key={i}
+                className={`h-1 rounded-full transition-all ${
+                  i <= phaseIndex
+                    ? "w-8 bg-foreground/40"
+                    : "w-8 bg-foreground/10"
+                }`}
+              />
+            ))}
+          </div>
+        )}
 
         {/* Phase content */}
+        {state.phase === "welcome" && (
+          <WelcomeSplashStep onAdvance={advanceWelcome} />
+        )}
+
         {state.phase === "loading" && (
           <div className="flex items-center justify-center">
             <div className="h-6 w-6 border-2 border-foreground/20 border-t-foreground/60 rounded-full animate-spin" />

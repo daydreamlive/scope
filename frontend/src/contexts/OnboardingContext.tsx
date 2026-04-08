@@ -21,6 +21,7 @@ import { isDisclosed as checkTelemetryDisclosed } from "../lib/telemetry";
 export type OnboardingPhase =
   | "loading" // waiting for backend status check
   | "idle" // returning user or post-completion
+  | "welcome" // pre-onboarding splash (first-time only)
   | "inference" // step 1: local vs cloud
   | "cloud_auth" // step 2a: sign in (only if cloud chosen)
   | "cloud_connecting" // step 2b: waiting for cloud relay connection
@@ -44,6 +45,7 @@ export interface OnboardingState {
 // ---------------------------------------------------------------------------
 
 type OnboardingAction =
+  | { type: "ADVANCE_WELCOME" }
   | { type: "SELECT_INFERENCE_MODE"; mode: "local" | "cloud" }
   | { type: "COMPLETE_AUTH" }
   | { type: "CLOUD_CONNECTED" }
@@ -77,6 +79,14 @@ function reducer(
   action: OnboardingAction
 ): OnboardingState {
   switch (action.type) {
+    case "ADVANCE_WELCOME":
+      try {
+        localStorage.setItem("scope_welcome_shown", "1");
+      } catch {
+        // no-op
+      }
+      return { ...state, phase: "inference" };
+
     case "SELECT_INFERENCE_MODE":
       persistInferenceMode(action.mode);
       // Set a sessionStorage flag so we can resume after a full-page auth
@@ -205,7 +215,15 @@ function reducer(
           };
         }
       }
-      return { ...state, phase: "inference" };
+      // Show welcome splash only the very first time (no prior onboarding state)
+      const welcomeShown = (() => {
+        try {
+          return !!localStorage.getItem("scope_welcome_shown");
+        } catch {
+          return false;
+        }
+      })();
+      return { ...state, phase: welcomeShown ? "inference" : "welcome" };
     }
 
     default:
@@ -223,6 +241,7 @@ interface OnboardingContextValue {
   isOnboarding: boolean;
   /** True only during the full-screen overlay phases */
   isOverlayVisible: boolean;
+  advanceWelcome: () => void;
   selectInferenceMode: (mode: "local" | "cloud") => void;
   completeAuth: () => void;
   cloudConnected: () => void;
@@ -272,6 +291,10 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const advanceWelcome = useCallback(
+    () => dispatch({ type: "ADVANCE_WELCOME" }),
+    []
+  );
   const selectInferenceMode = useCallback(
     (mode: "local" | "cloud") =>
       dispatch({ type: "SELECT_INFERENCE_MODE", mode }),
@@ -328,6 +351,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
   const isOnboarding = state.phase !== "idle";
   const isOverlayVisible = [
     "loading",
+    "welcome",
     "inference",
     "cloud_auth",
     "cloud_connecting",
@@ -341,6 +365,7 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         state,
         isOnboarding,
         isOverlayVisible,
+        advanceWelcome,
         selectInferenceMode,
         completeAuth,
         cloudConnected,
