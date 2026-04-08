@@ -646,7 +646,7 @@ export function StreamPage() {
   });
 
   // Show post-session survey once after the first completed stream
-  const prevIsStreamingRef = useRef(false);
+  const prevIsStreamingRef = useRef(isStreaming);
   useEffect(() => {
     if (prevIsStreamingRef.current && !isStreaming) {
       // Stream just stopped — trigger survey if not yet shown and telemetry opted in
