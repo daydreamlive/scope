@@ -80,6 +80,7 @@ midi = [
 ]
 web = [
     "playwright>=1.40.0",
+    "Pillow>=9.0",
 ]
 
 [project.scripts]

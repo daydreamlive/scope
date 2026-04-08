@@ -44,7 +44,7 @@ class WebAppInputSource(InputSource):
     def is_available(cls) -> bool:
         """Check if Playwright is installed."""
         try:
-            import playwright  # noqa: F401
+            from playwright.sync_api import sync_playwright  # noqa: F401
 
             return True
         except ImportError:
@@ -83,14 +83,14 @@ class WebAppInputSource(InputSource):
             self._cleanup()
             return False
 
-    def receive_frame(self, timeout_ms: int = 100) -> np.ndarray | None:
+    def receive_frame(self, timeout_ms: int = 5000) -> np.ndarray | None:
         """Capture a screenshot and return it as an RGB numpy array."""
-        if not self._connected or self._page is None:
-            return None
         try:
             from PIL import Image
 
             with self._lock:
+                if not self._connected or self._page is None:
+                    return None
                 png_bytes = self._page.screenshot(type="png", timeout=timeout_ms)
 
             img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
@@ -101,25 +101,19 @@ class WebAppInputSource(InputSource):
 
     def disconnect(self):
         """Disconnect and release browser resources."""
-        self._connected = False
         self._cleanup()
 
     def _cleanup(self):
-        try:
-            if self._page:
-                self._page.close()
-        except Exception:
-            pass
-        try:
-            if self._browser:
-                self._browser.close()
-        except Exception:
-            pass
-        try:
-            if self._playwright:
-                self._playwright.stop()
-        except Exception:
-            pass
-        self._page = None
-        self._browser = None
-        self._playwright = None
+        with self._lock:
+            self._connected = False
+            page, browser, pw = self._page, self._browser, self._playwright
+            self._page = self._browser = self._playwright = None
+
+        # Close resources outside the lock to avoid blocking receive_frame
+        for resource, method in ((page, "close"), (browser, "close"), (pw, "stop")):
+            if resource is None:
+                continue
+            try:
+                getattr(resource, method)()
+            except Exception:
+                pass
