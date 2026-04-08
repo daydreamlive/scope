@@ -165,6 +165,13 @@ class RecacheFramesBlock(ModularPipelineBlocks):
         num_recache_frames = min(
             block_state.current_start_frame, components.config.local_attn_size
         )
+
+        # Guard: skip recaching when there are zero frames to avoid
+        # KV cache tensor dimension mismatches (e.g. expand size 0 vs existing cache size)
+        if num_recache_frames == 0:
+            self.set_block_state(state, block_state)
+            return components, state
+
         recache_start = block_state.current_start_frame - num_recache_frames
         recache_frames = (
             block_state.recache_buffer[:, -num_recache_frames:]
