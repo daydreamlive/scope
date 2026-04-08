@@ -22,9 +22,9 @@ from av import AudioFrame, VideoFrame
 from livepeer_gateway.channel_reader import JSONLReader
 from livepeer_gateway.channel_writer import JSONLWriter
 from livepeer_gateway.errors import SkipPaymentCycle
-from livepeer_gateway.lv2v import StartJobRequest, start_lv2v
 from livepeer_gateway.media_output import MediaOutput
 from livepeer_gateway.media_publish import MediaPublish, MediaPublishConfig
+from livepeer_gateway.scope import StartJobRequest, start_scope
 
 logger = logging.getLogger(__name__)
 LIVEPEER_ORCH_URL_ENV = "LIVEPEER_ORCH_URL"
@@ -162,10 +162,10 @@ class LivepeerClient:
             params=params or None,
         )
 
-        # start_lv2v is synchronous and may block on network I/O, so run it in
+        # start_scope is synchronous and may block on network I/O, so run it in
         # a worker thread to avoid blocking the event loop.
         self._job = await asyncio.to_thread(
-            start_lv2v,
+            start_scope,
             # If unset, orchestrator is discovered via token signer/discovery fields.
             self._orchestrator_url,
             request,
@@ -177,7 +177,7 @@ class LivepeerClient:
         )
         self._connection_id = getattr(self._job, "manifest_id", None)
 
-        # start_lv2v runs in a worker thread without an event loop, so
+        # start_scope runs in a worker thread without an event loop, so
         # deferred async initialisers need to be kicked off now.
         if self._job.control_url:
             self._control_writer = JSONLWriter(self._job.control_url)
