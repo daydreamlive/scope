@@ -81,6 +81,8 @@ import { toast } from "sonner";
 import { useOnboarding } from "../contexts/OnboardingContext";
 import { OnboardingOverlay } from "../components/onboarding/OnboardingOverlay";
 import { WorkspaceTour } from "../components/onboarding/WorkspaceTour";
+import { SurveyModal } from "../components/SurveyModal";
+import { useTelemetry } from "../contexts/TelemetryContext";
 
 import {
   isAuthenticated as checkIsAuthenticated,
@@ -148,6 +150,12 @@ export function StreamPage() {
   // Onboarding state
   const { state: onboardingState, isOverlayVisible: showOnboardingOverlay } =
     useOnboarding();
+
+  // Telemetry opt-in status (used for survey gating)
+  const { isEnabled: isTelemetryEnabled } = useTelemetry();
+
+  // Post-session survey state
+  const [showSurvey, setShowSurvey] = useState(false);
 
   // Get API functions that work in both local and cloud modes
   const api = useApi();
@@ -636,6 +644,20 @@ export function StreamPage() {
     onParametersUpdated: handleParametersUpdated,
     onTempoUpdate: updateTempoFromNotification,
   });
+
+  // Show post-session survey once after the first completed stream
+  const prevIsStreamingRef = useRef(false);
+  useEffect(() => {
+    if (prevIsStreamingRef.current && !isStreaming) {
+      // Stream just stopped — trigger survey if not yet shown and telemetry opted in
+      const alreadyShown = localStorage.getItem("scope_survey_shown");
+      if (!alreadyShown && isTelemetryEnabled) {
+        localStorage.setItem("scope_survey_shown", "true");
+        setShowSurvey(true);
+      }
+    }
+    prevIsStreamingRef.current = isStreaming;
+  }, [isStreaming, isTelemetryEnabled]);
 
   // Whether beat-quantized output gating is active
   const isQuantizeActive =
@@ -3776,6 +3798,9 @@ export function StreamPage() {
           />
         )}
       </div>
+
+      {/* Post-session survey modal */}
+      <SurveyModal open={showSurvey} onClose={() => setShowSurvey(false)} />
     </MIDIProvider>
   );
 }
