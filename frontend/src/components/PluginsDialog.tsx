@@ -99,7 +99,7 @@ export function PluginsDialog({
   const handleBrowseLocalPlugin = async () => {
     if (window.scope?.browseDirectory) {
       const path = await window.scope.browseDirectory(
-        "Select Plugin Directory"
+        "Select Node Directory"
       );
       if (path) setPluginInstallPath(path);
     }

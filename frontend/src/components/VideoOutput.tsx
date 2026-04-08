@@ -277,7 +277,7 @@ export function VideoOutput({
           <div className="text-center text-muted-foreground">
             <Spinner size={24} className="mx-auto mb-3" />
             <p key={pipelineLoadingStage} className="animate-fade-in text-lg">
-              {pipelineLoadingStage || "Loading pipeline..."}
+              {pipelineLoadingStage || "Loading model..."}
             </p>
             <p className="text-xs text-muted-foreground/80 mt-3 max-w-[280px] mx-auto leading-relaxed">
               Models may take up to a minute to load, only on the first run.
