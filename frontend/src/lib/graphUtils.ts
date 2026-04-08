@@ -119,6 +119,10 @@ export interface FlowNodeData {
   valueType?: "string" | "number" | "boolean" | "trigger";
   /** For primitive / slider nodes: the current value */
   value?: unknown;
+  /** For primitive nodes: whether value changes are sent immediately (default: true) */
+  primitiveAutoSend?: boolean;
+  /** For primitive nodes: the last explicitly committed/sent value (runtime-only, used when autoSend is off) */
+  committedValue?: unknown;
   /** For control nodes: the type of control (float, int, string) */
   controlType?: "float" | "int" | "string";
   /** For string control nodes: animated (pattern cycling) or switch (input-selected) */
@@ -939,6 +943,7 @@ const NON_SERIALIZABLE_KEYS = new Set<string>([
   "onSetTempo",
   "onRefreshTempoSources",
   "tempoSources",
+  "committedValue",
 ]);
 
 /**

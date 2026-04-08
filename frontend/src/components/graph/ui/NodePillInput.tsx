@@ -5,6 +5,7 @@ interface NodePillInputProps {
   type: "text" | "number";
   value: string | number;
   onChange: (value: string | number) => void;
+  onSubmit?: () => void;
   disabled?: boolean;
   placeholder?: string;
   min?: number;
@@ -17,6 +18,7 @@ export function NodePillInput({
   type,
   value,
   onChange,
+  onSubmit,
   disabled = false,
   placeholder,
   min,
@@ -52,6 +54,17 @@ export function NodePillInput({
       return clamped;
     },
     [min, max]
+  );
+
+  const handleKeyDown = useCallback(
+    (e: React.KeyboardEvent<HTMLInputElement>) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        onSubmit?.();
+        inputRef.current?.blur();
+      }
+    },
+    [onSubmit]
   );
 
   const handleMouseDown = useCallback(
@@ -107,6 +120,7 @@ export function NodePillInput({
       type={type}
       value={value}
       onChange={handleChange}
+      onKeyDown={onSubmit ? handleKeyDown : undefined}
       onMouseDown={isNumber ? handleMouseDown : undefined}
       disabled={disabled}
       placeholder={placeholder}
