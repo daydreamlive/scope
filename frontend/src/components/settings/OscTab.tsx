@@ -134,7 +134,7 @@ export function OscTab({ isActive }: OscTabProps) {
           <code className="bg-muted px-1 py-0.5 rounded text-xs">
             {status?.port ?? "..."}
           </code>{" "}
-          to control model parameters in real time. Click{" "}
+          to control workflow parameters in real time. Click{" "}
           <strong>Open OSC Docs</strong> for the full path reference.
         </div>
       </div>
