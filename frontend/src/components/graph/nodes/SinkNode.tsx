@@ -150,7 +150,8 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
               <div className="flex flex-col items-center justify-center h-full gap-1 text-[#8c8c8d]">
                 <span className="text-[10px]">No output stream</span>
                 <span className="text-[9px] text-[#666] text-center px-2">
-                  Resize node for a bigger preview or use Spout/NDI/Syphon for external output
+                  Resize node for a bigger preview or use Spout/NDI/Syphon for
+                  external output
                 </span>
               </div>
             )}
