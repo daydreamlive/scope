@@ -285,7 +285,7 @@ def resolve_workflow(
     all_pipelines_ok = True
 
     try:
-        plugins = plugin_manager.list_plugins_sync()
+        plugins = plugin_manager.list_plugins_sync(skip_update_check=True)
     except Exception:
         logger.warning(
             "Failed to list plugins; treating all plugins as missing", exc_info=True

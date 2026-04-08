@@ -131,6 +131,14 @@ def _invalidate_plugin_caches():
     _pipeline_schemas_cache = None
     _plugins_list_cache = None
 
+    # Also clear the plugin manager's per-plugin update check TTL cache
+    try:
+        from scope.core.plugins import get_plugin_manager
+
+        get_plugin_manager().clear_update_check_cache()
+    except Exception:
+        pass
+
 
 class STUNErrorFilter(logging.Filter):
     """Filter to suppress STUN/TURN connection errors that are not critical."""
@@ -328,6 +336,19 @@ async def prewarm_pipeline(pipeline_id: str):
         logger.error(f"Error pre-warming pipeline {pipeline_id} in background: {e}")
 
 
+async def _prewarm_plugin_update_cache():
+    """Background task to warm the plugin update check cache at startup."""
+    try:
+        from scope.core.plugins import get_plugin_manager
+
+        pm = get_plugin_manager()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, pm.list_plugins_sync)
+        logger.info("Plugin update check cache warmed")
+    except Exception as e:
+        logger.debug(f"Plugin update cache warm-up skipped: {e}")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan handler for startup and shutdown events."""
@@ -383,6 +404,10 @@ async def lifespan(app: FastAPI):
     # Pre-warm the default pipeline
     if PIPELINE is not None:
         asyncio.create_task(prewarm_pipeline(PIPELINE))
+
+    # Pre-warm the plugin update check cache in the background so the first
+    # "Nodes" / resolve-workflow call doesn't block on PyPI lookups.
+    asyncio.create_task(_prewarm_plugin_update_cache())
 
     webrtc_manager = WebRTCManager()
     logger.info("WebRTC manager initialized")
