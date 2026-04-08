@@ -169,8 +169,7 @@ export function useKeyboardShortcuts({
         if (shortcut.builtIn) continue;
         if (!matchesShortcut(e, shortcut)) continue;
         if (!shortcut.allowInInput && isInputElement) continue;
-        if (shortcut.disabledWhileStreaming && isStreamingRef.current)
-          continue;
+        if (shortcut.disabledWhileStreaming && isStreamingRef.current) continue;
 
         const handler = resolveHandler(shortcut.id);
         if (handler) {

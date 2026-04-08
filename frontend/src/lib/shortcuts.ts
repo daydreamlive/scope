@@ -42,7 +42,10 @@ export const CATEGORY_LABELS: Record<ShortcutCategory, string> = {
 };
 
 export function isMac(): boolean {
-  return typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.userAgent);
+  return (
+    typeof navigator !== "undefined" &&
+    /Mac|iPhone|iPad/.test(navigator.userAgent)
+  );
 }
 
 /** Platform-aware modifier symbol */
@@ -327,7 +330,11 @@ export function getShortcutById(
  */
 export function getShortcutsByCategory(
   shortcuts: ShortcutDefinition[] = SHORTCUTS
-): { category: ShortcutCategory; label: string; items: ShortcutDefinition[] }[] {
+): {
+  category: ShortcutCategory;
+  label: string;
+  items: ShortcutDefinition[];
+}[] {
   const grouped = new Map<ShortcutCategory, ShortcutDefinition[]>();
   const seenLabels = new Map<ShortcutCategory, Set<string>>();
 

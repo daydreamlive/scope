@@ -18,7 +18,14 @@ import { toast } from "sonner";
 interface SettingsDialogProps {
   open: boolean;
   onClose: () => void;
-  initialTab?: "general" | "account" | "api-keys" | "loras" | "osc" | "dmx" | "shortcuts";
+  initialTab?:
+    | "general"
+    | "account"
+    | "api-keys"
+    | "loras"
+    | "osc"
+    | "dmx"
+    | "shortcuts";
   onPipelinesRefresh?: () => Promise<unknown>;
   cloudDisabled?: boolean;
 }

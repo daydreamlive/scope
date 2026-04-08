@@ -1,8 +1,4 @@
-import {
-  SHORTCUTS,
-  isMac,
-  type ShortcutDefinition,
-} from "./shortcuts";
+import { SHORTCUTS, isMac, type ShortcutDefinition } from "./shortcuts";
 
 const STORAGE_KEY = "scope:shortcut-overrides";
 
