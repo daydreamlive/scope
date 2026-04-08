@@ -327,14 +327,23 @@ class PipelineManager:
 
         except Exception as e:
             self.set_loading_stage(None)
-            from .models_config import get_models_dir
-
-            models_dir = get_models_dir()
             error_msg = f"Failed to load pipeline {key}: {e}"
-            logger.error(
-                f"{error_msg}. If this error persists, consider removing the models "
-                f"directory '{models_dir}' and re-downloading models."
+            # Only suggest model directory removal for model-loading failures,
+            # not for unknown pipeline IDs (which indicate a missing plugin or
+            # a stale job config referencing a removed pipeline).
+            is_unknown_pipeline = isinstance(e, ValueError) and (
+                "Unknown pipeline ID" in str(e) or "Invalid pipeline ID" in str(e)
             )
+            if is_unknown_pipeline:
+                logger.error(error_msg)
+            else:
+                from .models_config import get_models_dir
+
+                models_dir = get_models_dir()
+                logger.error(
+                    f"{error_msg}. If this error persists, consider removing the models "
+                    f"directory '{models_dir}' and re-downloading models."
+                )
 
             # Hold lock while updating state with error
             with self._lock:
@@ -877,6 +886,21 @@ class PipelineManager:
             # Merge: load_params override schema defaults
             merged_params = {**schema_defaults, **(load_params or {})}
             return pipeline_class(**merged_params)
+
+        # Catch unknown pipeline IDs early — before the built-in if/elif chain.
+        # A pipeline that is neither registered nor a known built-in is either
+        # a typo, a removed ID, or a plugin that is not installed on this worker.
+        if pipeline_class is None and pipeline_id not in BUILTIN_PIPELINES:
+            available = sorted(
+                set(PipelineRegistry.list_pipelines()) | BUILTIN_PIPELINES
+            )
+            raise ValueError(
+                f"Unknown pipeline ID: '{pipeline_id}'. "
+                f"It is not registered as a built-in pipeline and no matching plugin "
+                f"was found. If this is a plugin pipeline, ensure the plugin is "
+                f"installed on this worker. "
+                f"Available pipelines: {available}"
+            )
 
         # Fall through to built-in pipeline initialization
         if pipeline_id == "streamdiffusionv2":
