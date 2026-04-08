@@ -1,5 +1,6 @@
 import { app, ipcMain, nativeImage, dialog, session, shell } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { execSync } from 'child_process';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
@@ -654,12 +655,59 @@ async function startServer(): Promise<void> {
 }
 
 /**
- * Configure session permissions
- * Shows user consent dialogs for permissions instead of denying all
+ * Persistent permission store.
+ *
+ * Reads/writes a JSON file in userData so that permission decisions survive
+ * app restarts.  The in-memory map (`grantedPermissions`) is the authority
+ * at runtime; the file is only read once at startup.
+ */
+const PERMISSIONS_FILE = path.join(app.getPath('userData'), 'permissions.json');
+const grantedPermissions = new Set<string>();
+
+function loadPersistedPermissions(): void {
+  try {
+    if (fs.existsSync(PERMISSIONS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(PERMISSIONS_FILE, 'utf-8'));
+      if (Array.isArray(data)) {
+        for (const p of data) grantedPermissions.add(p);
+      }
+      logger.info(`Loaded ${grantedPermissions.size} persisted permission(s)`);
+    }
+  } catch (e) {
+    logger.warn('Failed to load persisted permissions:', e);
+  }
+}
+
+function persistPermissions(): void {
+  try {
+    fs.writeFileSync(
+      PERMISSIONS_FILE,
+      JSON.stringify([...grantedPermissions], null, 2),
+      'utf-8'
+    );
+  } catch (e) {
+    logger.warn('Failed to persist permissions:', e);
+  }
+}
+
+/**
+ * Configure session permissions.
+ *
+ * Previously-granted permissions are remembered (both in-memory for the
+ * current session AND on disk across restarts) so the user is only prompted
+ * once per permission type.
  */
 async function configureSessionPermissions(): Promise<void> {
-  // Set permission request handler - ask user for consent
-  session.defaultSession.setPermissionRequestHandler(async (webContents, permission, callback, details) => {
+  loadPersistedPermissions();
+
+  // Set permission request handler - auto-grant cached, prompt otherwise
+  session.defaultSession.setPermissionRequestHandler(async (_webContents, permission, callback) => {
+    // Fast path: permission was already granted
+    if (grantedPermissions.has(permission)) {
+      callback(true);
+      return;
+    }
+
     try {
       // Check if main window exists
       if (!appState.mainWindow || appState.mainWindow.isDestroyed()) {
@@ -685,51 +733,39 @@ async function configureSessionPermissions(): Promise<void> {
       };
 
       const description = permissionDescriptions[permission] || permissionDescriptions.unknown;
-      const requestingUrl = details.requestingUrl || 'Unknown source';
 
       // Show permission dialog to user
       const result = await dialog.showMessageBox(appState.mainWindow, {
         type: 'question',
         title: 'Permission Request',
         message: `Allow "${permission}" permission?`,
-        detail: `${description}\n\nRequested by: ${requestingUrl}`,
+        detail: description,
         buttons: ['Allow', 'Deny'],
         defaultId: 0,
         cancelId: 1,
-        checkboxLabel: 'Remember this decision',
-        checkboxChecked: false
       });
 
       const granted = result.response === 0;
-      const remember = result.checkboxChecked;
 
       if (granted) {
-        logger.info(`Permission granted: ${permission} (remember: ${remember})`);
-        if (remember) {
-          // TODO: Store permission decision persistently
-          logger.info(`Would persist permission grant for: ${permission}`);
-        }
+        grantedPermissions.add(permission);
+        persistPermissions();
+        logger.info(`Permission granted and persisted: ${permission}`);
       } else {
-        logger.info(`Permission denied: ${permission} (remember: ${remember})`);
-        if (remember) {
-          // TODO: Store permission denial persistently
-          logger.info(`Would persist permission denial for: ${permission}`);
-        }
+        logger.info(`Permission denied: ${permission}`);
       }
 
       callback(granted);
     } catch (error) {
       logger.error('Error handling permission request:', error);
-      // Deny permission on error for security
       callback(false);
     }
   });
 
-  // Set permission check handler - deny all by default for security
-  session.defaultSession.setPermissionCheckHandler(() => {
-    // Permission checks are handled by the request handler above
-    // This ensures no permissions are granted without user consent
-    return false;
+  // Return true for previously-granted permissions so Chromium doesn't
+  // trigger a new request handler call for synchronous permission checks.
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+    return grantedPermissions.has(permission);
   });
 
   // Disable cache in development mode to ensure fresh frontend code
@@ -748,7 +784,7 @@ async function configureSessionPermissions(): Promise<void> {
     logger.info('Cache disabled in development mode');
   }
 
-  logger.info('Session permissions configured with user consent dialogs');
+  logger.info('Session permissions configured with persistent caching');
 }
 
 /**

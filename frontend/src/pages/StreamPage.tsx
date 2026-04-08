@@ -27,7 +27,13 @@ import { LogPanel } from "../components/LogPanel";
 import { useUnifiedWebRTC } from "../hooks/useUnifiedWebRTC";
 import { useTempoSync } from "../hooks/useTempoSync";
 import { MIDIProvider } from "../contexts/MIDIContext";
-import { useVideoSource, SAMPLE_VIDEOS } from "../hooks/useVideoSource";
+import {
+  useVideoSource,
+  SAMPLE_VIDEOS,
+  FPS,
+  MIN_FPS,
+  MAX_FPS,
+} from "../hooks/useVideoSource";
 import { useWebRTCStats } from "../hooks/useWebRTCStats";
 import { useControllerInput } from "../hooks/useControllerInput";
 import { usePipeline } from "../hooks/usePipeline";
@@ -744,13 +750,34 @@ export function StreamPage() {
   const nodeLocalStreamsRef = useRef(nodeLocalStreams);
   nodeLocalStreamsRef.current = nodeLocalStreams;
 
-  // Create a camera stream for a specific source node
+  // Shared camera stream ref so multiple source nodes (or repeated mode
+  // switches) reuse the same getUserMedia stream instead of prompting again.
+  const sharedCameraStreamRef = useRef<MediaStream | null>(null);
+
+  // Create (or reuse) a camera stream for a specific source node
   const createCameraStreamForNode = useCallback(async (nodeId: string) => {
     try {
+      // Reuse existing shared camera stream if it's still active
+      const existing = sharedCameraStreamRef.current;
+      if (
+        existing &&
+        existing.getVideoTracks().some(t => t.readyState === "live")
+      ) {
+        // Clone the stream so each node gets an independent MediaStream object
+        // while sharing the same underlying track (no new permission prompt).
+        setNodeLocalStreams(prev => ({ ...prev, [nodeId]: existing.clone() }));
+        return;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: {
+          width: { ideal: 512, min: 256, max: 512 },
+          height: { ideal: 512, min: 256, max: 512 },
+          frameRate: { ideal: FPS, min: MIN_FPS, max: MAX_FPS },
+        },
         audio: false,
       });
+      sharedCameraStreamRef.current = stream;
       setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
     } catch (e) {
       console.error(`Failed to get camera for node ${nodeId}:`, e);
