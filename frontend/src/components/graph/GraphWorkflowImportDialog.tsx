@@ -95,7 +95,7 @@ export function GraphWorkflowImportDialog({
   const confirmPluginInstall = useCallback(
     (installSpec: string) =>
       showConfirm(
-        "Install Plugin",
+        "Install Node",
         `This will install the package "${installSpec}" via pip. Only proceed if you trust the workflow source.`
       ),
     [showConfirm]
@@ -264,7 +264,7 @@ export function GraphWorkflowImportDialog({
                   <Download className="h-4 w-4 mr-2" />
                   {plugins.someInstalling
                     ? "Installing..."
-                    : `Install All Missing Plugins (${installablePlugins.filter(p => plugins.installs[p.name] !== "done").length})`}
+                    : `Install All Missing Nodes (${installablePlugins.filter(p => plugins.installs[p.name] !== "done").length})`}
                 </Button>
               )}
 

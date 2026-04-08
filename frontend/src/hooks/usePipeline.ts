@@ -45,7 +45,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         const errorMessage = statusResponse.error || "Unknown pipeline error";
         // Show toast if we haven't shown this error yet
         if (shownErrorRef.current !== errorMessage) {
-          toast.error("Pipeline Error", {
+          toast.error("Model Error", {
             description: errorMessage,
             duration: 8000,
           });
@@ -63,7 +63,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         err instanceof Error ? err.message : "Failed to get pipeline status";
       // Show toast for API errors
       if (shownErrorRef.current !== errorMessage) {
-        toast.error("Pipeline Error", {
+        toast.error("Model Error", {
           description: errorMessage,
           duration: 5000,
         });
@@ -131,7 +131,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
                 const errorMsg = currentStatus.error || "Pipeline load failed";
                 // Show toast for load completion errors
                 if (shownErrorRef.current !== errorMsg) {
-                  toast.error("Pipeline Error", {
+                  toast.error("Model Error", {
                     description: errorMsg,
                     duration: 8000,
                   });
@@ -166,7 +166,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
         console.error("Pipeline load error:", errorMessage);
         // Show toast for load errors
         if (shownErrorRef.current !== errorMessage) {
-          toast.error("Pipeline Error", {
+          toast.error("Model Error", {
             description: errorMessage,
             duration: 8000,
           });

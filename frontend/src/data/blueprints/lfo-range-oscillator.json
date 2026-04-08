@@ -1,6 +1,6 @@
 {
   "name": "LFO Range Oscillator",
-  "description": "A sine LFO smoothly oscillates a value between configurable min and max bounds — wire the output to any numeric pipeline parameter",
+  "description": "A sine LFO smoothly oscillates a value between configurable min and max bounds — wire the output to any numeric model parameter",
   "category": "Controls",
   "color": "#a78bfa",
   "thumbnail": null,

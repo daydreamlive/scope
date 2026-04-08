@@ -228,7 +228,7 @@ export function DaydreamAccountSection({
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          Use remote inference for running pipelines.
+          Use remote inference for running models.
           {!isSignedIn &&
             !(status.connected || status.connecting) &&
             " Log in required."}

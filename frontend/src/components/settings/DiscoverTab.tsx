@@ -103,7 +103,7 @@ export function DiscoverTab({
       setPlugins(data.plugins);
     } catch (err) {
       console.error("Failed to fetch discover plugins:", err);
-      setError(err instanceof Error ? err.message : "Failed to load plugins");
+      setError(err instanceof Error ? err.message : "Failed to load nodes");
     } finally {
       setIsLoading(false);
     }

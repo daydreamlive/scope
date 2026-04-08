@@ -367,7 +367,7 @@ export function DmxTab({ isActive }: DmxTabProps) {
           <code className="bg-muted px-1 py-0.5 rounded text-xs">
             {status?.port ?? localPort}
           </code>{" "}
-          to control pipeline parameters in real time. Map DMX channels to
+          to control model parameters in real time. Map DMX channels to
           numeric parameters below.
         </div>
       </div>

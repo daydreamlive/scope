@@ -422,7 +422,7 @@ export function WorkflowImportDialog({
           parsed.pipelines.length === 0
         ) {
           toast.error("Malformed workflow file", {
-            description: "Missing required fields: metadata or pipelines",
+            description: "Missing required fields: metadata or models",
           });
           return;
         }

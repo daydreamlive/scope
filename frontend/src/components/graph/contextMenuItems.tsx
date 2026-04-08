@@ -95,7 +95,7 @@ export function buildPaneMenuItems(deps: {
       keywords: ["input", "camera", "video"],
     },
     {
-      label: "Pipeline",
+      label: "Model",
       icon: <Workflow />,
       onClick: () => handleNodeTypeSelect("pipeline"),
       keywords: ["process", "effect", "filter"],
