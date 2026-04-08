@@ -1,7 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Node } from "@xyflow/react";
+import type { Edge, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
-import { extractParameterPorts } from "../../../../lib/graphUtils";
+import {
+  extractParameterPorts,
+  generateNodeId,
+} from "../../../../lib/graphUtils";
 import type {
   PipelineSchemaInfo,
   HardwareInfoResponse,
@@ -11,6 +14,7 @@ import type { InputMode } from "../../../../types";
 
 interface UsePipelineParamsArgs {
   setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>;
+  setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
   portsMap: Record<string, { inputs: string[]; outputs: string[] }>;
   pipelineSchemas: Record<string, PipelineSchemaInfo>;
   isStreamingRef: React.RefObject<boolean>;
@@ -21,6 +25,7 @@ interface UsePipelineParamsArgs {
 
 export function usePipelineParams({
   setNodes,
+  setEdges,
   portsMap,
   pipelineSchemas,
   isStreamingRef,
@@ -48,41 +53,50 @@ export function usePipelineParams({
       const schema = newPipelineId ? pipelineSchemas[newPipelineId] : null;
       const supportsPrompts = schema?.supports_prompts ?? false;
 
+      // Compute new node ID to match the pipeline, keeping it unique
+      const existingIds = new Set(
+        nodesRef.current.filter(n => n.id !== nodeId).map(n => n.id)
+      );
+      const newNodeId = newPipelineId
+        ? generateNodeId(newPipelineId, existingIds)
+        : nodeId;
+      const needsRename = newNodeId !== nodeId;
+
       // Pre-fill prompt default and recommended quantization
-      {
-        const paramOverrides: Record<string, unknown> = {};
+      const paramOverrides: Record<string, unknown> = {};
 
-        if (supportsPrompts && schema) {
-          const existing = nodeParamsRef.current[nodeId]?.__prompt;
-          if (!existing) {
-            const defaultMode = (schema.default_mode ?? "text") as InputMode;
-            paramOverrides.__prompt = getDefaultPromptForMode(defaultMode);
-          }
-        }
-
-        // Set recommended quantization based on VRAM (same logic as perform mode)
-        const vramThreshold =
-          schema?.recommended_quantization_vram_threshold ?? null;
-        if (
-          vramThreshold !== null &&
-          vramThreshold !== undefined &&
-          hardwareInfo?.vram_gb !== null &&
-          hardwareInfo?.vram_gb !== undefined
-        ) {
-          paramOverrides.quantization =
-            hardwareInfo.vram_gb > vramThreshold ? null : "fp8_e4m3fn";
-        } else {
-          // No recommendation from pipeline: reset quantization to null
-          paramOverrides.quantization = null;
-        }
-
-        if (Object.keys(paramOverrides).length > 0) {
-          setNodeParams(prev => ({
-            ...prev,
-            [nodeId]: { ...(prev[nodeId] || {}), ...paramOverrides },
-          }));
+      if (supportsPrompts && schema) {
+        const existing = nodeParamsRef.current[nodeId]?.__prompt;
+        if (!existing) {
+          const defaultMode = (schema.default_mode ?? "text") as InputMode;
+          paramOverrides.__prompt = getDefaultPromptForMode(defaultMode);
         }
       }
+
+      // Set recommended quantization based on VRAM (same logic as perform mode)
+      const vramThreshold =
+        schema?.recommended_quantization_vram_threshold ?? null;
+      if (
+        vramThreshold !== null &&
+        vramThreshold !== undefined &&
+        hardwareInfo?.vram_gb !== null &&
+        hardwareInfo?.vram_gb !== undefined
+      ) {
+        paramOverrides.quantization =
+          hardwareInfo.vram_gb > vramThreshold ? null : "fp8_e4m3fn";
+      } else {
+        // No recommendation from pipeline: reset quantization to null
+        paramOverrides.quantization = null;
+      }
+
+      // Migrate nodeParams from old key to new key, merging overrides
+      setNodeParams(prev => {
+        const { [nodeId]: oldParams, ...rest } = prev;
+        return {
+          ...rest,
+          [newNodeId]: { ...(oldParams || {}), ...paramOverrides },
+        };
+      });
 
       setNodes(nds =>
         nds.map(n => {
@@ -98,13 +112,14 @@ export function usePipelineParams({
           delete newStyle.height;
           return {
             ...n,
+            id: newNodeId,
             style: newStyle,
             height: undefined,
             measured: undefined,
             data: {
               ...n.data,
               pipelineId: newPipelineId,
-              label: newPipelineId || n.id,
+              label: newPipelineId || newNodeId,
               streamInputs: ports?.inputs ?? ["video"],
               streamOutputs: ports?.outputs ?? ["video"],
               parameterInputs,
@@ -116,8 +131,27 @@ export function usePipelineParams({
           };
         })
       );
+
+      // Update edges that reference the old node ID
+      if (needsRename) {
+        setEdges(eds =>
+          eds.map(e => {
+            const srcMatch = e.source === nodeId;
+            const tgtMatch = e.target === nodeId;
+            if (!srcMatch && !tgtMatch) return e;
+            const newSource = srcMatch ? newNodeId : e.source;
+            const newTarget = tgtMatch ? newNodeId : e.target;
+            return {
+              ...e,
+              id: e.id.replaceAll(nodeId, newNodeId),
+              source: newSource,
+              target: newTarget,
+            };
+          })
+        );
+      }
     },
-    [setNodes, portsMap, pipelineSchemas, hardwareInfo]
+    [setNodes, setEdges, portsMap, pipelineSchemas, hardwareInfo, nodesRef]
   );
 
   const handleNodeParameterChange = useCallback(
