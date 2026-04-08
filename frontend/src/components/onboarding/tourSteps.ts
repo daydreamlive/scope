@@ -24,28 +24,8 @@ export interface TourStepDef {
   linkText?: string;
 }
 
-/** Tour steps shown after simple-mode onboarding. */
-export const SIMPLE_TOUR_STEPS: TourStepDef[] = [
-  {
-    anchor: "play-button",
-    title: "Click Play to start generation",
-    description: "",
-    position: "bottom",
-    showSkip: false,
-  },
-  {
-    anchor: "workflows-button",
-    title: "Explore Workflows",
-    description:
-      "When you're ready, try the other starter workflows or browse community creations.",
-    position: "bottom",
-    showSkip: false,
-    showDone: true,
-  },
-];
-
-/** Tour steps shown after teaching-mode onboarding. */
-export const TEACHING_TOUR_STEPS: TourStepDef[] = [
+/** Shared 5-step tour used by both simple and teaching onboarding modes. */
+const TOUR_STEPS: TourStepDef[] = [
   {
     anchor: "graph-canvas",
     title: "This is your workflow",
@@ -86,3 +66,9 @@ export const TEACHING_TOUR_STEPS: TourStepDef[] = [
     showDone: true,
   },
 ];
+
+/** Tour steps shown after simple-mode onboarding. */
+export const SIMPLE_TOUR_STEPS: TourStepDef[] = TOUR_STEPS;
+
+/** Tour steps shown after teaching-mode onboarding. */
+export const TEACHING_TOUR_STEPS: TourStepDef[] = TOUR_STEPS;
