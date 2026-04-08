@@ -213,19 +213,24 @@ export function Header({
             variant="ghost"
             size="sm"
             onClick={handleCloudIconClick}
+            disabled={!isBackendHealthy}
             className={`hover:opacity-80 transition-opacity h-8 gap-1.5 px-2 ${
-              isConnected
-                ? "text-green-500 opacity-100"
-                : isConnecting
-                  ? "text-amber-400 opacity-100"
-                  : "text-muted-foreground opacity-80"
+              !isBackendHealthy
+                ? "text-muted-foreground opacity-40 cursor-not-allowed"
+                : isConnected
+                  ? "text-green-500 opacity-100"
+                  : isConnecting
+                    ? "text-amber-400 opacity-100"
+                    : "text-muted-foreground opacity-80"
             }`}
             title={
-              isConnected
-                ? "Cloud connected"
-                : isConnecting
-                  ? "Connecting to cloud..."
-                  : "Connect to cloud"
+              !isBackendHealthy
+                ? "Cloud unavailable — backend is offline"
+                : isConnected
+                  ? "Cloud connected"
+                  : isConnecting
+                    ? "Connecting to cloud..."
+                    : "Connect to cloud"
             }
           >
             {isConnected ? (
