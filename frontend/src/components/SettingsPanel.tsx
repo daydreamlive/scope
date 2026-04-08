@@ -555,7 +555,7 @@ export function SettingsPanel({
                       {plugin.length > 0 && (
                         <SelectGroup>
                           <SelectLabel className="text-xs text-muted-foreground font-bold">
-                            Node Models
+                            All Models
                           </SelectLabel>
                           {plugin.map(([id]) => (
                             <SelectItem key={id} value={id}>
