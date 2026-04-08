@@ -48,6 +48,13 @@ def get_input_source_classes() -> dict[str, type[InputSource]]:
     except Exception:
         pass
 
+    try:
+        from .web_app import WebAppInputSource
+
+        sources[WebAppInputSource.source_id] = WebAppInputSource
+    except Exception:
+        pass
+
     return sources
 
 

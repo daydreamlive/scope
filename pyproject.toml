@@ -78,6 +78,9 @@ midi = [
     "mido>=1.3.0",
     "python-rtmidi>=1.5.0",
 ]
+web = [
+    "playwright>=1.40.0",
+]
 
 [project.scripts]
 daydream-scope = "scope.server.app:main"

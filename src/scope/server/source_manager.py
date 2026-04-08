@@ -334,7 +334,7 @@ class SourceManager:
         for node in graph.nodes:
             if node.type != "source":
                 continue
-            if node.source_mode not in ("spout", "ndi", "syphon", "video_file"):
+            if node.source_mode not in ("spout", "ndi", "syphon", "video_file", "web_app"):
                 continue
             source_name = node.source_name or ""
             node_id = node.id
