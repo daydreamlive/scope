@@ -309,6 +309,7 @@ export function PipelineNode({
                       }
                       min={param.min}
                       max={param.max}
+                      step={param.step}
                       disabled={disabled}
                     />
                   ) : (
