@@ -3,7 +3,8 @@
  *
  * Detects when the Python backend crashes or becomes unresponsive:
  * - In Electron: listens to IPC server-status events for instant crash detection
- * - In all modes: polls /health every 10s, marks backend offline after 2 consecutive failures
+ * - In all modes: polls /health every 10s, marks backend offline after 4 consecutive failures
+ * - Skips failure counting until the first successful health check (startup grace period)
  *
  * Shows a persistent toast when backend goes offline and a recovery toast when it comes back.
  */
@@ -19,7 +20,7 @@ import {
 import { toast } from "sonner";
 
 const HEALTH_POLL_INTERVAL_MS = 10_000;
-const FAILURE_THRESHOLD = 2; // consecutive failures before marking offline
+const FAILURE_THRESHOLD = 4; // consecutive failures before marking offline
 const HEALTH_FETCH_TIMEOUT_MS = 5_000;
 
 interface BackendHealthContextValue {
@@ -43,9 +44,14 @@ export function BackendHealthProvider({ children }: BackendHealthProviderProps) 
   const offlineToastIdRef = useRef<string | number | null>(null);
   // Only show recovery toast if we've ever gone offline during this session
   const hasGoneOfflineRef = useRef(false);
+  // Don't count polling failures until the backend has responded at least once
+  const hasEverConnectedRef = useRef(false);
+  // Ref to the health check function so the toast retry button can trigger it
+  const checkHealthNowRef = useRef<(() => void) | null>(null);
 
   const markHealthy = () => {
     consecutiveFailuresRef.current = 0;
+    hasEverConnectedRef.current = true;
     if (!isHealthyRef.current) {
       isHealthyRef.current = true;
       setIsHealthy(true);
@@ -74,8 +80,12 @@ export function BackendHealthProvider({ children }: BackendHealthProviderProps) 
       console.error("[BackendHealth] Backend is unresponsive or has crashed");
       offlineToastIdRef.current = toast.error("Backend is not responding", {
         description:
-          "The Python backend has crashed or become unresponsive. Please restart the app.",
+          "If this persists, try restarting the app.",
         duration: Infinity,
+        action: {
+          label: "Retry now",
+          onClick: () => checkHealthNowRef.current?.(),
+        },
       });
     }
   }, [isHealthy]);
@@ -121,22 +131,31 @@ export function BackendHealthProvider({ children }: BackendHealthProviderProps) 
           markHealthy();
         } else {
           consecutiveFailuresRef.current++;
-          if (consecutiveFailuresRef.current >= FAILURE_THRESHOLD) {
+          if (
+            hasEverConnectedRef.current &&
+            consecutiveFailuresRef.current >= FAILURE_THRESHOLD
+          ) {
             markUnhealthy();
           }
         }
       } catch {
         consecutiveFailuresRef.current++;
-        if (consecutiveFailuresRef.current >= FAILURE_THRESHOLD) {
+        if (
+          hasEverConnectedRef.current &&
+          consecutiveFailuresRef.current >= FAILURE_THRESHOLD
+        ) {
           markUnhealthy();
         }
       }
     };
 
+    checkHealthNowRef.current = checkHealth;
     checkHealth();
     const interval = setInterval(checkHealth, HEALTH_POLL_INTERVAL_MS);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => {
+      clearInterval(interval);
+      checkHealthNowRef.current = null;
+    };
   }, []);
 
   return (
