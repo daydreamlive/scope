@@ -24,25 +24,37 @@ export function loadOverrides(): OverridesMap {
 
 /** Save a single shortcut override. */
 export function saveOverride(id: string, override: ShortcutOverride): void {
-  const overrides = loadOverrides();
-  overrides[id] = override;
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+  try {
+    const overrides = loadOverrides();
+    overrides[id] = override;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+  } catch {
+    // localStorage may be full or unavailable
+  }
 }
 
 /** Remove a single shortcut override, restoring its default. */
 export function resetOverride(id: string): void {
-  const overrides = loadOverrides();
-  delete overrides[id];
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+  try {
+    const overrides = loadOverrides();
+    delete overrides[id];
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
+  } catch {
+    // localStorage may be full or unavailable
+  }
 }
 
 /** Remove all overrides, restoring all defaults. */
 export function resetAllOverrides(): void {
-  localStorage.removeItem(STORAGE_KEY);
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    // localStorage may be unavailable
+  }
 }
 
 /** Build the human-readable keys string from an override's key binding. */
-function buildKeysString(override: ShortcutOverride): string {
+export function buildKeysString(override: ShortcutOverride): string {
   const mac = isMac();
   const parts: string[] = [];
 

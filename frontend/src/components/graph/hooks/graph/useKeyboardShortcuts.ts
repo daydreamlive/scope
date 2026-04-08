@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import type { Edge, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 import { generateNodeId } from "../../../../lib/graphUtils";
@@ -154,9 +154,6 @@ export function useKeyboardShortcuts({
     [doCopy, doPaste, setNodes, setEdges]
   );
 
-  // Get effective shortcuts (with user overrides)
-  const shortcuts = useMemo(() => getEffectiveShortcuts(), []);
-
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeElement = document.activeElement;
@@ -165,11 +162,23 @@ export function useKeyboardShortcuts({
         activeElement?.tagName === "TEXTAREA" ||
         activeElement?.tagName === "SELECT";
 
+      // Read effective shortcuts fresh each keypress so user overrides
+      // from the Settings dialog apply immediately without remounting.
+      const shortcuts = getEffectiveShortcuts();
+
       for (const shortcut of shortcuts) {
         if (shortcut.builtIn) continue;
         if (!matchesShortcut(e, shortcut)) continue;
         if (!shortcut.allowInInput && isInputElement) continue;
         if (shortcut.disabledWhileStreaming && isStreamingRef.current) continue;
+
+        // When Escape is pressed inside an input, blur the element
+        // instead of running the deselect handler.
+        if (shortcut.id === "deselect" && isInputElement) {
+          e.preventDefault();
+          (activeElement as HTMLElement)?.blur();
+          return;
+        }
 
         const handler = resolveHandler(shortcut.id);
         if (handler) {
@@ -182,5 +191,5 @@ export function useKeyboardShortcuts({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [shortcuts, resolveHandler]);
+  }, [resolveHandler]);
 }

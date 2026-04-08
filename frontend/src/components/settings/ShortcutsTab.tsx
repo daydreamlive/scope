@@ -1,12 +1,13 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import type { ShortcutDefinition } from "../../lib/shortcuts";
-import { SHORTCUTS, getShortcutsByCategory, isMac } from "../../lib/shortcuts";
+import { SHORTCUTS, getShortcutsByCategory } from "../../lib/shortcuts";
 import {
   getEffectiveShortcuts,
   saveOverride,
   resetOverride,
   resetAllOverrides,
   findConflict,
+  buildKeysString,
   type ShortcutOverride,
 } from "../../lib/shortcutOverrides";
 
@@ -27,18 +28,6 @@ function formatKeyEvent(e: KeyboardEvent): ShortcutOverride | null {
     shift: e.shiftKey || undefined,
     alt: e.altKey || undefined,
   };
-}
-
-function formatOverrideDisplay(override: ShortcutOverride): string {
-  const mac = isMac();
-  const parts: string[] = [];
-  if (override.metaOrCtrl) parts.push(mac ? "⌘" : "Ctrl +");
-  if (override.shift) parts.push(mac ? "⇧" : "Shift +");
-  if (override.alt) parts.push(mac ? "⌥" : "Alt +");
-  const keys = Array.isArray(override.key) ? override.key : [override.key];
-  const displayKey = keys[0].length === 1 ? keys[0].toUpperCase() : keys[0];
-  parts.push(displayKey);
-  return parts.join(" ");
 }
 
 export function ShortcutsTab() {
@@ -175,7 +164,7 @@ export function ShortcutsTab() {
                     {isRecording && recording.captured ? (
                       <div className="flex items-center gap-2">
                         <kbd className="inline-flex items-center gap-1 rounded border border-accent bg-accent/20 px-2 py-0.5 font-mono text-[11px] text-foreground">
-                          {formatOverrideDisplay(recording.captured)}
+                          {buildKeysString(recording.captured)}
                         </kbd>
                         {recording.conflict && (
                           <span className="text-[11px] text-destructive">
@@ -185,7 +174,8 @@ export function ShortcutsTab() {
                         )}
                         <button
                           onClick={handleConfirm}
-                          className="text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90"
+                          disabled={!!recording.conflict}
+                          className="text-xs px-2 py-0.5 rounded bg-primary text-primary-foreground hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                           Save
                         </button>

@@ -92,6 +92,7 @@ import {
   useKeyboardShortcuts,
   type KeyboardShortcutHandlers,
 } from "./hooks/graph/useKeyboardShortcuts";
+import { useGraphHistory } from "./hooks/graph/useGraphHistory";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
 import { useGraphNavigation } from "./hooks/subgraph/useGraphNavigation";
 import { useParentValueBridge } from "./hooks/value/useParentValueBridge";
@@ -348,6 +349,15 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       },
       resolveRootGraphRef,
       resetNavigationRef
+    );
+
+    const { undo, redo } = useGraphHistory(
+      nodes,
+      edges,
+      setNodes,
+      setEdges,
+      enrichDepsRef,
+      handleEdgeDelete
     );
 
     useImperativeHandle(
@@ -632,11 +642,11 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           }
           setShowAddNodeModal(true);
         },
+        undo,
+        redo,
         save: handleSave,
         export: () => setShowExportDialog(true),
         "toggle-stream": () =>
-          isStreaming ? onStopStream?.() : onStartStream?.(),
-        "toggle-stream-alt": () =>
           isStreaming ? onStopStream?.() : onStartStream?.(),
         "show-shortcuts": () => setShowShortcutsDialog(true),
         "select-all": () =>
@@ -681,6 +691,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         },
       }),
       [
+        undo,
+        redo,
         handleSave,
         isStreaming,
         onStartStream,
