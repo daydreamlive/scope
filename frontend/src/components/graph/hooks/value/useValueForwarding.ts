@@ -136,7 +136,10 @@ export function useValueForwarding(
   onNodeParamChangeRef: React.RefObject<
     ((nodeId: string, key: string, value: unknown) => void) | undefined
   >,
-  setNodes?: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>
+  setNodes?: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>,
+  onPromptForwardRef?: React.RefObject<
+    ((nodeId: string, text: string) => void) | undefined
+  >
 ) {
   const lastForwardTimeRef = useRef<Record<string, number>>({});
 
@@ -414,6 +417,13 @@ export function useValueForwarding(
               { text: String(entry.value), weight: 100 },
             ]);
           }
+          // Keep nodeParams.__prompt in sync so getGraphNodePrompts and
+          // stream-start initialisation use the connected value, not the
+          // stale default that was set when the pipeline was first selected.
+          const promptText = Array.isArray(entry.value)
+            ? (entry.value[0]?.text ?? "")
+            : String(entry.value);
+          onPromptForwardRef?.current?.(edge.target, promptText);
         } else {
           sendParam(resolvedBackendId, resolvedParamName, entry.value);
         }

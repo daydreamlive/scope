@@ -53,8 +53,11 @@ export function usePipelineParams({
         const paramOverrides: Record<string, unknown> = {};
 
         if (supportsPrompts && schema) {
-          const defaultMode = (schema.default_mode ?? "text") as InputMode;
-          paramOverrides.__prompt = getDefaultPromptForMode(defaultMode);
+          const existing = nodeParamsRef.current[nodeId]?.__prompt;
+          if (!existing) {
+            const defaultMode = (schema.default_mode ?? "text") as InputMode;
+            paramOverrides.__prompt = getDefaultPromptForMode(defaultMode);
+          }
         }
 
         // Set recommended quantization based on VRAM (same logic as perform mode)
