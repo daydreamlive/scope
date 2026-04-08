@@ -180,6 +180,7 @@ export function Header({
                   ? "Switch to Perform Mode"
                   : "Switch to Workflow Builder"
               }
+              data-tour="perform-mode-toggle"
             >
               {graphMode ? (
                 <>

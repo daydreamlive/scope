@@ -47,20 +47,42 @@ export const SIMPLE_TOUR_STEPS: TourStepDef[] = [
 /** Tour steps shown after teaching-mode onboarding. */
 export const TEACHING_TOUR_STEPS: TourStepDef[] = [
   {
-    anchor: "play-button",
-    title: "Follow the Note Cards",
+    anchor: "graph-canvas",
+    title: "This is your workflow",
     description:
-      "Before you click Play to start generation, please follow the instructions on the note cards below, starting from the left.",
-    position: "bottom",
+      "Each node does one thing — video flows left to right from Source to Output.",
+    position: "right",
     showSkip: false,
   },
   {
-    anchor: "workflows-button",
-    title: "Explore Workflows",
-    description:
-      "When you're ready, try the other starter workflows or browse community creations.",
+    anchor: "input-controls-panel",
+    title: "Change what goes in",
+    description: "Set your text prompt or connect a live video source here.",
+    position: "right",
+    showSkip: true,
+  },
+  {
+    anchor: "play-button",
+    title: "Click Play to start",
+    description: "Scope generates in real time — every frame is live.",
     position: "bottom",
-    showSkip: false,
+    showSkip: true,
+  },
+  {
+    anchor: "perform-mode-toggle",
+    title: "Switch to Perform Mode",
+    description:
+      "Hide the graph and focus on your live output — great for performance.",
+    position: "bottom",
+    showSkip: true,
+  },
+  {
+    anchor: "workflows-button",
+    title: "Explore more workflows",
+    description:
+      "When you're ready, try the other starters or import your own.",
+    position: "bottom",
+    showSkip: true,
     showDone: true,
   },
 ];
