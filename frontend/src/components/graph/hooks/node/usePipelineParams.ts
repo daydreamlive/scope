@@ -143,7 +143,7 @@ export function usePipelineParams({
             const newTarget = tgtMatch ? newNodeId : e.target;
             return {
               ...e,
-              id: e.id.replaceAll(nodeId, newNodeId),
+              id: `reactflow__edge-${newSource}${e.sourceHandle ?? ""}-${newTarget}${e.targetHandle ?? ""}`,
               source: newSource,
               target: newTarget,
             };
