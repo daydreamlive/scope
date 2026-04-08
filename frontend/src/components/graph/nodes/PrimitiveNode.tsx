@@ -122,30 +122,36 @@ export function PrimitiveNode({
               />
             </NodeParamRow>
           )}
-          <div className="flex items-center gap-1 mt-1">
-            {!autoSend && (
+          {valueType !== "boolean" && (
+            <div className="flex items-center gap-1 mt-1">
+              {!autoSend && (
+                <button
+                  type="button"
+                  onClick={handleSend}
+                  className={`${NODE_TOKENS.pill} flex-1 flex items-center justify-center gap-1 cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
+                  title="Send value (Enter)"
+                >
+                  <ArrowUp className="h-3 w-3 text-[#fafafa]" />
+                  <span className={NODE_TOKENS.primaryText}>Send</span>
+                </button>
+              )}
               <button
                 type="button"
-                onClick={handleSend}
-                className={`${NODE_TOKENS.pill} flex-1 flex items-center justify-center gap-1 cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
-                title="Send value (Enter)"
+                onClick={() => handleAutoSendToggle(!autoSend)}
+                className={`${NODE_TOKENS.pill} flex items-center gap-1 cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors ${autoSend ? "flex-1 justify-center" : ""}`}
+                title={
+                  autoSend
+                    ? "Auto-send is on (click to disable)"
+                    : "Auto-send is off (click to enable)"
+                }
               >
-                <ArrowUp className="h-3 w-3 text-[#fafafa]" />
-                <span className={NODE_TOKENS.primaryText}>Send</span>
+                <span
+                  className={`inline-block w-1.5 h-1.5 rounded-full ${autoSend ? "bg-emerald-400" : "bg-[#555]"}`}
+                />
+                <span className={NODE_TOKENS.primaryText}>Auto-send</span>
               </button>
-            )}
-            <button
-              type="button"
-              onClick={() => handleAutoSendToggle(!autoSend)}
-              className={`${NODE_TOKENS.pill} flex items-center gap-1 cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors ${autoSend ? "flex-1 justify-center" : ""}`}
-              title={autoSend ? "Auto-send is on (click to disable)" : "Auto-send is off (click to enable)"}
-            >
-              <span
-                className={`inline-block w-1.5 h-1.5 rounded-full ${autoSend ? "bg-emerald-400" : "bg-[#555]"}`}
-              />
-              <span className={NODE_TOKENS.primaryText}>Auto-send</span>
-            </button>
-          </div>
+            </div>
+          )}
         </NodeBody>
       )}
       <Handle

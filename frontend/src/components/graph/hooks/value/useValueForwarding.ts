@@ -151,11 +151,21 @@ export function useValueForwarding(
   // that re-fires this effect with identical producer values.
   const lastSentRef = useRef<Map<string, unknown>>(new Map());
 
-  // Debounce prompt sends: wait 1s of no changes before sending to backend.
-  // Key = "backendId\0prompts", value = timeout handle.
+  // Debounce prompt sends from primitive nodes so intermediate keystrokes
+  // don't spam the pipeline.  Key = "backendId\0prompts", value = timeout handle.
+  const PROMPT_DEBOUNCE_MS = 1000;
   const promptDebounceRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(
     new Map()
   );
+
+  // Clean up any pending debounce timers on unmount.
+  useEffect(() => {
+    const ref = promptDebounceRef.current;
+    return () => {
+      ref.forEach(t => clearTimeout(t));
+      ref.clear();
+    };
+  }, []);
 
   // Detect streaming session start (false→true) and clear dedup state so the
   // new backend session receives all parameter values, even if they haven't
@@ -426,35 +436,49 @@ export function useValueForwarding(
             : String(entry.value);
           onPromptForwardRef?.current?.(edge.target, promptText);
 
-          // Debounce the actual backend send by 1s so intermediate
-          // keystrokes don't spam the pipeline.
-          const debounceKey = `${resolvedBackendId}\0prompts`;
-          const existingTimer = promptDebounceRef.current.get(debounceKey);
-          if (existingTimer) clearTimeout(existingTimer);
-
           const capturedValue = entry.value;
           const capturedBackendId = resolvedBackendId;
           const capturedSource = nodes.find(n => n.id === edge.source);
-          promptDebounceRef.current.set(
-            debounceKey,
-            setTimeout(() => {
-              promptDebounceRef.current.delete(debounceKey);
-              if (Array.isArray(capturedValue)) {
-                sendParam(capturedBackendId, "prompts", capturedValue);
-                if (capturedSource?.data.nodeType === "prompt_blend") {
-                  sendParam(
-                    capturedBackendId,
-                    "prompt_interpolation_method",
-                    capturedSource.data.promptBlendMethod ?? "linear"
-                  );
-                }
-              } else {
-                sendParam(capturedBackendId, "prompts", [
-                  { text: String(capturedValue), weight: 100 },
-                ]);
+
+          const sendPrompt = () => {
+            if (Array.isArray(capturedValue)) {
+              sendParam(capturedBackendId, "prompts", capturedValue);
+              if (capturedSource?.data.nodeType === "prompt_blend") {
+                sendParam(
+                  capturedBackendId,
+                  "prompt_interpolation_method",
+                  capturedSource.data.promptBlendMethod ?? "linear"
+                );
               }
-            }, 1000)
-          );
+            } else {
+              sendParam(capturedBackendId, "prompts", [
+                { text: String(capturedValue), weight: 100 },
+              ]);
+            }
+          };
+
+          // Only debounce prompts coming from auto-send primitives so
+          // intermediate keystrokes don't spam the pipeline.  Manual
+          // sends (committedValue) and non-primitive sources fire
+          // immediately.
+          const isPrimitiveAutoSend =
+            node.data.nodeType === "primitive" &&
+            node.data.primitiveAutoSend !== false;
+
+          if (isPrimitiveAutoSend) {
+            const debounceKey = `${resolvedBackendId}\0prompts`;
+            const existingTimer = promptDebounceRef.current.get(debounceKey);
+            if (existingTimer) clearTimeout(existingTimer);
+            promptDebounceRef.current.set(
+              debounceKey,
+              setTimeout(() => {
+                promptDebounceRef.current.delete(debounceKey);
+                sendPrompt();
+              }, PROMPT_DEBOUNCE_MS)
+            );
+          } else {
+            sendPrompt();
+          }
         } else {
           sendParam(resolvedBackendId, resolvedParamName, entry.value);
         }
