@@ -1382,6 +1382,11 @@ export function StreamPage() {
       sendParameterUpdate({
         vace_ref_images: imagePaths,
       });
+    } else if (currentPipeline?.supportsI2V) {
+      // LTX i2v pipeline - use i2v_image (single image)
+      sendParameterUpdate({
+        i2v_image: imagePaths[0] ?? null,
+      });
     } else if (currentPipeline?.supportsImages) {
       // Non-VACE pipeline with images support - use images
       sendParameterUpdate({
@@ -2806,6 +2811,11 @@ export function StreamPage() {
         }
         initialParameters.vace_enabled = vaceEnabled;
       } else if (
+        currentPipeline?.supportsI2V &&
+        settings.refImages?.length
+      ) {
+        initialParameters.i2v_image = settings.refImages[0];
+      } else if (
         currentPipeline?.supportsImages &&
         settings.refImages?.length
       ) {
@@ -3336,6 +3346,7 @@ export function StreamPage() {
                 supportsImages={
                   pipelines?.[settings.pipelineId]?.supportsImages
                 }
+                supportsI2V={pipelines?.[settings.pipelineId]?.supportsI2V}
                 firstFrameImage={settings.firstFrameImage}
                 onFirstFrameImageChange={handleFirstFrameImageChange}
                 lastFrameImage={settings.lastFrameImage}

@@ -95,6 +95,8 @@ interface InputAndControlsPanelProps {
   isDownloading?: boolean;
   // Images input support - presence of images field in pipeline schema
   supportsImages?: boolean;
+  // i2v image input support - presence of i2v_image field in pipeline schema (LTX)
+  supportsI2V?: boolean;
   // FFLF (First-Frame-Last-Frame) extension mode
   firstFrameImage?: string;
   onFirstFrameImageChange?: (imagePath: string | undefined) => void;
@@ -165,6 +167,7 @@ export function InputAndControlsPanel({
   onSendHints,
   isDownloading = false,
   supportsImages = false,
+  supportsI2V = false,
   firstFrameImage,
   onFirstFrameImageChange,
   lastFrameImage,
@@ -654,8 +657,8 @@ export function InputAndControlsPanel({
           </div>
         )}
 
-        {/* Reference Images - show when VACE enabled OR when pipeline supports images without VACE */}
-        {(vaceEnabled || (supportsImages && !pipeline?.supportsVACE)) && (
+        {/* Reference Images - show when VACE enabled OR when pipeline supports images without VACE OR when pipeline supports i2v */}
+        {(vaceEnabled || (supportsImages && !pipeline?.supportsVACE) || supportsI2V) && (
           <div>
             <ImageManager
               images={refImages}
@@ -666,12 +669,16 @@ export function InputAndControlsPanel({
               label={
                 vaceEnabled && pipeline?.supportsVACE
                   ? "Reference Images"
-                  : "Images"
+                  : supportsI2V
+                    ? "Reference Image"
+                    : "Images"
               }
               tooltip={
                 vaceEnabled && pipeline?.supportsVACE
                   ? "Select reference images for VACE conditioning. Images will guide the video generation style and content."
-                  : "Select images to send to the pipeline for conditioning."
+                  : supportsI2V
+                    ? "Select a reference image for image-to-video generation."
+                    : "Select images to send to the pipeline for conditioning."
               }
             />
             {onSendHints && refImages && refImages.length > 0 && (

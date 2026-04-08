@@ -26,6 +26,10 @@ export function usePipelines() {
         const supportsImages =
           schema.config_schema?.properties?.images !== undefined;
 
+        // Check if pipeline supports i2v image input (has i2v_image field in schema)
+        const supportsI2V =
+          schema.config_schema?.properties?.i2v_image !== undefined;
+
         transformed[id] = {
           name: schema.name,
           about: schema.description,
@@ -55,6 +59,7 @@ export function usePipelines() {
           pluginName: schema.plugin_name ?? undefined,
           supportsControllerInput,
           supportsImages,
+          supportsI2V,
           configSchema: schema.config_schema,
         };
       }

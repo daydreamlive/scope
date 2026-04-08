@@ -163,6 +163,8 @@ export interface PipelineInfo {
   supportsControllerInput?: boolean;
   // Images input support - presence of images field in pipeline schema
   supportsImages?: boolean;
+  // i2v image input support - presence of i2v_image field in pipeline schema (LTX)
+  supportsI2V?: boolean;
   // Raw config schema for dynamic settings UI
   configSchema?: import("../lib/api").PipelineConfigSchema;
 }
