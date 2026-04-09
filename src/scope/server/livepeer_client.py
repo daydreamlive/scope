@@ -373,12 +373,14 @@ class LivepeerClient:
 
         input_urls_by_track: dict[int, str] = {}
         output_urls_by_track: dict[int, str] = {}
+        audio_output_url: str | None = None
         for channel in channels:
             if not isinstance(channel, dict):
                 continue
             url = channel.get("url")
             direction = channel.get("direction")
             role = channel.get("role")
+            media_kind = channel.get("output_media_kind")
             if not isinstance(url, str) or not isinstance(direction, str):
                 continue
             if direction == "in":
@@ -390,6 +392,9 @@ class LivepeerClient:
                 )
                 input_urls_by_track[track_index] = url
             elif direction == "out":
+                if role == "output_audio" or media_kind == "audio":
+                    audio_output_url = url
+                    continue
                 if role not in (None, "output"):
                     continue
                 idx_val = channel.get("output_track_index")
@@ -398,7 +403,11 @@ class LivepeerClient:
                 )
                 output_urls_by_track[track_index] = url
 
-        if not input_urls_by_track and not output_urls_by_track:
+        if (
+            not input_urls_by_track
+            and not output_urls_by_track
+            and audio_output_url is None
+        ):
             raise RuntimeError("stream_started response missing usable channels")
 
         self._media_publishers = [None] * num_input_tracks
@@ -429,12 +438,21 @@ class LivepeerClient:
                 self._receive_loop(media_output, output_track_index=output_idx)
             )
             self._media_subscriber_tasks.append(subscriber)
+        if audio_output_url is not None:
+            media_output = MediaOutput(audio_output_url, start_seq=-1)
+            audio_output_index = len(self._media_outputs)
+            self._media_outputs.append(media_output)
+            subscriber = asyncio.create_task(
+                self._receive_loop(media_output, output_track_index=audio_output_index)
+            )
+            self._media_subscriber_tasks.append(subscriber)
 
         self._media_connected = any(self._media_publishers) or any(self._media_outputs)
         logger.info(
-            "Media channels started (inputs=%s outputs=%s)",
+            "Media channels started (inputs=%s outputs=%s audio=%s)",
             sum(1 for p in self._media_publishers if p is not None),
             sum(1 for o in self._media_outputs if o is not None),
+            audio_output_url is not None,
         )
 
     async def stop_media(self, current_task: asyncio.Task | None = None) -> None:

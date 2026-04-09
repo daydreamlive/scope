@@ -27,12 +27,13 @@ from typing import Any
 import click
 import httpx
 import uvicorn
-from av import VideoFrame
+from av import AudioFrame, VideoFrame
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from livepeer_gateway.channel_reader import JSONLReader
 from livepeer_gateway.channel_writer import JSONLWriter
 from livepeer_gateway.media_output import MediaOutput
 from livepeer_gateway.media_publish import (
+    AudioOutputConfig,
     MediaPublish,
     MediaPublishConfig,
     VideoOutputConfig,
@@ -182,8 +183,6 @@ def _parse_browser_graph_routes(
                     sink_ids.append(node_id)
             elif node_type == "record":
                 record_ids.append(node_id)
-    if not source_ids:
-        source_ids = [None]
     return source_ids, sink_ids, record_ids
 
 
@@ -203,10 +202,29 @@ def _resolve_output_route_ids(
     return None, None
 
 
+def _resolve_produces_audio(
+    params: dict[str, Any], status_info: dict[str, Any]
+) -> bool:
+    """Resolve audio capability from explicit params first, then pipeline status."""
+    if "produces_audio" in params:
+        return bool(params.get("produces_audio", False))
+    return bool(status_info.get("produces_audio", False))
+
+
+def _resolve_produces_video(
+    params: dict[str, Any], status_info: dict[str, Any]
+) -> bool:
+    """Resolve video capability from explicit params first, then pipeline status."""
+    if "produces_video" in params:
+        return bool(params.get("produces_video", True))
+    return bool(status_info.get("produces_video", True))
+
+
 async def _request_stream_channels(
     session: LivepeerSession,
     *,
     direction: str,
+    mime_type: str = "video/MP2T",
 ) -> list[dict[str, Any]]:
     """Request media channels from orchestrator over websocket."""
     ws_request_id = str(uuid.uuid4())
@@ -217,7 +235,7 @@ async def _request_stream_channels(
         {
             "type": "create_channels",
             "request_id": ws_request_id,
-            "mime_type": "video/MP2T",
+            "mime_type": mime_type,
             "direction": direction,
         }
     )
@@ -487,6 +505,88 @@ async def _media_output_loop(
             session.media_publishes[output_track_index] = None
 
 
+async def _media_audio_output_loop(
+    session: LivepeerSession,
+    *,
+    publish_url: str,
+    publish_slot_index: int,
+) -> None:
+    """Read processed audio chunks from FrameProcessor and publish over trickle."""
+    frame_processor = session.frame_processor
+    stop_event = session.media_stop_event
+    if frame_processor is None:
+        logger.error("Media audio output loop started without complete session state")
+        return
+
+    # Audio uses a larger queue than video to absorb jitter from async resampling.
+    publisher = MediaPublish(
+        publish_url,
+        config=MediaPublishConfig(tracks=[AudioOutputConfig()]),
+    )
+    if 0 <= publish_slot_index < len(session.media_publishes):
+        session.media_publishes[publish_slot_index] = publisher
+
+    import numpy as np
+
+    next_audio_pts = 0
+    pts_sample_rate: int | None = None
+
+    try:
+        while not stop_event.is_set():
+            audio_tensor, sample_rate = frame_processor.get_audio()
+            if audio_tensor is None:
+                await asyncio.sleep(0.01)
+                continue
+            if sample_rate is None or sample_rate <= 0:
+                continue
+
+            audio_np = audio_tensor.numpy()
+            if audio_np.ndim == 1:
+                audio_np = audio_np.reshape(1, -1)
+            if audio_np.shape[0] > 2:
+                audio_np = audio_np[:2]
+            audio_np = np.asarray(audio_np, dtype=np.float32)
+
+            sample_rate_int = int(sample_rate)
+            layout = "mono" if audio_np.shape[0] == 1 else "stereo"
+            frame = AudioFrame.from_ndarray(audio_np, format="fltp", layout=layout)
+            frame.sample_rate = sample_rate_int
+            frame_samples = int(getattr(frame, "samples", 0) or 0)
+            if frame_samples <= 0:
+                continue
+            # Stamp explicit monotonic PTS in sample-time so mux timing does
+            # not fall back to wall-clock heuristics.
+            if pts_sample_rate is None:
+                pts_sample_rate = sample_rate_int
+            elif sample_rate_int != pts_sample_rate:
+                # `next_audio_pts` is the accumulated sample-count timeline in
+                # `pts_sample_rate` units (the previous frame rate basis).
+                # Convert it into `sample_rate_int` units (the new frame rate basis)
+                # so PTS stays continuous when sample rate changes mid-stream.
+                next_audio_pts = int(
+                    round(next_audio_pts * sample_rate_int / pts_sample_rate)
+                )
+                pts_sample_rate = sample_rate_int
+            frame.pts = next_audio_pts
+            frame.time_base = fractions.Fraction(1, sample_rate_int)
+            next_audio_pts += frame_samples
+            await publisher.write_frame(frame)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.error("Media audio output loop failed: %s", exc)
+    finally:
+        try:
+            await publisher.close()
+        except Exception as exc:
+            logger.warning("Media audio publisher close failed: %s", exc)
+        if (
+            0 <= publish_slot_index < len(session.media_publishes)
+            and session.media_publishes[publish_slot_index] is publisher
+        ):
+            session.media_publishes[publish_slot_index] = None
+
+
 async def _media_stats_loop(session: LivepeerSession) -> None:
     """Periodically log MediaPublish / MediaOutput statistics."""
     try:
@@ -751,14 +851,22 @@ async def _handle_control_message(
                 "error": "No pipeline loaded. Load a pipeline before start_stream.",
             }
 
+        produces_video = _resolve_produces_video(params, status_info)
+        produces_audio = _resolve_produces_audio(params, status_info)
         input_mode = params.get("input_mode")
         source_node_ids, sink_node_ids, record_node_ids = _parse_browser_graph_routes(
             params
         )
 
         output_sink_node_ids: list[str | None]
-        if sink_node_ids:
+        if not produces_video:
+            output_sink_node_ids = []
+            record_node_ids = []
+        elif sink_node_ids:
             output_sink_node_ids = [sink_node_ids[0], *sink_node_ids[1:]]
+        elif produces_audio:
+            # Audio-only pipelines should not synthesize a placeholder video output.
+            output_sink_node_ids = []
         else:
             output_sink_node_ids = [None]
         output_record_node_ids = [None] * len(output_sink_node_ids) + list(
@@ -770,6 +878,7 @@ async def _handle_control_message(
         output_publish_urls: list[str | None] = [None] * (
             len(output_sink_node_ids) + len(record_node_ids)
         )
+        audio_publish_url: str | None = None
 
         try:
             if input_mode != "text":
@@ -812,6 +921,25 @@ async def _handle_control_message(
                 if outbound_url is None:
                     raise RuntimeError("response did not include output track URL")
                 output_publish_urls[output_idx] = outbound_url
+            if produces_audio:
+                channels = await _request_stream_channels(
+                    session,
+                    direction="out",
+                    mime_type="audio/MP2T",
+                )
+                for channel in channels:
+                    ch = {
+                        **channel,
+                        "role": "output_audio",
+                        "output_media_kind": "audio",
+                    }
+                    active_channels.append(ch)
+                    if channel["direction"] == "out":
+                        audio_publish_url = channel["url"]
+                if audio_publish_url is None:
+                    raise RuntimeError(
+                        "response did not include audio output track URL"
+                    )
         except TimeoutError:
             return {
                 "type": "error",
@@ -823,7 +951,12 @@ async def _handle_control_message(
 
         session.frame_processor = FrameProcessor(
             pipeline_manager=pipeline_manager,
-            initial_parameters={**params, "pipeline_ids": pipeline_ids},
+            initial_parameters={
+                **params,
+                "pipeline_ids": pipeline_ids,
+                "produces_video": produces_video,
+                "produces_audio": produces_audio,
+            },
         )
         session.frame_processor.start()
         session.media_stop_event.clear()
@@ -873,12 +1006,25 @@ async def _handle_control_message(
                     )
                 )
             )
+        if audio_publish_url is not None:
+            audio_publish_slot = len(session.media_publishes)
+            session.media_publishes.append(None)
+            session.media_output_tasks.append(
+                asyncio.create_task(
+                    _media_audio_output_loop(
+                        session,
+                        publish_url=audio_publish_url,
+                        publish_slot_index=audio_publish_slot,
+                    )
+                )
+            )
         session.media_stats_task = asyncio.create_task(_media_stats_loop(session))
         logger.info(
-            "Started stream with pipeline_ids=%s inputs=%s outputs=%s",
+            "Started stream with pipeline_ids=%s inputs=%s outputs=%s audio=%s",
             pipeline_ids,
             len(input_subscribe_urls),
             len(output_publish_urls),
+            produces_audio,
         )
         return {
             "type": "stream_started",
