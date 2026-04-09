@@ -1,6 +1,6 @@
 export const NODE_TOKENS = {
-  card: "bg-[#242424] border border-[rgba(255,255,255,0.06)] rounded-lg shadow-[0_2px_8px_rgba(0,0,0,0.3)] min-w-[240px] relative w-full h-full flex flex-col",
-  cardSelected: "ring-2 ring-blue-400/80",
+  card: "bg-[#242424] border-2 border-[rgba(255,255,255,0.06)] rounded-lg shadow-[0_2px_8px_rgba(0,0,0,0.3)] min-w-[240px] relative w-full h-full flex flex-col",
+  cardSelected: "[outline:0.5px_solid_white] [outline-offset:3px]",
   header:
     "bg-[#1e1e1e] border-b border-[rgba(255,255,255,0.04)] flex items-center gap-2 px-2.5 py-1 h-[30px] rounded-t-lg",
   body: "py-1 px-2.5",

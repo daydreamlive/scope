@@ -58,9 +58,5 @@
     #000 3px,
     transparent 3.5px
   );
-  mask-image: radial-gradient(
-    circle at center,
-    #000 3px,
-    transparent 3.5px
-  );
+  mask-image: radial-gradient(circle at center, #000 3px, transparent 3.5px);
 }
