@@ -56,6 +56,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const onCycleSampleVideo = data.onCycleSampleVideo as
     | (() => void)
     | undefined;
+  const onInitSampleVideo = data.onInitSampleVideo as (() => void) | undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [ndiSources, setNdiSources] = useState<DiscoveredSource[]>([]);
@@ -68,6 +69,17 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
       videoRef.current.srcObject = localStream;
     }
   }, [localStream]);
+
+  // Auto-load the first sample video (test.mp4) when in file mode without a
+  // stream. Without this, freshly added source nodes — or nodes loaded after
+  // the global useVideoSource fallback was cleared (e.g. switching to
+  // Spout/NDI/Syphon globally) — would show "No video loaded" until the user
+  // manually clicked the cycle button. The init handler is idempotent.
+  useEffect(() => {
+    if (sourceMode === "video" && !localStream && onInitSampleVideo) {
+      onInitSampleVideo();
+    }
+  }, [sourceMode, localStream, onInitSampleVideo]);
 
   // Discover NDI sources
   useEffect(() => {

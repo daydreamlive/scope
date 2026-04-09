@@ -71,6 +71,7 @@ export interface GraphEditorCallbacks {
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
   onCycleSampleVideo?: (nodeId?: string) => void;
+  onInitSampleVideo?: (nodeId?: string) => void;
   onOutputSinkChange?: (
     sinkType: string,
     config: { enabled: boolean; name: string }
@@ -226,6 +227,9 @@ export function useGraphState(
   const onCycleSampleVideoRef = useRef(callbacks.onCycleSampleVideo);
   onCycleSampleVideoRef.current = callbacks.onCycleSampleVideo;
 
+  const onInitSampleVideoRef = useRef(callbacks.onInitSampleVideo);
+  onInitSampleVideoRef.current = callbacks.onInitSampleVideo;
+
   const onOutputSinkChangeRef = useRef(callbacks.onOutputSinkChange);
   onOutputSinkChangeRef.current = callbacks.onOutputSinkChange;
 
@@ -288,6 +292,7 @@ export function useGraphState(
     onNdiSourceChangeRef,
     onSyphonSourceChangeRef,
     onCycleSampleVideoRef,
+    onInitSampleVideoRef,
     spoutAvailable: availability.spoutAvailable,
     ndiAvailable: availability.ndiAvailable,
     syphonAvailable: availability.syphonAvailable,
