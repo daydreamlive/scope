@@ -931,13 +931,26 @@ class WebRTCManager:
                         # through FrameProcessor.put() → send_frame(generic
                         # track 0), colliding with hardware-source frames on
                         # the same track.
-                        cloud_track_idx = idx
+                        #
+                        # Pass the source NODE ID (not the cloud track index)
+                        # to CloudTrack. The cloud track index is resolved
+                        # later inside CloudTrack._start, after the cloud
+                        # relay's webrtc_client has been (re)connected with
+                        # this graph and `source_node_to_track_index` is
+                        # populated. Resolving the index here would either
+                        # use a stale mapping from a prior session or fall
+                        # back to the browser's receive order — both of
+                        # which mis-route Camera frames into Syphon/NDI
+                        # source pipelines for mixed-source graphs.
                         if idx < len(webrtc_source_node_ids):
                             node_id = webrtc_source_node_ids[idx]
-                            mapped = cloud_manager.get_source_track_index(node_id)
-                            if mapped is not None:
-                                cloud_track_idx = mapped
-                        cloud_track.add_extra_source_track(cloud_track_idx, track)
+                            cloud_track.add_extra_source_track(node_id, track)
+                        else:
+                            logger.warning(
+                                f"Browser sent video track index {idx} but "
+                                f"only {len(webrtc_source_node_ids)} WebRTC "
+                                "source node(s) in graph; ignoring extra track"
+                            )
                     else:
                         # No graph or non-graph perform mode — use the generic
                         # CloudTrack input path (single source, no routing).
