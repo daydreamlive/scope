@@ -41,9 +41,11 @@ export function MediaPicker({
           listAssets("video"),
           listAssets("audio"),
         ]);
-        const merged = [...imgRes.assets, ...vidRes.assets, ...audRes.assets].sort(
-          (a, b) => b.created_at - a.created_at
-        );
+        const merged = [
+          ...imgRes.assets,
+          ...vidRes.assets,
+          ...audRes.assets,
+        ].sort((a, b) => b.created_at - a.created_at);
         setAssets(merged);
       } else {
         const response = await listAssets(accept);

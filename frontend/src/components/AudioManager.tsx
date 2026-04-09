@@ -17,7 +17,9 @@ export function AudioManager({
 }: AudioManagerProps) {
   const [isPickerOpen, setIsPickerOpen] = useState(false);
 
-  const fileName = audioPath ? audioPath.split(/[/\\]/).pop() ?? audioPath : null;
+  const fileName = audioPath
+    ? (audioPath.split(/[/\\]/).pop() ?? audioPath)
+    : null;
 
   return (
     <div>

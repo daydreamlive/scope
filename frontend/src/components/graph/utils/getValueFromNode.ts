@@ -249,10 +249,7 @@ export function getAnyValueFromNode(
     if (!sourceHandleId) return node.data.imagePath || null;
     const parsed = parseHandleId(sourceHandleId);
     if (!parsed) return null;
-    if (
-      parsed.name === "value" ||
-      parsed.name === "video_value"
-    )
+    if (parsed.name === "value" || parsed.name === "video_value")
       return node.data.imagePath || null;
     return null;
   }
