@@ -435,7 +435,11 @@ class LivepeerClient:
             media_output = MediaOutput(output_url, start_seq=-1)
             self._media_outputs[output_idx] = media_output
             subscriber = asyncio.create_task(
-                self._receive_loop(media_output, output_track_index=output_idx)
+                self._receive_loop(
+                    media_output,
+                    output_track_index=output_idx,
+                    media_kind="video",
+                )
             )
             self._media_subscriber_tasks.append(subscriber)
         if audio_output_url is not None:
@@ -443,7 +447,11 @@ class LivepeerClient:
             audio_output_index = len(self._media_outputs)
             self._media_outputs.append(media_output)
             subscriber = asyncio.create_task(
-                self._receive_loop(media_output, output_track_index=audio_output_index)
+                self._receive_loop(
+                    media_output,
+                    output_track_index=audio_output_index,
+                    media_kind="audio",
+                )
             )
             self._media_subscriber_tasks.append(subscriber)
 
@@ -491,7 +499,12 @@ class LivepeerClient:
 
         logger.info("Media channels stopped")
 
-    async def _receive_loop(self, output: MediaOutput, output_track_index: int) -> None:
+    async def _receive_loop(
+        self,
+        output: MediaOutput,
+        output_track_index: int,
+        media_kind: str,
+    ) -> None:
         """Consume output frames from Livepeer and notify callbacks."""
         prev_video_ts: float | None = None
         prev_dispatch_time: float | None = None
@@ -538,7 +551,9 @@ class LivepeerClient:
         except asyncio.CancelledError:
             pass
         except Exception as e:
-            unexpected_reason = f"Livepeer output loop failed: {e}"
+            unexpected_reason = (
+                f"Livepeer {media_kind} output loop {output_track_index} failed: {e}"
+            )
             logger.error(f"Output loop failed: {e}")
         finally:
             try:
@@ -553,10 +568,17 @@ class LivepeerClient:
                 self._media_outputs[output_track_index] = None
             if self._media_connected and not self._shutdown_started:
                 if unexpected_reason is None:
-                    unexpected_reason = "Livepeer output loop stopped unexpectedly"
+                    unexpected_reason = (
+                        "Livepeer "
+                        f"{media_kind} output loop {output_track_index} stopped unexpectedly"
+                    )
                 logger.warning("%s; stopping media only", unexpected_reason)
                 await self.stop_media(current_task=asyncio.current_task())
-            logger.info("Output loop stopped")
+            logger.info(
+                "Output loop stopped (track=%s kind=%s)",
+                output_track_index,
+                media_kind,
+            )
 
     async def _events_loop(self) -> None:
         """Consume control/events channel and resolve pending API requests."""
