@@ -41,6 +41,9 @@ export interface EnrichNodesDeps {
   onCycleSampleVideoRef: React.RefObject<
     ((nodeId?: string) => void) | undefined
   >;
+  onInitSampleVideoRef: React.RefObject<
+    ((nodeId?: string) => void) | undefined
+  >;
   spoutAvailable: boolean;
   ndiAvailable: boolean;
   syphonAvailable: boolean;
@@ -175,6 +178,7 @@ export function enrichNodes(
           onSyphonSourceChange: (identifier: string) =>
             deps.onSyphonSourceChangeRef.current?.(identifier),
           onCycleSampleVideo: () => deps.onCycleSampleVideoRef.current?.(n.id),
+          onInitSampleVideo: () => deps.onInitSampleVideoRef.current?.(n.id),
           isStreaming: deps.isStreaming,
         },
       };

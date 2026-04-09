@@ -180,6 +180,7 @@ interface GraphEditorProps {
   sinkStats?: Record<string, { fps: number; bitrate: number }>;
   onVideoFileUpload?: (file: File, nodeId?: string) => Promise<boolean>;
   onCycleSampleVideo?: (nodeId?: string) => void;
+  onInitSampleVideo?: (nodeId?: string) => void;
   isPlaying?: boolean;
   onStartStream?: () => void;
   onStopStream?: () => void;
@@ -231,6 +232,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       sinkStats,
       onVideoFileUpload,
       onCycleSampleVideo,
+      onInitSampleVideo,
       isPlaying = true,
       onStartStream,
       onStopStream,
@@ -313,6 +315,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         onGraphClear,
         onVideoFileUpload,
         onCycleSampleVideo,
+        onInitSampleVideo,
         onSourceModeChange,
         onSpoutSourceChange,
         onNdiSourceChange,

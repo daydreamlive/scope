@@ -198,6 +198,8 @@ export interface FlowNodeData {
   onSyphonSourceChange?: (identifier: string) => void;
   /** For source nodes: callback to cycle through sample videos */
   onCycleSampleVideo?: () => void;
+  /** For source nodes: callback to initialize the first sample video (test.mp4) */
+  onInitSampleVideo?: () => void;
   /** For sink nodes: remote output stream */
   remoteStream?: MediaStream | null;
   /** For sink nodes: per-sink WebRTC stats (FPS, bitrate) */

@@ -882,11 +882,13 @@ export function StreamPage() {
     [handleVideoFileUpload]
   );
 
-  // Track per-node sample video cycle index (start at 0 so first cycle advances to 1,
-  // avoiding a no-op when the node already shows the default test.mp4)
+  // Track per-node sample video cycle index. After init this holds the index
+  // currently shown so the next cycle advances to the following sample.
   const nodeSampleVideoIndexRef = useRef<Record<string, number>>({});
   // Track per-node <video> elements so we can clean up the previous one on each cycle
   const nodeVideoElementsRef = useRef<Record<string, HTMLVideoElement>>({});
+  // Track in-flight init calls so a re-render doesn't kick off duplicate loads
+  const nodeInitInFlightRef = useRef<Set<string>>(new Set());
 
   // Handle per-node sample video cycling in graph mode
   const handlePerNodeCycleSampleVideo = useCallback(
@@ -928,6 +930,44 @@ export function StreamPage() {
     },
     [cycleSampleVideo]
   );
+
+  // Initialize a per-node sample video stream with the first sample (test.mp4).
+  // Idempotent: no-op if the node already has a stream or an init is in flight.
+  // Used by SourceNode to ensure file-mode source nodes always show a video,
+  // even when the global useVideoSource fallback isn't available.
+  const handlePerNodeInitSampleVideo = useCallback(async (nodeId?: string) => {
+    if (!nodeId) return;
+    if (nodeLocalStreamsRef.current[nodeId]) return;
+    if (nodeInitInFlightRef.current.has(nodeId)) return;
+    nodeInitInFlightRef.current.add(nodeId);
+    try {
+      const url = SAMPLE_VIDEOS[0];
+      const video = document.createElement("video");
+      video.src = url;
+      video.loop = true;
+      video.muted = true;
+      video.playsInline = true;
+      await video.play();
+      // Clean up any prior element (defensive — shouldn't happen since
+      // we only init when there's no stream, but be safe)
+      const oldVideo = nodeVideoElementsRef.current[nodeId];
+      if (oldVideo) {
+        oldVideo.pause();
+        oldVideo.removeAttribute("src");
+        oldVideo.load();
+      }
+      nodeVideoElementsRef.current[nodeId] = video;
+      nodeSampleVideoIndexRef.current[nodeId] = 0;
+      const stream = (
+        video as HTMLVideoElement & { captureStream(): MediaStream }
+      ).captureStream();
+      setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+    } catch (e) {
+      console.error(`Failed to init sample video for node ${nodeId}:`, e);
+    } finally {
+      nodeInitInFlightRef.current.delete(nodeId);
+    }
+  }, []);
 
   // Track the last stream track ID sent per node so we only call
   // updateSourceNodeTrack when the track actually changed.
@@ -3260,6 +3300,7 @@ export function StreamPage() {
             sinkStats={perSinkStats}
             onVideoFileUpload={handlePerNodeVideoFileUpload}
             onCycleSampleVideo={handlePerNodeCycleSampleVideo}
+            onInitSampleVideo={handlePerNodeInitSampleVideo}
             isPlaying={!settings.paused}
             onStartStream={() => handleStartStream()}
             onStopStream={stopStream}
