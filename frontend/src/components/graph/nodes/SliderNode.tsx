@@ -73,30 +73,30 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
         <NodeBody withGap>
           {/* Slider track */}
           <div ref={setRowRef("slider")}>
-          <div
-            ref={sliderRef}
-            className="relative w-full h-5 rounded-full cursor-pointer select-none"
-            style={{
-              background: "#1b1a1a",
-              border: "1px solid rgba(119,119,119,0.15)",
-            }}
-            onPointerDown={handlePointerDown}
-          >
-            {/* Filled portion */}
             <div
-              className="absolute left-0 top-0 h-full rounded-full pointer-events-none"
-              style={{ width: `${pct}%`, background: COLOR, opacity: 0.35 }}
-            />
-            {/* Thumb */}
-            <div
-              className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full pointer-events-none"
+              ref={sliderRef}
+              className="relative w-full h-5 rounded-full cursor-pointer select-none"
               style={{
-                left: `calc(${pct}% - 6px)`,
-                background: COLOR,
-                boxShadow: `0 0 4px ${COLOR}`,
+                background: "#1b1a1a",
+                border: "1px solid rgba(119,119,119,0.15)",
               }}
-            />
-          </div>
+              onPointerDown={handlePointerDown}
+            >
+              {/* Filled portion */}
+              <div
+                className="absolute left-0 top-0 h-full rounded-full pointer-events-none"
+                style={{ width: `${pct}%`, background: COLOR, opacity: 0.35 }}
+              />
+              {/* Thumb */}
+              <div
+                className="absolute top-1/2 -translate-y-1/2 w-3 h-3 rounded-full pointer-events-none"
+                style={{
+                  left: `calc(${pct}% - 6px)`,
+                  background: COLOR,
+                  boxShadow: `0 0 4px ${COLOR}`,
+                }}
+              />
+            </div>
           </div>
 
           {/* Current value display */}
@@ -152,7 +152,11 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
         style={
           collapsed
             ? collapsedHandleStyle("left")
-            : { top: rowPositions["slider"] ?? 44, left: 0, backgroundColor: COLOR }
+            : {
+                top: rowPositions["slider"] ?? 44,
+                left: 0,
+                backgroundColor: COLOR,
+              }
         }
       />
 
@@ -206,7 +210,11 @@ export function SliderNode({ id, data, selected }: NodeProps<SliderNodeType>) {
         style={
           collapsed
             ? collapsedHandleStyle("right")
-            : { top: rowPositions["slider"] ?? 44, right: 0, backgroundColor: COLOR }
+            : {
+                top: rowPositions["slider"] ?? 44,
+                right: 0,
+                backgroundColor: COLOR,
+              }
         }
       />
     </NodeCard>

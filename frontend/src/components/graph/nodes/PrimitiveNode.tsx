@@ -170,7 +170,11 @@ export function PrimitiveNode({
         style={
           collapsed
             ? collapsedHandleStyle("left")
-            : { top: rowPositions["value"] ?? 44, left: 0, backgroundColor: color }
+            : {
+                top: rowPositions["value"] ?? 44,
+                left: 0,
+                backgroundColor: color,
+              }
         }
       />
       <Handle
@@ -181,7 +185,11 @@ export function PrimitiveNode({
         style={
           collapsed
             ? collapsedHandleStyle("right")
-            : { top: rowPositions["value"] ?? 44, right: 0, backgroundColor: color }
+            : {
+                top: rowPositions["value"] ?? 44,
+                right: 0,
+                backgroundColor: color,
+              }
         }
       />
     </NodeCard>
