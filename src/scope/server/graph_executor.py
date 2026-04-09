@@ -84,8 +84,10 @@ def build_graph(
     if errors:
         raise ValueError(f"Invalid graph: {'; '.join(errors)}")
 
-    # Validate edge ports against pipeline input/output declarations
-    _validate_edge_ports(graph, pipeline_manager)
+    # Validate edge ports against pipeline input/output declarations.
+    # Edges referencing undeclared ports are pruned with a warning rather than
+    # failing the whole setup (e.g. stale 'mask' port from an older plugin version).
+    graph = _prune_invalid_edges(graph, pipeline_manager)
 
     # Sink and record nodes get dedicated queues in steps 4–5, so we
     # exclude them here to avoid false-positive duplicate-edge errors
@@ -322,46 +324,90 @@ def build_graph(
     )
 
 
-def _validate_edge_ports(
+def _prune_invalid_edges(
     graph: GraphConfig,
     pipeline_manager: PipelineManager,
-) -> None:
-    """Validate that edge ports match pipeline input/output declarations.
+) -> GraphConfig:
+    """Validate edge ports against pipeline declarations and prune bad edges.
 
-    Raises:
-        ValueError: If any edge references an undeclared port.
+    Edges that reference an undeclared input or output port are **removed** from
+    the graph with a WARNING rather than raising an exception.  This makes the
+    pipeline resilient to stale graph configs (e.g. a 'mask' port from an older
+    plugin version that renamed the port) — the stream starts without the broken
+    edge rather than failing entirely.
+
+    Returns:
+        A (possibly modified) GraphConfig with invalid stream edges removed.
     """
     # Build a map of node_id -> (declared_inputs, declared_outputs)
     port_map: dict[str, tuple[set[str], set[str]]] = {}
     for node in graph.nodes:
         if node.type != "pipeline" or node.pipeline_id is None:
             continue
-        pipeline = pipeline_manager.get_pipeline_by_id(node.id)
+        try:
+            pipeline = pipeline_manager.get_pipeline_by_id(node.id)
+        except Exception:
+            # Pipeline unavailable (e.g. reloading); skip port checks for it.
+            logger.warning(
+                "Pipeline %r unavailable during port validation; skipping port checks.",
+                node.id,
+            )
+            continue
         config_class = pipeline.get_config_class()
         port_map[node.id] = (set(config_class.inputs), set(config_class.outputs))
 
-    errors: list[str] = []
+    pruned: list = []
+    kept_edges: list = []
     for e in graph.edges:
         if e.kind != "stream":
+            kept_edges.append(e)
             continue
+        invalid = False
         # Check output port on the producing pipeline
         if e.from_node in port_map:
             _, declared_outputs = port_map[e.from_node]
             if e.from_port not in declared_outputs:
-                errors.append(
-                    f"Node {e.from_node!r} has no output port {e.from_port!r} "
-                    f"(declared: {sorted(declared_outputs)})"
+                logger.warning(
+                    "Pruning edge %r→%r:%r — source node has no output port %r "
+                    "(declared: %s). Graph may be stale; ignoring this edge.",
+                    e.from_node,
+                    e.to_node,
+                    e.to_port,
+                    e.from_port,
+                    sorted(declared_outputs),
                 )
+                invalid = True
         # Check input port on the consuming pipeline
-        if e.to_node in port_map:
+        if not invalid and e.to_node in port_map:
             declared_inputs, _ = port_map[e.to_node]
             if e.to_port not in declared_inputs:
-                errors.append(
-                    f"Node {e.to_node!r} has no input port {e.to_port!r} "
-                    f"(declared: {sorted(declared_inputs)})"
+                logger.warning(
+                    "Pruning edge %r→%r:%r — target node has no input port %r "
+                    "(declared: %s). Graph may be stale; ignoring this edge.",
+                    e.from_node,
+                    e.to_node,
+                    e.to_port,
+                    e.to_port,
+                    sorted(declared_inputs),
                 )
-    if errors:
-        raise ValueError(f"Invalid graph ports: {'; '.join(errors)}")
+                invalid = True
+        if invalid:
+            pruned.append(e)
+        else:
+            kept_edges.append(e)
+
+    if pruned:
+        pruned_desc = "; ".join(
+            f"{e.from_node}:{e.from_port}→{e.to_node}:{e.to_port}" for e in pruned
+        )
+        logger.warning(
+            "Pruned %d invalid stream edge(s) from graph: [%s]",
+            len(pruned),
+            pruned_desc,
+        )
+        graph = graph.model_copy(update={"edges": kept_edges})
+
+    return graph
 
 
 def _resize_graph_queues(
