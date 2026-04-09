@@ -187,6 +187,22 @@ def _parse_browser_graph_routes(
     return source_ids, sink_ids, record_ids
 
 
+def _resolve_output_route_ids(
+    output_idx: int,
+    sink_node_ids: list[str | None],
+    record_node_ids: list[str],
+) -> tuple[str | None, str | None]:
+    """Return sink/record node ids for a mixed output slot index."""
+    sink_count = len(sink_node_ids)
+    if output_idx < sink_count:
+        return sink_node_ids[output_idx], None
+
+    record_idx = output_idx - sink_count
+    if 0 <= record_idx < len(record_node_ids):
+        return None, record_node_ids[record_idx]
+    return None, None
+
+
 async def _request_stream_channels(
     session: LivepeerSession,
     *,
@@ -779,15 +795,10 @@ async def _handle_control_message(
             for output_idx in range(len(output_publish_urls)):
                 channels = await _request_stream_channels(session, direction="out")
                 outbound_url: str | None = None
-                sink_node_id = (
-                    output_sink_node_ids[output_idx]
-                    if output_idx < len(output_sink_node_ids)
-                    else None
-                )
-                record_node_id = (
-                    None
-                    if output_idx < len(output_sink_node_ids)
-                    else record_node_ids[output_idx - len(output_sink_node_ids)]
+                sink_node_id, record_node_id = _resolve_output_route_ids(
+                    output_idx=output_idx,
+                    sink_node_ids=output_sink_node_ids,
+                    record_node_ids=record_node_ids,
                 )
                 for channel in channels:
                     ch = {
@@ -847,11 +858,10 @@ async def _handle_control_message(
         for output_idx, publish_url in enumerate(output_publish_urls):
             if publish_url is None:
                 continue
-            sink_node_id = output_sink_node_ids[output_idx]
-            record_node_id = (
-                record_node_ids[output_idx - len(output_sink_node_ids)]
-                if output_idx >= len(output_sink_node_ids)
-                else None
+            sink_node_id, record_node_id = _resolve_output_route_ids(
+                output_idx=output_idx,
+                sink_node_ids=output_sink_node_ids,
+                record_node_ids=record_node_ids,
             )
             session.media_output_tasks.append(
                 asyncio.create_task(
