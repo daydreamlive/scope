@@ -19,6 +19,7 @@ import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
+import { AudioManager } from "./AudioManager";
 import { ImageManager } from "./ImageManager";
 import { LoRAManager } from "./LoRAManager";
 import { RotateCcw } from "lucide-react";
@@ -102,6 +103,30 @@ export function SchemaComplexField({
   context: ctx,
   ui,
 }: SchemaComplexFieldProps): React.ReactNode {
+  if (component === "audio") {
+    const value = ctx.schemaFieldOverrides?.[fieldKey];
+    const path = value == null ? null : String(value);
+    const isRuntimeParam = ui?.is_load_param === false;
+    const disabled =
+      ((ctx.isStreaming ?? false) && !isRuntimeParam) ||
+      (ctx.isLoading ?? false);
+    return (
+      <div key={fieldKey} className="space-y-1">
+        {ui?.label != null && (
+          <span className="text-xs text-muted-foreground">{ui.label}</span>
+        )}
+        <AudioManager
+          audioPath={path}
+          onAudioChange={p =>
+            ctx.onSchemaFieldOverrideChange?.(fieldKey, p, isRuntimeParam)
+          }
+          disabled={disabled}
+          label={ui?.label ?? "Audio Input"}
+        />
+      </div>
+    );
+  }
+
   if (component === "image") {
     const value = ctx.schemaFieldOverrides?.[fieldKey];
     const path = value == null ? null : String(value);

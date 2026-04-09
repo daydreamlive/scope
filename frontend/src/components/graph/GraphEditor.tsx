@@ -41,6 +41,7 @@ import { KnobsNode } from "./nodes/KnobsNode";
 import { XYPadNode } from "./nodes/XYPadNode";
 import { TupleNode } from "./nodes/TupleNode";
 import { ImageNode } from "./nodes/ImageNode";
+import { AudioNode } from "./nodes/AudioNode";
 import { VaceNode } from "./nodes/VaceNode";
 import { LoraNode } from "./nodes/LoraNode";
 import { MidiNode } from "./nodes/MidiNode";
@@ -115,6 +116,7 @@ const nodeTypes = {
   tuple: TupleNode,
   reroute: RerouteNode,
   image: ImageNode,
+  audio: AudioNode,
   vace: VaceNode,
   lora: LoraNode,
   midi: MidiNode,

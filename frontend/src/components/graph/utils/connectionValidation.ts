@@ -407,6 +407,8 @@ export function validateConnection(
       return true;
     if (targetParam.type === "string" && sourceType === "video_path")
       return true;
+    if (targetParam.type === "string" && sourceType === "audio_path")
+      return true;
 
     return sourceType === targetParam.type;
   }

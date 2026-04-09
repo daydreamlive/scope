@@ -52,6 +52,7 @@ type NodeTypeSelectFn = (
     | "tuple"
     | "reroute"
     | "image"
+    | "audio"
     | "vace"
     | "lora"
     | "midi"
@@ -258,6 +259,12 @@ export function buildPaneMenuItems(deps: {
         "reference",
         "film",
       ],
+    },
+    {
+      label: "Audio",
+      icon: <Music />,
+      onClick: () => handleNodeTypeSelect("audio"),
+      keywords: ["audio", "music", "sound", "wav", "mp3", "flac"],
     },
     {
       label: "VACE",

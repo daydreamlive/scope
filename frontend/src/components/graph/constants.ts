@@ -8,6 +8,7 @@ import {
   COLOR_STRING,
   COLOR_STREAM,
   COLOR_VACE,
+  COLOR_AUDIO,
   COLOR_BOOLEAN,
   COLOR_TRIGGER,
   COLOR_DEFAULT,
@@ -59,6 +60,9 @@ export function getEdgeColor(
       return sourceNode.data.mediaType === "video"
         ? COLOR_STREAM
         : COLOR_STRING;
+    }
+    if (sourceNode.data.nodeType === "audio") {
+      return COLOR_AUDIO;
     }
     if (sourceNode.data.nodeType === "vace") {
       return COLOR_VACE;

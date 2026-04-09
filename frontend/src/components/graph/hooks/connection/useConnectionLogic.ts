@@ -107,6 +107,7 @@ export function useConnectionLogic(
           expectedType !== "list_number" &&
           expectedType !== "vace" &&
           expectedType !== "video_path" &&
+          expectedType !== "audio_path" &&
           expectedType !== sourceNode.data.valueType
         ) {
           changed.set(sourceNode.id, expectedType);
@@ -169,6 +170,7 @@ export function useConnectionLogic(
             srcType !== "list_number" &&
             srcType !== "vace" &&
             srcType !== "video_path" &&
+            srcType !== "audio_path" &&
             srcType !== targetNode.data.valueType
           ) {
             changed.set(targetNode.id, srcType);
@@ -206,7 +208,8 @@ export function useConnectionLogic(
           expectedType &&
           expectedType !== "list_number" &&
           expectedType !== "vace" &&
-          expectedType !== "video_path"
+          expectedType !== "video_path" &&
+          expectedType !== "audio_path"
         ) {
           const narrowType = expectedType as
             | "string"

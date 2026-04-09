@@ -453,7 +453,7 @@ export interface AssetFileInfo {
   path: string;
   size_mb: number;
   folder?: string | null;
-  type: string; // "image" or "video"
+  type: string; // "image", "video", or "audio"
   created_at: number; // Unix timestamp
 }
 
@@ -462,7 +462,7 @@ export interface AssetsResponse {
 }
 
 export const listAssets = async (
-  type?: "image" | "video"
+  type?: "image" | "video" | "audio"
 ): Promise<AssetsResponse> => {
   const url = type ? `/api/v1/assets?type=${type}` : "/api/v1/assets";
   const response = await fetch(url, {

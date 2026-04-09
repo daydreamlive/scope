@@ -10,6 +10,7 @@ export type ResolvedType =
   | "trigger"
   | "list_number"
   | "video_path"
+  | "audio_path"
   | "vace"
   | "lora"
   | undefined;
@@ -36,6 +37,7 @@ export function resolveSourceType(
   if (nt === "image") {
     return node.data.mediaType === "video" ? "video_path" : "string";
   }
+  if (nt === "audio") return "audio_path";
   if (nt === "vace") return "vace";
   if (nt === "lora") return "lora";
   if (nt === "midi") return "number";
