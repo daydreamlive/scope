@@ -88,6 +88,7 @@ class TestListPluginsEndpoint:
                 ],
                 "latest_version": "2.0.0",
                 "update_available": True,
+                "bundled": True,
             }
         ]
 
@@ -102,6 +103,7 @@ class TestListPluginsEndpoint:
         assert len(data["plugins"][0]["pipelines"]) == 1
         assert data["plugins"][0]["latest_version"] == "2.0.0"
         assert data["plugins"][0]["update_available"] is True
+        assert data["plugins"][0]["bundled"] is True
 
     def test_handles_manager_errors(self, client, mock_plugin_manager):
         """Manager exception should return 500 error."""
