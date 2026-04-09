@@ -57,7 +57,7 @@ export function NodeCard({
   if (collapsed) {
     return (
       <div
-        className={`group bg-[#1e1e1e] border-2 border-[rgba(255,255,255,0.06)] rounded-full shadow-[0_1px_4px_rgba(0,0,0,0.25)] relative flex flex-col ${
+        className={`group bg-[#1e1e1e] border-2 border-transparent rounded-full shadow-[0_1px_4px_rgba(0,0,0,0.25)] relative flex flex-col ${
           selected ? NODE_TOKENS.cardSelected : ""
         } ${className}`}
       >
