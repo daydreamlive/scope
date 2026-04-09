@@ -233,6 +233,37 @@ async def _request_stream_channels(
     return normalized
 
 
+async def _request_restart(session: LivepeerSession) -> None:
+    """
+    Request restart acknowledgment over websocket.
+
+    Allows the orchestrator to do cleanup, eg stopping keepalives that
+    might otherwise behave unexpectedly during a runner restart.
+    """
+    ws_request_id = str(uuid.uuid4())
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[dict[str, Any]] = loop.create_future()
+    session.ws_pending_responses[ws_request_id] = future
+    # This should stop keepalives on the server.
+    await session.ws.send_json(
+        {
+            "type": "restarting",
+            "request_id": ws_request_id,
+        }
+    )
+    try:
+        ws_response = await asyncio.wait_for(future, timeout=5.0)
+    finally:
+        pending = session.ws_pending_responses.pop(ws_request_id, None)
+        if pending is not None and not pending.done():
+            pending.cancel()
+
+    if ws_response.get("type") != "response":
+        raise RuntimeError(
+            "Invalid restarting response payload: expected response type"
+        )
+
+
 async def _stop_stream(session: LivepeerSession) -> None:
     """Stop frame processor and media tasks."""
     async with session.stream_stop_lock:
@@ -489,6 +520,25 @@ async def _handle_api_request(
                 "request_id": request_id,
                 "status": 403,
                 "error": f"Plugin '{requested_package}' is not in the allowed list for cloud mode",
+            }
+
+    if method == "POST" and normalized_path == "/api/v1/restart":
+        # Notify orchestrator of the restart so it can tear down some stuff
+        try:
+            await _request_restart(session)
+        except TimeoutError:
+            return {
+                "type": "api_response",
+                "request_id": request_id,
+                "status": 504,
+                "error": "Timed out waiting for websocket restarting response",
+            }
+        except Exception as exc:
+            return {
+                "type": "api_response",
+                "request_id": request_id,
+                "status": 502,
+                "error": f"Failed restart websocket handshake: {exc}",
             }
 
     # Pass through validated user_id for pipeline load requests.

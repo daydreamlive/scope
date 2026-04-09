@@ -1332,7 +1332,7 @@ wheels = [
 [[package]]
 name = "livepeer-gateway"
 version = "0.1.0"
-source = { git = "https://github.com/livepeer/livepeer-python-gateway#a78be972adea1308cf98e13810e258cc3512c3c3" }
+source = { git = "https://github.com/livepeer/livepeer-python-gateway#acdeb11f9d1449dfbee87493e49fc26281bf80c0" }
 dependencies = [
     { name = "aiohttp" },
     { name = "av" },
