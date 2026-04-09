@@ -83,7 +83,11 @@ class CloudTrack(MediaStreamTrack):
         self._started = False
 
         # Multi-source / multi-sink / record (wired up in _start after cloud connects)
-        self._pending_extra_sources: list[tuple[int, MediaStreamTrack]] = []
+        # Store (source_node_id, track). Resolving to a cloud input track index
+        # is deferred until _start() runs, because the webrtc_client's
+        # source_node_to_track_index mapping for *this* graph only exists
+        # after `cloud_manager.start_webrtc(initial_parameters)` runs in _start.
+        self._pending_extra_sources: list[tuple[str, MediaStreamTrack]] = []
         self._extra_sink_tracks: list[CloudSinkOutputTrack] = []
         self._extra_input_handlers: list[CloudSourceInputHandler] = []
         self._record_callbacks: list[tuple[str, Callable]] = []
@@ -126,15 +130,38 @@ class CloudTrack(MediaStreamTrack):
             self._input_running = True
             self._input_task = asyncio.create_task(self._input_loop())
 
-        # Wire up extra source tracks now that the cloud connection exists
+        # Wire up extra source tracks now that the cloud connection exists.
+        # Resolve each pending source node ID to a cloud input track index
+        # via the freshly populated source_node_to_track_index. Doing this
+        # lookup here (rather than at add_extra_source_track time) is what
+        # makes mixed browser+hardware source graphs route correctly: when
+        # `pc.on("track")` fires for the browser camera, the webrtc_client
+        # may not yet exist or may carry a stale mapping from a previous
+        # session.
         webrtc_client = self.cloud_manager.get_webrtc_client()
         if webrtc_client is not None:
-            for idx, track in self._pending_extra_sources:
-                if idx < len(webrtc_client.input_tracks):
-                    handler = CloudSourceInputHandler(webrtc_client.input_tracks[idx])
-                    handler.start(track)
-                    self._extra_input_handlers.append(handler)
-                    logger.info(f"Wired extra source track {idx} to cloud input")
+            for source_node_id, track in self._pending_extra_sources:
+                track_index = webrtc_client.source_node_to_track_index.get(
+                    source_node_id
+                )
+                if track_index is None or track_index >= len(
+                    webrtc_client.input_tracks
+                ):
+                    logger.warning(
+                        "Could not resolve cloud input track for source node "
+                        f"{source_node_id!r} (index={track_index}, "
+                        f"have {len(webrtc_client.input_tracks)} input tracks)"
+                    )
+                    continue
+                handler = CloudSourceInputHandler(
+                    webrtc_client.input_tracks[track_index]
+                )
+                handler.start(track)
+                self._extra_input_handlers.append(handler)
+                logger.info(
+                    f"Wired extra source track for node {source_node_id!r} "
+                    f"to cloud input track {track_index}"
+                )
             self._pending_extra_sources.clear()
 
             # Wire extra sink output callbacks (index 0 is primary, 1+ are extras)
@@ -298,27 +325,51 @@ class CloudTrack(MediaStreamTrack):
     # Multi-source / multi-sink helpers
     # ------------------------------------------------------------------
 
-    def add_extra_source_track(self, track_index: int, track: MediaStreamTrack) -> None:
+    def add_extra_source_track(
+        self, source_node_id: str, track: MediaStreamTrack
+    ) -> None:
         """Register an extra browser source track to forward to cloud.
 
-        *track_index* is the position among the cloud input tracks
-        (0 is the primary handled by ``_input_loop``).  If the cloud
-        connection is already established the handler starts immediately;
-        otherwise it is buffered until :meth:`_start` completes.
+        *source_node_id* identifies which graph source node this browser
+        track belongs to. The cloud input track index is resolved from
+        ``webrtc_client.source_node_to_track_index`` — either immediately
+        if the cloud relay is already started, or in :meth:`_start` once
+        ``cloud_manager.start_webrtc(initial_parameters)`` has populated
+        the mapping for the current graph.
+
+        Storing a node ID rather than an index here is critical: when
+        `pc.on("track")` fires for browser camera tracks, the cloud
+        relay's webrtc_client may be missing or carry stale mapping from
+        a previous session, so any precomputed index would point at the
+        wrong cloud input track and frames from a Camera source would be
+        delivered to a Syphon (or other hardware) source's pipeline.
         """
         if self._started:
             webrtc_client = self.cloud_manager.get_webrtc_client()
-            if webrtc_client is not None and track_index < len(
-                webrtc_client.input_tracks
-            ):
-                handler = CloudSourceInputHandler(
-                    webrtc_client.input_tracks[track_index]
+            if webrtc_client is not None:
+                track_index = webrtc_client.source_node_to_track_index.get(
+                    source_node_id
                 )
-                handler.start(track)
-                self._extra_input_handlers.append(handler)
-                logger.info(f"Wired extra source track {track_index} (immediate)")
+                if track_index is not None and track_index < len(
+                    webrtc_client.input_tracks
+                ):
+                    handler = CloudSourceInputHandler(
+                        webrtc_client.input_tracks[track_index]
+                    )
+                    handler.start(track)
+                    self._extra_input_handlers.append(handler)
+                    logger.info(
+                        f"Wired extra source track for node {source_node_id!r} "
+                        f"to cloud input track {track_index} (immediate)"
+                    )
+                    return
+            logger.warning(
+                "Could not resolve cloud input track for source node "
+                f"{source_node_id!r} (immediate path); buffering for _start"
+            )
+            self._pending_extra_sources.append((source_node_id, track))
         else:
-            self._pending_extra_sources.append((track_index, track))
+            self._pending_extra_sources.append((source_node_id, track))
 
     def set_extra_sink_tracks(self, tracks: list[CloudSinkOutputTrack]) -> None:
         """Register extra sink output tracks that need cloud callbacks."""

@@ -199,6 +199,11 @@ class CloudWebRTCClient:
         self.input_tracks: list[FrameInputTrack] = []
         self.output_handlers: list[FrameOutputHandler] = [FrameOutputHandler()]
         self.audio_output_handler = AudioOutputHandler()
+        # Source node ID → cloud input track index. Populated by connect()
+        # from the graph in initial_parameters; initialized here so callers
+        # of `get_source_track_index` never see AttributeError between
+        # client construction and the first connect().
+        self.source_node_to_track_index: dict[str, int] = {}
         self._data_channel = None
         self._session_id: str | None = None
         self._connected = False
