@@ -71,7 +71,11 @@ import {
   getDmxStatus,
 } from "../lib/api";
 import type { ScopeWorkflow } from "../lib/workflowApi";
-import { linearGraphFromSettings, stripUIFields } from "../lib/graphUtils";
+import {
+  applyHardwareInputSourceToLinearGraph,
+  linearGraphFromSettings,
+  stripUIFields,
+} from "../lib/graphUtils";
 import { resolveLoRAPath } from "../lib/workflowSettings";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { usePluginsContext } from "../contexts/PluginsContext";
@@ -2543,11 +2547,14 @@ export function StreamPage() {
           }
         }
 
-        graphConfigForStream = linearGraphFromSettings(
-          pipelineIdToUse,
-          settings.preprocessorIds ?? [],
-          settings.postprocessorIds ?? [],
-          vaceInputVideoIds.size > 0 ? vaceInputVideoIds : undefined
+        graphConfigForStream = applyHardwareInputSourceToLinearGraph(
+          linearGraphFromSettings(
+            pipelineIdToUse,
+            settings.preprocessorIds ?? [],
+            settings.postprocessorIds ?? [],
+            vaceInputVideoIds.size > 0 ? vaceInputVideoIds : undefined
+          ),
+          settings.inputSource
         );
 
         // Extract sink node IDs so WebRTC stats can map tracks to sinks
@@ -3123,10 +3130,13 @@ export function StreamPage() {
               ) {
                 // No graph yet — create a linear one from current settings
                 // and save to localStorage so the graph editor picks it up
-                const graph = linearGraphFromSettings(
-                  settings.pipelineId,
-                  settings.preprocessorIds ?? [],
-                  settings.postprocessorIds ?? []
+                const graph = applyHardwareInputSourceToLinearGraph(
+                  linearGraphFromSettings(
+                    settings.pipelineId,
+                    settings.preprocessorIds ?? [],
+                    settings.postprocessorIds ?? []
+                  ),
+                  settings.inputSource
                 );
                 try {
                   localStorage.setItem(

@@ -1411,6 +1411,43 @@ export function linearGraphFromSettings(
 }
 
 /**
+ * Perform mode sends a linear graph whose default source is WebRTC (`video`).
+ * When the user selects Spout, NDI, or Syphon, `input_source` is also set, but
+ * the backend drops `input_source` whenever the session includes any graph
+ * source node — hardware capture is wired only from per-node `source_mode` /
+ * `source_name` (see FrameProcessor.start). Patch the linear graph's `input`
+ * node so multi-source setup matches Workflow Builder.
+ */
+export function applyHardwareInputSourceToLinearGraph(
+  graph: GraphConfig,
+  inputSource?: {
+    enabled: boolean;
+    source_type: string;
+    source_name: string;
+  }
+): GraphConfig {
+  const t = inputSource?.source_type;
+  if (
+    !inputSource?.enabled ||
+    (t !== "ndi" && t !== "spout" && t !== "syphon")
+  ) {
+    return graph;
+  }
+  return {
+    ...graph,
+    nodes: graph.nodes.map(n =>
+      n.id === "input" && n.type === "source"
+        ? {
+            ...n,
+            source_mode: t,
+            source_name: inputSource.source_name ?? "",
+          }
+        : n
+    ),
+  };
+}
+
+/**
  * Drop layout fields (x, y, w, h) and omit `ui_state` from the payload to the
  * server. Execution topology — including `type: "record"` nodes and their
  * edges — stays in `nodes` / `edges`; record nodes are not frontend-only.
