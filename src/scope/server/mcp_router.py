@@ -245,6 +245,8 @@ def _wire_cloud_outputs(cloud_manager, frame_processor, graph_config) -> None:
 
     from av import VideoFrame
 
+    # TODO: Out of scope for this refactor. This still depends on the
+    # CloudConnectionManager private member and is not Livepeer-compatible.
     webrtc_client = cloud_manager._webrtc_client
     if webrtc_client is None:
         return

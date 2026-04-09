@@ -15,10 +15,11 @@ import {
   isAuthenticated,
   redirectToSignIn,
   clearDaydreamAuth,
+  getDaydreamAPIKey,
+  getDaydreamUserId,
   getDaydreamUserDisplayName,
   refreshUserProfile,
 } from "../../lib/auth";
-import { connectToCloud } from "../../lib/cloudApi";
 import { useCloudStatus } from "../../hooks/useCloudStatus";
 
 interface DaydreamAccountSectionProps {
@@ -101,10 +102,17 @@ export function DaydreamAccountSection({
     setError(null);
 
     try {
-      const response = await connectToCloud();
+      const userId = getDaydreamUserId();
+      const apiKey = getDaydreamAPIKey();
 
-      if (!response || !response.ok) {
-        const data = response ? await response.json() : {};
+      const response = await fetch("/api/v1/cloud/connect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_id: userId, api_key: apiKey }),
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
         throw new Error(data.detail || "Connection failed");
       }
 

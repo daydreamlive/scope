@@ -138,6 +138,9 @@ class CloudTrack(MediaStreamTrack):
         # `pc.on("track")` fires for the browser camera, the webrtc_client
         # may not yet exist or may carry a stale mapping from a previous
         # session.
+        #
+        # TODO: This relies on duck-typed public members
+        # (input_tracks/output_handlers) from get_webrtc_client().
         webrtc_client = self.cloud_manager.get_webrtc_client()
         if webrtc_client is not None:
             for source_node_id, track in self._pending_extra_sources:
@@ -345,6 +348,8 @@ class CloudTrack(MediaStreamTrack):
         delivered to a Syphon (or other hardware) source's pipeline.
         """
         if self._started:
+            # TODO: This relies on duck-typed public members
+            # (input_tracks/output_handlers) from get_webrtc_client().
             webrtc_client = self.cloud_manager.get_webrtc_client()
             if webrtc_client is not None:
                 track_index = webrtc_client.source_node_to_track_index.get(

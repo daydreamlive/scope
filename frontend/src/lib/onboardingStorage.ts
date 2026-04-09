@@ -72,6 +72,20 @@ export async function persistSurveyAnswers(answers: {
   }
 }
 
+/** Fire-and-forget: tell the backend to connect to the cloud relay. */
+export async function activateCloudRelay(userId: string | null): Promise<void> {
+  if (!userId) return;
+  try {
+    await fetch("/api/v1/cloud/connect", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ user_id: userId }),
+    });
+  } catch (err) {
+    console.error("[Onboarding] Failed to auto-connect to cloud:", err);
+  }
+}
+
 /**
  * Reset onboarding so it shows on next launch.
  * Used by Settings → Advanced → "Show onboarding again".
