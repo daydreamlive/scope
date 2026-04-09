@@ -751,7 +751,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         },
       ];
 
-      const debugNodes = DEBUG_NODES.map(def => ({
+      const debugNodes: Node<FlowNodeData>[] = DEBUG_NODES.map(def => ({
         id: def.id,
         type: def.type,
         position: def.position,
@@ -762,7 +762,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         } as FlowNodeData,
       }));
 
-      setNodes(debugNodes as any);
+      setNodes(debugNodes);
       setEdges([]);
     }, [setNodes, setEdges]);
 
