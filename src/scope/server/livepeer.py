@@ -1,7 +1,7 @@
 """LivepeerConnection for relay mode.
 
 This manager mirrors the subset of CloudConnectionManager's interface used by
-CloudTrack/FrameProcessor, but routes media and control over Livepeer LV2V.
+CloudTrack/FrameProcessor, but routes media and control over Livepeer.
 """
 
 from __future__ import annotations
@@ -88,7 +88,7 @@ class LivepeerConnection:
         api_key: str | None = None,
         user_id: str | None = None,
     ) -> None:
-        """Create and connect a persistent Livepeer LV2V job."""
+        """Create and connect a persistent Livepeer job."""
         # Keep connect signature compatible with cloud-style connect requests.
         # app_id can be used as optional runner routing config (derived into a
         # fal ws_url in the client). api_key is forwarded so Livepeer startup can

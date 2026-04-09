@@ -1,4 +1,4 @@
-"""LivepeerClient - Trickle HTTP client for Livepeer LV2V inference.
+"""LivepeerClient - Trickle HTTP client for Livepeer inference.
 
 This client is transport-only. It manages the Livepeer job lifecycle and exposes
 simple frame/parameter methods used by the relay manager.
@@ -60,9 +60,9 @@ class _MediaHandles:
 
 
 class LivepeerClient:
-    """Livepeer LV2V transport client.
+    """Livepeer transport client.
 
-    This client opens a Livepeer LV2V job, publishes frames to the input channel,
+    This client opens a Livepeer job, publishes frames to the input channel,
     subscribes to output frames, and forwards output frames to callbacks.
     """
 

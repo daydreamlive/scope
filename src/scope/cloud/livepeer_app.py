@@ -1072,8 +1072,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
 
     try:
         raw = await ws.receive_text()
-        job_info = Lv2vJobInfo.model_validate_json(raw)
-        logger.info("Received LV2V job info: manifest_id=%s", job_info.manifest_id)
+        job_info = ScopeJobInfo.model_validate_json(raw)
+        logger.info("Received job info: manifest_id=%s", job_info.manifest_id)
         params = job_info.params or {}
         user_id = params.get("daydream_user_id")
         if not await validate_user_access(user_id):
