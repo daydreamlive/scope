@@ -73,7 +73,6 @@ import { createDaydreamImportSession } from "../../lib/daydreamExport";
 import { openExternalUrl } from "../../lib/openExternal";
 import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
 import type { FlowNodeData } from "../../lib/graphUtils";
-import { generateNodeId } from "../../lib/graphUtils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -590,68 +589,178 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       });
 
     const handleDebugNodes = useCallback(() => {
-      const DEBUG_NODE_TYPES: Array<{
+      const DEBUG_NODES: Array<{
+        id: string;
         type: string;
         nodeType: string;
+        position: { x: number; y: number };
         extra?: Partial<FlowNodeData>;
       }> = [
-        { type: "source", nodeType: "source" },
-        { type: "pipeline", nodeType: "pipeline" },
-        { type: "sink", nodeType: "sink" },
-        { type: "record", nodeType: "record" },
-        { type: "primitive", nodeType: "primitive" },
-        { type: "bool", nodeType: "bool" },
-        { type: "slider", nodeType: "slider" },
-        { type: "knobs", nodeType: "knobs" },
-        { type: "xypad", nodeType: "xypad" },
         {
+          id: "source",
+          type: "source",
+          nodeType: "source",
+          position: { x: 50, y: 50 },
+        },
+        {
+          id: "pipeline",
+          type: "pipeline",
+          nodeType: "pipeline",
+          position: { x: 321.74, y: 49.33 },
+        },
+        {
+          id: "sink",
+          type: "sink",
+          nodeType: "sink",
+          position: { x: 577.54, y: 42.91 },
+        },
+        {
+          id: "record",
+          type: "record",
+          nodeType: "record",
+          position: { x: 584.35, y: 274.9 },
+        },
+        {
+          id: "primitive",
+          type: "primitive",
+          nodeType: "primitive",
+          position: { x: 586.99, y: 393.92 },
+        },
+        {
+          id: "bool",
+          type: "bool",
+          nodeType: "bool",
+          position: { x: 50, y: 350 },
+        },
+        {
+          id: "slider",
+          type: "slider",
+          nodeType: "slider",
+          position: { x: 43.29, y: 773.73 },
+        },
+        {
+          id: "knobs",
+          type: "knobs",
+          nodeType: "knobs",
+          position: { x: 39.43, y: 966.33 },
+        },
+        {
+          id: "xypad",
+          type: "xypad",
+          nodeType: "xypad",
+          position: { x: 850.46, y: 46.12 },
+        },
+        {
+          id: "control",
           type: "control",
           nodeType: "control",
+          position: { x: 856.59, y: 334.32 },
           extra: { controlType: "float" },
         },
-        { type: "control", nodeType: "control", extra: { controlType: "int" } },
         {
+          id: "control_1",
           type: "control",
           nodeType: "control",
+          position: { x: 47.15, y: 558.69 },
+          extra: { controlType: "int" },
+        },
+        {
+          id: "control_2",
+          type: "control",
+          nodeType: "control",
+          position: { x: 318.9, y: 923.97 },
           extra: { controlType: "string" },
         },
-        { type: "math", nodeType: "math" },
-        { type: "tuple", nodeType: "tuple" },
-        { type: "output", nodeType: "output" },
-        { type: "image", nodeType: "image" },
-        { type: "vace", nodeType: "vace" },
-        { type: "lora", nodeType: "lora" },
-        { type: "midi", nodeType: "midi" },
-        { type: "trigger", nodeType: "trigger" },
-        { type: "tempo", nodeType: "tempo" },
-        { type: "prompt_list", nodeType: "prompt_list" },
-        { type: "prompt_blend", nodeType: "prompt_blend" },
-        { type: "scheduler", nodeType: "scheduler" },
-        { type: "note", nodeType: "note" },
-        { type: "reroute", nodeType: "reroute" },
+        {
+          id: "math",
+          type: "math",
+          nodeType: "math",
+          position: { x: 586.16, y: 588.74 },
+        },
+        {
+          id: "tuple",
+          type: "tuple",
+          nodeType: "tuple",
+          position: { x: 857.59, y: 543.01 },
+        },
+        {
+          id: "output",
+          type: "output",
+          nodeType: "output",
+          position: { x: 860.87, y: 697.09 },
+        },
+        {
+          id: "vace",
+          type: "vace",
+          nodeType: "vace",
+          position: { x: 587.22, y: 914.44 },
+        },
+        {
+          id: "lora",
+          type: "lora",
+          nodeType: "lora",
+          position: { x: 586.18, y: 794.57 },
+        },
+        {
+          id: "midi",
+          type: "midi",
+          nodeType: "midi",
+          position: { x: 860.45, y: 860.13 },
+        },
+        {
+          id: "trigger",
+          type: "trigger",
+          nodeType: "trigger",
+          position: { x: 318.72, y: 817.36 },
+        },
+        {
+          id: "tempo",
+          type: "tempo",
+          nodeType: "tempo",
+          position: { x: 1121.76, y: 278.44 },
+        },
+        {
+          id: "prompt_list",
+          type: "prompt_list",
+          nodeType: "prompt_list",
+          position: { x: 1123.61, y: 479.6 },
+        },
+        {
+          id: "prompt_blend",
+          type: "prompt_blend",
+          nodeType: "prompt_blend",
+          position: { x: 1129.74, y: 709.3 },
+        },
+        {
+          id: "scheduler",
+          type: "scheduler",
+          nodeType: "scheduler",
+          position: { x: 1128.73, y: 883.37 },
+        },
+        {
+          id: "note",
+          type: "note",
+          nodeType: "note",
+          position: { x: 1122.5, y: 49.42 },
+        },
+        {
+          id: "reroute",
+          type: "reroute",
+          nodeType: "reroute",
+          position: { x: 971.33, y: 1063.07 },
+        },
       ];
 
-      const cols = 5;
-      const spacingX = 320;
-      const spacingY = 300;
-      const ids = new Set<string>();
-
-      const debugNodes = DEBUG_NODE_TYPES.map((def, idx) => {
-        const col = idx % cols;
-        const row = Math.floor(idx / cols);
-        const id = generateNodeId(def.nodeType, ids);
-        ids.add(id);
-        return {
-          id,
-          type: def.type,
-          position: { x: 50 + col * spacingX, y: 50 + row * spacingY },
-          data: {
-            label: id,
-            nodeType: def.nodeType,
-            ...def.extra,
-          } as FlowNodeData,
-        };
-      });
+      const debugNodes = DEBUG_NODES.map(def => ({
+        id: def.id,
+        type: def.type,
+        position: def.position,
+        data: {
+          label: def.id,
+          nodeType: def.nodeType,
+          ...def.extra,
+        } as FlowNodeData,
+      }));
 
       setNodes(debugNodes as any);
       setEdges([]);
