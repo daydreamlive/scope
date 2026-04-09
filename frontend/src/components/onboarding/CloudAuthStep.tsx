@@ -4,9 +4,10 @@ import { Button } from "../ui/button";
 import {
   isAuthenticated,
   getDaydreamUserDisplayName,
+  getDaydreamUserId,
   redirectToSignIn,
 } from "../../lib/auth";
-import { connectToCloud } from "../../lib/cloudApi";
+import { activateCloudRelay } from "../../lib/onboardingStorage";
 
 type AuthState = "idle" | "waiting" | "success" | "error";
 
@@ -31,9 +32,7 @@ export function CloudAuthStep({ onComplete }: CloudAuthStepProps) {
   useEffect(() => {
     if (authState === "success") {
       setDisplayName(getDaydreamUserDisplayName());
-      connectToCloud().catch(e =>
-        console.error("[Onboarding] Cloud connect failed:", e)
-      );
+      activateCloudRelay(getDaydreamUserId());
       advanceRef.current = setTimeout(onComplete, AUTO_ADVANCE_DELAY_MS);
     }
     return () => {
@@ -47,9 +46,7 @@ export function CloudAuthStep({ onComplete }: CloudAuthStepProps) {
     const handleSuccess = () => {
       setAuthState("success");
       setDisplayName(getDaydreamUserDisplayName());
-      connectToCloud().catch(e =>
-        console.error("[Onboarding] Cloud connect failed:", e)
-      );
+      activateCloudRelay(getDaydreamUserId());
       if (timeoutRef.current) clearTimeout(timeoutRef.current);
       advanceRef.current = setTimeout(onComplete, AUTO_ADVANCE_DELAY_MS);
     };
