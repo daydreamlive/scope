@@ -117,6 +117,9 @@ class FrameProcessor:
 
         # Graph support: processors indexed by node_id for per-node routing
         self._processors_by_node_id: dict[str, PipelineProcessor] = {}
+        self._graph_ready = False
+        # Buffer per-node parameter updates that arrive before graph setup
+        self._pending_node_params: list[tuple[str, dict[str, Any]]] = []
         # The processor whose output we read in graph mode (legacy get() path)
         self._sink_processor: PipelineProcessor | None = None
 
@@ -771,6 +774,9 @@ class FrameProcessor:
         if node_id:
             if node_id in self._processors_by_node_id:
                 self._processors_by_node_id[node_id].update_parameters(parameters)
+            elif not self._graph_ready:
+                # Graph not set up yet — buffer for replay after setup
+                self._pending_node_params.append((node_id, parameters.copy()))
             else:
                 logger.warning(
                     f"Unknown node_id '{node_id}', ignoring parameter update"
@@ -862,6 +868,21 @@ class FrameProcessor:
         # Index processors by node_id for per-node parameter routing
         for proc in self.pipeline_processors:
             self._processors_by_node_id[proc.node_id] = proc
+        self._graph_ready = True
+
+        # Replay any per-node parameter updates that arrived before graph setup
+        if self._pending_node_params:
+            for pending_node_id, pending_params in self._pending_node_params:
+                if pending_node_id in self._processors_by_node_id:
+                    self._processors_by_node_id[pending_node_id].update_parameters(
+                        pending_params
+                    )
+                else:
+                    logger.warning(
+                        f"Buffered node_id '{pending_node_id}' not in graph, "
+                        f"ignoring parameter update"
+                    )
+            self._pending_node_params.clear()
 
         # Start all processors
         for processor in self.pipeline_processors:

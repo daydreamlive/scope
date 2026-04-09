@@ -259,6 +259,7 @@ export function useGraphState(
 
   const params = usePipelineParams({
     setNodes,
+    setEdges,
     portsMap,
     pipelineSchemas,
     isStreamingRef,
