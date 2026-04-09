@@ -41,6 +41,7 @@ const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
   "tuple",
   "reroute",
   "image",
+  "audio",
   "vace",
   "midi",
   "bool",
@@ -281,6 +282,11 @@ export function useValueForwarding(
         valuesToForward.push({
           handleName: mediaHandleName,
           value: node.data.imagePath || "",
+        });
+      } else if (node.data.nodeType === "audio") {
+        valuesToForward.push({
+          handleName: "value",
+          value: node.data.audioPath || "",
         });
       } else if (node.data.nodeType === "midi") {
         const midiChannels = node.data.midiChannels;

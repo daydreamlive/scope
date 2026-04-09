@@ -14,6 +14,7 @@ export const COLOR_BOOLEAN = "#34d399"; // emerald-400
 export const COLOR_TRIGGER = "#f97316"; // orange-500
 export const COLOR_VACE = "#a78bfa"; // violet-400
 export const COLOR_LORA = "#f472b6"; // pink-400
+export const COLOR_AUDIO = "#34d399"; // emerald-400
 export const COLOR_IMAGE = COLOR_STRING; // images are string-typed paths
 export const COLOR_DOT = "#fafafa";
 export const COLOR_DEFAULT = "#9ca3af"; // gray-400
@@ -29,6 +30,7 @@ export const PARAM_TYPE_COLORS: Record<string, string> = {
   float: COLOR_NUMBER,
   int: COLOR_NUMBER,
   video_path: COLOR_STREAM,
+  audio_path: COLOR_AUDIO,
 };
 
 /** Port-level colors for stream handles (video, VACE, source, sink, etc.). */

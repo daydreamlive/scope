@@ -103,7 +103,8 @@ export interface FlowNodeData {
     | "tempo"
     | "prompt_list"
     | "prompt_blend"
-    | "scheduler";
+    | "scheduler"
+    | "audio";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -255,6 +256,10 @@ export interface FlowNodeData {
   tupleEnforceOrder?: boolean;
   /** For tuple nodes: ordering direction */
   tupleOrderDirection?: "asc" | "desc";
+
+  /* ── Audio node fields ── */
+  /** For audio nodes: the selected audio asset path */
+  audioPath?: string;
 
   /* ── Image / Media node fields ── */
   /** For image/media nodes: the selected asset path (image or video) */
@@ -904,6 +909,7 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "tuple",
   "reroute",
   "image",
+  "audio",
   "vace",
   "lora",
   "midi",

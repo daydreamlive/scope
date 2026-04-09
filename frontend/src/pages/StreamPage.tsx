@@ -2396,6 +2396,31 @@ export function StreamPage() {
       // Use settings.resolution if available, otherwise fall back to videoResolution
       let resolution = settings.resolution || videoResolution;
 
+      // In graph mode, prefer the pipeline node's height/width over
+      // settings.resolution (which may be stale from a previous pipeline/mode).
+      // Falls back to schema defaults for any dimension not explicitly set.
+      if ((graphMode || nonLinearGraph) && graphConfigForStream?.ui_state) {
+        const nParams = graphConfigForStream.ui_state.node_params as
+          | Record<string, Record<string, unknown>>
+          | undefined;
+        if (nParams) {
+          const mainNode = graphConfigForStream.nodes.find(
+            n => n.type === "pipeline" && n.pipeline_id === pipelineIdToUse
+          );
+          const mainBag = mainNode ? nParams[mainNode.id] : undefined;
+          const schemaDefaults = getDefaults(pipelineIdToUse, currentMode);
+          const h =
+            typeof mainBag?.height === "number"
+              ? Math.round(mainBag.height)
+              : schemaDefaults.height;
+          const w =
+            typeof mainBag?.width === "number"
+              ? Math.round(mainBag.width)
+              : schemaDefaults.width;
+          resolution = { height: h, width: w };
+        }
+      }
+
       // Adjust resolution to be divisible by required scale factor for the pipeline
       if (resolution) {
         const { resolution: adjustedResolution, wasAdjusted } =
@@ -2870,10 +2895,9 @@ export function StreamPage() {
       }
 
       // Override initialParameters with graph node params for the main pipeline.
-      // When a workflow is imported into graph mode, per-node params (denoising
-      // steps, noise scale, etc.) are stored in ui_state.node_params but not
-      // reflected in settings.*. Apply them so the backend receives the correct
-      // values at stream start.
+      // This includes both manually-set params (from the sidebar) and params
+      // forwarded from connected graph nodes (e.g. image/audio nodes).
+      // Skip load-time params (height/width) and internally-managed keys.
       if ((graphMode || nonLinearGraph) && graphConfigForStream?.ui_state) {
         const nodeParams = graphConfigForStream.ui_state.node_params as
           | Record<string, Record<string, unknown>>
@@ -2884,20 +2908,22 @@ export function StreamPage() {
           );
           const mainNodeParams = mainNode ? nodeParams[mainNode.id] : undefined;
           if (mainNodeParams) {
-            const RUNTIME_PARAMS = [
-              "denoising_step_list",
-              "noise_scale",
-              "noise_controller",
-              "manage_cache",
-              "kv_cache_attention_bias",
-              "vace_enabled",
-              "vace_context_scale",
-              "vace_use_input_video",
-            ] as const;
-            for (const key of RUNTIME_PARAMS) {
-              if (mainNodeParams[key] !== undefined) {
-                (initialParameters as Record<string, unknown>)[key] =
-                  mainNodeParams[key];
+            const SKIP_PARAMS = new Set([
+              "height",
+              "width",
+              "prompts",
+              "pipeline_ids",
+              "produces_video",
+              "produces_audio",
+              "recording",
+            ]);
+            for (const [key, value] of Object.entries(mainNodeParams)) {
+              if (
+                value !== undefined &&
+                !SKIP_PARAMS.has(key) &&
+                !key.startsWith("__")
+              ) {
+                (initialParameters as Record<string, unknown>)[key] = value;
               }
             }
           }

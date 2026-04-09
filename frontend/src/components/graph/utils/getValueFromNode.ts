@@ -245,6 +245,20 @@ export function getAnyValueFromNode(
     if (!vals || isNaN(idx) || idx >= vals.length) return null;
     return vals[idx];
   }
+  if (t === "image") {
+    if (!sourceHandleId) return node.data.imagePath || null;
+    const parsed = parseHandleId(sourceHandleId);
+    if (!parsed) return null;
+    if (
+      parsed.name === "value" ||
+      parsed.name === "video_value"
+    )
+      return node.data.imagePath || null;
+    return null;
+  }
+  if (t === "audio") {
+    return node.data.audioPath || null;
+  }
   if (t === "subgraph" || t === "subgraph_input") {
     const pv = node.data.portValues as Record<string, unknown> | undefined;
     if (!pv || !sourceHandleId) return null;

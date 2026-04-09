@@ -31,6 +31,7 @@ type NodeTypeKey =
   | "tuple"
   | "output"
   | "image"
+  | "audio"
   | "vace"
   | "lora"
   | "midi"
@@ -261,6 +262,18 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       nodeType: "image",
       imagePath: "",
       mediaType: "image",
+      parameterOutputs: [{ name: "value", type: "string", defaultValue: "" }],
+    },
+  },
+  audio: {
+    type: "audio",
+    idPrefix: "audio",
+    defaultX: 50,
+    style: { width: 160, height: 100 },
+    data: {
+      label: "Audio",
+      nodeType: "audio",
+      audioPath: "",
       parameterOutputs: [{ name: "value", type: "string", defaultValue: "" }],
     },
   },
@@ -541,6 +554,7 @@ export function useNodeFactories({
         | "tuple"
         | "reroute"
         | "image"
+        | "audio"
         | "vace"
         | "lora"
         | "midi"

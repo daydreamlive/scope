@@ -39,6 +39,17 @@ function getParamTypeColor(
   return PARAM_TYPE_COLORS[type] || COLOR_DEFAULT;
 }
 
+function displayFilePath(value: string, maxLen = 24): string {
+  if (!value.includes("/") && !value.includes("\\")) return value;
+  const basename = value.split(/[/\\]/).pop() ?? value;
+  if (basename.length <= maxLen) return basename;
+  const ext = basename.includes(".")
+    ? basename.slice(basename.lastIndexOf("."))
+    : "";
+  const stem = basename.slice(0, basename.length - ext.length);
+  return stem.slice(0, maxLen - ext.length - 1) + "\u2026" + ext;
+}
+
 export function PipelineNode({
   id,
   data,
@@ -254,7 +265,14 @@ export function PipelineNode({
               >
                 <NodeParamRow label={param.label || param.name}>
                   {isConnected ? (
-                    <NodePill className="opacity-50">
+                    <NodePill
+                      className="opacity-50"
+                      title={
+                        currentValue !== undefined
+                          ? String(currentValue)
+                          : undefined
+                      }
+                    >
                       {param.type === "boolean"
                         ? currentValue !== undefined
                           ? String(Boolean(currentValue))
@@ -266,7 +284,9 @@ export function PipelineNode({
                                 ? currentValue
                                 : currentValue.toFixed(3)
                               : String(currentValue)
-                            : String(currentValue)
+                            : param.type === "string"
+                              ? displayFilePath(String(currentValue))
+                              : String(currentValue)
                           : "—"}
                     </NodePill>
                   ) : param.type === "string" ? (
