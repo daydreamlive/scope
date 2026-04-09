@@ -351,6 +351,12 @@ export function useGraphPersistence({
       setStatus(`Imported from ${fileName}`);
       setFitViewTrigger(c => c + 1);
 
+      // Restore non-default source modes that need external setup
+      // (camera permission, Spout/NDI/Syphon hardware connection). File mode
+      // ("video") is the default and is handled by SourceNode's auto-init
+      // effect — re-dispatching it here would race with and cancel the init
+      // since handlePerNodeSourceModeChange unconditionally stops any existing
+      // stream for the node.
       const sourceNodes = flowNodes.filter(n => n.data.nodeType === "source");
       const modesToRestore = sourceNodes
         .map(n => ({
@@ -358,7 +364,8 @@ export function useGraphPersistence({
           nodeId: n.id,
         }))
         .filter(
-          (entry): entry is { mode: string; nodeId: string } => !!entry.mode
+          (entry): entry is { mode: string; nodeId: string } =>
+            !!entry.mode && entry.mode !== "video"
         );
       if (modesToRestore.length > 0) {
         setTimeout(() => {
