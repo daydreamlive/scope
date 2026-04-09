@@ -774,9 +774,7 @@ async def _handle_control_message(
         try:
             if input_mode != "text":
                 for input_idx, source_node_id in enumerate(source_node_ids):
-                    channels = await _request_stream_channels(
-                        session, direction="bidirectional"
-                    )
+                    channels = await _request_stream_channels(session, direction="in")
                     inbound_url: str | None = None
                     for channel in channels:
                         ch = {
