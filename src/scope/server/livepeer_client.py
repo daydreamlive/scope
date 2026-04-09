@@ -204,7 +204,10 @@ class LivepeerClient:
         self._events_task = asyncio.create_task(self._events_loop())
         self._ping_task = asyncio.create_task(self._ping_loop())
 
-        logger.info("Connected to Livepeer LV2V")
+        logger.info(
+            "Connected to Scope on Livepeer (%s)",
+            self._connection_id or "unknown",
+        )
 
     @staticmethod
     def _normalize_orchestrator_url(value: str | None) -> str | None:

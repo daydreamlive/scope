@@ -74,18 +74,16 @@ async def lifespan(_app: FastAPI):
 app = FastAPI(
     lifespan=lifespan,
     title="Livepeer Runner App",
-    description="Receives LV2V job info over WebSocket and subscribes to control/media channels",
+    description="Receives job info over WebSocket and subscribes to control/media channels",
 )
 
 
-class Lv2vJobInfo(BaseModel):
-    """Shape of the LV2V orchestrator HTTP response forwarded by the client."""
+class ScopeJobInfo(BaseModel):
+    """Shape of the orchestrator HTTP response forwarded by the client."""
 
     manifest_id: str | None = None
     control_url: str | None = None
     events_url: str | None = None
-    publish_url: str | None = None
-    subscribe_url: str | None = None
     params: dict[str, Any] | None = None
 
 
@@ -1007,7 +1005,7 @@ async def cleanup_session() -> dict[str, Any]:
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
-    """Accept a WebSocket connection, read LV2V job info, then subscribe to the control channel."""
+    """Accept a WebSocket connection, read job info, then subscribe to the control channel."""
     await ws.accept()
     logger.info("WebSocket client connected")
 
