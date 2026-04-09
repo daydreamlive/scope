@@ -48,3 +48,19 @@
   display: none;
   pointer-events: none;
 }
+
+/* Shrink the visible area of node handles while keeping the full hit area.
+   The Handle element stays 10x10 for easy edge drawing, but the mask limits
+   the visible background to a 6px circle centered on the border. */
+.react-flow__handle {
+  -webkit-mask-image: radial-gradient(
+    circle at center,
+    #000 3px,
+    transparent 3.5px
+  );
+  mask-image: radial-gradient(
+    circle at center,
+    #000 3px,
+    transparent 3.5px
+  );
+}
