@@ -29,9 +29,12 @@ Example (YOLO plugin + Longlive with shared input video):
 
 from __future__ import annotations
 
-from typing import Literal
+import logging
+from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+logger = logging.getLogger(__name__)
 
 
 class GraphNode(BaseModel):
@@ -72,7 +75,13 @@ class GraphNode(BaseModel):
 
 
 class GraphEdge(BaseModel):
-    """An edge connecting an output port to an input port."""
+    """An edge connecting an output port to an input port.
+
+    Accepts both the current schema (``from``, ``from_port``, ``to_node``,
+    ``to_port``) and the legacy schema (``source``, ``target``) for backwards
+    compatibility with older Scope desktop clients.  When the legacy keys are
+    present the port names default to ``"video"``.
+    """
 
     from_node: str = Field(..., alias="from", description="Source node id")
     from_port: str = Field(
@@ -86,6 +95,55 @@ class GraphEdge(BaseModel):
     )
 
     model_config = {"populate_by_name": True}
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_legacy_edge(cls, data: Any) -> Any:
+        """Map legacy ``source``/``target`` keys to the current schema.
+
+        Older clients send edges as::
+
+            {"source": "input", "target": "pipeline"}
+
+        The current schema requires ``from``, ``from_port``, ``to_node``,
+        ``to_port``.  This validator accepts any mix of legacy and current keys,
+        mapping them where the canonical field is absent.  Port names default to
+        ``"video"`` when the legacy payload omits port information.
+        """
+        if not isinstance(data, dict):
+            return data
+
+        has_legacy = "source" in data or "target" in data
+        if not has_legacy:
+            return data
+
+        logger.warning(
+            "GraphEdge: received legacy edge schema (source/target). "
+            "Please update the Scope client to send 'from'/'to_node' edges. "
+            "Coercing automatically. source=%r target=%r",
+            data.get("source"),
+            data.get("target"),
+        )
+
+        data = dict(data)  # make a mutable copy
+
+        # Map source → from (only when 'from' is absent)
+        if "source" in data and "from" not in data:
+            data["from"] = data.pop("source")
+        else:
+            data.pop("source", None)
+
+        # Map target → to_node (only when 'to_node' is absent)
+        if "target" in data and "to_node" not in data:
+            data["to_node"] = data.pop("target")
+        else:
+            data.pop("target", None)
+
+        # Apply port defaults when the caller omitted them
+        data.setdefault("from_port", data.pop("source_port", "video"))
+        data.setdefault("to_port", data.pop("target_port", "video"))
+
+        return data
 
 
 class GraphConfig(BaseModel):
