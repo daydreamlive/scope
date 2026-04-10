@@ -7,10 +7,13 @@ cloud-specific state across its own fields.
 
 import logging
 import queue
+from fractions import Fraction
 from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+
+from .media_packets import MediaTimestamp, VideoPacket
 
 if TYPE_CHECKING:
     from aiortc.mediastreams import VideoFrame
@@ -137,11 +140,31 @@ class CloudRelay:
         try:
             frame_np = frame.to_ndarray(format="rgb24")
             try:
-                self._frame_queue.put_nowait(frame_np)
+                self._frame_queue.put_nowait(
+                    VideoPacket(
+                        tensor=torch.from_numpy(frame_np),
+                        timestamp=MediaTimestamp(
+                            pts=frame.pts,
+                            time_base=Fraction(frame.time_base)
+                            if frame.time_base is not None
+                            else None,
+                        ),
+                    )
+                )
             except queue.Full:
                 try:
                     self._frame_queue.get_nowait()
-                    self._frame_queue.put_nowait(frame_np)
+                    self._frame_queue.put_nowait(
+                        VideoPacket(
+                            tensor=torch.from_numpy(frame_np),
+                            timestamp=MediaTimestamp(
+                                pts=frame.pts,
+                                time_base=Fraction(frame.time_base)
+                                if frame.time_base is not None
+                                else None,
+                            ),
+                        )
+                    )
                 except queue.Empty:
                     pass
         except Exception as e:
@@ -189,11 +212,10 @@ class CloudRelay:
     # Consuming received output
     # ------------------------------------------------------------------
 
-    def get_frame(self) -> torch.Tensor | None:
+    def get_frame(self) -> VideoPacket | None:
         """Get the next video frame received from cloud, or None."""
         try:
-            frame_np = self._frame_queue.get_nowait()
-            return torch.from_numpy(frame_np)
+            return self._frame_queue.get_nowait()
         except queue.Empty:
             return None
 

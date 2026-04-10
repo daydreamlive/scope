@@ -8,11 +8,11 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
-import torch
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import VideoFrame
 
+from .media_packets import VideoPacket, ensure_video_packet
 from .pipeline_manager import PipelineManager
 
 if TYPE_CHECKING:
@@ -96,23 +96,27 @@ class QueueVideoTrack(MediaStreamTrack):
 
         while True:
             try:
-                frame_tensor: torch.Tensor = self._queue.get_nowait()
+                packet = ensure_video_packet(self._queue.get_nowait())
             except queue.Empty:
                 await asyncio.sleep(0.01)
                 if self.readyState != "live":
                     raise MediaStreamError from None
                 continue
 
-            frame_squeezed = frame_tensor.squeeze(0)
+            frame_squeezed = packet.tensor.squeeze(0)
             if frame_squeezed.is_cuda:
                 frame_squeezed = frame_squeezed.cpu()
 
             video_frame = VideoFrame.from_ndarray(
                 frame_squeezed.numpy(), format="rgb24"
             )
-            pts, time_base = await _next_timestamp(self, self._ts)
-            video_frame.pts = pts
-            video_frame.time_base = time_base
+            if packet.timestamp.is_valid:
+                video_frame.pts = packet.timestamp.pts
+                video_frame.time_base = packet.timestamp.time_base
+            else:
+                pts, time_base = await _next_timestamp(self, self._ts)
+                video_frame.pts = pts
+                video_frame.time_base = time_base
             return video_frame
 
 
@@ -144,12 +148,17 @@ class NodeOutputTrack(MediaStreamTrack):
             if self._fps_getter is not None:
                 self._ts["fps"] = self._fps_getter(fp)
 
-            frame_tensor = self._frame_getter(fp)
-            if frame_tensor is not None:
-                frame = VideoFrame.from_ndarray(frame_tensor.numpy(), format="rgb24")
-                pts, time_base = await _next_timestamp(self, self._ts)
-                frame.pts = pts
-                frame.time_base = time_base
+            packet = self._frame_getter(fp)
+            if packet is not None:
+                packet = ensure_video_packet(packet)
+                frame = VideoFrame.from_ndarray(packet.tensor.numpy(), format="rgb24")
+                if packet.timestamp.is_valid:
+                    frame.pts = packet.timestamp.pts
+                    frame.time_base = packet.timestamp.time_base
+                else:
+                    pts, time_base = await _next_timestamp(self, self._ts)
+                    frame.pts = pts
+                    frame.time_base = time_base
                 return frame
 
             await asyncio.sleep(0.01)
@@ -164,7 +173,7 @@ def SinkOutputTrack(
     """Create a NodeOutputTrack that reads from a sink node's output queue."""
     return NodeOutputTrack(
         frame_processor=frame_processor,
-        frame_getter=lambda fp: fp.get_from_sink(sink_node_id),
+        frame_getter=lambda fp: fp.get_packet_from_sink(sink_node_id),
         fps_getter=lambda fp: fp.get_fps_for_sink(sink_node_id),
     )
 
@@ -305,21 +314,27 @@ class VideoProcessingTrack(MediaStreamTrack):
                     paused = self._paused
 
                 frame = None
+                packet: VideoPacket | None = None
                 if paused:
                     # When video is paused, return the last frame to freeze the playback video
                     frame = self._last_frame
                 else:
-                    frame_tensor = self.frame_processor.get()
+                    packet = self.frame_processor.get_packet()
 
-                    if frame_tensor is not None:
+                    if packet is not None:
+                        packet = ensure_video_packet(packet)
                         frame = VideoFrame.from_ndarray(
-                            frame_tensor.numpy(), format="rgb24"
+                            packet.tensor.numpy(), format="rgb24"
                         )
 
                 if frame is not None:
-                    pts, time_base = await _next_timestamp(self, self._ts)
-                    frame.pts = pts
-                    frame.time_base = time_base
+                    if packet is not None and packet.timestamp.is_valid:
+                        frame.pts = packet.timestamp.pts
+                        frame.time_base = packet.timestamp.time_base
+                    else:
+                        pts, time_base = await _next_timestamp(self, self._ts)
+                        frame.pts = pts
+                        frame.time_base = time_base
 
                     with self._frame_lock:
                         self._last_frame = frame

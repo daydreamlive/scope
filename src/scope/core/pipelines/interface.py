@@ -70,9 +70,15 @@ class Pipeline(ABC):
                 (1, H, W, C) in THWC format with values in [0, 255] range (uint8).
                 The list contains one tensor per frame. Other common parameters include
                 prompts, init_cache, etc.
+                Timestamp-aware pipelines may also read:
+                - "video_timestamps": list of per-frame timestamp metadata
+                - "audio_timestamps": optional per-chunk audio timestamp metadata
 
         Returns:
             A dictionary containing the processed video tensor under the "video" key.
             The video tensor is in THWC format and [0, 1] range.
+            Pipelines may optionally return:
+            - "video_timestamps": per-frame timestamp metadata for "video"
+            - "audio_timestamps": per-chunk timestamp metadata for "audio"
         """
         pass

@@ -44,6 +44,7 @@ import scope.server.app as scope_app_module
 from scope.server.app import app as scope_app
 from scope.server.app import lifespan as scope_lifespan
 from scope.server.frame_processor import FrameProcessor
+from scope.server.media_packets import ensure_video_packet
 
 logger = logging.getLogger(__name__)
 scope_client: httpx.AsyncClient | None = None
@@ -424,17 +425,20 @@ async def _media_output_loop(
     try:
         while not stop_event.is_set():
             # TODO make this blocking; we busy-wait a LOT
+            frame_item = None
             if record_node_id is not None:
-                frame_tensor = frame_processor.sink_manager.recording.get(
-                    record_node_id
-                )
+                frame_item = frame_processor.sink_manager.recording.get(record_node_id)
+                if frame_item is None:
+                    await asyncio.sleep(0.01)  # no frame yet, wait a bit
+                    continue
             elif sink_node_id is not None:
-                frame_tensor = frame_processor.get_from_sink(sink_node_id)
+                frame_item = frame_processor.get_packet_from_sink(sink_node_id)
             else:
-                frame_tensor = frame_processor.get()
-            if frame_tensor is None:
+                frame_item = frame_processor.get_packet()
+            if frame_item is None:
                 await asyncio.sleep(0.01)  # no frame yet, wait a bit
                 continue
+            frame_packet = ensure_video_packet(frame_item)
 
             target_queue_size: int | None = None
             # TODO: Unify sink/record queue-size lookup into a single output-track path.
@@ -484,10 +488,16 @@ async def _media_output_loop(
                 stream_fps = frame_processor.get_fps()
                 frame_ptime = 1.0 / stream_fps if stream_fps > 0 else 1.0 / fps
 
-            video_frame = VideoFrame.from_ndarray(frame_tensor.numpy(), format="rgb24")
-            video_frame.pts = next_pts
-            video_frame.time_base = REMOTE_VIDEO_TIME_BASE
-            next_pts += int(frame_ptime * REMOTE_VIDEO_CLOCK_RATE)
+            video_frame = VideoFrame.from_ndarray(
+                frame_packet.tensor.numpy(), format="rgb24"
+            )
+            if frame_packet.timestamp.is_valid:
+                video_frame.pts = frame_packet.timestamp.pts
+                video_frame.time_base = frame_packet.timestamp.time_base
+            else:
+                video_frame.pts = next_pts
+                video_frame.time_base = REMOTE_VIDEO_TIME_BASE
+                next_pts += int(frame_ptime * REMOTE_VIDEO_CLOCK_RATE)
             await publisher.write_frame(video_frame)
     except asyncio.CancelledError:
         raise

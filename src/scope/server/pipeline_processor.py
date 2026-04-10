@@ -6,6 +6,7 @@ import random
 import threading
 import time
 from collections import deque
+from fractions import Fraction
 from typing import Any
 
 import torch
@@ -13,6 +14,7 @@ import torch
 from scope.core.pipelines.controller import parse_ctrl_input
 
 from .kafka_publisher import publish_event
+from .media_packets import MediaTimestamp, VideoPacket, ensure_video_packet
 from .pipeline_manager import PipelineNotAvailableException
 from .tempo_sync import get_beat_boundary
 
@@ -313,16 +315,16 @@ class PipelineProcessor:
 
     def prepare_chunk(
         self, input_queue_ref: queue.Queue, chunk_size: int
-    ) -> list[torch.Tensor]:
+    ) -> list[VideoPacket]:
         """
         Sample frames uniformly from one queue (used when only video port is present).
         """
         step = input_queue_ref.qsize() / chunk_size
         indices = [round(i * step) for i in range(chunk_size)]
-        video_frames = []
+        video_frames: list[VideoPacket] = []
         last_idx = indices[-1]
         for i in range(last_idx + 1):
-            frame = input_queue_ref.get_nowait()
+            frame = ensure_video_packet(input_queue_ref.get_nowait())
             if i in indices:
                 video_frames.append(frame)
         return video_frames
@@ -331,7 +333,7 @@ class PipelineProcessor:
         self,
         input_queues_ref: dict[str, queue.Queue],
         chunk_size: int,
-    ) -> dict[str, list[torch.Tensor]]:
+    ) -> dict[str, list[VideoPacket]]:
         """
         Sample chunk_size frames uniformly from each wired queue.
 
@@ -342,6 +344,36 @@ class PipelineProcessor:
             port: self.prepare_chunk(q, chunk_size)
             for port, q in input_queues_ref.items()
         }
+
+    @staticmethod
+    def _normalize_timestamps(
+        raw_timestamps: Any, expected_len: int
+    ) -> list[MediaTimestamp]:
+        if not isinstance(raw_timestamps, list):
+            return [MediaTimestamp() for _ in range(expected_len)]
+
+        normalized: list[MediaTimestamp] = []
+        for ts in raw_timestamps[:expected_len]:
+            if isinstance(ts, MediaTimestamp):
+                normalized.append(ts)
+                continue
+            if isinstance(ts, dict):
+                pts = ts.get("pts")
+                time_base = ts.get("time_base")
+                if time_base is not None and not isinstance(time_base, Fraction):
+                    try:
+                        time_base = Fraction(time_base)
+                    except Exception:
+                        time_base = None
+                normalized.append(MediaTimestamp(pts=pts, time_base=time_base))
+                continue
+            normalized.append(MediaTimestamp())
+
+        if len(normalized) < expected_len:
+            normalized.extend(
+                MediaTimestamp() for _ in range(expected_len - len(normalized))
+            )
+        return normalized
 
     def process_chunk(self):
         """Process a single chunk of frames."""
@@ -423,7 +455,7 @@ class PipelineProcessor:
                 prepare_params["video"] = True
             requirements = self.pipeline.prepare(**prepare_params)
 
-        chunks: dict[str, list[torch.Tensor]] = {}
+        chunks: dict[str, list[VideoPacket]] = {}
         if requirements is not None:
             current_chunk_size = requirements.input_size
             with self.input_queue_lock:
@@ -465,8 +497,12 @@ class PipelineProcessor:
 
             # Fill call_params from stream chunks (port names are set by graph edges)
             if chunks:
-                for port, frame_list in chunks.items():
-                    call_params[port] = frame_list
+                for port, packet_list in chunks.items():
+                    call_params[port] = [packet.tensor for packet in packet_list]
+                    ts_key = (
+                        "video_timestamps" if port == "video" else f"{port}_timestamps"
+                    )
+                    call_params[ts_key] = [packet.timestamp for packet in packet_list]
 
             if self.tempo_sync is not None:
                 call_params = self._apply_tempo_sync(call_params)
@@ -571,10 +607,24 @@ class PipelineProcessor:
                         .detach()
                     )
                 frames = [value[i].unsqueeze(0) for i in range(value.shape[0])]
-                for frame in frames:
+                ts_key = f"{port}_timestamps"
+                raw_timestamps = output_dict.get(ts_key)
+                if port == "video" and raw_timestamps is None:
+                    raw_timestamps = output_dict.get("video_timestamps")
+                timestamps = self._normalize_timestamps(raw_timestamps, len(frames))
+                for idx, frame in enumerate(frames):
+                    packet = VideoPacket(tensor=frame, timestamp=timestamps[idx])
                     for q in queues:
                         try:
-                            q.put_nowait(frame if q is queues[0] else frame.clone())
+                            if q is queues[0]:
+                                q.put_nowait(packet)
+                            else:
+                                q.put_nowait(
+                                    VideoPacket(
+                                        tensor=packet.tensor.clone(),
+                                        timestamp=packet.timestamp,
+                                    )
+                                )
                         except queue.Full:
                             logger.debug(
                                 f"Output queue full for {self.pipeline_id} port '{port}', dropping frame"
@@ -597,7 +647,11 @@ class PipelineProcessor:
             # "vace_input_frames": ..., "vace_input_masks": ...} and the extra
             # entries need to reach the consuming pipeline as parameters.
             extra_params = {
-                k: v for k, v in output_dict.items() if k not in self.output_queues
+                k: v
+                for k, v in output_dict.items()
+                if k not in self.output_queues
+                and k not in {"video_timestamps", "audio_timestamps"}
+                and not k.endswith("_timestamps")
             }
             if extra_params and self.output_consumers:
                 seen: set[int] = set()

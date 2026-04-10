@@ -24,6 +24,8 @@ from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import VideoFrame
 
+from .media_packets import ensure_video_packet
+
 if TYPE_CHECKING:
     from .frame_processor import FrameProcessor
     from .scope_cloud_types import ScopeCloudBackend
@@ -260,14 +262,18 @@ class CloudTrack(MediaStreamTrack):
 
         while True:
             if self.frame_processor:
-                frame_tensor = self.frame_processor.get()
-                if frame_tensor is not None:
-                    frame_np = frame_tensor.numpy()
+                frame_packet = self.frame_processor.get_packet()
+                if frame_packet is not None:
+                    packet = ensure_video_packet(frame_packet)
+                    frame_np = packet.tensor.numpy()
                     frame = VideoFrame.from_ndarray(frame_np, format="rgb24")
-
-                    pts, time_base = await self.next_timestamp()
-                    frame.pts = pts
-                    frame.time_base = time_base
+                    if packet.timestamp.is_valid:
+                        frame.pts = packet.timestamp.pts
+                        frame.time_base = packet.timestamp.time_base
+                    else:
+                        pts, time_base = await self.next_timestamp()
+                        frame.pts = pts
+                        frame.time_base = time_base
 
                     self._last_frame = frame
                     return frame
