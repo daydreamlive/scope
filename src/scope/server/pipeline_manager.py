@@ -839,7 +839,7 @@ class PipelineManager:
                 filename = Path(path).name
 
         if needs_rewrite:
-            new_path = str(assets_dir / filename)
+            new_path = (assets_dir / filename).as_posix()
             logger.warning(
                 "_sanitize_asset_path: asset path %r appears to be a local "
                 "absolute path from a different OS or filesystem. "

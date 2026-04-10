@@ -408,10 +408,7 @@ class TestSanitizeAssetPaths:
                 "strength": 0.8,
             }
             result = PipelineManager._sanitize_initial_params(params)
-        assert (
-            result["i2v_image"]
-            == "/tmp/.daydream-scope/assets/ShinraFireForce.webp"
-        )
+        assert result["i2v_image"] == "/tmp/.daydream-scope/assets/ShinraFireForce.webp"
         assert result["strength"] == 0.8
 
     def test_sanitize_initial_params_images_list(self):
