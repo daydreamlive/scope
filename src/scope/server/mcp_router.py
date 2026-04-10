@@ -130,6 +130,32 @@ async def capture_frame(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@router.get("/session/audio")
+async def capture_audio(
+    webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),
+):
+    """Capture buffered audio output as a WAV file.
+
+    Drains audio buffered by the active headless session since the last
+    capture (or session start) and returns it as a stereo 16-bit PCM
+    WAV file. Used to verify audio-producing node graphs (ACEStep,
+    audio builtins). Only works for headless sessions.
+    """
+    hs = webrtc_manager.headless_session
+    if hs is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No active headless session",
+        )
+    wav_bytes = hs.capture_audio()
+    if wav_bytes is None:
+        raise HTTPException(
+            status_code=404,
+            detail="No audio buffered yet",
+        )
+    return Response(content=wav_bytes, media_type="audio/wav")
+
+
 @router.get("/session/output.ts")
 async def stream_headless_output_ts(
     webrtc_manager: "WebRTCManager" = Depends(_get_webrtc_manager),

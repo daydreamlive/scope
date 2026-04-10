@@ -345,6 +345,13 @@ class HeadlessSession:
         self._stopped_recording_path: str | None = None
         self._media_sinks: list[HeadlessMediaSink] = []
         self.recording_manager = HeadlessRecordingAdapter(self)
+        # Headless audio capture buffer: raw (channels, samples) float32
+        # chunks drained from FrameProcessor.get_audio() and exposed via
+        # capture_audio() as a WAV file.
+        self._audio_lock = threading.Lock()
+        self._audio_chunks: list[tuple[bytes, int, int]] = []
+        self._audio_total_samples = 0
+        self._audio_sample_rate: int | None = None
 
     def start_frame_consumer(self):
         """Start a background task that continuously pulls frames to keep the
@@ -401,6 +408,28 @@ class HeadlessSession:
                 if audio_tensor is None and sample_rate is None:
                     break
                 got_any = True
+                # Buffer raw audio for /api/v1/session/audio capture.
+                if audio_tensor is not None and sample_rate and sample_rate > 0:
+                    try:
+                        import numpy as _np
+
+                        arr = audio_tensor.detach().cpu().numpy()
+                        if arr.ndim == 1:
+                            arr = arr.reshape(1, -1)
+                        if arr.shape[0] == 1:
+                            arr = _np.vstack([arr, arr])
+                        elif arr.shape[0] > 2:
+                            arr = arr[:2]
+                        arr = _np.ascontiguousarray(arr, dtype=_np.float32)
+                        num_samples = int(arr.shape[1])
+                        with self._audio_lock:
+                            self._audio_chunks.append(
+                                (arr.tobytes(), num_samples, int(sample_rate))
+                            )
+                            self._audio_total_samples += num_samples
+                            self._audio_sample_rate = int(sample_rate)
+                    except Exception as exc:
+                        logger.debug("Audio buffer append failed: %s", exc)
                 for sink in self._get_sinks_snapshot():
                     try:
                         sink.on_audio_chunk(audio_tensor, sample_rate)
@@ -468,6 +497,50 @@ class HeadlessSession:
     @property
     def is_recording(self) -> bool:
         return self._recorder is not None and self._recorder.is_recording
+
+    def capture_audio(self) -> bytes | None:
+        """Return buffered audio as a WAV file and clear the buffer.
+
+        Drains the per-session audio buffer populated by ``_consume_frames``
+        and returns a mono/stereo WAV blob (16-bit PCM). Returns ``None``
+        when no audio has been buffered since the last call or session
+        start. Used by ``GET /api/v1/session/audio`` and by tests that
+        verify audio-producing node graphs.
+        """
+        import io
+        import wave
+
+        import numpy as np
+
+        with self._audio_lock:
+            if not self._audio_chunks or self._audio_sample_rate is None:
+                return None
+            chunks = list(self._audio_chunks)
+            total_samples = self._audio_total_samples
+            sample_rate = self._audio_sample_rate
+            self._audio_chunks.clear()
+            self._audio_total_samples = 0
+
+        channels = 2
+        all_samples = np.zeros((channels, total_samples), dtype=np.float32)
+        offset = 0
+        for pcm_bytes, num_samples, _sr in chunks:
+            arr = np.frombuffer(pcm_bytes, dtype=np.float32).reshape(
+                channels, num_samples
+            )
+            all_samples[:, offset : offset + num_samples] = arr
+            offset += num_samples
+
+        interleaved = np.stack([all_samples[ch] for ch in range(channels)], axis=-1)
+        int16_data = (interleaved.clip(-1.0, 1.0) * 32767).astype(np.int16)
+
+        buf = io.BytesIO()
+        with wave.open(buf, "wb") as wf:
+            wf.setnchannels(channels)
+            wf.setsampwidth(2)
+            wf.setframerate(int(sample_rate))
+            wf.writeframes(int16_data.tobytes())
+        return buf.getvalue()
 
     def download_recording(self) -> str | None:
         """Stop recording (if active) and return a copy for download.
