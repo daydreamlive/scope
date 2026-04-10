@@ -2707,10 +2707,13 @@ export function StreamPage() {
         );
       }
 
-      const loadSuccess = await loadPipeline(loadItems);
-      if (!loadSuccess) {
-        console.error("Failed to load pipeline, cannot start stream");
-        return false;
+      // Node-only graphs (no pipeline nodes) skip the pipeline load step.
+      if (loadItems.length > 0) {
+        const loadSuccess = await loadPipeline(loadItems);
+        if (!loadSuccess) {
+          console.error("Failed to load pipeline, cannot start stream");
+          return false;
+        }
       }
 
       // Check video requirements based on input mode
@@ -2815,6 +2818,18 @@ export function StreamPage() {
       const latestInfo = pipelineInfoRef.current;
       initialParameters.produces_video = latestInfo?.produces_video ?? true;
       initialParameters.produces_audio = latestInfo?.produces_audio ?? false;
+
+      // If the graph has custom nodes (ACEStep audio, etc.), force audio on.
+      // The loaded pipeline's produces_audio only reflects registry pipelines,
+      // not node-graph audio output, so it would otherwise be stuck at false.
+      if (graphConfigForStream) {
+        const hasCustomNode = graphConfigForStream.nodes.some(
+          n => n.type === "node"
+        );
+        if (hasCustomNode) {
+          initialParameters.produces_audio = true;
+        }
+      }
 
       // VACE-specific parameters
       if (graphMode || nonLinearGraph) {
