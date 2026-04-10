@@ -263,6 +263,7 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             "HF_TOKEN",
             "HF_HOME",
             "HUGGINGFACE_HUB_CACHE",
+            "DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE",
             "LIVEPEER_DEBUG",
             "UV_CACHE_DIR",
         ]

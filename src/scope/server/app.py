@@ -2800,6 +2800,7 @@ def _convert_plugin_dict_to_info(plugin_dict: dict) -> "PluginInfo":
         latest_version=plugin_dict.get("latest_version"),
         update_available=plugin_dict.get("update_available"),
         package_spec=plugin_dict.get("package_spec"),
+        bundled=plugin_dict.get("bundled", False),
     )
 
 

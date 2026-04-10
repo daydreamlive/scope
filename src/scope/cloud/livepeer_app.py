@@ -1142,11 +1142,18 @@ async def _cleanup_plugins_via_scope_client() -> dict[str, Any]:
     payload = response.json()
     plugins = payload.get("plugins", []) if isinstance(payload, dict) else []
     removed: list[str] = []
+    skipped: list[str] = []
     failed: list[dict[str, Any]] = []
 
     for plugin in plugins:
-        name = plugin.get("name") if isinstance(plugin, dict) else None
+        if not isinstance(plugin, dict):
+            continue
+
+        name = plugin.get("name")
         if not name:
+            continue
+        if plugin.get("bundled"):
+            skipped.append(name)
             continue
         try:
             uninstall = await client.delete(f"/api/v1/plugins/{name}", timeout=60.0)
@@ -1163,7 +1170,12 @@ async def _cleanup_plugins_via_scope_client() -> dict[str, Any]:
         except Exception as exc:
             failed.append({"name": name, "error": str(exc)})
 
-    return {"removed": removed, "failed": failed, "total": len(plugins)}
+    return {
+        "removed": removed,
+        "skipped": skipped,
+        "failed": failed,
+        "total": len(plugins),
+    }
 
 
 def _cleanup_assets_dir() -> dict[str, Any]:
