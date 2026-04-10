@@ -302,9 +302,32 @@ export function validateConnection(
     return true;
   }
 
-  // Stream ↔ stream always ok
-  if (sourceParsed.kind === "stream" && targetParsed.kind === "stream")
-    return true;
+  // Stream ↔ stream: for custom_node edges, enforce port-type matching
+  // against the node's declared inputs/outputs. For built-in source /
+  // pipeline / sink nodes, streams are untyped (video) and always ok.
+  if (sourceParsed.kind === "stream" && targetParsed.kind === "stream") {
+    const sourceNode = nodes.find(n => n.id === connection.source);
+    const targetNode = nodes.find(n => n.id === connection.target);
+    if (!sourceNode || !targetNode) return true;
+    const srcIsCustom = sourceNode.data.nodeType === "custom_node";
+    const tgtIsCustom = targetNode.data.nodeType === "custom_node";
+    if (!srcIsCustom && !tgtIsCustom) return true;
+
+    const srcType = srcIsCustom
+      ? sourceNode.data.customNodeOutputs?.find(
+          p => p.name === sourceParsed.name
+        )?.port_type
+      : undefined;
+    const tgtType = tgtIsCustom
+      ? targetNode.data.customNodeInputs?.find(
+          p => p.name === targetParsed.name
+        )?.port_type
+      : undefined;
+
+    // If we can't look up both types, allow (assume compatible).
+    if (!srcType || !tgtType) return true;
+    return srcType === tgtType;
+  }
 
   // Param ↔ param
   if (sourceParsed.kind === "param" && targetParsed.kind === "param") {

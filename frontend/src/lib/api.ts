@@ -907,8 +907,12 @@ export const deleteApiKey = async (
 
 export interface GraphNode {
   id: string;
-  type: "source" | "pipeline" | "sink" | "record";
+  type: "source" | "pipeline" | "sink" | "record" | "node";
   pipeline_id?: string | null;
+  /** Node type ID (NodeRegistry key) when type is "node" */
+  node_type_id?: string | null;
+  /** Per-node parameter values for custom nodes */
+  params?: Record<string, unknown> | null;
   x?: number | null;
   y?: number | null;
   w?: number | null;
@@ -919,6 +923,54 @@ export interface GraphNode {
   sink_mode?: string | null;
   sink_name?: string | null;
 }
+
+export interface NodePortDef {
+  name: string;
+  port_type: string;
+  required?: boolean;
+  description?: string;
+  default_value?: unknown;
+}
+
+export interface NodeParamDef {
+  name: string;
+  param_type: "number" | "string" | "boolean" | "select";
+  default?: unknown;
+  description?: string;
+  min_value?: number | null;
+  max_value?: number | null;
+  step?: number | null;
+  options?: string[] | null;
+  convertible_to_input?: boolean;
+}
+
+export interface NodeDefinitionDto {
+  node_type_id: string;
+  display_name: string;
+  category: string;
+  description: string;
+  inputs: NodePortDef[];
+  outputs: NodePortDef[];
+  params: NodeParamDef[];
+  continuous: boolean;
+}
+
+export interface NodeDefinitionsResponse {
+  nodes: NodeDefinitionDto[];
+}
+
+export const fetchNodeDefinitions =
+  async (): Promise<NodeDefinitionsResponse> => {
+    const response = await fetch("/api/v1/nodes/definitions", {
+      method: "GET",
+    });
+    if (!response.ok) {
+      throw new Error(
+        `Failed to fetch node definitions: ${response.statusText}`
+      );
+    }
+    return response.json();
+  };
 
 export interface GraphEdge {
   from: string;
