@@ -84,14 +84,14 @@ export function PipelineNode({
   const supportsLoRA = data.supportsLoRA ?? false;
   const isStreaming = data.isStreaming ?? false;
 
-  const pipelineName = data.pipelineId || "Pipeline";
+  const pipelineName = data.pipelineId || "Model";
 
   // Inject unavailable pipelineId into options
   const isUnavailable =
     !!data.pipelineId && !pipelineIds.includes(data.pipelineId);
 
   const selectOptions = [
-    { value: "", label: "Select pipeline..." },
+    { value: "", label: "Select model..." },
     ...pipelineIds.map(pid => ({ value: pid, label: pid })),
     ...(isUnavailable
       ? [
@@ -188,7 +188,7 @@ export function PipelineNode({
       {!collapsed && (
         <NodeBody withGap>
           {/* Pipeline selector */}
-          <NodeParamRow label="Pipeline">
+          <NodeParamRow label="Model">
             <NodePillSearchableSelect
               value={data.pipelineId || ""}
               onChange={newValue => {
@@ -196,7 +196,7 @@ export function PipelineNode({
                 onPipelineSelect?.(id, newPipelineId);
               }}
               options={selectOptions}
-              placeholder="Select pipeline..."
+              placeholder="Select model..."
               disabled={isStreaming}
             />
           </NodeParamRow>
@@ -206,7 +206,7 @@ export function PipelineNode({
             <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-amber-500/10 border border-amber-500/20">
               <AlertTriangle className="h-3 w-3 text-amber-400 shrink-0" />
               <span className="text-[10px] text-amber-400">
-                Pipeline not installed
+                Model not installed
               </span>
             </div>
           )}

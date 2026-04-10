@@ -85,8 +85,8 @@ const NODE_CATALOG: NodeCatalogItem[] = [
   },
   {
     type: "pipeline",
-    name: "Pipeline",
-    description: "Processing pipeline node",
+    name: "Model",
+    description: "Processing model node",
     color: "#60a5fa",
     category: "I/O",
   },
@@ -209,7 +209,7 @@ const NODE_CATALOG: NodeCatalogItem[] = [
     type: "vace",
     name: "VACE",
     description:
-      "Bundle VACE parameters (context scale, reference images) for pipeline conditioning",
+      "Bundle VACE parameters (context scale, reference images) for model conditioning",
     color: "#a78bfa",
     category: "I/O",
   },

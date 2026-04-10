@@ -341,7 +341,7 @@ export function TempoSyncSection({
           <div className="space-y-2">
             <LabelWithTooltip
               label="Lookahead"
-              tooltip="Compensate for pipeline latency by applying parameter changes this many milliseconds before the beat boundary. Increase if visual changes arrive late; decrease if they arrive early."
+              tooltip="Compensate for model latency by applying parameter changes this many milliseconds before the beat boundary. Increase if visual changes arrive late; decrease if they arrive early."
               className="text-xs text-muted-foreground"
             />
             <div className="flex items-center gap-2">

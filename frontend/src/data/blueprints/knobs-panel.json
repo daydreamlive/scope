@@ -1,6 +1,6 @@
 {
   "name": "Knobs Panel",
-  "description": "Four knobs pre-configured for common pipeline parameters — Guidance, Steps, Strength, and Denoise — ready to wire",
+  "description": "Four knobs pre-configured for common model parameters — Guidance, Steps, Strength, and Denoise — ready to wire",
   "category": "UI",
   "color": "#38bdf8",
   "thumbnail": null,

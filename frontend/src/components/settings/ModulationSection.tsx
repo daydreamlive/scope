@@ -168,7 +168,7 @@ export function ModulationSection({
       <div className="flex items-center justify-between gap-2">
         <LabelWithTooltip
           label="Modulation"
-          tooltip="Continuously modulate pipeline parameters in sync with the beat. Select a parameter target and configure the wave shape, depth, and rate."
+          tooltip="Continuously modulate model parameters in sync with the beat. Select a parameter target and configure the wave shape, depth, and rate."
           className="text-xs text-muted-foreground"
         />
         <Toggle

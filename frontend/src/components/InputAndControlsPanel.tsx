@@ -672,7 +672,7 @@ export function InputAndControlsPanel({
               tooltip={
                 vaceEnabled && pipeline?.supportsVACE
                   ? "Select reference images for VACE conditioning. Images will guide the video generation style and content."
-                  : "Select images to send to the pipeline for conditioning."
+                  : "Select images to send to the model for conditioning."
               }
             />
             {onSendHints && refImages && refImages.length > 0 && (

@@ -163,7 +163,7 @@ export function SchemaComplexField({
         <div className="flex items-center justify-between gap-2">
           <LabelWithTooltip
             label="VACE"
-            tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, you can use reference images for R2V generation. In Video input mode, a separate toggle controls whether the input video is used for VACE conditioning or for latent initialization. Requires pipeline reload to take effect."
+            tooltip="Enable VACE (Video All-In-One Creation and Editing) support for reference image conditioning and structural guidance. When enabled, you can use reference images for R2V generation. In Video input mode, a separate toggle controls whether the input video is used for VACE conditioning or for latent initialization. Requires model reload to take effect."
             className="text-sm font-medium"
           />
           <Toggle

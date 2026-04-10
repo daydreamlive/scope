@@ -25,7 +25,7 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
   manageCache: {
     label: "Manage Cache",
     tooltip:
-      "Enables pipeline to automatically manage the cache which influences newly generated frames. Disable for manual control via Reset Cache.",
+      "Enables the model to automatically manage the cache which influences newly generated frames. Disable for manual control via Reset Cache.",
   },
   resetCache: {
     label: "Reset Cache",
@@ -84,10 +84,10 @@ export const PARAMETER_METADATA: Record<string, ParameterMetadata> = {
   },
   preprocessor: {
     label: "Preprocessor",
-    tooltip: "Select a preprocessor to apply before the main pipeline.",
+    tooltip: "Select a preprocessor to apply before the main model.",
   },
   postprocessor: {
     label: "Postprocessor",
-    tooltip: "Select a postprocessor to apply after the main pipeline.",
+    tooltip: "Select a postprocessor to apply after the main model.",
   },
 };
