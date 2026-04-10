@@ -7,6 +7,7 @@ simple frame/parameter methods used by the relay manager.
 from __future__ import annotations
 
 import asyncio
+import copy
 import inspect
 import logging
 import os
@@ -30,6 +31,7 @@ from livepeer_gateway.media_publish import (
 from livepeer_gateway.scope import StartJobRequest, start_scope
 
 from .cloud_webrtc_client import AudioOutputHandler, FrameOutputHandler
+from .pacing import MediaPacingDecision, MediaPacingState, compute_pacing_decision
 
 logger = logging.getLogger(__name__)
 LIVEPEER_ORCH_URL_ENV = "LIVEPEER_ORCH_URL"
@@ -114,6 +116,19 @@ class LivepeerClient:
             "connected_at": None,
             "api_requests_sent": 0,
             "api_requests_successful": 0,
+            "pacing": {
+                "observations": 0,
+                "valid_timestamp_frames": 0,
+                "hard_resets": 0,
+                "soft_reanchors": 0,
+                "sleep_total_s": 0.0,
+                "drift_samples": 0,
+                "drift_abs_sum_s": 0.0,
+                "drift_max_abs_s": 0.0,
+                "stall_positive_samples": 0,
+                "stall_positive_sum_s": 0.0,
+                "stall_positive_max_s": 0.0,
+            },
         }
 
     @property
@@ -506,8 +521,7 @@ class LivepeerClient:
         media_kind: str,
     ) -> None:
         """Consume output frames from Livepeer and notify callbacks."""
-        prev_video_ts: float | None = None
-        prev_dispatch_time: float | None = None
+        pacing = MediaPacingState()
         unexpected_reason: str | None = None
         try:
             async for decoded in output.frames():
@@ -524,23 +538,24 @@ class LivepeerClient:
                 if decoded_kind != "video":
                     continue
 
-                # Hack: Sleep here to pace output (pts based)
                 time_base = getattr(frame, "time_base", None)
                 video_ts = (
                     frame.pts * float(time_base)
                     if time_base is not None and frame.pts is not None
                     else None
                 )
-                now_monotonic = time.monotonic()
-                if prev_video_ts is not None and video_ts is not None:
-                    seconds_delta = video_ts - prev_video_ts
-                    if seconds_delta > 0 and prev_dispatch_time is not None:
-                        elapsed = now_monotonic - prev_dispatch_time
-                        wait = seconds_delta - elapsed
-                        if wait > 0:
-                            await asyncio.sleep(wait)
-                prev_video_ts = video_ts
-                prev_dispatch_time = time.monotonic()
+                decision = compute_pacing_decision(
+                    pacing,
+                    media_ts=video_ts,
+                    now_monotonic=time.monotonic(),
+                )
+                # Keep observability in lock-step with every pacing decision.
+                self._record_pacing_observation(decision)
+                if decision.sleep_s > 0:
+                    await asyncio.sleep(decision.sleep_s)
+                # Track actual dispatch time (after optional sleep) so the next
+                # wall_delta reflects real scheduling delay.
+                pacing.prev_wall_monotonic = time.monotonic()
                 if 0 <= output_track_index < len(self.output_handlers):
                     self.output_handlers[output_track_index].handle_frame(frame)
                 else:
@@ -829,10 +844,38 @@ class LivepeerClient:
         await self._shutdown()
 
     def get_stats(self) -> dict[str, Any]:
-        stats = dict(self._stats)
+        stats = copy.deepcopy(self._stats)
         if stats["connected_at"] is not None:
             stats["uptime_seconds"] = time.time() - stats["connected_at"]
         return stats
+
+    def _record_pacing_observation(self, decision: MediaPacingDecision) -> None:
+        pacing = self._stats.get("pacing")
+        if not isinstance(pacing, dict):
+            return
+        pacing["observations"] += 1
+        if decision.has_valid_ts:
+            pacing["valid_timestamp_frames"] += 1
+        if decision.hard_reset:
+            pacing["hard_resets"] += 1
+        if decision.soft_reanchor:
+            pacing["soft_reanchors"] += 1
+        pacing["sleep_total_s"] += decision.sleep_s
+
+        if decision.drift_s is not None:
+            abs_drift = abs(decision.drift_s)
+            pacing["drift_samples"] += 1
+            pacing["drift_abs_sum_s"] += abs_drift
+            pacing["drift_max_abs_s"] = max(pacing["drift_max_abs_s"], abs_drift)
+
+        # Positive stall_delta captures per-frame wall-clock stalls even when
+        # cumulative drift stays bounded by later catch-up.
+        if decision.stall_delta_s is not None and decision.stall_delta_s > 0:
+            pacing["stall_positive_samples"] += 1
+            pacing["stall_positive_sum_s"] += decision.stall_delta_s
+            pacing["stall_positive_max_s"] = max(
+                pacing["stall_positive_max_s"], decision.stall_delta_s
+            )
 
     async def _shutdown(
         self,
