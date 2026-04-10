@@ -764,9 +764,23 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 input_masks_data.shape
             )
             if mask_channels != 1:
-                raise ValueError(
-                    f"VaceEncodingBlock._encode_with_conditioning: vace_input_masks must have 1 channel, got {mask_channels}"
-                )
+                if mask_channels == 3:
+                    # Depth maps from video-depth-anything arrive as 3-channel RGB
+                    # (depth value replicated across R/G/B).  Convert to single-channel
+                    # grayscale by averaging so downstream VACE encoding works correctly.
+                    import logging
+                    logging.getLogger(__name__).warning(
+                        "VaceEncodingBlock._encode_with_conditioning: vace_input_masks has 3 "
+                        "channels (likely an RGB depth map). Auto-converting to single-channel "
+                        "by averaging. Wire a grayscale source to avoid this conversion."
+                    )
+                    # Shape: [B, 3, F, H, W] -> [B, 1, F, H, W]
+                    input_masks_data = input_masks_data.mean(dim=1, keepdim=True)
+                    mask_channels = 1
+                else:
+                    raise ValueError(
+                        f"VaceEncodingBlock._encode_with_conditioning: vace_input_masks must have 1 channel, got {mask_channels}"
+                    )
             if (
                 mask_frames != num_frames
                 or mask_height != height
