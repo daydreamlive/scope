@@ -84,7 +84,7 @@ export function PipelineNode({
   const supportsLoRA = data.supportsLoRA ?? false;
   const isStreaming = data.isStreaming ?? false;
 
-  const pipelineName = data.pipelineId || "Pipeline";
+  const pipelineName = data.pipelineId || "Node";
 
   // Inject unavailable pipelineId into options
   const isUnavailable =
@@ -187,8 +187,8 @@ export function PipelineNode({
       />
       {!collapsed && (
         <NodeBody withGap>
-          {/* Pipeline selector */}
-          <NodeParamRow label="Pipeline">
+          {/* Node type selector (video pipeline model) */}
+          <NodeParamRow label="Model">
             <NodePillSearchableSelect
               value={data.pipelineId || ""}
               onChange={newValue => {

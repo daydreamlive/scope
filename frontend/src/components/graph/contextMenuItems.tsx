@@ -96,10 +96,10 @@ export function buildPaneMenuItems(deps: {
       keywords: ["input", "camera", "video"],
     },
     {
-      label: "Pipeline",
+      label: "Node",
       icon: <Workflow />,
       onClick: () => handleNodeTypeSelect("pipeline"),
-      keywords: ["process", "effect", "filter"],
+      keywords: ["process", "effect", "filter", "pipeline"],
     },
     {
       label: "Sink",

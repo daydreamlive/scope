@@ -871,16 +871,20 @@ async def get_pipeline_schemas(
 
 @app.get("/api/v1/nodes/definitions")
 async def get_node_definitions():
-    """Return definitions for all registered backend node types.
+    """Return definitions for plain (non-pipeline) custom nodes.
 
-    Each definition includes the ``node_type_id``, ``display_name``,
-    ``category``, ``description``, ``continuous`` flag, input/output
-    ports, and editable parameters. The frontend uses this to populate
-    the add-node catalog and render custom nodes generically.
+    Pipelines share the unified :class:`NodeRegistry` but are surfaced
+    via ``GET /api/v1/pipelines/schemas`` because their rich
+    ``config_schema`` doesn't fit the compact :class:`NodeDefinition`.
     """
     from scope.core.nodes.registry import NodeRegistry
+    from scope.core.pipelines.interface import Pipeline
 
-    definitions = NodeRegistry.get_all_definitions()
+    definitions = [
+        node_class.get_definition()
+        for node_class in NodeRegistry._nodes.values()
+        if not (isinstance(node_class, type) and issubclass(node_class, Pipeline))
+    ]
     return {"nodes": [d.model_dump() for d in definitions]}
 
 

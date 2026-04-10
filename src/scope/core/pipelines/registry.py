@@ -1,8 +1,10 @@
-"""Pipeline registry for centralized pipeline management.
+"""Pipeline registry — a filtering view over :class:`NodeRegistry`.
 
-This module provides a registry pattern to eliminate if/elif chains when
-accessing pipelines by ID. It enables dynamic pipeline discovery and
-metadata retrieval.
+Pipelines and plain custom nodes share the same ``NodeRegistry._nodes``
+storage. ``PipelineRegistry`` projects that storage down to entries
+whose class is a :class:`Pipeline` subclass and exposes the same API
+the rest of the codebase always used, so existing call sites and
+plugins keep working unchanged.
 """
 
 import importlib
@@ -11,6 +13,8 @@ from typing import TYPE_CHECKING
 
 import torch
 
+from scope.core.nodes.registry import NodeRegistry
+
 if TYPE_CHECKING:
     from .interface import Pipeline
     from .schema import BasePipelineConfig
@@ -18,83 +22,49 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class PipelineRegistry:
-    """Registry for managing available pipelines."""
+def _is_pipeline(node_class: object) -> bool:
+    """Return True when ``node_class`` is a :class:`Pipeline` subclass.
 
-    _pipelines: dict[str, type["Pipeline"]] = {}
+    Lazily imports :class:`Pipeline` to dodge the import cycle between
+    the pipelines and nodes packages at module load time.
+    """
+    from .interface import Pipeline
+
+    return isinstance(node_class, type) and issubclass(node_class, Pipeline)
+
+
+class PipelineRegistry:
+    """Filtering view over :class:`NodeRegistry` for pipeline classes."""
 
     @classmethod
     def register(cls, pipeline_id: str, pipeline_class: type["Pipeline"]) -> None:
-        """Register a pipeline class with its ID.
-
-        Args:
-            pipeline_id: Unique identifier for the pipeline
-            pipeline_class: Pipeline class to register
-        """
-        cls._pipelines[pipeline_id] = pipeline_class
+        """Plant a pipeline class into the unified :class:`NodeRegistry`."""
+        NodeRegistry._nodes[pipeline_id] = pipeline_class
 
     @classmethod
     def get(cls, pipeline_id: str) -> type["Pipeline"] | None:
-        """Get a pipeline class by its ID.
-
-        Args:
-            pipeline_id: Pipeline identifier
-
-        Returns:
-            Pipeline class if found, None otherwise
-        """
-        return cls._pipelines.get(pipeline_id)
+        node_class = NodeRegistry._nodes.get(pipeline_id)
+        return node_class if _is_pipeline(node_class) else None
 
     @classmethod
     def unregister(cls, pipeline_id: str) -> bool:
-        """Remove a pipeline from the registry.
-
-        Args:
-            pipeline_id: Pipeline identifier to remove
-
-        Returns:
-            True if pipeline was removed, False if not found
-        """
-        if pipeline_id in cls._pipelines:
-            del cls._pipelines[pipeline_id]
-            return True
-        return False
+        if cls.get(pipeline_id) is None:
+            return False
+        NodeRegistry._nodes.pop(pipeline_id, None)
+        return True
 
     @classmethod
     def is_registered(cls, pipeline_id: str) -> bool:
-        """Check if a pipeline is registered.
-
-        Args:
-            pipeline_id: Pipeline identifier
-
-        Returns:
-            True if pipeline is registered, False otherwise
-        """
-        return pipeline_id in cls._pipelines
+        return cls.get(pipeline_id) is not None
 
     @classmethod
     def get_config_class(cls, pipeline_id: str) -> type["BasePipelineConfig"] | None:
-        """Get config class for a specific pipeline.
-
-        Args:
-            pipeline_id: Pipeline identifier
-
-        Returns:
-            Pydantic config class if found, None otherwise
-        """
         pipeline_class = cls.get(pipeline_id)
-        if pipeline_class is None:
-            return None
-        return pipeline_class.get_config_class()
+        return pipeline_class.get_config_class() if pipeline_class else None
 
     @classmethod
     def list_pipelines(cls) -> list[str]:
-        """Get list of all registered pipeline IDs.
-
-        Returns:
-            List of pipeline IDs
-        """
-        return list(cls._pipelines.keys())
+        return [pid for pid, c in NodeRegistry._nodes.items() if _is_pipeline(c)]
 
     @classmethod
     def chain_produces_video(cls, pipeline_ids: list[str]) -> bool:
@@ -255,30 +225,27 @@ def _initialize_registry():
 
     register_builtin_nodes()
 
-    # Load and register plugin pipelines and plugin nodes
+    # Load and register plugins. The unified register_plugin_nodes fires
+    # both register_pipelines and register_nodes hooks, so old and new
+    # plugins are picked up in one call.
     try:
         from scope.core.plugins import (
             ensure_plugins_installed,
             load_plugins,
             register_plugin_nodes,
-            register_plugin_pipelines,
         )
 
         ensure_plugins_installed()
         load_plugins()
-        register_plugin_pipelines(PipelineRegistry)
-
-        from scope.core.nodes.registry import NodeRegistry
-
-        register_plugin_nodes(NodeRegistry)
+        register_plugin_nodes()
     except Exception as e:
         logger.error(
             f"Failed to load plugins: {e}. Built-in pipelines are still available."
         )
 
-    pipeline_count = len(PipelineRegistry.list_pipelines())
     from scope.core.nodes.registry import NodeRegistry
 
+    pipeline_count = len(PipelineRegistry.list_pipelines())
     node_count = len(NodeRegistry.list_node_types())
     logger.info(
         f"Registry initialized with {pipeline_count} pipeline(s) and "
