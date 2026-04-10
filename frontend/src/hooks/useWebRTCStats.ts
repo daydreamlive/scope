@@ -18,6 +18,32 @@ interface UseWebRTCStatsProps {
   sinkMidMapRef?: React.RefObject<Record<string, string>>;
 }
 
+interface InboundVideoStats extends RTCStats {
+  mediaType?: string;
+  kind?: string;
+  mid?: string;
+  framesReceived?: number;
+  framesDecoded?: number;
+  framesPerSecond?: number;
+  bytesReceived?: number;
+  timestamp: number;
+}
+
+function isInboundVideoStats(report: RTCStats): report is InboundVideoStats {
+  if (report.type !== "inbound-rtp") return false;
+
+  const candidate = report as InboundVideoStats;
+  return (
+    // Safari exposes a slightly different RTCInboundRtpStreamStats shape than
+    // Chromium, so accept either browser's video markers/counters here.
+    candidate.mediaType === "video" ||
+    candidate.kind === "video" ||
+    typeof candidate.framesReceived === "number" ||
+    typeof candidate.framesDecoded === "number" ||
+    typeof candidate.framesPerSecond === "number"
+  );
+}
+
 export function useWebRTCStats({
   peerConnectionRef,
   isStreaming,
@@ -47,11 +73,14 @@ export function useWebRTCStats({
       const newPerSink: Record<string, WebRTCStats> = {};
 
       statsReport.forEach(report => {
-        if (report.type === "inbound-rtp" && report.mediaType === "video") {
+        if (isInboundVideoStats(report)) {
           const mid = report.mid;
           const trackKey = mid ?? "default";
 
-          const currentFrames = report.framesReceived || 0;
+          // Safari may omit framesReceived on inbound-rtp video stats while
+          // still exposing framesDecoded, so fall back to that counter.
+          const currentFrames =
+            report.framesReceived ?? report.framesDecoded ?? 0;
           const currentBytes = report.bytesReceived || 0;
           const currentTimestamp = report.timestamp;
 
@@ -73,6 +102,12 @@ export function useWebRTCStats({
             if (timeDiff > 0 && bytesDiff >= 0) {
               bitrate = (bytesDiff * 8) / timeDiff;
             }
+          }
+
+          // Some Safari builds report instantaneous FPS directly instead of
+          // enough counters to derive it from deltas.
+          if (fps <= 0 && typeof report.framesPerSecond === "number") {
+            fps = Math.max(0, Math.min(report.framesPerSecond, 60));
           }
 
           previousPerTrackRef.current[trackKey] = {
