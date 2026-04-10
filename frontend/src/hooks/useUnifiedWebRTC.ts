@@ -88,6 +88,26 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   /** Maps source node ID → RTCRtpSender for per-node track replacement */
   const sourceNodeSendersRef = useRef<Record<string, RTCRtpSender>>({});
 
+  const resetConnectionState = useCallback(() => {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+
+    dataChannelRef.current = null;
+    currentStreamRef.current = null;
+    sessionIdRef.current = null;
+    queuedCandidatesRef.current = [];
+    sinkNodeIdsRef.current = [];
+    sinkMidMapRef.current = {};
+    sourceNodeSendersRef.current = {};
+
+    setRemoteStream(null);
+    setRemoteStreams({});
+    setConnectionState("new");
+    setIsStreaming(false);
+  }, []);
+
   // Helper to get ICE servers
   const fetchIceServers = useCallback(async (): Promise<RTCConfiguration> => {
     try {
@@ -575,14 +595,23 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           });
         } catch (error) {
           console.error("[UnifiedWebRTC] Offer/answer exchange failed:", error);
+          resetConnectionState();
           setIsConnecting(false);
         }
       } catch (error) {
         console.error("[UnifiedWebRTC] Failed to start stream:", error);
+        resetConnectionState();
         setIsConnecting(false);
       }
     },
-    [isConnecting, options, fetchIceServers, sendOffer, sendIceCandidate]
+    [
+      isConnecting,
+      options,
+      fetchIceServers,
+      sendOffer,
+      sendIceCandidate,
+      resetConnectionState,
+    ]
   );
 
   const updateVideoTrack = useCallback(
@@ -708,23 +737,8 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   );
 
   const stopStream = useCallback(() => {
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-      peerConnectionRef.current = null;
-    }
-
-    dataChannelRef.current = null;
-    currentStreamRef.current = null;
-    sessionIdRef.current = null;
-    queuedCandidatesRef.current = [];
-    sinkNodeIdsRef.current = [];
-    sinkMidMapRef.current = {};
-
-    setRemoteStream(null);
-    setRemoteStreams({});
-    setConnectionState("new");
-    setIsStreaming(false);
-  }, []);
+    resetConnectionState();
+  }, [resetConnectionState]);
 
   // Cleanup on unmount
   useEffect(() => {
