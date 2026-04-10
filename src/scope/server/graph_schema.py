@@ -29,7 +29,7 @@ Example (YOLO plugin + Longlive with shared input video):
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -41,13 +41,24 @@ class GraphNode(BaseModel):
         ...,
         description="Unique node id (e.g. 'input', 'yolo_plugin', 'longlive', 'output')",
     )
-    type: Literal["source", "pipeline", "sink", "record"] = Field(
+    type: Literal["source", "pipeline", "sink", "record", "node"] = Field(
         ...,
-        description="source = external input, pipeline = pipeline instance, sink = output, record = file recorder",
+        description=(
+            "source = external input, pipeline = pipeline instance, "
+            "sink = output, record = file recorder, node = custom backend node"
+        ),
     )
     pipeline_id: str | None = Field(
         default=None,
         description="Pipeline ID (registry key) when type is 'pipeline'",
+    )
+    node_type_id: str | None = Field(
+        default=None,
+        description="Node type ID (NodeRegistry key) when type is 'node'",
+    )
+    params: dict[str, Any] | None = Field(
+        default=None,
+        description="Per-node parameter values for custom nodes",
     )
     source_mode: str | None = Field(
         default=None,
@@ -110,6 +121,10 @@ class GraphConfig(BaseModel):
         """Return node ids that are record nodes."""
         return [n.id for n in self.nodes if n.type == "record"]
 
+    def get_backend_node_ids(self) -> list[str]:
+        """Return node ids that are backend (custom) nodes."""
+        return [n.id for n in self.nodes if n.type == "node"]
+
     def edges_from(self, node_id: str) -> list[GraphEdge]:
         """Return edges whose source is the given node."""
         return [e for e in self.edges if e.from_node == node_id]
@@ -145,10 +160,12 @@ class GraphConfig(BaseModel):
         if not self.get_sink_node_ids():
             errors.append("Graph must have at least one sink node")
 
-        # Pipeline nodes must have pipeline_id
+        # Pipeline nodes must have pipeline_id; backend nodes need node_type_id
         for node in self.nodes:
             if node.type == "pipeline" and not node.pipeline_id:
                 errors.append(f"Pipeline node '{node.id}' is missing pipeline_id")
+            if node.type == "node" and not node.node_type_id:
+                errors.append(f"Node '{node.id}' is missing node_type_id")
 
         # Edge references must point to existing nodes
         node_id_set = set(node_ids)

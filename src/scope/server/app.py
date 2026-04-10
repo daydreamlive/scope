@@ -865,6 +865,26 @@ async def get_pipeline_schemas(
 
 
 # ---------------------------------------------------------------------------
+# Node definitions
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/nodes/definitions")
+async def get_node_definitions():
+    """Return definitions for all registered backend node types.
+
+    Each definition includes the ``node_type_id``, ``display_name``,
+    ``category``, ``description``, ``continuous`` flag, input/output
+    ports, and editable parameters. The frontend uses this to populate
+    the add-node catalog and render custom nodes generically.
+    """
+    from scope.core.nodes.registry import NodeRegistry
+
+    definitions = NodeRegistry.get_all_definitions()
+    return {"nodes": [d.model_dump() for d in definitions]}
+
+
+# ---------------------------------------------------------------------------
 # OSC endpoints
 # ---------------------------------------------------------------------------
 
