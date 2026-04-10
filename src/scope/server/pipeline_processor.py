@@ -82,6 +82,10 @@ class PipelineProcessor:
         # record_queues_by_node). Updated by _resize_output_queue so cached
         # references stay in sync when a queue object is replaced.
         self.external_queue_refs: list[tuple[dict, str]] = []
+        # Input ports that carry audio (tensor, sample_rate) tuples instead
+        # of video frame tensors. Set by graph_executor when wiring audio
+        # edges so audio inputs don't get accumulated into a video chunk.
+        self.audio_input_ports: set[str] = set()
 
         # Audio output queue: (audio_tensor, sample_rate) tuples.
         # Consumed by FrameProcessor.get_audio() on the sink processor.
@@ -495,6 +499,16 @@ class PipelineProcessor:
                         "Audio output queue full for %s, dropping audio chunk",
                         self.pipeline_id,
                     )
+                # Also fan out audio to graph edge queues on the "audio" port
+                # so downstream custom nodes can consume it.
+                audio_queues = self.output_queues.get("audio")
+                if audio_queues:
+                    packed = (audio_cpu, audio_sample_rate)
+                    for q in audio_queues:
+                        try:
+                            q.put_nowait(packed)
+                        except queue.Full:
+                            pass
 
             # Extract video from the returned dictionary
             output = output_dict.get("video")

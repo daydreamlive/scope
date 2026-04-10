@@ -210,8 +210,25 @@ class FrameProcessor:
             )
             return
 
-        # Local mode: setup pipeline graph
-        if not self.pipeline_ids:
+        # Local mode: setup pipeline graph.
+        # Node-only graphs (custom nodes, audio-only workflows) are allowed
+        # to start without any pipeline IDs — the graph executor still runs
+        # custom nodes via NodeProcessor and the audio path works through
+        # the standard audio_output_queue.
+        graph_param = (self.parameters or {}).get("graph")
+        _has_custom_nodes = False
+        if graph_param is not None:
+            _nodes = (
+                graph_param.get("nodes", [])
+                if isinstance(graph_param, dict)
+                else getattr(graph_param, "nodes", [])
+            )
+            _has_custom_nodes = any(
+                (n.get("type") if isinstance(n, dict) else getattr(n, "type", None))
+                == "node"
+                for n in _nodes
+            )
+        if not self.pipeline_ids and not _has_custom_nodes:
             error_msg = "No pipeline IDs provided, cannot start"
             logger.error(error_msg)
             self.running = False
