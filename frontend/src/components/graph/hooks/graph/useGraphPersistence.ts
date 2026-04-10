@@ -65,6 +65,71 @@ function clearGraphFromLocalStorage(): void {
   }
 }
 
+/**
+ * After loading or importing a workflow, fetch `/api/v1/nodes/definitions`
+ * and hydrate each custom_node flow node with its inputs/outputs/params/
+ * display metadata. Saved workflows only persist `node_type_id` and
+ * `params`, so the port definitions have to be re-attached before render.
+ * User-supplied param values override the defaults from the definition.
+ */
+function hydrateCustomNodeDefinitions(
+  nodes: Node<FlowNodeData>[],
+  setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>
+): void {
+  const customFlowNodes = nodes.filter(
+    n => n.data.nodeType === "custom_node" && !n.data.customNodeInputs
+  );
+  if (customFlowNodes.length === 0) return;
+  fetch("/api/v1/nodes/definitions")
+    .then(r => r.json())
+    .then(data => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const defs = (data.nodes ?? []) as any[];
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const defMap = new Map<string, any>(
+        defs.map(d => [d.node_type_id as string, d])
+      );
+      setNodes(prev =>
+        prev.map(n => {
+          if (
+            n.data.nodeType !== "custom_node" ||
+            !n.data.customNodeTypeId ||
+            n.data.customNodeInputs
+          ) {
+            return n;
+          }
+          const def = defMap.get(n.data.customNodeTypeId);
+          if (!def) return n;
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              customNodeDisplayName: def.display_name,
+              customNodeCategory: def.category,
+              customNodeInputs: def.inputs ?? [],
+              customNodeOutputs: def.outputs ?? [],
+              customNodeParamDefs: def.params ?? [],
+              customNodeParams: {
+                ...Object.fromEntries(
+                  (def.params || [])
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    .filter((p: any) => p.default != null)
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                    .map((p: any) => [p.name, p.default] as const)
+                ),
+                // User-edited values take precedence over definition defaults
+                ...(n.data.customNodeParams || {}),
+              },
+            },
+          };
+        })
+      );
+    })
+    .catch(() => {
+      // custom nodes just won't be hydrated; render falls back to placeholders
+    });
+}
+
 interface UseGraphPersistenceArgs {
   nodes: Node<FlowNodeData>[];
   edges: Edge[];
@@ -181,6 +246,8 @@ export function useGraphPersistence({
             }
           }, 0);
         }
+
+        hydrateCustomNodeDefinitions(enriched, setNodes);
 
         // Allow async side-effects (e.g. source mode restore) to settle
         // before re-enabling change notifications.
@@ -374,6 +441,8 @@ export function useGraphPersistence({
           }
         }, 0);
       }
+
+      hydrateCustomNodeDefinitions(enriched, setNodes);
     },
     [
       portsMap,

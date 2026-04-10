@@ -55,6 +55,7 @@ import { TempoNode } from "./nodes/TempoNode";
 import { PromptListNode } from "./nodes/PromptListNode";
 import { PromptBlendNode } from "./nodes/PromptBlendNode";
 import { SchedulerNode } from "./nodes/SchedulerNode";
+import { CustomNode } from "./nodes/CustomNode";
 import { CustomEdge } from "./CustomEdge";
 import { ContextMenu } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
@@ -130,6 +131,7 @@ const nodeTypes = {
   prompt_list: PromptListNode,
   prompt_blend: PromptBlendNode,
   scheduler: SchedulerNode,
+  custom_node: CustomNode,
 };
 
 const edgeTypes = {
