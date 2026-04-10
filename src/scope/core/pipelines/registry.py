@@ -246,28 +246,44 @@ def _register_pipelines():
 
 
 def _initialize_registry():
-    """Initialize registry with built-in pipelines and plugins."""
+    """Initialize registry with built-in pipelines, nodes, and plugins."""
     # Register built-in pipelines first
     _register_pipelines()
 
-    # Load and register plugin pipelines
+    # Register built-in nodes (no-op on the base abstraction branch)
+    from scope.core.nodes import register_builtin_nodes
+
+    register_builtin_nodes()
+
+    # Load and register plugin pipelines and plugin nodes
     try:
         from scope.core.plugins import (
             ensure_plugins_installed,
             load_plugins,
+            register_plugin_nodes,
             register_plugin_pipelines,
         )
 
         ensure_plugins_installed()
         load_plugins()
         register_plugin_pipelines(PipelineRegistry)
+
+        from scope.core.nodes.registry import NodeRegistry
+
+        register_plugin_nodes(NodeRegistry)
     except Exception as e:
         logger.error(
             f"Failed to load plugins: {e}. Built-in pipelines are still available."
         )
 
     pipeline_count = len(PipelineRegistry.list_pipelines())
-    logger.info(f"Registry initialized with {pipeline_count} pipeline(s)")
+    from scope.core.nodes.registry import NodeRegistry
+
+    node_count = len(NodeRegistry.list_node_types())
+    logger.info(
+        f"Registry initialized with {pipeline_count} pipeline(s) and "
+        f"{node_count} node(s)"
+    )
 
 
 # Auto-register pipelines on module import

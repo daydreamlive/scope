@@ -575,6 +575,21 @@ class PluginManager:
             # Update pipeline-to-plugin mapping by checking which plugins provide which pipelines
             self._update_pipeline_plugin_mapping(registry)
 
+    def register_plugin_nodes(self, registry: Any) -> None:
+        """Call ``register_nodes`` hook for all plugins.
+
+        Args:
+            registry: ``NodeRegistry`` to register nodes with
+        """
+        with self._lock:
+
+            def register_callback(node_class: Any) -> None:
+                node_type_id = node_class.node_type_id
+                registry.register(node_class)
+                logger.info(f"Registered plugin node: {node_type_id}")
+
+            self._pm.hook.register_nodes(register=register_callback)
+
     def _update_pipeline_plugin_mapping(self, registry: "PipelineRegistry") -> None:
         """Update the mapping of pipeline IDs to plugin names."""
         from importlib.metadata import distributions
@@ -1665,3 +1680,12 @@ def register_plugin_pipelines(registry: "PipelineRegistry") -> None:
         registry: PipelineRegistry to register pipelines with
     """
     get_plugin_manager().register_plugin_pipelines(registry)
+
+
+def register_plugin_nodes(registry: Any) -> None:
+    """Call ``register_nodes`` hook for all plugins.
+
+    Args:
+        registry: ``NodeRegistry`` to register nodes with
+    """
+    get_plugin_manager().register_plugin_nodes(registry)
