@@ -9,13 +9,14 @@ are discovered here and rendered generically by the frontend via
 """
 
 from .base import BaseNode, NodeDefinition, NodeParam, NodePort
-from .builtins import AudioSourceNode
+from .builtins import AudioSourceNode, SchedulerNode
 from .registry import NodeRegistry
 
 
 def register_builtin_nodes() -> None:
     """Register all built-in node types shipped with the foundation."""
     NodeRegistry.register(AudioSourceNode)
+    NodeRegistry.register(SchedulerNode)
 
 
 __all__ = [
@@ -25,5 +26,6 @@ __all__ = [
     "NodeParam",
     "NodePort",
     "NodeRegistry",
+    "SchedulerNode",
     "register_builtin_nodes",
 ]
