@@ -110,15 +110,32 @@ class BaseNode(ABC):
     """Abstract base class for all backend node types.
 
     Subclasses must set ``node_type_id`` as a ``ClassVar`` and implement
-    ``get_definition()``. Execution contracts (e.g. ``execute(inputs)`` for
-    pull-based execution, or ``setup(emit_output) / update_input(...)`` for
-    event-driven execution) are defined by concrete execution backends and
-    not by this base class.
+    ``get_definition()`` and ``execute()``. Nodes run inside a
+    :class:`NodeProcessor` in the pipeline graph: input port values arrive
+    in the ``inputs`` dict and the return dict fans out to downstream
+    nodes or pipelines via queue edges.
+
+    Example::
+
+        class MyNode(BaseNode):
+            node_type_id: ClassVar[str] = "my-plugin.my-node"
+
+            @classmethod
+            def get_definition(cls) -> NodeDefinition:
+                return NodeDefinition(
+                    node_type_id=cls.node_type_id,
+                    display_name="My Node",
+                    inputs=[NodePort(name="audio", port_type="audio")],
+                    outputs=[NodePort(name="audio", port_type="audio")],
+                )
+
+            def execute(self, inputs, **kwargs):
+                return {"audio": inputs["audio"]}
     """
 
     node_type_id: ClassVar[str]
 
-    def __init__(self, node_id: str, config: dict[str, Any] | None = None):
+    def __init__(self, node_id: str = "", config: dict[str, Any] | None = None):
         self.node_id = node_id
         self.config = config or {}
 
@@ -126,3 +143,42 @@ class BaseNode(ABC):
     @abstractmethod
     def get_definition(cls) -> NodeDefinition:
         """Return static metadata for this node type."""
+
+    def execute(
+        self,
+        inputs: dict[str, Any],
+        **kwargs,
+    ) -> dict[str, Any]:
+        """Execute the node with the given inputs.
+
+        Plain backend nodes override this; :class:`Pipeline` subclasses
+        leave the default in place because they're invoked through
+        ``__call__`` from ``PipelineProcessor``, not through
+        ``execute`` from ``NodeProcessor``.
+
+        Args:
+            inputs: Dict mapping input port names to their values.
+                Audio ports receive ``(tensor, sample_rate)`` tuples.
+                Video ports receive frame tensors.
+            **kwargs: Additional context (pipeline parameters, etc.)
+
+        Returns:
+            Dict mapping output port names to their values.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must override execute() or be invoked "
+            "via PipelineProcessor (Pipeline subclass) instead of NodeProcessor."
+        )
+
+    @classmethod
+    def IS_CHANGED(cls, **kwargs) -> Any:
+        """Return a cache key for the current parameter state.
+
+        When this return value differs from the previous call the node
+        is re-executed even if its input data hasn't changed. Useful for
+        nodes that depend on external state (files on disk, random
+        seeds, wall-clock time). Default implementation returns
+        ``None``, meaning the node relies purely on input-data changes
+        for cache invalidation. Inspired by ComfyUI's ``IS_CHANGED``.
+        """
+        return None

@@ -243,6 +243,14 @@ def _initialize_registry():
 
     register_builtin_nodes()
 
+    # Scan ~/.daydream-scope/custom_nodes/ for ComfyUI-style local node packs
+    from scope.core.nodes import load_and_register_local_nodes
+
+    try:
+        load_and_register_local_nodes()
+    except Exception as e:
+        logger.warning(f"Error loading local custom nodes: {e}")
+
     # Load and register plugins. The unified register_plugin_nodes fires
     # both register_pipelines and register_nodes hooks, so old and new
     # plugins are picked up in one call.
