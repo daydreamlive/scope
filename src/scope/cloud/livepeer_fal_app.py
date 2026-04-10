@@ -22,7 +22,7 @@ RUNNER_HOST = "127.0.0.1"
 RUNNER_PORT = int(os.getenv("LIVEPEER_RUNNER_PORT", "8001"))
 RUNNER_LOCAL_WS_URL = f"ws://{RUNNER_HOST}:{RUNNER_PORT}/ws"
 RUNNER_LOCAL_HTTP_URL = f"http://{RUNNER_HOST}:{RUNNER_PORT}"
-RUNNER_STARTUP_TIMEOUT_SECONDS = 90
+RUNNER_STARTUP_TIMEOUT_SECONDS = 600
 RUNNER_RETRY_DELAY_SECONDS = 2.5
 RUNNER_MAX_FAILURES_PER_WINDOW = 20
 RUNNER_FAILURE_WINDOW_SECONDS = 60.0
@@ -109,6 +109,9 @@ FROM {DOCKER_IMAGE}
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md patches.pth /app/
 COPY src/ /app/src/
+# Pre-install livepeer extras at image build time so the runner can start
+# immediately on cold workers without downloading ~1.4GB of CUDA packages.
+RUN uv sync --extra livepeer --frozen
 """
 custom_image = ContainerImage.from_dockerfile_str(
     dockerfile_str,
