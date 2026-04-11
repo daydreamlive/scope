@@ -61,6 +61,45 @@ class _MediaHandles:
     outputs: list[MediaOutput | None]
 
 
+@dataclass(slots=True)
+class _BrowserGraphInfo:
+    """Result of parsing `initial_parameters.graph` for Livepeer media layout."""
+
+    source_node_to_track_index: dict[str, int]
+    sink_node_ids: list[str]
+    record_node_ids: list[str]
+    """All record nodes (remote + sink-teed combined), in graph node order.
+    Used to compute graph output indices that match cloud_track wiring expectations."""
+    remote_record_node_ids: list[str]
+    """Record nodes that need a dedicated runner output (pipeline-attached)."""
+    sink_teed_records: list[tuple[str, int]]
+    """Sink-attached records: (record_id, index in sink_node_ids). Mirrored locally."""
+
+    @staticmethod
+    def empty() -> _BrowserGraphInfo:
+        return _BrowserGraphInfo(
+            source_node_to_track_index={},
+            sink_node_ids=[],
+            record_node_ids=[],
+            remote_record_node_ids=[],
+            sink_teed_records=[],
+        )
+
+
+@dataclass(slots=True)
+class _OutputMapping:
+    """How runner tracks map to graph output slots (sinks + recorders)."""
+
+    num_output_tracks: int
+    """Number of remote outputs the runner will create."""
+    num_local_handlers: int
+    """Number of local output_handlers (includes sink-teed records)."""
+    remote_to_local: list[int]
+    """runner track index -> graph output index."""
+    sink_tee_pairs: list[tuple[int, int]]
+    """(sink_handler_index, record_handler_index) pairs for local mirroring."""
+
+
 class LivepeerClient:
     """Livepeer transport client.
 
@@ -296,16 +335,21 @@ class LivepeerClient:
     @staticmethod
     def _parse_browser_graph(
         initial_parameters: dict[str, Any] | None,
-    ) -> tuple[dict[str, int], list[str], list[str]]:
-        """Return source map, webrtc sink IDs, and record IDs."""
+    ) -> _BrowserGraphInfo:
+        """Return source map, sinks, records, and sink-attached vs remote record split."""
+        if not initial_parameters:
+            return _BrowserGraphInfo.empty()
+        graph_data = initial_parameters.get("graph")
+        if not isinstance(graph_data, dict):
+            return _BrowserGraphInfo.empty()
+
         source_node_to_track_index: dict[str, int] = {}
         sink_node_ids: list[str] = []
         record_node_ids: list[str] = []
-        if not initial_parameters:
-            return source_node_to_track_index, sink_node_ids, record_node_ids
-        graph_data = initial_parameters.get("graph")
-        if not isinstance(graph_data, dict):
-            return source_node_to_track_index, sink_node_ids, record_node_ids
+        remote_record_node_ids: list[str] = []
+        sink_teed_records: list[tuple[str, int]] = []
+
+        node_by_id: dict[str, dict[str, Any]] = {}
         src_count = 0
         for node in graph_data.get("nodes", []):
             if not isinstance(node, dict):
@@ -313,6 +357,7 @@ class LivepeerClient:
             node_id = node.get("id")
             if not isinstance(node_id, str):
                 continue
+            node_by_id[node_id] = node
             node_type = node.get("type")
             if node_type == "source":
                 source_mode = node.get("source_mode", "video")
@@ -325,7 +370,106 @@ class LivepeerClient:
                     sink_node_ids.append(node_id)
             elif node_type == "record":
                 record_node_ids.append(node_id)
-        return source_node_to_track_index, sink_node_ids, record_node_ids
+
+        # Classify each record node by its input type: records fed from a
+        # sink node are "teed" locally (no extra runner output needed), while
+        # records fed from a pipeline node need their own remote output.
+        # Teed records are dropped from the graph before sending to the runner.
+        for rec_id in record_node_ids:
+            inbound_from: str | None = None
+            for edge in graph_data.get("edges", []):
+                if not isinstance(edge, dict):
+                    continue
+                if edge.get("to_node") != rec_id or edge.get("kind") != "stream":
+                    continue
+                from_id = edge.get("from")
+                if isinstance(from_id, str):
+                    inbound_from = from_id
+                    break
+
+            if inbound_from is None:
+                remote_record_node_ids.append(rec_id)
+                continue
+
+            src_node = node_by_id.get(inbound_from)
+            if src_node is not None and src_node.get("type") == "sink":
+                if inbound_from in sink_node_ids:
+                    sink_teed_records.append(
+                        (rec_id, sink_node_ids.index(inbound_from))
+                    )
+                else:
+                    # Hardware sink excluded from WebRTC sink list — needs remote output.
+                    remote_record_node_ids.append(rec_id)
+            else:
+                remote_record_node_ids.append(rec_id)
+
+        return _BrowserGraphInfo(
+            source_node_to_track_index=source_node_to_track_index,
+            sink_node_ids=sink_node_ids,
+            record_node_ids=record_node_ids,
+            remote_record_node_ids=remote_record_node_ids,
+            sink_teed_records=sink_teed_records,
+        )
+
+    @staticmethod
+    def _filter_runner_params(
+        initial_parameters: dict[str, Any] | None,
+        parsed: _BrowserGraphInfo,
+    ) -> dict[str, Any]:
+        """Deep-copy params and drop sink-attached record nodes.
+
+        The runner creates a dedicated output for every record node it sees, so
+        removing sink-attached records avoids redundant remote outputs whose
+        frames are identical to the parent sink.
+        """
+        if not initial_parameters:
+            return {}
+        if not parsed.sink_teed_records:
+            return copy.deepcopy(initial_parameters)
+        collapsed = {rid for rid, _ in parsed.sink_teed_records}
+        params = copy.deepcopy(initial_parameters)
+        graph = params.get("graph")
+        if not isinstance(graph, dict):
+            return params
+        nodes = graph.get("nodes")
+        if isinstance(nodes, list):
+            graph["nodes"] = [
+                n for n in nodes if isinstance(n, dict) and n.get("id") not in collapsed
+            ]
+        edges = graph.get("edges")
+        if isinstance(edges, list):
+            graph["edges"] = [
+                e
+                for e in edges
+                if isinstance(e, dict)
+                and e.get("to_node") not in collapsed
+                and e.get("from") not in collapsed
+            ]
+        return params
+
+    @staticmethod
+    def _build_output_mapping(parsed: _BrowserGraphInfo) -> _OutputMapping:
+        """Compute how runner tracks map to graph output slots."""
+        num_sink_slots = max(len(parsed.sink_node_ids), 1)
+        num_output_tracks = num_sink_slots + len(parsed.remote_record_node_ids)
+        num_local_handlers = num_sink_slots + len(parsed.record_node_ids)
+
+        remote_to_local: list[int] = list(range(num_sink_slots))
+        for rid in parsed.remote_record_node_ids:
+            rec_pos = parsed.record_node_ids.index(rid)
+            remote_to_local.append(num_sink_slots + rec_pos)
+
+        sink_tee_pairs: list[tuple[int, int]] = []
+        for rec_id, sink_idx in parsed.sink_teed_records:
+            rec_pos = parsed.record_node_ids.index(rec_id)
+            sink_tee_pairs.append((sink_idx, num_sink_slots + rec_pos))
+
+        return _OutputMapping(
+            num_output_tracks=num_output_tracks,
+            num_local_handlers=num_local_handlers,
+            remote_to_local=remote_to_local,
+            sink_tee_pairs=sink_tee_pairs,
+        )
 
     def _make_input_track_handle(self, track_index: int):
         """Create a minimal sync put_frame handle expected by CloudSourceInputHandler."""
@@ -350,6 +494,9 @@ class LivepeerClient:
             logger.info("Media already started")
             return
 
+        parsed = self._parse_browser_graph(initial_parameters)
+        runner_params = self._filter_runner_params(initial_parameters, parsed)
+
         request_id = str(uuid.uuid4())
         future: asyncio.Future = self._loop.create_future()
         self._pending_requests[request_id] = future
@@ -357,7 +504,7 @@ class LivepeerClient:
             {
                 "type": "start_stream",
                 "request_id": request_id,
-                "params": initial_parameters or {},
+                "params": runner_params or {},
             }
         )
 
@@ -377,14 +524,13 @@ class LivepeerClient:
         channels = response.get("channels")
         if not isinstance(channels, list):
             raise RuntimeError("stream_started response missing channels list")
-        (
-            source_node_to_track_index,
-            sink_node_ids,
-            record_node_ids,
-        ) = self._parse_browser_graph(initial_parameters)
-        self.source_node_to_track_index = source_node_to_track_index
-        num_input_tracks = max(len(source_node_to_track_index), 1)
-        num_output_tracks = max(len(sink_node_ids), 1) + len(record_node_ids)
+
+        self.source_node_to_track_index = parsed.source_node_to_track_index
+        num_input_tracks = max(len(parsed.source_node_to_track_index), 1)
+        # Sink-attached records are not sent to the runner but cloud_track
+        # still expects all original graph outputs (sinks and recorders),
+        # so map runner track indices to account for the gaps.
+        mapping = self._build_output_mapping(parsed)
 
         input_urls_by_track: dict[int, str] = {}
         output_urls_by_track: dict[int, str] = {}
@@ -426,14 +572,27 @@ class LivepeerClient:
             raise RuntimeError("stream_started response missing usable channels")
 
         self._media_publishers = [None] * num_input_tracks
-        self._media_outputs = [None] * num_output_tracks
+        self._media_outputs = [None] * mapping.num_output_tracks
         self._media_subscriber_tasks = []
         self.input_tracks = [
             self._make_input_track_handle(i) for i in range(num_input_tracks)
         ]
-        self.output_handlers = [FrameOutputHandler() for _ in range(num_output_tracks)]
+        self.output_handlers = [
+            FrameOutputHandler() for _ in range(mapping.num_local_handlers)
+        ]
         if not self.output_handlers:
             self.output_handlers = [FrameOutputHandler()]
+
+        # Wire sink-teed records: when the sink receives a frame,
+        # mirror it into the recorder so recording works without the
+        # runner sending a separate track for the recorder.
+        for sink_handler_idx, rec_handler_idx in mapping.sink_tee_pairs:
+            if sink_handler_idx < len(self.output_handlers) and rec_handler_idx < len(
+                self.output_handlers
+            ):
+                self.output_handlers[sink_handler_idx].add_callback(
+                    self.output_handlers[rec_handler_idx].handle_frame
+                )
 
         publish_config = self._build_video_publish_config(self._fps)
         for input_idx in range(num_input_tracks):
@@ -443,16 +602,18 @@ class LivepeerClient:
             publisher = MediaPublish(input_url, config=publish_config)
             self._media_publishers[input_idx] = publisher
 
-        for output_idx in range(num_output_tracks):
+        for output_idx in range(mapping.num_output_tracks):
             output_url = output_urls_by_track.get(output_idx)
             if output_url is None:
                 continue
             media_output = MediaOutput(output_url, start_seq=-1)
             self._media_outputs[output_idx] = media_output
+            local_handler_index = mapping.remote_to_local[output_idx]
             subscriber = asyncio.create_task(
                 self._receive_loop(
                     media_output,
                     output_track_index=output_idx,
+                    local_handler_index=local_handler_index,
                     media_kind="video",
                 )
             )
@@ -465,6 +626,7 @@ class LivepeerClient:
                 self._receive_loop(
                     media_output,
                     output_track_index=audio_output_index,
+                    local_handler_index=0,
                     media_kind="audio",
                 )
             )
@@ -517,10 +679,17 @@ class LivepeerClient:
     async def _receive_loop(
         self,
         output: MediaOutput,
+        *,
         output_track_index: int,
+        local_handler_index: int,
         media_kind: str,
     ) -> None:
-        """Consume output frames from Livepeer and notify callbacks."""
+        """Consume output frames from Livepeer and notify callbacks.
+
+        ``output_track_index`` indexes ``_media_outputs`` (media tracks).
+        ``local_handler_index`` maps video into ``output_handlers`` (may differ
+        from ``output_track_index`` when sink-attached records are collapsed).
+        """
         pacing = MediaPacingState()
         unexpected_reason: str | None = None
         try:
@@ -556,12 +725,12 @@ class LivepeerClient:
                 # Track actual dispatch time (after optional sleep) so the next
                 # wall_delta reflects real scheduling delay.
                 pacing.prev_wall_monotonic = time.monotonic()
-                if 0 <= output_track_index < len(self.output_handlers):
-                    self.output_handlers[output_track_index].handle_frame(frame)
+                if 0 <= local_handler_index < len(self.output_handlers):
+                    self.output_handlers[local_handler_index].handle_frame(frame)
                 else:
                     logger.debug(
-                        "Dropping frame for unknown output track index %s",
-                        output_track_index,
+                        "Dropping frame for unknown output handler index %s",
+                        local_handler_index,
                     )
         except asyncio.CancelledError:
             pass
