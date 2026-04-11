@@ -28,6 +28,7 @@ from .credentials import get_turn_credentials
 from .frame_processor import FrameProcessor
 from .headless import HeadlessSession
 from .kafka_publisher import publish_event
+from .livepeer import LivepeerConnection
 from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
@@ -834,6 +835,10 @@ class WebRTCManager:
             if produces_video:
                 cloud_track = CloudTrack(
                     cloud_manager=cloud_manager,
+                    # Once incoming timestamps are good everywhere,remove this
+                    preserve_output_timestamps=isinstance(
+                        cloud_manager, LivepeerConnection
+                    ),
                     initial_parameters=initial_parameters,
                     user_id=request.user_id,
                     connection_id=request.connection_id,

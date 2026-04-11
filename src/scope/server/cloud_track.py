@@ -53,6 +53,7 @@ class CloudTrack(MediaStreamTrack):
         self,
         cloud_manager: ScopeCloudBackend,
         fps: int = 30,
+        preserve_output_timestamps: bool = False,
         initial_parameters: dict | None = None,
         notification_callback: Callable | None = None,
         user_id: str | None = None,
@@ -73,6 +74,7 @@ class CloudTrack(MediaStreamTrack):
         # FPS control
         self.fps = fps
         self.frame_ptime = 1.0 / fps
+        self.preserve_output_timestamps = preserve_output_timestamps
 
         # Source track for input frames (from browser)
         self._source_track: MediaStreamTrack | None = None
@@ -267,7 +269,7 @@ class CloudTrack(MediaStreamTrack):
                     packet = ensure_video_packet(frame_packet)
                     frame_np = packet.tensor.numpy()
                     frame = VideoFrame.from_ndarray(frame_np, format="rgb24")
-                    if packet.timestamp.is_valid:
+                    if self.preserve_output_timestamps and packet.timestamp.is_valid:
                         frame.pts = packet.timestamp.pts
                         frame.time_base = packet.timestamp.time_base
                     else:
