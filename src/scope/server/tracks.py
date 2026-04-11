@@ -13,6 +13,7 @@ from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamEr
 from av import VideoFrame
 
 from .media_packets import VideoPacket, ensure_video_packet
+from .pacing import MediaPacingState, compute_pacing_decision
 from .pipeline_manager import PipelineManager
 
 if TYPE_CHECKING:
@@ -42,6 +43,31 @@ async def _next_timestamp(
 
     state["_last_send_time"] = time.time()
     return state["_pts"], VIDEO_TIME_BASE
+
+
+async def _pace_preserved_timestamp(
+    track: MediaStreamTrack,
+    pacing_state: MediaPacingState,
+    packet: VideoPacket,
+) -> None:
+    """Sleep until a valid packet timestamp lines up with wall clock."""
+    if track.readyState != "live":
+        raise MediaStreamError
+    now_monotonic = time.monotonic()
+    media_ts = (
+        packet.timestamp.pts * float(packet.timestamp.time_base)
+        if packet.timestamp.is_valid
+        else None
+    )
+    decision = compute_pacing_decision(
+        pacing_state,
+        media_ts=media_ts,
+        now_monotonic=now_monotonic,
+    )
+    if decision.sleep_s > 0:
+        await asyncio.sleep(decision.sleep_s)
+    if packet.timestamp.is_valid:
+        pacing_state.prev_wall_monotonic = time.monotonic()
 
 
 async def _run_input_loop(
@@ -89,6 +115,7 @@ class QueueVideoTrack(MediaStreamTrack):
         super().__init__()
         self._queue = frame_queue
         self._ts = {"fps": fps, "_pts": 0, "_last_send_time": None}
+        self._pacing = MediaPacingState()
 
     async def recv(self) -> VideoFrame:
         if self.readyState != "live":
@@ -111,6 +138,7 @@ class QueueVideoTrack(MediaStreamTrack):
                 frame_squeezed.numpy(), format="rgb24"
             )
             if packet.timestamp.is_valid:
+                await _pace_preserved_timestamp(self, self._pacing, packet)
                 video_frame.pts = packet.timestamp.pts
                 video_frame.time_base = packet.timestamp.time_base
             else:
@@ -140,6 +168,7 @@ class NodeOutputTrack(MediaStreamTrack):
         self._frame_getter = frame_getter
         self._fps_getter = fps_getter
         self._ts = {"fps": 30, "_pts": 0, "_last_send_time": None}
+        self._pacing = MediaPacingState()
 
     async def recv(self) -> VideoFrame:
         fp = self._frame_processor
@@ -153,6 +182,7 @@ class NodeOutputTrack(MediaStreamTrack):
                 packet = ensure_video_packet(packet)
                 frame = VideoFrame.from_ndarray(packet.tensor.numpy(), format="rgb24")
                 if packet.timestamp.is_valid:
+                    await _pace_preserved_timestamp(self, self._pacing, packet)
                     frame.pts = packet.timestamp.pts
                     frame.time_base = packet.timestamp.time_base
                 else:
@@ -260,6 +290,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._last_frame = None
         self._frame_lock = threading.Lock()
         self._ts = {"fps": fps, "_pts": 0, "_last_send_time": None}
+        self._pacing = MediaPacingState()
 
         # Server-side input mode - when enabled, frames come from the backend
         # instead of WebRTC (no browser video track needed)
@@ -329,6 +360,7 @@ class VideoProcessingTrack(MediaStreamTrack):
 
                 if frame is not None:
                     if packet is not None and packet.timestamp.is_valid:
+                        await _pace_preserved_timestamp(self, self._pacing, packet)
                         frame.pts = packet.timestamp.pts
                         frame.time_base = packet.timestamp.time_base
                     else:
