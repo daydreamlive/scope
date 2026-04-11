@@ -10,6 +10,8 @@ from dataclasses import dataclass
 
 import torch
 
+from .media_packets import ensure_video_packet
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,7 +79,7 @@ class RecordingCoordinator:
         if rec_q is None:
             return None
         try:
-            frame = rec_q.get_nowait()
+            frame = ensure_video_packet(rec_q.get_nowait()).tensor
             frame = frame.squeeze(0)
             if frame.is_cuda:
                 frame = frame.cpu()
