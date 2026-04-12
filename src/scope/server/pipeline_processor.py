@@ -136,6 +136,13 @@ class PipelineProcessor:
         self._fnf_last_logged: dict[str, float] = {}
         self._FNF_LOG_INTERVAL: float = 30.0  # seconds between repeated log entries
 
+        # Rate-limit repeated Conv2d kernel-size / padded-input-underflow RuntimeErrors.
+        # Community plugins (e.g. flux-klein) may not validate minimum input dimensions,
+        # causing the same error on every processed chunk — easily 2+ per second.
+        # Maps error message key -> last-logged timestamp (same 30-s window as FNF).
+        self._conv2d_last_logged: dict[str, float] = {}
+        self._CONV2D_LOG_INTERVAL: float = 30.0  # seconds between repeated log entries
+
         # Native frame rate reported by the pipeline (e.g. 24fps for LTX-2).
         # When set, get_fps() returns this instead of the measured production rate,
         # giving the video track a stable playback speed for A/V sync.
@@ -631,6 +638,38 @@ class PipelineProcessor:
                     exc_info=False,
                 )
             # Continue processing — the next param update may correct the path.
+        except RuntimeError as e:
+            # Conv2d "Kernel size can't be greater than actual input size" fires on
+            # every chunk when the input is too narrow (e.g. 2 px after padding).
+            # Community plugins such as flux-klein may not enforce minimum spatial
+            # dimensions, producing 2+ errors/second that flood Grafana / CloudWatch.
+            # Rate-limit identically to FileNotFoundError: one ERROR per 30 s per
+            # unique message, then continue so the pipeline stays alive if the
+            # user corrects the resolution.  Non-matching RuntimeErrors fall through
+            # to the generic handler below.
+            err_msg = str(e)
+            if self._is_conv2d_kernel_underflow(err_msg):
+                now = time.monotonic()
+                last = self._conv2d_last_logged.get(err_msg, 0.0)
+                if now - last >= self._CONV2D_LOG_INTERVAL:
+                    self._conv2d_last_logged[err_msg] = now
+                    logger.error(
+                        "Error processing chunk for %s: %s — input spatial dimensions "
+                        "are too small for a Conv2d kernel (check minimum resolution). "
+                        "Further identical errors suppressed for %.0fs. "
+                        "(See daydreamlive/scope#917, #713)",
+                        self.pipeline_id,
+                        e,
+                        self._CONV2D_LOG_INTERVAL,
+                        exc_info=False,
+                    )
+                # Continue — resolution may be corrected by next parameter update.
+            elif self._is_recoverable(e):
+                logger.error(
+                    f"Error processing chunk for {self.pipeline_id}: {e}", exc_info=True
+                )
+            else:
+                raise e
         except Exception as e:
             if self._is_recoverable(e):
                 logger.error(
@@ -740,3 +779,17 @@ class PipelineProcessor:
         if isinstance(error, torch.cuda.OutOfMemoryError):
             return False
         return True
+
+    @staticmethod
+    def _is_conv2d_kernel_underflow(err_msg: str) -> bool:
+        """Return True when *err_msg* matches PyTorch's Conv2d padded-input underflow.
+
+        The canonical message is:
+          "Calculated padded input size per channel: (H x W).
+           Kernel size: (K x K). Kernel size can't be greater than actual input size"
+
+        This pattern fires when a spatial dimension is smaller than the convolution
+        kernel (e.g. input width 2 px with a 3×3 kernel), which happens in community
+        plugins that lack minimum-resolution guards (see daydreamlive/scope#917, #713).
+        """
+        return "Kernel size can't be greater than actual input size" in err_msg
