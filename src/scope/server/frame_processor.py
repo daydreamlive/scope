@@ -715,6 +715,16 @@ class FrameProcessor:
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
+        # Sanitize foreign-OS / stale asset paths (e.g. i2v_image, first_frame_image)
+        # before they reach the pipeline.  This mirrors what _load_pipeline_implementation
+        # does for load-time params but also covers mid-session parameter updates sent
+        # by the client over the WebSocket (e.g. user picking a Reference Image while
+        # already streaming).  Without this, a path like
+        # "/tmp/.daydream-scope/assets/foo.png" from a *different* machine ends up on
+        # a fal.ai worker where it doesn't exist, causing a FileNotFoundError on every
+        # processed chunk.
+        parameters = PipelineManager._sanitize_initial_params(parameters)
+
         # Always strip tempo-control keys so they never leak into pipelines,
         # even when the corresponding helper (scheduler/engine/tempo_sync) is absent.
 

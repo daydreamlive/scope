@@ -130,6 +130,12 @@ class PipelineProcessor:
         self._beat_cache_reset_rate: str = "none"
         self._last_reset_boundary: int = -1
 
+        # Rate-limit repeated FileNotFoundError messages for the same missing path.
+        # Maps path -> last-logged timestamp so we only emit one ERROR per path
+        # per _FNF_LOG_INTERVAL seconds rather than flooding the log on every chunk.
+        self._fnf_last_logged: dict[str, float] = {}
+        self._FNF_LOG_INTERVAL: float = 30.0  # seconds between repeated log entries
+
         # Native frame rate reported by the pipeline (e.g. 24fps for LTX-2).
         # When set, get_fps() returns this instead of the measured production rate,
         # giving the video track a stable playback speed for A/V sync.
@@ -608,6 +614,23 @@ class PipelineProcessor:
                             seen.add(proc_id)
                             consumer_proc.update_parameters(extra_params)
 
+        except FileNotFoundError as e:
+            # Missing asset files (e.g. i2v_image path that hasn't been downloaded
+            # yet, or a stale /tmp path from a different machine) cause a
+            # FileNotFoundError on every single chunk — easily 2500+ per session.
+            # Rate-limit to one log entry per missing path per 30 s to avoid
+            # flooding Grafana / CloudWatch while still making the error visible.
+            missing_path = str(e.filename) if e.filename else str(e)
+            now = time.monotonic()
+            last = self._fnf_last_logged.get(missing_path, 0.0)
+            if now - last >= self._FNF_LOG_INTERVAL:
+                self._fnf_last_logged[missing_path] = now
+                logger.error(
+                    f"Error processing chunk for {self.pipeline_id}: {e} "
+                    f"(further identical errors suppressed for {self._FNF_LOG_INTERVAL:.0f}s)",
+                    exc_info=False,
+                )
+            # Continue processing — the next param update may correct the path.
         except Exception as e:
             if self._is_recoverable(e):
                 logger.error(
