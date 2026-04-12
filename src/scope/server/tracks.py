@@ -12,8 +12,9 @@ from aiortc import MediaStreamTrack
 from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE, MediaStreamError
 from av import VideoFrame
 
+from scope.core.pacing import MediaPacingState, compute_pacing_decision
+
 from .media_packets import VideoPacket, ensure_video_packet
-from .pacing import MediaPacingState, compute_pacing_decision
 from .pipeline_manager import PipelineManager
 
 if TYPE_CHECKING:

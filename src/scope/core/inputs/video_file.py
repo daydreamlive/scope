@@ -1,14 +1,19 @@
 """Video file input source implementation using PyAV."""
 
 import logging
+import time
 from pathlib import Path
 from typing import ClassVar
 
 import numpy as np
 
+from ..pacing import MediaPacingConfig, MediaPacingState, compute_pacing_decision
 from .interface import InputSource, InputSourceInfo
 
 logger = logging.getLogger(__name__)
+
+# Tighter tolerance than the default (10ms) since decode jitter is negligible.
+_DRIFT_TOLERANCE_S = 0.002
 
 
 class VideoFileInputSource(InputSource):
@@ -30,6 +35,8 @@ class VideoFileInputSource(InputSource):
         self._frame_iter = None
         self._connected = False
         self._file_path: str | None = None
+        self._pacing_state = MediaPacingState()
+        self._pacing_config = MediaPacingConfig(drift_tolerance_s=_DRIFT_TOLERANCE_S)
 
     @classmethod
     def is_available(cls) -> bool:
@@ -100,6 +107,7 @@ class VideoFileInputSource(InputSource):
             self._frame_iter = self._container.decode(self._stream)
             self._file_path = str(path)
             self._connected = True
+            self._reset_pacing()
 
             logger.info(
                 f"VideoFileInputSource connected: {path.name} "
@@ -119,9 +127,11 @@ class VideoFileInputSource(InputSource):
             return False
 
     def receive_frame(self, timeout_ms: int = 100) -> np.ndarray | None:
-        """Decode and return the next video frame as an RGB numpy array.
+        """Decode and return the next video frame, paced to real-time.
 
-        Loops back to the start when the video ends.
+        Uses the file's PTS to sleep so frames are emitted at the source
+        frame rate rather than at unbounded CPU decode speed. On loop (seek
+        back to start) the pacing anchor is reset automatically.
 
         Returns:
             (H, W, 3) uint8 RGB array, or None if no frame is available.
@@ -137,6 +147,7 @@ class VideoFileInputSource(InputSource):
                 self._container.seek(0)
                 self._frame_iter = self._container.decode(self._stream)
                 frame = next(self._frame_iter)
+                self._reset_pacing()
             except (StopIteration, Exception) as e:
                 if isinstance(e, StopIteration):
                     logger.warning("Video file appears empty after seek")
@@ -147,7 +158,28 @@ class VideoFileInputSource(InputSource):
             logger.error(f"Error decoding video frame: {e}")
             return None
 
+        self._pace(frame)
+
         return frame.to_ndarray(format="rgb24")
+
+    def _reset_pacing(self) -> None:
+        self._pacing_state = MediaPacingState()
+
+    def _pace(self, frame) -> None:
+        """Sleep if wall-clock is ahead of the frame's media timestamp."""
+        if frame.pts is None or frame.time_base is None:
+            return
+        media_ts = float(frame.pts * frame.time_base)
+        now = time.monotonic()
+        decision = compute_pacing_decision(
+            self._pacing_state,
+            media_ts=media_ts,
+            now_monotonic=now,
+            config=self._pacing_config,
+        )
+        if decision.sleep_s > 0:
+            time.sleep(decision.sleep_s)
+        self._pacing_state.prev_wall_monotonic = time.monotonic()
 
     @staticmethod
     def _resolve_in_assets(name: str) -> Path | None:
@@ -179,6 +211,7 @@ class VideoFileInputSource(InputSource):
                 self._container = None
         self._connected = False
         self._file_path = None
+        self._reset_pacing()
 
     def get_source_resolution(
         self, identifier: str, timeout_ms: int = 5000

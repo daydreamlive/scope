@@ -30,8 +30,13 @@ from livepeer_gateway.media_publish import (
 )
 from livepeer_gateway.scope import StartJobRequest, start_scope
 
+from scope.core.pacing import (
+    MediaPacingDecision,
+    MediaPacingState,
+    compute_pacing_decision,
+)
+
 from .cloud_webrtc_client import AudioOutputHandler, FrameOutputHandler
-from .pacing import MediaPacingDecision, MediaPacingState, compute_pacing_decision
 
 logger = logging.getLogger(__name__)
 LIVEPEER_ORCH_URL_ENV = "LIVEPEER_ORCH_URL"
