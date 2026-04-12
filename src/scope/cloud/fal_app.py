@@ -177,6 +177,12 @@ ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
 # Persistent shared directory for sample LoRAs (survives session cleanup)
 SHARED_LORA_DIR = "/data/models/lora"
 
+# Persistent user LoRA directory: stored on the /data volume so LoRAs installed
+# by the user survive fal.ai worker resets between jobs.  This is distinct from
+# SHARED_LORA_DIR (which holds pre-bundled sample LoRAs) so the two can be
+# managed and cleaned up independently.
+USER_LORA_DIR = "/data/models/user-loras"
+
 
 # Gates the "ready" WebSocket message until the previous session's cleanup completes.
 # Initialized lazily to ensure an event loop is available.
@@ -286,25 +292,36 @@ def cleanup_session_data():
     This prevents data leakage between users on fal.ai by clearing:
     - Assets directory (uploaded images, videos)
     - Recording files in temp directory
+    - User-installed LoRA directory (persistent volume, cleared per-session for isolation)
     """
     from pathlib import Path
 
+    def _rmdir_contents(path: Path, label: str) -> None:
+        """Delete all children of *path* without removing the directory itself."""
+        if not path.exists():
+            return
+        for item in path.iterdir():
+            try:
+                if item.is_file():
+                    item.unlink()
+                elif item.is_dir():
+                    shutil.rmtree(item)
+            except Exception as e:
+                print(f"Warning: Failed to delete {item}: {e}")
+        print(f"Cleaned up {label}: {path}")
+
     try:
         # Clean assets directory (matches DAYDREAM_SCOPE_ASSETS_DIR set in setup)
-        assets_dir = Path(ASSETS_DIR_PATH).expanduser()
-        if assets_dir.exists():
-            for item in assets_dir.iterdir():
-                try:
-                    if item.is_file():
-                        item.unlink()
-                    elif item.is_dir():
-                        shutil.rmtree(item)
-                except Exception as e:
-                    print(f"Warning: Failed to delete {item}: {e}")
-            print(f"Cleaned up assets directory: {assets_dir}")
-
+        _rmdir_contents(Path(ASSETS_DIR_PATH).expanduser(), "assets directory")
     except Exception as e:
-        print(f"Warning: Session cleanup failed: {e}")
+        print(f"Warning: Assets cleanup failed: {e}")
+
+    try:
+        # Clean user LoRA directory (persistent volume — must be wiped between
+        # sessions to prevent LoRA files from one user leaking to the next).
+        _rmdir_contents(Path(USER_LORA_DIR), "user LoRA directory")
+    except Exception as e:
+        print(f"Warning: User LoRA cleanup failed: {e}")
 
 
 async def cleanup_installed_plugins():
@@ -479,7 +496,10 @@ class ScopeApp(fal.App, keep_alive=300):
         # not shared between users
         scope_env["DAYDREAM_SCOPE_LOGS_DIR"] = ASSETS_DIR_PATH + "/logs"
         scope_env["DAYDREAM_SCOPE_ASSETS_DIR"] = ASSETS_DIR_PATH
-        scope_env["DAYDREAM_SCOPE_LORA_DIR"] = ASSETS_DIR_PATH + "/lora"
+        # Store user-installed LoRAs on the persistent /data volume so they
+        # survive fal.ai worker resets between jobs.  The tmp-based path was
+        # cleared on every new job, causing pipeline load failures (#923).
+        scope_env["DAYDREAM_SCOPE_LORA_DIR"] = USER_LORA_DIR
         scope_env["DAYDREAM_SCOPE_LORA_SHARED_DIR"] = "/data/models/lora"
         scope_env["UV_CACHE_DIR"] = "/tmp/uv-cache"
 
