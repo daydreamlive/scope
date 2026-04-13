@@ -38,8 +38,23 @@ class PipelineRegistry:
 
     @classmethod
     def register(cls, pipeline_id: str, pipeline_class: type["Pipeline"]) -> None:
-        """Plant a pipeline class into the unified :class:`NodeRegistry`."""
-        NodeRegistry._nodes[pipeline_id] = pipeline_class
+        """Plant a pipeline class into the unified :class:`NodeRegistry`.
+
+        Delegates to ``NodeRegistry.register`` so the same logging and
+        id-derivation path runs for built-in pipelines and plugin nodes
+        alike. The explicit ``pipeline_id`` argument is asserted against
+        the derived id to catch drift between the registry key and the
+        config class's ``pipeline_id``.
+        """
+        config_pipeline_id = pipeline_class.get_config_class().pipeline_id
+        if pipeline_id != config_pipeline_id:
+            class_name = getattr(pipeline_class, "__name__", repr(pipeline_class))
+            raise ValueError(
+                f"Pipeline id mismatch: registered as '{pipeline_id}' but "
+                f"{class_name}.get_config_class().pipeline_id is "
+                f"'{config_pipeline_id}'."
+            )
+        NodeRegistry.register(pipeline_class)
 
     @classmethod
     def get(cls, pipeline_id: str) -> type["Pipeline"] | None:
