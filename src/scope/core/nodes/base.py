@@ -86,6 +86,16 @@ class NodeDefinition(BaseModel):
             "instead of executing once. Useful for streaming generators."
         ),
     )
+    pipeline_meta: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Rich pipeline-only metadata (config_schema, mode_defaults, "
+            "supports_lora, supports_vace, etc.) for nodes that are "
+            ":class:`Pipeline` subclasses. ``None`` for plain nodes. "
+            "Populated by ``Pipeline.get_definition()`` from the config "
+            "class's ``get_schema_with_metadata()``."
+        ),
+    )
 
 
 class BaseNode(ABC):

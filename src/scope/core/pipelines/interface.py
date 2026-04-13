@@ -50,10 +50,10 @@ class Pipeline(BaseNode, ABC):
     def get_definition(cls) -> NodeDefinition:
         """Project the pipeline's config class into a :class:`NodeDefinition`.
 
-        This is the lightweight node-catalog view. The rich pipeline
-        metadata (``config_schema``, LoRA/VACE flags, mode defaults,
-        etc.) is still served by ``GET /api/v1/pipelines/schemas`` and
-        rendered by ``PipelineNode.tsx``. ``params`` is left empty
+        Populates the compact node-catalog fields (id, ports, etc.)
+        and stuffs the full ``get_schema_with_metadata()`` output into
+        ``pipeline_meta``, which is the rich data ``PipelineNode.tsx``
+        renders in the parameter panel. ``params`` is left empty
         because the Pydantic schema is too structured to flatten into
         ``NodeParam[]`` widgets.
         """
@@ -73,6 +73,7 @@ class Pipeline(BaseNode, ABC):
             ],
             params=[],
             continuous=False,
+            pipeline_meta=config.get_schema_with_metadata(),
         )
 
     @abstractmethod

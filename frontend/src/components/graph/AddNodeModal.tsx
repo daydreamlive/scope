@@ -409,16 +409,23 @@ export function AddNodeModal({
     fetch("/api/v1/nodes/definitions")
       .then(r => r.json())
       .then(data => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const items: NodeCatalogItem[] = (data.nodes ?? []).map((n: any) => ({
-          type: "custom_node" as const,
-          subType: n.node_type_id,
-          name: n.display_name || n.node_type_id,
-          description: n.description || "",
-          color: "#9ca3af",
-          category: "Plugins",
-          customNodeDef: n,
-        }));
+        // The unified endpoint returns both pipelines (pipeline_meta != null)
+        // and plain custom nodes. Pipelines are still added via the hardcoded
+        // "Pipeline" catalog entry (placeholder + dropdown), so we filter
+        // them out of the plugin listing here to avoid duplication.
+        const items: NodeCatalogItem[] = (data.nodes ?? [])
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .filter((n: any) => n.pipeline_meta == null)
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((n: any) => ({
+            type: "custom_node" as const,
+            subType: n.node_type_id,
+            name: n.display_name || n.node_type_id,
+            description: n.description || "",
+            color: "#9ca3af",
+            category: "Plugins",
+            customNodeDef: n,
+          }));
         setCustomNodes(items);
       })
       .catch(() => {

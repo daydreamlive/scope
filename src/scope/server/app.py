@@ -823,41 +823,36 @@ async def get_pipeline_schemas(
     http_request: Request,
     cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
-    """Get configuration schemas and defaults for all available pipelines.
+    """Compat alias for the pipeline-rich subset of the unified node catalog.
 
-    Returns the output of each pipeline's get_schema_with_metadata() method,
-    which includes:
-    - Pipeline metadata (id, name, description, version)
-    - supported_modes: List of supported input modes ("text", "video")
-    - default_mode: Default input mode for this pipeline
-    - mode_defaults: Mode-specific default overrides (if any)
-    - config_schema: Full JSON schema with defaults
+    Derives its response from the unified :class:`NodeRegistry` —
+    every entry whose :attr:`NodeDefinition.pipeline_meta` is set is a
+    pipeline, and ``pipeline_meta`` already holds the full output of
+    ``get_schema_with_metadata()`` (config_schema, mode_defaults,
+    supports_lora, supports_vace, etc.). Kept so existing frontend
+    callers in ``usePipelines.ts`` keep working without migration; new
+    code should read from ``GET /api/v1/nodes/definitions`` instead.
 
-    The frontend should use this as the source of truth for parameter defaults.
-
-    In cloud mode (when connected to cloud), this proxies the request to the
-    cloud-hosted scope backend to get the available pipelines there.
+    In cloud mode this proxies to the cloud-hosted scope backend.
     """
     global _pipeline_schemas_cache
     if _pipeline_schemas_cache is not None:
         return _pipeline_schemas_cache
 
-    from scope.core.pipelines.registry import PipelineRegistry
+    from scope.core.nodes.registry import NodeRegistry
     from scope.core.plugins import get_plugin_manager
 
     plugin_manager = get_plugin_manager()
     pipelines: dict = {}
 
-    for pipeline_id in PipelineRegistry.list_pipelines():
-        config_class = PipelineRegistry.get_config_class(pipeline_id)
-        if config_class:
-            # get_schema_with_metadata() includes supported_modes, default_mode,
-            # and mode_defaults directly from the config class
-            schema_data = config_class.get_schema_with_metadata()
-            schema_data["plugin_name"] = plugin_manager.get_plugin_for_pipeline(
-                pipeline_id
-            )
-            pipelines[pipeline_id] = schema_data
+    for definition in NodeRegistry.get_all_definitions():
+        if definition.pipeline_meta is None:
+            continue
+        schema_data = dict(definition.pipeline_meta)
+        schema_data["plugin_name"] = plugin_manager.get_plugin_for_pipeline(
+            definition.node_type_id
+        )
+        pipelines[definition.node_type_id] = schema_data
 
     response = PipelineSchemasResponse(pipelines=pipelines)
     _pipeline_schemas_cache = response
@@ -871,21 +866,17 @@ async def get_pipeline_schemas(
 
 @app.get("/api/v1/nodes/definitions")
 async def get_node_definitions():
-    """Return definitions for plain (non-pipeline) custom nodes.
+    """Return definitions for every registered node — pipelines included.
 
-    Pipelines share the unified :class:`NodeRegistry` but are surfaced
-    via ``GET /api/v1/pipelines/schemas`` because their rich
-    ``config_schema`` doesn't fit the compact :class:`NodeDefinition`.
+    The unified discovery endpoint. Pipelines (Pipeline subclasses)
+    appear with ``pipeline_meta`` populated; plain custom nodes leave
+    ``pipeline_meta`` ``None``. Frontend consumers that only want plain
+    nodes filter on ``pipeline_meta == null`` client-side; consumers
+    that want rich pipeline data read from ``pipeline_meta`` directly.
     """
     from scope.core.nodes.registry import NodeRegistry
-    from scope.core.pipelines.interface import Pipeline
 
-    definitions = [
-        node_class.get_definition()
-        for node_class in NodeRegistry._nodes.values()
-        if not (isinstance(node_class, type) and issubclass(node_class, Pipeline))
-    ]
-    return {"nodes": [d.model_dump() for d in definitions]}
+    return {"nodes": [d.model_dump() for d in NodeRegistry.get_all_definitions()]}
 
 
 # ---------------------------------------------------------------------------

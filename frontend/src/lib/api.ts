@@ -953,6 +953,12 @@ export interface NodeDefinitionDto {
   outputs: NodePortDef[];
   params: NodeParamDef[];
   continuous: boolean;
+  /**
+   * Rich pipeline-only metadata (config_schema, mode_defaults,
+   * supports_lora, supports_vace, etc.) populated for entries whose
+   * underlying class is a Pipeline subclass. ``null`` for plain nodes.
+   */
+  pipeline_meta?: Record<string, unknown> | null;
 }
 
 export interface NodeDefinitionsResponse {
