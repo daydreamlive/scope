@@ -410,6 +410,23 @@ def parse_lora_weights(
                 f"parse_lora_weights: Matched base_key='{base_key}' -> model_key='{model_key}'"
             )
 
+        # Validate LoRA dimensions against the model weight before injecting.
+        # lora_A shape: [rank, in_features]  — in_features must match model weight dim 1
+        # lora_B shape: [out_features, rank] — out_features must match model weight dim 0
+        # (model weight shape is [out_features, in_features] for nn.Linear)
+        model_weight = model_state.get(model_key)
+        if model_weight is not None and lora_A.ndim == 2 and lora_B.ndim == 2:
+            lora_in = lora_A.shape[1]   # LoRA expects this input dimension
+            lora_out = lora_B.shape[0]  # LoRA expects this output dimension
+            model_out, model_in = model_weight.shape[0], model_weight.shape[1]
+            if lora_in != model_in or lora_out != model_out:
+                raise ValueError(
+                    f"LoRA dimension mismatch at layer '{base_key}': "
+                    f"LoRA expects ({lora_out}×{lora_in}) but model layer is ({model_out}×{model_in}). "
+                    f"This LoRA was likely trained for a different model size (e.g. Wan2.1-5B vs 1.3B). "
+                    f"Please use a LoRA that matches the loaded model architecture."
+                )
+
         # Extract alpha and rank
         alpha = None
         if alpha_key and alpha_key in lora_state:

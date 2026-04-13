@@ -54,6 +54,9 @@ MEDIA_STATS_INTERVAL_S = 10.0
 REMOTE_VIDEO_CLOCK_RATE = 90_000
 REMOTE_VIDEO_TIME_BASE = fractions.Fraction(1, REMOTE_VIDEO_CLOCK_RATE)
 ASSETS_DIR_PATH = os.getenv("DAYDREAM_SCOPE_ASSETS_DIR", "/tmp/.daydream-scope/assets")
+# User LoRA dir lives on the persistent volume; read from env so it matches the
+# value injected by the outer fal app at worker start (#923).
+USER_LORA_DIR = os.getenv("DAYDREAM_SCOPE_LORA_DIR", "/data/models/user-loras")
 
 
 @asynccontextmanager
@@ -1178,16 +1181,15 @@ async def _cleanup_plugins_via_scope_client() -> dict[str, Any]:
     }
 
 
-def _cleanup_assets_dir() -> dict[str, Any]:
-    """Delete all files and directories inside the configured assets directory."""
-    assets_dir = Path(ASSETS_DIR_PATH).expanduser()
+def _cleanup_dir_contents(dir_path: Path) -> dict[str, Any]:
+    """Delete all files and directories inside *dir_path* without removing it."""
     deleted = 0
     errors: list[dict[str, str]] = []
 
-    if not assets_dir.exists():
-        return {"path": str(assets_dir), "deleted": deleted, "errors": errors}
+    if not dir_path.exists():
+        return {"path": str(dir_path), "deleted": deleted, "errors": errors}
 
-    for item in assets_dir.iterdir():
+    for item in dir_path.iterdir():
         try:
             if item.is_file():
                 item.unlink()
@@ -1198,24 +1200,41 @@ def _cleanup_assets_dir() -> dict[str, Any]:
         except Exception as exc:
             errors.append({"path": str(item), "error": str(exc)})
 
-    return {"path": str(assets_dir), "deleted": deleted, "errors": errors}
+    return {"path": str(dir_path), "deleted": deleted, "errors": errors}
+
+
+def _cleanup_assets_dir() -> dict[str, Any]:
+    """Delete all files and directories inside the configured assets directory."""
+    return _cleanup_dir_contents(Path(ASSETS_DIR_PATH).expanduser())
+
+
+def _cleanup_user_lora_dir() -> dict[str, Any]:
+    """Delete user-installed LoRAs from the persistent volume.
+
+    User LoRAs are stored on /data (not /tmp) so they survive worker resets
+    within a session (#923).  They must still be wiped at session end to
+    prevent one user's LoRAs from leaking to the next user on the same worker.
+    """
+    return _cleanup_dir_contents(Path(USER_LORA_DIR))
 
 
 @app.post("/internal/cleanup-session")
 async def cleanup_session() -> dict[str, Any]:
-    """Cleanup plugins and assets after the outer fal websocket disconnects."""
+    """Cleanup plugins, assets and user LoRAs after the outer fal websocket disconnects."""
     try:
         plugins = await _cleanup_plugins_via_scope_client()
         assets = _cleanup_assets_dir()
+        loras = _cleanup_user_lora_dir()
     except RuntimeError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     return {
-        "ok": not plugins["failed"] and not assets["errors"],
+        "ok": not plugins["failed"] and not assets["errors"] and not loras["errors"],
         "plugins": plugins,
         "assets": assets,
+        "loras": loras,
     }
 
 

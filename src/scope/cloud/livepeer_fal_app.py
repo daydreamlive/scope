@@ -28,6 +28,10 @@ RUNNER_MAX_FAILURES_PER_WINDOW = 20
 RUNNER_FAILURE_WINDOW_SECONDS = 60.0
 ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
 
+# Persistent user LoRA directory (matches fal_app.py).  Stored on the /data
+# volume so user-installed LoRAs survive fal.ai worker resets (#923).
+USER_LORA_DIR = "/data/models/user-loras"
+
 # Gates startup cleanup so only one cleanup run executes at a time.
 _cleanup_event: asyncio.Event | None = None
 
@@ -272,7 +276,9 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         runner_env.setdefault("DAYDREAM_SCOPE_MODELS_DIR", "/data/models")
         runner_env.setdefault("DAYDREAM_SCOPE_LORA_SHARED_DIR", "/data/models/lora")
         runner_env.setdefault("DAYDREAM_SCOPE_ASSETS_DIR", ASSETS_DIR_PATH)
-        runner_env.setdefault("DAYDREAM_SCOPE_LORA_DIR", ASSETS_DIR_PATH + "/lora")
+        # Store user-installed LoRAs on the persistent /data volume so they
+        # survive fal.ai worker resets between jobs (#923).
+        runner_env.setdefault("DAYDREAM_SCOPE_LORA_DIR", USER_LORA_DIR)
         runner_env.setdefault("DAYDREAM_SCOPE_LOGS_DIR", ASSETS_DIR_PATH + "/logs")
         runner_env.setdefault(
             "DAYDREAM_SCOPE_PLUGINS_DIR", ASSETS_DIR_PATH + "/plugins"
