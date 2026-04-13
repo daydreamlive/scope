@@ -58,15 +58,14 @@ class PipelineRegistry:
 
     @classmethod
     def get(cls, pipeline_id: str) -> type["Pipeline"] | None:
-        node_class = NodeRegistry._nodes.get(pipeline_id)
+        node_class = NodeRegistry.get(pipeline_id)
         return node_class if _is_pipeline(node_class) else None
 
     @classmethod
     def unregister(cls, pipeline_id: str) -> bool:
         if cls.get(pipeline_id) is None:
             return False
-        NodeRegistry._nodes.pop(pipeline_id, None)
-        return True
+        return NodeRegistry.unregister(pipeline_id)
 
     @classmethod
     def is_registered(cls, pipeline_id: str) -> bool:
@@ -79,7 +78,11 @@ class PipelineRegistry:
 
     @classmethod
     def list_pipelines(cls) -> list[str]:
-        return [pid for pid, c in NodeRegistry._nodes.items() if _is_pipeline(c)]
+        return [
+            pid
+            for pid in NodeRegistry.list_node_types()
+            if _is_pipeline(NodeRegistry.get(pid))
+        ]
 
     @classmethod
     def chain_produces_video(cls, pipeline_ids: list[str]) -> bool:
