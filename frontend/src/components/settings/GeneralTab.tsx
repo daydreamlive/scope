@@ -28,7 +28,7 @@ export function GeneralTab({
 }: GeneralTabProps) {
   const handleDocsClick = () => {
     window.open(
-      "https://docs.daydream.live/knowledge-hub/tutorials/scope",
+      "https://docs.daydream.monster/knowledge-hub/tutorials/scope",
       "_blank"
     );
   };

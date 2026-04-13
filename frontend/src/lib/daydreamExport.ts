@@ -1,6 +1,6 @@
 const DAYDREAM_API_BASE =
   (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
-  "https://api.daydream.live";
+  "https://api.daydream.monster";
 
 interface ImportSessionResponse {
   token: string;
