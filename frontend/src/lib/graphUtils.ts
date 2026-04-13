@@ -5,6 +5,8 @@ import type {
   GraphEdge,
   PipelineSchemaInfo,
   LoRAFileInfo,
+  NodePortDef,
+  NodeParamDef,
 } from "./api";
 import { inferPrimitiveFieldType } from "./schemaSettings";
 import { resolveLoRAPath } from "./workflowSettings";
@@ -393,31 +395,13 @@ export interface FlowNodeData {
   /** For custom_node: category from node definition */
   customNodeCategory?: string;
   /** For custom_node: input port definitions */
-  customNodeInputs?: Array<{
-    name: string;
-    port_type: string;
-    required?: boolean;
-    description?: string;
-  }>;
+  customNodeInputs?: NodePortDef[];
   /** For custom_node: output port definitions */
-  customNodeOutputs?: Array<{
-    name: string;
-    port_type: string;
-    description?: string;
-  }>;
+  customNodeOutputs?: NodePortDef[];
   /** For custom_node: current parameter values (user-editable) */
   customNodeParams?: Record<string, unknown>;
   /** For custom_node: parameter definitions from API (widget metadata) */
-  customNodeParamDefs?: Array<{
-    name: string;
-    param_type: string;
-    default?: unknown;
-    description?: string;
-    min_value?: number;
-    max_value?: number;
-    step?: number;
-    options?: string[];
-  }>;
+  customNodeParamDefs?: NodeParamDef[];
 
   /* ── Node lock / pin / collapse ── */
   /** When true, parameter inputs on this node are disabled (read-only). */

@@ -38,13 +38,7 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
 
   const inputs = data.customNodeInputs ?? [];
   const outputs = data.customNodeOutputs ?? [];
-  const params = (data.customNodeParamDefs ?? []) as Array<{
-    name: string;
-    param_type: string;
-    default?: unknown;
-    description?: string;
-    ui?: Record<string, unknown> | null;
-  }>;
+  const params = data.customNodeParamDefs ?? [];
   const displayName =
     data.customTitle ||
     data.customNodeDisplayName ||

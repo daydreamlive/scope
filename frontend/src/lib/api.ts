@@ -968,18 +968,18 @@ export interface NodeDefinitionsResponse {
   nodes: NodeDefinitionDto[];
 }
 
-export const fetchNodeDefinitions =
-  async (): Promise<NodeDefinitionsResponse> => {
-    const response = await fetch("/api/v1/nodes/definitions", {
-      method: "GET",
-    });
-    if (!response.ok) {
-      throw new Error(
-        `Failed to fetch node definitions: ${response.statusText}`
-      );
-    }
-    return response.json();
-  };
+export const fetchNodeDefinitions = async (
+  options: { signal?: AbortSignal } = {}
+): Promise<NodeDefinitionsResponse> => {
+  const response = await fetch("/api/v1/nodes/definitions", {
+    method: "GET",
+    signal: options.signal,
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch node definitions: ${response.statusText}`);
+  }
+  return response.json();
+};
 
 export interface GraphEdge {
   from: string;
