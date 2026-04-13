@@ -106,7 +106,10 @@ async def capture_frame(
 
     Returns the most recent rendered frame from the active session
     (WebRTC or headless). When sink_node_id is provided, captures from
-    that specific sink node in a multi-sink graph.
+    that specific sink node in a multi-sink graph. In multi-sink headless
+    sessions, omitting sink_node_id returns the most recently consumed frame
+    from any sink, so callers that need stable per-sink capture should pass
+    sink_node_id explicitly.
     """
     frame = webrtc_manager.get_last_frame(sink_node_id=sink_node_id)
     if frame is None:
