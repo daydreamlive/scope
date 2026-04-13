@@ -1475,6 +1475,11 @@ const VACE_PORTS = ["vace_input_frames", "vace_input_masks"];
  * vace_input_frames + vace_input_masks), the topology fans out so the source
  * feeds both the preprocessor and the main pipeline, and the preprocessor
  * connects to the main pipeline via its VACE ports.
+ *
+ * When `vace_enabled` is true on a pipeline, a graph `vace` node is added and
+ * connected via `param:__vace`. An empty `image` (Media) node is placed to the
+ * left and wired to `ref_image` with no path; workflow `vace_ref_images` stay
+ * in pipeline `node_params` for runtime.
  */
 export function workflowToGraphConfig(
   workflow: {
@@ -1690,6 +1695,79 @@ export function workflowToGraphConfig(
         sourceHandle: buildHandleId("param", "__loras"),
         target: nodeId,
         targetHandle: buildHandleId("param", "__loras"),
+      });
+    }
+
+    // VACE compound node: matches graph-native workflows so the pipeline shows
+    // "VACE: Connected" and getGraphVaceSettings() can supply ref/context.
+    if (wp.params?.vace_enabled === true) {
+      const refImageNodeId = generateNodeId("ref-image", usedIds);
+      usedIds.add(refImageNodeId);
+
+      const vaceNodeId = generateNodeId("vace", usedIds);
+      usedIds.add(vaceNodeId);
+
+      const vaceContextScale =
+        typeof wp.params.vace_context_scale === "number"
+          ? wp.params.vace_context_scale
+          : 1.0;
+
+      const vaceY =
+        wp.loras && wp.loras.length > 0 ? meta.y - 360 : meta.y - 160;
+
+      // Empty Media node (Ref Image slot); paths remain in pipeline node_params only.
+      uiNodes.push({
+        id: refImageNodeId,
+        type: "image",
+        position: { x: meta.x - 420, y: vaceY },
+        width: 160,
+        height: 140,
+        data: {
+          label: "Ref Image",
+          customTitle: "Ref Image",
+          nodeType: "image",
+          imagePath: "",
+          mediaType: "image",
+          parameterOutputs: [
+            { name: "value", type: "string", defaultValue: "" },
+          ],
+        } as FlowNodeData,
+      });
+
+      uiNodes.push({
+        id: vaceNodeId,
+        type: "vace",
+        position: { x: meta.x - 180, y: vaceY },
+        width: 240,
+        height: 178,
+        data: {
+          label: "VACE",
+          nodeType: "vace",
+          vaceContextScale,
+          vaceRefImage: "",
+          vaceFirstFrame: "",
+          vaceLastFrame: "",
+          vaceVideo: "",
+          parameterOutputs: [
+            { name: "__vace", type: "string", defaultValue: "" },
+          ],
+        } as FlowNodeData,
+      });
+
+      uiEdges.push({
+        id: `e-${refImageNodeId}-${vaceNodeId}-ref`,
+        source: refImageNodeId,
+        sourceHandle: buildHandleId("param", "value"),
+        target: vaceNodeId,
+        targetHandle: buildHandleId("param", "ref_image"),
+      });
+
+      uiEdges.push({
+        id: `e-${vaceNodeId}-${nodeId}`,
+        source: vaceNodeId,
+        sourceHandle: buildHandleId("param", "__vace"),
+        target: nodeId,
+        targetHandle: buildHandleId("param", "__vace"),
       });
     }
   }
