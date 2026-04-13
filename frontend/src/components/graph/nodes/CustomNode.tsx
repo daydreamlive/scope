@@ -43,10 +43,7 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
     param_type: string;
     default?: unknown;
     description?: string;
-    min_value?: number;
-    max_value?: number;
-    step?: number;
-    options?: string[];
+    ui?: Record<string, unknown> | null;
   }>;
   const displayName =
     data.customTitle ||
@@ -133,7 +130,8 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
                     >
                       {p.description || p.name}
                     </span>
-                    {p.param_type === "select" && p.options ? (
+                    {p.param_type === "select" &&
+                    Array.isArray(p.ui?.options) ? (
                       <select
                         className="bg-zinc-900 text-zinc-200 rounded px-1 py-0.5 text-[11px] max-w-[130px]"
                         value={String(val)}
@@ -146,7 +144,7 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
                           })
                         }
                       >
-                        {p.options.map(o => (
+                        {(p.ui?.options as string[]).map(o => (
                           <option key={o} value={o}>
                             {o}
                           </option>
@@ -171,9 +169,9 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
                         type="number"
                         className="bg-zinc-900 text-zinc-200 rounded px-1 py-0.5 text-[11px] w-[80px]"
                         value={Number(val)}
-                        min={p.min_value ?? undefined}
-                        max={p.max_value ?? undefined}
-                        step={p.step ?? undefined}
+                        min={(p.ui?.min as number | undefined) ?? undefined}
+                        max={(p.ui?.max as number | undefined) ?? undefined}
+                        step={(p.ui?.step as number | undefined) ?? undefined}
                         onChange={e =>
                           updateData({
                             customNodeParams: {
