@@ -21,13 +21,16 @@ def _derive_node_type_id(node_class: type) -> str | None:
     if node_type_id is not None:
         return node_type_id
     # Lazy import: nodes.registry is loaded before pipelines.interface.
+    # Narrow to ImportError so real bugs (AttributeError on a broken
+    # config class, typos in pipeline_id, etc.) surface instead of being
+    # silently swallowed.
     try:
         from scope.core.pipelines.interface import Pipeline
+    except ImportError:
+        return None
 
-        if issubclass(node_class, Pipeline):
-            return node_class.get_config_class().pipeline_id
-    except Exception:
-        pass
+    if issubclass(node_class, Pipeline):
+        return node_class.get_config_class().pipeline_id
     return None
 
 
