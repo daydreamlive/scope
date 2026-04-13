@@ -48,30 +48,54 @@ def load_model_config(config, pipeline_file_path: str | Path) -> OmegaConf:
     return model_config
 
 
+def snap_to_multiple(val: int, multiple: int) -> int:
+    """Round *val* down to the nearest multiple of *multiple*."""
+    return (val // multiple) * multiple
+
+
 def validate_resolution(
     height: int,
     width: int,
     scale_factor: int,
-) -> None:
+    snap: bool = False,
+) -> tuple[int, int]:
     """
-    Validate that resolution dimensions are divisible by the required scale factor.
+    Validate (and optionally snap) resolution dimensions to a required scale factor.
 
     Args:
         height: Height of the resolution
         width: Width of the resolution
         scale_factor: The factor that both dimensions must be divisible by
+        snap: If True, silently round down to the nearest valid multiple instead
+              of raising an error.  A warning is logged when snapping occurs.
+
+    Returns:
+        A ``(height, width)`` tuple.  When *snap* is False and the dimensions
+        are already valid the input values are returned unchanged.  When *snap*
+        is True the (possibly adjusted) values are returned.
 
     Raises:
-        ValueError: If height or width is not divisible by scale_factor
+        ValueError: If *snap* is False and height or width is not divisible by
+                    *scale_factor*.
     """
     if height % scale_factor != 0 or width % scale_factor != 0:
-        adjusted_width = (width // scale_factor) * scale_factor
-        adjusted_height = (height // scale_factor) * scale_factor
+        adjusted_width = snap_to_multiple(width, scale_factor)
+        adjusted_height = snap_to_multiple(height, scale_factor)
+        if snap:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Snapping resolution from %d×%d to %d×%d "
+                "(both dimensions must be divisible by %d)",
+                width, height, adjusted_width, adjusted_height, scale_factor,
+            )
+            return adjusted_height, adjusted_width
         raise ValueError(
             f"Invalid resolution {width}×{height}. "
             f"Both width and height must be divisible by {scale_factor} "
             f"Please adjust to a valid resolution, e.g., {adjusted_width}×{adjusted_height}."
+            f"\nIf this error persists, consider removing the models directory and re-downloading models."
         )
+    return height, width
 
 
 def parse_jsonl_prompts(file_path: str) -> list[list[str]]:
