@@ -24,10 +24,10 @@ function getRedirectUrl(): string {
 
 const DAYDREAM_AUTH_URL =
   (import.meta.env.VITE_DAYDREAM_AUTH_URL as string | undefined) ||
-  `https://app.daydream.live/sign-in/local`;
+  `https://app.daydream.monster/sign-in/local`;
 const DAYDREAM_API_BASE =
   (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
-  "https://api.daydream.live";
+  "https://api.daydream.monster";
 const AUTH_STORAGE_KEY = "daydream_auth";
 const AUTH_STATE_KEY = "daydream_auth_state";
 

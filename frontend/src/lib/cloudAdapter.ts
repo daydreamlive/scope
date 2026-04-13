@@ -58,6 +58,19 @@ interface PendingRequest {
   timeout: ReturnType<typeof setTimeout>;
 }
 
+function dispatchCreditsExhausted(source: string, detail?: unknown): void {
+  try {
+    console.warn("[CloudAdapter] credits exhausted detected:", source, detail);
+    window.dispatchEvent(
+      new CustomEvent("billing:credits-exhausted", {
+        detail: { source, ...(detail ? { info: detail } : {}) },
+      })
+    );
+  } catch (err) {
+    console.error("[CloudAdapter] failed to dispatch credits-exhausted:", err);
+  }
+}
+
 export class CloudAdapter {
   private ws: WebSocket | null = null;
   private wsUrl: string;
@@ -144,6 +157,17 @@ export class CloudAdapter {
           this.isReady = false;
           this.ws = null;
 
+          if (
+            event.code === 4020 ||
+            (typeof event.reason === "string" &&
+              event.reason.toLowerCase().includes("credit"))
+          ) {
+            dispatchCreditsExhausted("ws_close", {
+              code: event.code,
+              reason: event.reason,
+            });
+          }
+
           // Reject all pending requests
           for (const [requestId, pending] of this.pendingRequests) {
             clearTimeout(pending.timeout);
@@ -209,6 +233,20 @@ export class CloudAdapter {
   }
 
   private handleMessage(message: ApiResponse): void {
+    // Credit-exhaustion push messages from the cloud runner
+    if (
+      message.type === "credits_exhausted" ||
+      message.type === "stream_terminated"
+    ) {
+      const reason = (message as unknown as { reason?: string }).reason;
+      if (
+        message.type === "credits_exhausted" ||
+        (typeof reason === "string" && reason.toLowerCase().includes("credit"))
+      ) {
+        dispatchCreditsExhausted(message.type, { reason });
+      }
+    }
+
     // Handle response to pending request
     if (message.request_id && this.pendingRequests.has(message.request_id)) {
       const pending = this.pendingRequests.get(message.request_id)!;
@@ -388,6 +426,12 @@ export class CloudAdapter {
     );
 
     if (response.status && response.status >= 400) {
+      if (response.status === 402) {
+        dispatchCreditsExhausted("http_402", {
+          path,
+          error: response.error,
+        });
+      }
       throw new Error(
         response.error || `API request failed with status ${response.status}`
       );

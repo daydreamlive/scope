@@ -6,12 +6,24 @@ import {
   Plug,
   Workflow,
   Monitor,
+  Clock,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import { SettingsDialog } from "./SettingsDialog";
 import { PluginsDialog } from "./PluginsDialog";
+import { PaywallModal } from "./PaywallModal";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import { useBilling } from "../contexts/BillingContext";
+
+function formatTrialTime(totalSeconds: number): string {
+  const s = Math.max(0, Math.floor(totalSeconds));
+  const m = Math.floor(s / 60);
+  const sec = s % 60;
+  return `${m}:${String(sec).padStart(2, "0")}`;
+}
+
 interface HeaderProps {
   className?: string;
   onPipelinesRefresh?: () => Promise<unknown>;
@@ -45,7 +57,7 @@ export function Header({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
-    "general" | "account" | "api-keys" | "loras" | "osc"
+    "general" | "account" | "api-keys" | "loras" | "osc" | "billing"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
   const [pluginsInitialTab, setPluginsInitialTab] = useState<
@@ -55,6 +67,9 @@ export function Header({
   // Use shared cloud status hook - single source of truth
   const { isConnected, isConnecting, lastCloseCode, lastCloseReason } =
     useCloudStatus();
+
+  // Billing state
+  const billing = useBilling();
 
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
@@ -121,6 +136,7 @@ export function Header({
             | "api-keys"
             | "loras"
             | "osc"
+            | "billing"
         );
         setSettingsOpen(true);
       }
@@ -230,6 +246,54 @@ export function Header({
                   : "Connect to Cloud"}
             </span>
           </Button>
+          {/* Subscribe CTA (free tier only) */}
+          {billing.tier === "free" && !billing.credits && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                billing.setPaywallReason("subscribe");
+                billing.setShowPaywall(true);
+              }}
+              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Subscribe
+            </Button>
+          )}
+          {isConnected &&
+            billing.tier === "free" &&
+            billing.trial &&
+            !billing.trial.exhausted && (
+              <span
+                className={`flex items-center gap-1 text-xs font-medium px-2 ${
+                  billing.trial.secondsLimit - billing.trial.secondsUsed < 300
+                    ? billing.trial.secondsLimit - billing.trial.secondsUsed <
+                      60
+                      ? "text-red-500"
+                      : "text-amber-400"
+                    : "text-muted-foreground"
+                }`}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                Trial:{" "}
+                {formatTrialTime(
+                  billing.trial.secondsLimit - billing.trial.secondsUsed,
+                )}
+              </span>
+            )}
+          {/* Billing unavailable fallback */}
+          {isConnected &&
+            billing.billingError &&
+            !billing.credits &&
+            !billing.trial && (
+              <span
+                className="flex items-center gap-1 text-xs font-medium px-2 text-amber-400"
+                title="Unable to load billing status. Usage may not be tracked."
+              >
+                <AlertTriangle className="h-3.5 w-3.5" />
+                Billing unavailable
+              </span>
+            )}
           <Button
             variant="ghost"
             size="sm"
@@ -288,6 +352,8 @@ export function Header({
         onPipelinesRefresh={onPipelinesRefresh}
         cloudDisabled={cloudDisabled}
       />
+
+      <PaywallModal />
     </header>
   );
 }

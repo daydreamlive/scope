@@ -14,10 +14,10 @@ import { getHardwareInfo } from "../../lib/api";
 
 const DAYDREAM_API_BASE =
   (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
-  "https://api.daydream.live";
+  "https://api.daydream.monster";
 const DAYDREAM_APP_BASE =
   (import.meta.env.VITE_DAYDREAM_APP_BASE as string | undefined) ||
-  "https://app.daydream.live";
+  "https://app.daydream.monster";
 
 interface DaydreamWorkflow {
   id: string;

@@ -104,7 +104,7 @@ export function LoRAsTab({
             <p>
               Install LoRAs using the URL input above, or follow the{" "}
               <a
-                href="https://docs.daydream.live/scope/guides/loras"
+                href="https://docs.daydream.monster/scope/guides/loras"
                 target="_blank"
                 rel="noopener noreferrer"
                 className="underline hover:text-foreground"
