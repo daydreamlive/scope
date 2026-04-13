@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import logging
 import os
+import struct
 import time
-import wave
 from typing import Any, ClassVar
 
 import numpy as np
@@ -23,6 +23,95 @@ logger = logging.getLogger(__name__)
 SAMPLE_RATE = 48000
 CHUNK_DURATION = 0.1  # 100ms chunks for streaming
 CHUNK_SAMPLES = int(SAMPLE_RATE * CHUNK_DURATION)
+
+
+def _read_wav_float32(path: str) -> tuple[np.ndarray, int]:
+    """Parse a WAV file into float32 samples without the stdlib ``wave``
+    module, which rejects IEEE-float (format 3) files.
+
+    Returns (data, sample_rate) where ``data`` has shape (samples, channels).
+    Supports formats 1 (PCM int) and 3 (IEEE float) — the two common cases.
+    WAVE_FORMAT_EXTENSIBLE (0xFFFE) is unwrapped to its underlying format.
+    """
+    with open(path, "rb") as f:
+        header = f.read(12)
+        if len(header) < 12 or header[:4] != b"RIFF" or header[8:12] != b"WAVE":
+            raise ValueError(f"Not a WAV file: {path}")
+
+        fmt_code: int | None = None
+        n_channels = 1
+        sample_rate = 0
+        bits_per_sample = 0
+        pcm_bytes = b""
+
+        while True:
+            chunk_header = f.read(8)
+            if len(chunk_header) < 8:
+                break
+            chunk_id, chunk_size = struct.unpack("<4sI", chunk_header)
+            chunk_data = f.read(chunk_size)
+            if chunk_size % 2 == 1:
+                f.read(1)  # RIFF pads odd-sized chunks
+
+            if chunk_id == b"fmt " and len(chunk_data) >= 16:
+                (
+                    fmt_code,
+                    n_channels,
+                    sample_rate,
+                    _byte_rate,
+                    _block_align,
+                    bits_per_sample,
+                ) = struct.unpack("<HHIIHH", chunk_data[:16])
+                # Unwrap WAVE_FORMAT_EXTENSIBLE: real format is first 2 bytes of the GUID.
+                if fmt_code == 0xFFFE and len(chunk_data) >= 26:
+                    fmt_code = struct.unpack("<H", chunk_data[24:26])[0]
+            elif chunk_id == b"data":
+                pcm_bytes = chunk_data
+
+        if fmt_code is None or not pcm_bytes or sample_rate <= 0:
+            raise ValueError(f"WAV missing fmt/data chunk: {path}")
+
+        if fmt_code == 1:  # PCM integer
+            if bits_per_sample == 16:
+                samples = (
+                    np.frombuffer(pcm_bytes, dtype="<i2").astype(np.float32) / 32768.0
+                )
+            elif bits_per_sample == 32:
+                samples = (
+                    np.frombuffer(pcm_bytes, dtype="<i4").astype(np.float32)
+                    / 2147483648.0
+                )
+            elif bits_per_sample == 8:
+                samples = (
+                    np.frombuffer(pcm_bytes, dtype=np.uint8).astype(np.float32) / 128.0
+                    - 1.0
+                )
+            elif bits_per_sample == 24:
+                raw = np.frombuffer(pcm_bytes, dtype=np.uint8).reshape(-1, 3)
+                as32 = (
+                    raw[:, 0].astype(np.int32)
+                    | (raw[:, 1].astype(np.int32) << 8)
+                    | (raw[:, 2].astype(np.int32) << 16)
+                )
+                # Sign-extend the 24-bit value.
+                as32 = np.where(as32 & 0x800000, as32 | ~0xFFFFFF, as32)
+                samples = as32.astype(np.float32) / 8388608.0
+            else:
+                raise ValueError(f"Unsupported PCM bit depth: {bits_per_sample}")
+        elif fmt_code == 3:  # IEEE float
+            if bits_per_sample == 32:
+                samples = np.frombuffer(pcm_bytes, dtype="<f4").astype(
+                    np.float32, copy=True
+                )
+            elif bits_per_sample == 64:
+                samples = np.frombuffer(pcm_bytes, dtype="<f8").astype(np.float32)
+            else:
+                raise ValueError(f"Unsupported float bit depth: {bits_per_sample}")
+        else:
+            raise ValueError(f"Unsupported WAV format code: {fmt_code}")
+
+        samples = samples.reshape(-1, n_channels)
+        return samples, sample_rate
 
 
 class AudioSourceNode(BaseNode):
@@ -75,23 +164,11 @@ class AudioSourceNode(BaseNode):
 
     def _load_audio(self, file_path: str, duration: float) -> None:
         """Load, decode, resample to 48kHz stereo, and clip to duration."""
-        with wave.open(file_path, "rb") as wf:
-            sr = wf.getframerate()
-            n_channels = wf.getnchannels()
-            sampwidth = wf.getsampwidth()
-            raw = wf.readframes(wf.getnframes())
+        data, sr = _read_wav_float32(file_path)  # (samples, channels)
 
-        if sampwidth == 2:
-            data = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / 32768.0
-        elif sampwidth == 4:
-            data = np.frombuffer(raw, dtype=np.int32).astype(np.float32) / 2147483648.0
-        else:
-            data = np.frombuffer(raw, dtype=np.uint8).astype(np.float32) / 128.0 - 1.0
-
-        data = data.reshape(-1, n_channels)
-        if n_channels == 1:
-            data = np.stack([data[:, 0], data[:, 0]], axis=-1)
-        elif n_channels > 2:
+        if data.shape[1] == 1:
+            data = np.concatenate([data, data], axis=1)
+        elif data.shape[1] > 2:
             data = data[:, :2]
         data = data.T  # (channels, samples)
 
