@@ -40,9 +40,14 @@ class NodeParam(BaseModel):
     """Describes an editable parameter (widget) on a node.
 
     Parameters are user-configurable values that live on the node card.
-    Like ComfyUI widgets, a parameter may be overridden by connecting an
-    incoming wire to the corresponding input port — the widget then
+    Like ComfyUI widgets, a parameter may be overridden by connecting
+    an incoming wire to the corresponding input port — the widget then
     becomes an input and the default value is ignored.
+
+    Widget-specific hints (number min/max/step, select options, etc.)
+    go into the free-form ``ui`` dict so the base schema doesn't grow
+    as new widget kinds are added. The frontend renderer dispatches on
+    ``param_type`` and reads whichever ``ui`` keys apply.
     """
 
     name: str = Field(..., description="Parameter identifier")
@@ -51,11 +56,14 @@ class NodeParam(BaseModel):
     )
     default: Any = Field(default=None, description="Default value")
     description: str = Field(default="", description="Human-readable label")
-    min_value: float | None = Field(default=None, description="Minimum (for number)")
-    max_value: float | None = Field(default=None, description="Maximum (for number)")
-    step: float | None = Field(default=None, description="Step size (for number)")
-    options: list[str] | None = Field(
-        default=None, description="Options (for select dropdowns)"
+    ui: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Widget-specific hints consumed by the frontend renderer. "
+            "Number widgets read ``min``/``max``/``step``; select "
+            "widgets read ``options``; plugin-defined widget kinds may "
+            "use any keys they like."
+        ),
     )
     convertible_to_input: bool = Field(
         default=True,

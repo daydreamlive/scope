@@ -937,10 +937,13 @@ export interface NodeParamDef {
   param_type: "number" | "string" | "boolean" | "select";
   default?: unknown;
   description?: string;
-  min_value?: number | null;
-  max_value?: number | null;
-  step?: number | null;
-  options?: string[] | null;
+  /**
+   * Free-form widget hints (``min``/``max``/``step`` for number,
+   * ``options`` for select, …). Keeps widget-specific fields off the
+   * base schema; the frontend renderer dispatches on ``param_type``
+   * and reads whichever ``ui`` keys apply.
+   */
+  ui?: Record<string, unknown> | null;
   convertible_to_input?: boolean;
 }
 
