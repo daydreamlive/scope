@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+import asyncio
+import fractions
+
+import torch
+
+from scope.server import tracks as tracks_module
+from scope.server.media_packets import MediaTimestamp, VideoPacket
 from scope.server.pacing import MediaPacingState, compute_pacing_decision
+from scope.server.tracks import _pace_preserved_timestamp
 
 
 def _dispatch(state: MediaPacingState, dispatch_monotonic: float) -> None:
@@ -136,3 +144,35 @@ def test_missing_timestamp_is_hard_reset():
     assert decision.hard_reset is True
     assert decision.has_valid_ts is False
     assert decision.sleep_s == 0.0
+
+
+def test_local_output_track_paces_preserved_timestamps(monkeypatch):
+    now = {"value": 0.0}
+    sleeps: list[float] = []
+
+    async def fake_sleep(delay: float) -> None:
+        sleeps.append(delay)
+        now["value"] += delay
+
+    monkeypatch.setattr(tracks_module.time, "monotonic", lambda: now["value"])
+    monkeypatch.setattr(tracks_module.asyncio, "sleep", fake_sleep)
+
+    class _LiveTrack:
+        readyState = "live"
+
+    packet0 = VideoPacket(
+        tensor=torch.zeros((1, 4, 4, 3), dtype=torch.uint8),
+        timestamp=MediaTimestamp(pts=0, time_base=fractions.Fraction(1, 90000)),
+    )
+    packet1 = VideoPacket(
+        tensor=torch.zeros((1, 4, 4, 3), dtype=torch.uint8),
+        timestamp=MediaTimestamp(pts=6000, time_base=fractions.Fraction(1, 90000)),
+    )
+    pacing = MediaPacingState()
+
+    asyncio.run(_pace_preserved_timestamp(_LiveTrack(), pacing, packet0))
+    asyncio.run(_pace_preserved_timestamp(_LiveTrack(), pacing, packet1))
+
+    assert len(sleeps) == 1
+    assert sleeps[0] == 6000 / 90000
+    assert pacing.prev_wall_monotonic == 6000 / 90000

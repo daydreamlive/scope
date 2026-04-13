@@ -14,6 +14,7 @@ import queue
 import threading
 import time
 from collections.abc import Callable
+from fractions import Fraction
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -23,9 +24,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# Type alias for the frame callback: (source_node_id | None, numpy_frame) -> None
+# Type alias for the frame callback:
+# (source_node_id | None, numpy_frame, pts, time_base) -> None
 # source_node_id is None for the generic (non-graph) input source.
-FrameCallback = Callable[[str | None, "np.ndarray"], None]
+FrameCallback = Callable[[str | None, "np.ndarray", int | None, Fraction | None], None]
 
 
 class SourceManager:
@@ -298,7 +300,18 @@ class SourceManager:
                 rgb_frame = source.receive_frame(timeout_ms=100)
                 if rgb_frame is not None:
                     if self._on_frame is not None:
-                        self._on_frame(node_id, rgb_frame)
+                        pts: int | None = None
+                        time_base: Fraction | None = None
+                        if isinstance(rgb_frame, tuple) and len(rgb_frame) == 3:
+                            rgb_frame, pts, time_base = rgb_frame
+                            if time_base is not None and not isinstance(
+                                time_base, Fraction
+                            ):
+                                try:
+                                    time_base = Fraction(time_base)
+                                except Exception:
+                                    time_base = None
+                        self._on_frame(node_id, rgb_frame, pts, time_base)
 
                     frame_count += 1
                     if frame_count % 100 == 0:

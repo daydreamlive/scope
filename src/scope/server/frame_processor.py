@@ -3,6 +3,7 @@ import queue
 import threading
 import time
 import uuid
+from fractions import Fraction
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -11,6 +12,7 @@ from aiortc.mediastreams import VideoFrame
 
 from .cloud_relay import CloudRelay, compute_relay_video_mode
 from .kafka_publisher import publish_event
+from .media_packets import MediaTimestamp, VideoPacket, ensure_video_packet
 from .modulation import ModulationEngine
 from .parameter_scheduler import ParameterScheduler
 from .pipeline_manager import PipelineManager
@@ -395,7 +397,11 @@ class FrameProcessor:
         return t.unsqueeze(0)
 
     def _on_hardware_source_frame(
-        self, source_node_id: str | None, rgb_frame: np.ndarray
+        self,
+        source_node_id: str | None,
+        rgb_frame: np.ndarray,
+        pts: int | None,
+        time_base: Fraction | None,
     ) -> None:
         """Callback invoked by SourceManager when a hardware source produces a frame.
 
@@ -411,10 +417,14 @@ class FrameProcessor:
 
         # Local mode: convert to tensor and route to source queues
         frame_tensor = self._frame_array_to_tensor(rgb_frame)
+        packet = VideoPacket(
+            tensor=frame_tensor,
+            timestamp=MediaTimestamp(pts=pts, time_base=time_base),
+        )
         if source_node_id is not None:
-            self._source_manager.route_frame_to_source(frame_tensor, source_node_id)
+            self._source_manager.route_frame_to_source(packet, source_node_id)
         else:
-            self._source_manager.route_frame_to_all_sources(frame_tensor)
+            self._source_manager.route_frame_to_all_sources(packet)
 
     def _maybe_emit_frame_heartbeat(self) -> None:
         """Log stats periodically when frames flow (shared by put() paths)."""
@@ -476,16 +486,28 @@ class FrameProcessor:
 
         # Local mode: convert and route to source node queues
         frame_tensor = self._frame_array_to_tensor(frame.to_ndarray(format="rgb24"))
-        return self._source_manager.route_frame_to_source(frame_tensor, source_node_id)
+        tb = Fraction(frame.time_base) if frame.time_base is not None else None
+        packet = VideoPacket(
+            tensor=frame_tensor,
+            timestamp=MediaTimestamp(pts=frame.pts, time_base=tb),
+        )
+        return self._source_manager.route_frame_to_source(packet, source_node_id)
 
-    def get_from_sink(self, sink_node_id: str) -> torch.Tensor | None:
-        """Read a frame from a specific sink node's output queue (multi-sink)."""
+    def get_packet_from_sink(self, sink_node_id: str) -> VideoPacket | None:
+        """Read a packet from a specific sink node output queue (multi-sink)."""
         if not self.running:
             return None
-        frame = self.sink_manager.get_from_sink(sink_node_id)
-        if frame is not None:
+        packet = self.sink_manager.get_packet_from_sink(sink_node_id)
+        if packet is not None:
             self._frames_out += 1
-        return frame
+        return packet
+
+    def get_from_sink(self, sink_node_id: str) -> torch.Tensor | None:
+        """Backwards-compatible tensor getter for sink output."""
+        packet = self.get_packet_from_sink(sink_node_id)
+        if packet is None:
+            return None
+        return packet.tensor
 
     def get_sink_node_ids(self) -> list[str]:
         """Return the list of sink node IDs available for reading."""
@@ -499,16 +521,16 @@ class FrameProcessor:
         """
         return self.sink_manager.get_unhandled_sink_node_ids()
 
-    def get(self) -> torch.Tensor | None:
+    def get_packet(self) -> VideoPacket | None:
         if not self.running:
             return None
 
         # Get frame based on mode
-        frame: torch.Tensor | None = None
+        packet: VideoPacket | None = None
 
         if self._cloud_relay is not None:
-            frame = self._cloud_relay.get_frame()
-            if frame is None:
+            packet = self._cloud_relay.get_frame()
+            if packet is None:
                 return None
         else:
             # Local mode: get from pipeline processor
@@ -519,17 +541,25 @@ class FrameProcessor:
                 return None
 
             try:
-                frame = self._sink_processor.output_queue.get_nowait()
-                # Frame is stored as [1, H, W, C], convert to [H, W, C] for output
-                # Move to CPU here for WebRTC streaming (frames stay on GPU between pipeline processors)
-                frame = frame.squeeze(0)
+                packet = ensure_video_packet(
+                    self._sink_processor.output_queue.get_nowait()
+                )
+                frame = packet.tensor.squeeze(0)
                 if frame.is_cuda:
                     frame = frame.cpu()
+                packet = VideoPacket(tensor=frame, timestamp=packet.timestamp)
             except queue.Empty:
                 return None
 
-        self._on_frame_output(frame)
-        return frame
+        self._on_frame_output(packet)
+        return packet
+
+    def get(self) -> torch.Tensor | None:
+        """Backwards-compatible tensor getter for primary output."""
+        packet = self.get_packet()
+        if packet is None:
+            return None
+        return packet.tensor
 
     def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
         """Get the next audio chunk and its sample rate.
@@ -578,7 +608,7 @@ class FrameProcessor:
             return fps
         return self.get_fps()
 
-    def _on_frame_output(self, frame: torch.Tensor) -> None:
+    def _on_frame_output(self, packet: VideoPacket) -> None:
         """Common post-output logic: increment counter, emit playback_ready, fan out to sinks."""
         self._frames_out += 1
 
@@ -609,7 +639,7 @@ class FrameProcessor:
 
         if self.sink_manager.has_generic_sinks:
             try:
-                frame_np = frame.numpy()
+                frame_np = packet.tensor.numpy()
                 self.sink_manager.fan_out_frame(frame_np)
             except Exception as e:
                 logger.error(f"Error enqueueing output sink frame: {e}")

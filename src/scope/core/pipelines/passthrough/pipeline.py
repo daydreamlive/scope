@@ -43,6 +43,7 @@ class PassthroughPipeline(Pipeline):
         **kwargs,
     ) -> dict:
         input = kwargs.get("video")
+        input_timestamps = kwargs.get("video_timestamps")
 
         if input is None:
             raise ValueError("Input cannot be None for PassthroughPipeline")
@@ -53,4 +54,8 @@ class PassthroughPipeline(Pipeline):
 
         input = rearrange(input, "B C T H W -> B T C H W")
 
-        return {"video": postprocess_chunk(input)}
+        output_video = postprocess_chunk(input)
+        output: dict = {"video": output_video}
+        if isinstance(input_timestamps, list):
+            output["video_timestamps"] = input_timestamps[: output_video.shape[0]]
+        return output
