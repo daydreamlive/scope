@@ -48,11 +48,14 @@ class AudioProcessingTrack(MediaStreamTrack):
         self.channels = channels
 
         self._samples_per_frame = int(AUDIO_CLOCK_RATE * AUDIO_PTIME)  # 960
-        self._chunks: collections.deque[np.ndarray] = collections.deque()
+        self._chunks: collections.deque[tuple[np.ndarray, int | None]] = (
+            collections.deque()
+        )
         self._buffered_samples: int = 0  # total interleaved sample count
         self._first_audio_logged = False
         self._start: float | None = None
         self._timestamp: int = 0
+        self._last_preserved_pts: int | None = None
 
     @staticmethod
     def _resample_audio(
@@ -100,15 +103,18 @@ class AudioProcessingTrack(MediaStreamTrack):
         # Drain all available audio from the queue to minimise latency
         # for bursty or small-chunk pipelines.
         while True:
-            audio_tensor, sample_rate = self.frame_processor.get_audio()
-            if audio_tensor is None and sample_rate is None:
+            audio_packet = self.frame_processor.get_audio_packet()
+            if audio_packet is None:
                 break
+            audio_tensor = audio_packet.audio
+            sample_rate = audio_packet.sample_rate
 
             # Flush sentinel: discard buffered audio so a new prompt
             # is heard immediately instead of after the old speech finishes.
             if audio_tensor is None and sample_rate == AUDIO_FLUSH_SENTINEL:
                 self._chunks.clear()
                 self._buffered_samples = 0
+                self._last_preserved_pts = None
                 logger.info("Audio buffer flushed (prompt change)")
                 continue
 
@@ -139,7 +145,16 @@ class AudioProcessingTrack(MediaStreamTrack):
             # columns first, producing [L0, R0, L1, R1, ...] which is exactly
             # what packed interleaved s16 expects in a single plane.
             interleaved = np.ravel(audio_np, order="F").astype(np.float32)
-            self._chunks.append(interleaved)
+            chunk_pts: int | None = None
+            if audio_packet.timestamp.is_valid:
+                # Convert the preserved timestamp onto the outgoing 48kHz sample
+                # timeline so the buffered chunk stores the PTS of its first
+                # output sample, regardless of the packet's original time_base.
+                media_ts = audio_packet.timestamp.pts * float(
+                    audio_packet.timestamp.time_base
+                )
+                chunk_pts = int(round(media_ts * AUDIO_CLOCK_RATE))
+            self._chunks.append((interleaved, chunk_pts))
             self._buffered_samples += len(interleaved)
 
         # Cap buffer to prevent unbounded growth.
@@ -147,29 +162,75 @@ class AudioProcessingTrack(MediaStreamTrack):
         # single large chunk (e.g. LTX2 delivering >1s at once) is never
         # discarded entirely.
         max_interleaved = AUDIO_MAX_BUFFER_SAMPLES * self.channels
+        overflow = self._buffered_samples - max_interleaved
+        while overflow > 0 and self._chunks:
+            chunk, pts = self._chunks[0]
+            if len(chunk) <= overflow:
+                self._chunks.popleft()
+                self._buffered_samples -= len(chunk)
+                overflow -= len(chunk)
+                continue
+
+            # Dropping samples from the front of a buffered chunk means its
+            # start PTS must move forward by the same number of output samples.
+            shifted_pts = None if pts is None else pts + (overflow // self.channels)
+            self._chunks[0] = (chunk[overflow:], shifted_pts)
+            self._buffered_samples -= overflow
+            overflow = 0
+
         if self._buffered_samples > max_interleaved:
-            flat = np.concatenate(list(self._chunks))
-            self._chunks.clear()
-            trimmed = flat[-max_interleaved:]
-            self._chunks.append(trimmed)
-            self._buffered_samples = len(trimmed)
             logger.warning("Audio buffer overflow, dropped oldest chunks")
 
         # Serve a 20ms frame from the buffer
         samples_needed = self._samples_per_frame * self.channels
         if self._buffered_samples >= samples_needed:
-            flat = np.concatenate(list(self._chunks))
-            self._chunks.clear()
-            frame_samples = flat[:samples_needed]
-            remainder = flat[samples_needed:]
-            if len(remainder) > 0:
-                self._chunks.append(remainder)
-            self._buffered_samples = len(remainder)
-            return self._create_audio_frame(frame_samples)
+            frame_parts: list[np.ndarray] = []
+            remaining = samples_needed
+            preserved_pts: int | None = None
+            first_chunk = True
+
+            while remaining > 0 and self._chunks:
+                chunk, pts = self._chunks[0]
+                take = min(len(chunk), remaining)
+                if first_chunk:
+                    # The emitted frame inherits the timestamp of its first
+                    # output sample.
+                    preserved_pts = pts
+                    first_chunk = False
+
+                frame_parts.append(chunk[:take])
+                if take == len(chunk):
+                    self._chunks.popleft()
+                else:
+                    # The leftover tail becomes a new buffered chunk whose
+                    # first-sample PTS advances by the number of consumed
+                    # output samples.
+                    shifted_pts = None if pts is None else pts + (take // self.channels)
+                    self._chunks[0] = (chunk[take:], shifted_pts)
+
+                self._buffered_samples -= take
+                remaining -= take
+
+            frame_samples = np.concatenate(frame_parts)
+            frame_pts = preserved_pts
+            if frame_pts is not None:
+                if (
+                    self._last_preserved_pts is None
+                    or frame_pts > self._last_preserved_pts
+                ):
+                    self._last_preserved_pts = frame_pts
+                else:
+                    logger.warning(
+                        "Ignoring non-monotonic preserved audio timestamp in AudioProcessingTrack"
+                    )
+                    frame_pts = None
+            return self._create_audio_frame(frame_samples, pts_override=frame_pts)
 
         return self._create_silence_frame()
 
-    def _create_audio_frame(self, samples: np.ndarray) -> AudioFrame:
+    def _create_audio_frame(
+        self, samples: np.ndarray, pts_override: int | None = None
+    ) -> AudioFrame:
         """Build a packed s16 AudioFrame from interleaved float32 samples.
 
         ``samples`` must already be interleaved: [L0, R0, L1, R1, …] for
@@ -185,7 +246,7 @@ class AudioProcessingTrack(MediaStreamTrack):
         layout = "stereo" if self.channels == 2 else "mono"
         frame = AudioFrame(format="s16", layout=layout, samples=self._samples_per_frame)
         frame.sample_rate = AUDIO_CLOCK_RATE
-        frame.pts = self._timestamp
+        frame.pts = self._timestamp if pts_override is None else pts_override
         frame.time_base = AUDIO_TIME_BASE
         frame.planes[0].update(samples_int16.tobytes())
         return frame
@@ -203,4 +264,5 @@ class AudioProcessingTrack(MediaStreamTrack):
     def stop(self):
         self._chunks.clear()
         self._buffered_samples = 0
+        self._last_preserved_pts = None
         super().stop()
