@@ -89,7 +89,9 @@ class NodeProcessor:
             return
         self.running = True
         self.shutdown_event.clear()
-        self.worker_thread = threading.Thread(target=self._worker_loop, daemon=True)
+        self.worker_thread = threading.Thread(
+            target=self._worker_loop, daemon=True, name=f"NodeProcessor[{self.node_id}]"
+        )
         self.worker_thread.start()
 
     def stop(self) -> None:
