@@ -17,6 +17,7 @@ import {
 } from "../lib/billing";
 import { getDaydreamAPIKey } from "../lib/auth";
 import { getDeviceId } from "../lib/deviceId";
+import { openExternalUrl } from "../lib/openExternal";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 import { toast } from "sonner";
 
@@ -84,14 +85,6 @@ const BillingContext = createContext<BillingContextValue>(defaultState);
 
 export function useBilling() {
   return useContext(BillingContext);
-}
-
-function openExternalUrl(url: string) {
-  if (typeof window !== "undefined" && "scope" in window) {
-    (window as any).scope.openExternal(url);
-  } else {
-    window.open(url, "_blank");
-  }
 }
 
 export function BillingProvider({ children }: { children: ReactNode }) {
