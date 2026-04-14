@@ -10,11 +10,12 @@ import {
 import {
   fetchCreditsBalance,
   sendTrialHeartbeat,
-  createCheckoutSession,
   createPortalSession,
   setOverageEnabled,
   requestInferenceToken,
 } from "../lib/billing";
+
+const SUBSCRIBE_URL = "https://app.daydream.monster/dashboard/usage";
 import { getDaydreamAPIKey } from "../lib/auth";
 import { getDeviceId } from "../lib/deviceId";
 import { openExternalUrl } from "../lib/openExternal";
@@ -377,25 +378,6 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const openCheckout = useCallback(async (tier: "pro" | "max") => {
-    try {
-      const apiKey = getDaydreamAPIKey();
-      if (!apiKey) {
-        toast.error("Please sign in first");
-        return;
-      }
-      const { checkoutUrl } = await createCheckoutSession(apiKey, tier);
-      openExternalUrl(checkoutUrl);
-      toast.info("Opening Stripe Checkout in your browser...");
-    } catch (err) {
-      console.error("[Billing] Checkout failed:", err);
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      toast.error(`Failed to open checkout: ${msg}`, {
-        description: "If this persists, contact support@daydream.monster",
-      });
-    }
-  }, []);
-
   const openPortal = useCallback(async () => {
     try {
       const apiKey = getDaydreamAPIKey();
@@ -413,6 +395,10 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         description: "If this persists, contact support@daydream.monster",
       });
     }
+  }, []);
+
+  const openCheckout = useCallback(async (_tier: "pro" | "max") => {
+    openExternalUrl(SUBSCRIBE_URL);
   }, []);
 
   const toggleOverage = useCallback(
