@@ -125,6 +125,10 @@ class AudioSourceNode(BaseNode):
         self._position = 0
         self._loaded_file: str = ""
         self._last_call_time: float | None = None
+        # In mode=full we emit the entire clip once and then stay silent
+        # (returning {}) until the loaded file or mode changes. Otherwise
+        # every worker tick would re-push a 15s clip and flood the graph.
+        self._full_emitted_key: tuple[str, str] | None = None
 
     @classmethod
     def get_definition(cls) -> NodeDefinition:
@@ -217,7 +221,18 @@ class AudioSourceNode(BaseNode):
             return {}
 
         if mode == "full":
+            # Emit the entire clip once per (file, mode) pair. Subsequent
+            # ticks stay silent until the loaded file changes. Streaming
+            # downstream through the latch-fallback cache keeps the DAG
+            # alive without spamming the audio track.
+            key = (self._loaded_file, "full")
+            if self._full_emitted_key == key:
+                return {}
+            self._full_emitted_key = key
             return self._emit_full()
+        # Stream mode re-emits 100ms chunks, so clear the "emitted" flag
+        # in case we ever switch back to full.
+        self._full_emitted_key = None
         return self._emit_chunk()
 
     @staticmethod
