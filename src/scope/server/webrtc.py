@@ -516,9 +516,6 @@ class WebRTCManager:
             graph_data_for_audio = initial_parameters.get("graph")
             if not produces_audio and graph_data_for_audio:
                 produces_audio = _graph_produces_audio(graph_data_for_audio)
-            # Respect explicit hint from frontend (node-only graphs)
-            if not produces_audio and initial_parameters.get("produces_audio"):
-                produces_audio = True
             if produces_audio:
                 audio_track = AudioProcessingTrack(
                     frame_processor=frame_processor,
