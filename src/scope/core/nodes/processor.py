@@ -35,7 +35,6 @@ class NodeProcessor:
     ):
         self.node = node
         self.node_id = node_id
-        self.pipeline_id = f"node:{node.node_type_id}"
         self.parameters = initial_parameters or {}
 
         # Port-based queues wired by the graph executor
@@ -61,27 +60,20 @@ class NodeProcessor:
         self.shutdown_event = threading.Event()
         self.running = False
 
-        # Source-node execution tracking
+        # Execution state
         self._source_executed = False
+        self._has_executed = False
         self._continuous = definition.continuous
 
-        # Output cache: stores last outputs so unchanged nodes skip re-execution
-        self._cached_outputs: dict[str, Any] | None = None
-
-        # PipelineProcessor interface compatibility
+        # PipelineProcessor interface compatibility: graph_executor populates
+        # this for every processor; kept as an empty dict so that write is safe.
         self.output_consumers: dict[str, list] = {}
-        self.is_prepared = False
-        self.native_fps: float | None = None
         self.paused = False
 
     @property
     def output_queue(self) -> queue.Queue | None:
         qs = self.output_queues.get("video")
         return qs[0] if qs else None
-
-    @property
-    def pipeline(self):
-        return self.node
 
     def start(self) -> None:
         if self.running:
@@ -109,7 +101,7 @@ class NodeProcessor:
         pass
 
     def get_fps(self) -> float:
-        return self.native_fps or 30.0
+        return 30.0
 
     def _worker_loop(self) -> None:
         while not self.shutdown_event.is_set():
@@ -153,19 +145,14 @@ class NodeProcessor:
                     except queue.Empty:
                         pass
             else:
-                if not all(not q.empty() for q in all_queues.values()):
+                if any(q.empty() for q in all_queues.values()):
                     self.shutdown_event.wait(SLEEP_TIME)
                     return
-                for port_name, q in all_queues.items():
-                    try:
-                        inputs[port_name] = q.get_nowait()
-                    except queue.Empty:
-                        self.shutdown_event.wait(SLEEP_TIME)
-                        return
+                inputs = {name: q.get_nowait() for name, q in all_queues.items()}
 
         # Non-continuous nodes skip re-execution when no new inputs arrived
         # and they already have a cached output.
-        if self._cached_outputs is not None and not inputs and not self._continuous:
+        if self._has_executed and not inputs and not self._continuous:
             self.shutdown_event.wait(SLEEP_TIME)
             return
 
@@ -178,7 +165,7 @@ class NodeProcessor:
             self.shutdown_event.wait(SLEEP_TIME)
             return
 
-        self._cached_outputs = outputs
+        self._has_executed = True
         self._route_outputs(outputs)
 
     def _route_outputs(self, outputs: dict[str, Any]) -> None:

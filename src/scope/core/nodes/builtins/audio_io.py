@@ -36,7 +36,6 @@ class AudioSourceNode(BaseNode):
         self._position = 0
         self._loaded_file: str = ""
         self._last_call_time: float | None = None
-        self._output_mode: str = "stream"  # "stream" or "full"
 
     @classmethod
     def get_definition(cls) -> NodeDefinition:
@@ -119,10 +118,10 @@ class AudioSourceNode(BaseNode):
         )
 
     def execute(self, inputs: dict[str, Any], **kwargs) -> dict[str, Any]:
-        file_id = kwargs.get("file_id", self.config.get("file_id", ""))
-        duration = float(kwargs.get("duration", self.config.get("duration", 60.0)))
+        file_id = kwargs.get("file_id", "")
+        duration = float(kwargs.get("duration", 15.0))
         # "full" = emit entire clip once (for batch DAGs); "stream" = 100ms chunks
-        mode = kwargs.get("mode", self.config.get("mode", "stream"))
+        mode = kwargs.get("mode", "stream")
 
         if not file_id:
             return {}
@@ -146,41 +145,21 @@ class AudioSourceNode(BaseNode):
 
     @staticmethod
     def _resolve_path(file_id: str) -> str | None:
-        """Resolve a file path, checking common locations for relative names."""
+        """Resolve a file path. Absolute → cwd → ~/.daydream-scope/assets."""
         if os.path.isabs(file_id) and os.path.exists(file_id):
             return file_id
-        # Check relative to cwd
         if os.path.exists(file_id):
             return os.path.abspath(file_id)
-        # Check Scope assets directory
         from pathlib import Path
 
-        assets_dir = Path.home() / ".daydream-scope" / "assets"
-        candidate = assets_dir / file_id
+        candidate = Path.home() / ".daydream-scope" / "assets" / file_id
         if candidate.exists():
             return str(candidate)
-        # Check installed plugin directories (e.g. ACEStep's scope_plugin/)
-        try:
-            from importlib.metadata import distributions
-
-            for dist in distributions():
-                eps = dist.entry_points
-                scope_eps = [ep for ep in eps if ep.group == "scope"]
-                if scope_eps:
-                    loc = dist._path  # type: ignore[attr-defined]
-                    if loc:
-                        for parent in [loc.parent, loc.parent.parent]:
-                            candidate = parent / file_id
-                            if candidate.exists():
-                                return str(candidate)
-        except Exception:
-            pass
         logger.warning("AudioSource: file not found: %s", file_id)
         return None
 
     def _emit_full(self) -> dict[str, Any]:
-        audio_tensor = torch.from_numpy(self._audio_data.copy())
-        return self._wrap(audio_tensor)
+        return {"audio": (torch.from_numpy(self._audio_data.copy()), SAMPLE_RATE)}
 
     def _emit_chunk(self) -> dict[str, Any]:
         # Pace to real-time
@@ -203,9 +182,4 @@ class AudioSourceNode(BaseNode):
             self._position = (self._position + avail) % total
             offset += avail
             remaining -= avail
-        return self._wrap(torch.from_numpy(chunk))
-
-    @staticmethod
-    def _wrap(audio_tensor: torch.Tensor) -> dict[str, Any]:
-        """Emit audio as a (tensor, sample_rate) tuple."""
-        return {"audio": (audio_tensor, SAMPLE_RATE)}
+        return {"audio": (torch.from_numpy(chunk), SAMPLE_RATE)}
