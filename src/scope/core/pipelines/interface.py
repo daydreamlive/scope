@@ -76,18 +76,6 @@ class Pipeline(BaseNode, ABC):
             pipeline_meta=config.get_schema_with_metadata(),
         )
 
-    def execute(self, inputs: dict[str, Any], **kwargs) -> dict[str, Any]:
-        """Satisfies :meth:`BaseNode.execute`.
-
-        Pipelines are driven by :meth:`__call__` from ``PipelineProcessor``;
-        they never reach ``NodeProcessor.execute``. Raise if that
-        invariant is somehow broken so the bug surfaces loudly.
-        """
-        raise NotImplementedError(
-            f"{type(self).__name__} is a Pipeline: invoke via __call__ "
-            "from PipelineProcessor, not execute from NodeProcessor."
-        )
-
     @abstractmethod
     def __call__(self, **kwargs) -> dict:
         """
