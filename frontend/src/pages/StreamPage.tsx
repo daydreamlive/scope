@@ -2821,17 +2821,6 @@ export function StreamPage() {
       initialParameters.produces_video = latestInfo?.produces_video ?? true;
       initialParameters.produces_audio = latestInfo?.produces_audio ?? false;
 
-      // If the graph has custom nodes with audio ports, force audio on —
-      // the pipeline status only reflects loaded pipelines, not custom nodes.
-      if (graphConfigForStream) {
-        const hasAudioNode = graphConfigForStream.nodes.some(
-          n => n.type === "node"
-        );
-        if (hasAudioNode) {
-          initialParameters.produces_audio = true;
-        }
-      }
-
       // VACE-specific parameters
       if (graphMode || nonLinearGraph) {
         // In graph mode, extract VACE settings from VaceNode connections.
