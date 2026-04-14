@@ -380,21 +380,11 @@ class HeadlessSession:
                 vf = VideoFrame.from_ndarray(frame_np, format="rgb24")
                 with self._frame_lock:
                     self._last_frame = vf
-                # Write to recorder if active
-                if self._recorder and self._recorder.is_recording:
-                    self._recorder.write_frame(vf)
                 for sink in self._get_sinks_snapshot():
                     try:
                         sink.on_video_frame(vf)
                     except Exception as e:
-                        logger.warning("Headless video sink failed: %s", e)
-                        self.remove_media_sink(sink)
-                        try:
-                            sink.close()
-                        except Exception as close_err:
-                            logger.warning(
-                                "Failed to close headless sink: %s", close_err
-                            )
+                        self._handle_failed_sink(sink, e, stream_type="video")
 
             while True:
                 audio_tensor, sample_rate = self.frame_processor.get_audio()
@@ -405,14 +395,7 @@ class HeadlessSession:
                     try:
                         sink.on_audio_chunk(audio_tensor, sample_rate)
                     except Exception as e:
-                        logger.warning("Headless audio sink failed: %s", e)
-                        self.remove_media_sink(sink)
-                        try:
-                            sink.close()
-                        except Exception as close_err:
-                            logger.warning(
-                                "Failed to close headless sink: %s", close_err
-                            )
+                        self._handle_failed_sink(sink, e, stream_type="audio")
 
             if got_any:
                 await asyncio.sleep(0)
@@ -422,6 +405,24 @@ class HeadlessSession:
     def _get_sinks_snapshot(self) -> list[HeadlessMediaSink]:
         with self._sink_lock:
             return list(self._media_sinks)
+
+    def _handle_failed_sink(
+        self,
+        sink: HeadlessMediaSink,
+        error: Exception,
+        stream_type: str,
+    ) -> None:
+        logger.warning("Headless %s sink failed: %s", stream_type, error)
+        self.remove_media_sink(sink)
+        try:
+            sink.close()
+        except Exception as close_err:
+            logger.warning("Failed to close headless sink: %s", close_err)
+        if sink is self._recorder:
+            self._stopped_recording_path = (
+                self._stopped_recording_path or sink.file_path
+            )
+            self._recorder = None
 
     def add_media_sink(self, sink: HeadlessMediaSink) -> None:
         with self._sink_lock:
