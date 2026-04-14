@@ -278,18 +278,17 @@ export function Header({
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              <Button
-                variant="ghost"
-                size="sm"
+              <button
+                type="button"
                 onClick={() =>
                   openExternalUrl(
                     `${DAYDREAM_APP_BASE}/dashboard/usage`
                   )
                 }
-                className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+                className="h-6 px-2 rounded-md text-[11px] font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
               >
                 Top Up
-              </Button>
+              </button>
             </span>
           )}
           <Button
@@ -326,25 +325,23 @@ export function Header({
                   : "Connect to Cloud"}
             </span>
           </Button>
-          {/* Subscribe CTA / Plan badge */}
+          {/* Upgrade CTA / Plan badge */}
           {!isSignedIn ? (
-            <Button
-              variant="ghost"
-              size="sm"
+            <button
+              type="button"
               onClick={() => redirectToSignIn()}
-              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+              className="h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
             >
-              Subscribe
-            </Button>
+              Upgrade
+            </button>
           ) : billing.tier === "free" ? (
-            <Button
-              variant="ghost"
-              size="sm"
+            <button
+              type="button"
               onClick={() => billing.openCheckout("pro")}
-              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+              className="h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
             >
               Upgrade for more credits
-            </Button>
+            </button>
           ) : (
             <Button
               variant="ghost"
