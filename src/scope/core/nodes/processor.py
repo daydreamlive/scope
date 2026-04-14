@@ -135,48 +135,53 @@ class NodeProcessor:
             all_queues = dict(self.input_queues)
 
         is_source_node = not all_queues
-
-        # Gather inputs. Continuous nodes consume whatever's available
-        # (empty inputs stay absent). Non-continuous nodes wait until every
-        # input queue has data, so they execute with a complete input set.
         inputs: dict[str, Any] = {}
-        if all_queues:
-            if self._continuous:
+
+        if is_source_node:
+            # Source nodes run once, then re-run only when params change
+            # (or every tick when continuous).
+            if self._source_executed and not self._continuous and not self._needs_rerun:
+                self.shutdown_event.wait(1.0)
+                return
+        elif self._continuous:
+            # Continuous nodes: pick up whatever's currently in the queues
+            # and run every tick.
+            for port_name, q in all_queues.items():
+                try:
+                    inputs[port_name] = q.get_nowait()
+                except queue.Empty:
+                    pass
+        else:
+            # Non-continuous node with inputs:
+            # - First run waits until every port has received data at least
+            #   once so the latch cache (_last_inputs) is populated.
+            # - Subsequent runs act as latches: they fire when any port has
+            #   fresh data or when parameters changed, and fall back to the
+            #   cached value on ports whose queue is currently empty. This
+            #   lets a parameter change on one node propagate through the
+            #   DAG without upstream having to re-emit every input.
+            if not self._has_executed:
+                if any(q.empty() for q in all_queues.values()):
+                    self.shutdown_event.wait(SLEEP_TIME)
+                    return
+                inputs = {name: q.get_nowait() for name, q in all_queues.items()}
+            else:
+                has_fresh = any(not q.empty() for q in all_queues.values())
+                if not has_fresh and not self._needs_rerun:
+                    self.shutdown_event.wait(SLEEP_TIME)
+                    return
                 for port_name, q in all_queues.items():
                     try:
                         inputs[port_name] = q.get_nowait()
                     except queue.Empty:
-                        pass
-            elif not any(q.empty() for q in all_queues.values()):
-                inputs = {name: q.get_nowait() for name, q in all_queues.items()}
-
-        # Decide whether to actually run. The worker re-executes when:
-        #   - the node is continuous (every tick), OR
-        #   - it's a source node that hasn't run yet, OR
-        #   - new inputs arrived on every port (non-continuous), OR
-        #   - update_parameters() flagged _needs_rerun — replay the last
-        #     inputs with the new parameters so live tweaks take effect.
-        consume_rerun = False
-        if not self._continuous:
-            if is_source_node:
-                if self._source_executed and not self._needs_rerun:
-                    self.shutdown_event.wait(1.0)
-                    return
-            else:
-                if not inputs:
-                    if self._has_executed and self._needs_rerun:
-                        inputs = self._last_inputs
-                        consume_rerun = True
-                    else:
-                        self.shutdown_event.wait(SLEEP_TIME)
-                        return
+                        if port_name in self._last_inputs:
+                            inputs[port_name] = self._last_inputs[port_name]
 
         outputs = self.node.execute(inputs, **self.parameters)
 
         if is_source_node:
             self._source_executed = True
-        if consume_rerun or self._needs_rerun:
-            self._needs_rerun = False
+        self._needs_rerun = False
 
         if not outputs:
             self.shutdown_event.wait(SLEEP_TIME)
