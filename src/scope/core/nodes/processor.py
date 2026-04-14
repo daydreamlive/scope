@@ -67,7 +67,6 @@ class NodeProcessor:
 
         # Output cache: stores last outputs so unchanged nodes skip re-execution
         self._cached_outputs: dict[str, Any] | None = None
-        self._last_change_key: Any = None
 
         # PipelineProcessor interface compatibility
         self.output_consumers: dict[str, list] = {}
@@ -164,14 +163,9 @@ class NodeProcessor:
                         self.shutdown_event.wait(SLEEP_TIME)
                         return
 
-        # Check IS_CHANGED before executing — if cache is valid, reuse it
-        change_key = self.node.IS_CHANGED(**self.parameters)
-        if (
-            self._cached_outputs is not None
-            and change_key == self._last_change_key
-            and not inputs  # only skip if no new inputs arrived
-            and not self._continuous
-        ):
+        # Non-continuous nodes skip re-execution when no new inputs arrived
+        # and they already have a cached output.
+        if self._cached_outputs is not None and not inputs and not self._continuous:
             self.shutdown_event.wait(SLEEP_TIME)
             return
 
@@ -185,7 +179,6 @@ class NodeProcessor:
             return
 
         self._cached_outputs = outputs
-        self._last_change_key = change_key
         self._route_outputs(outputs)
 
     def _route_outputs(self, outputs: dict[str, Any]) -> None:

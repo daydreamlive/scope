@@ -169,16 +169,3 @@ class BaseNode(ABC):
             f"{type(self).__name__} must override execute() or be invoked "
             "via PipelineProcessor (Pipeline subclass) instead of NodeProcessor."
         )
-
-    @classmethod
-    def IS_CHANGED(cls, **kwargs) -> Any:
-        """Return a cache key for the current parameter state.
-
-        When this return value differs from the previous call the node
-        is re-executed even if its input data hasn't changed. Useful for
-        nodes that depend on external state (files on disk, random
-        seeds, wall-clock time). Default implementation returns
-        ``None``, meaning the node relies purely on input-data changes
-        for cache invalidation. Inspired by ComfyUI's ``IS_CHANGED``.
-        """
-        return None
