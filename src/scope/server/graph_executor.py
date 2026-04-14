@@ -291,19 +291,6 @@ def build_graph(
         if pipeline_node_ids:
             sink_node_id = pipeline_node_ids[-1]
 
-    if sink_node_id is None:
-        # Node-only graph with no Sink node: use the last custom node as
-        # the sink processor, preferring one that emits audio so the
-        # audio_output_queue path still gets wired up.
-        custom_node_ids = [n.id for n in graph.nodes if n.type == "node"]
-        for nid in reversed(custom_node_ids):
-            proc = node_processors.get(nid)
-            if proc is not None and getattr(proc, "audio_output_ports", None):
-                sink_node_id = nid
-                break
-        if sink_node_id is None and custom_node_ids:
-            sink_node_id = custom_node_ids[-1]
-
     sink_processor = node_processors.get(sink_node_id) if sink_node_id else None
     if sink_node_id and sink_processor is None:
         logger.warning(
