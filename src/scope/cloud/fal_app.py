@@ -279,6 +279,148 @@ MAX_CONNECTION_DURATION_SECONDS = (
 )
 TIMEOUT_CHECK_INTERVAL_SECONDS = 60  # Check for timeout every 60 seconds
 
+# Credit heartbeat settings
+HEARTBEAT_INTERVAL_SECONDS = 15
+HEARTBEAT_MAX_CONSECUTIVE_FAILURES = 4  # 4 x 15s = 1 minute grace on transient errors
+
+
+def _gpu_source_from_machine_type(machine_type: str | None) -> str:
+    """Map fal.ai `machine_type` (e.g. "GPU-H100") to a credit rate source
+    key (e.g. "h100"). Unknown types default to "h100" so we never
+    under-bill on a misconfigured runner."""
+    if not machine_type:
+        return "h100"
+    normalized = machine_type.lower().replace("gpu-", "").replace("rtx-", "")
+    normalized = normalized.replace("-", "").strip()
+    if "h100" in normalized:
+        return "h100"
+    if "5090" in normalized:
+        return "5090"
+    if "4090" in normalized:
+        return "4090"
+    return "h100"
+
+
+# TODO(billing): replace with real inference-JWT minting before production.
+# Must match FAL_PLACEHOLDER_TOKEN in pipelines/apps/api/src/modules/credits/credits.routes.ts.
+# Under this placeholder path the pipelines API trusts the userId sent in the
+# request body — anyone with this token can bill any user. Do not deploy.
+_FAL_PLACEHOLDER_TOKEN = "dev-placeholder-fal-runner-token-do-not-use-in-prod"
+
+
+async def run_credit_heartbeat(
+    user_id: str,
+    connection_id: str,
+    gpu_type: str,
+    safe_send_json,
+    close_ws,
+    stop_event: asyncio.Event,
+    log_prefix: str,
+) -> None:
+    """Periodically report streaming usage to the pipelines API so paid
+    Scope cloud sessions get billed and terminated when credits run out.
+
+    Runs inside the fal runner (not the scope subprocess, not the client) so
+    that a tampered local client cannot skip the call.
+
+    TODO(billing): auth is currently a hardcoded shared secret
+    (_FAL_PLACEHOLDER_TOKEN) and userId is sent in the body. Before production,
+    switch to a real inference JWT minted with INFERENCE_JWT_SECRET so the
+    pipelines API can trust the userId from the token rather than the body.
+    """
+    import httpx
+
+    source = _gpu_source_from_machine_type(gpu_type)
+    url = f"{get_daydream_api_base()}/credits/stream/heartbeat"
+    consecutive_failures = 0
+    print(
+        f"[{log_prefix}] [credits] Heartbeat started "
+        f"(url={url} gpuType={source} interval={HEARTBEAT_INTERVAL_SECONDS}s)"
+    )
+
+    try:
+        while not stop_event.is_set():
+            try:
+                await asyncio.wait_for(
+                    stop_event.wait(), timeout=HEARTBEAT_INTERVAL_SECONDS
+                )
+                break  # stop_event fired → exit cleanly
+            except (asyncio.TimeoutError, TimeoutError):  # noqa: UP041
+                pass  # interval elapsed → send a beat
+
+            try:
+                async with httpx.AsyncClient() as client:
+                    response = await client.post(
+                        url,
+                        headers={
+                            "Authorization": f"Bearer {_FAL_PLACEHOLDER_TOKEN}",
+                            "Content-Type": "application/json",
+                        },
+                        json={
+                            # TODO(billing): drop `userId` once auth uses JWT.
+                            "userId": user_id,
+                            "connectionId": connection_id,
+                            "durationSeconds": HEARTBEAT_INTERVAL_SECONDS,
+                            "gpuType": source,
+                        },
+                        timeout=10.0,
+                    )
+
+                if response.status_code == 402:
+                    try:
+                        data = response.json()
+                    except Exception:
+                        data = {}
+                    print(
+                        f"[{log_prefix}] [credits] Credits exhausted "
+                        f"(balance={data.get('balance')}) — terminating session"
+                    )
+                    await safe_send_json(
+                        {
+                            "type": "credits_exhausted",
+                            "reason": "credits_exhausted",
+                            "balance": data.get("balance"),
+                        }
+                    )
+                    await close_ws()
+                    return
+
+                if response.status_code == 200:
+                    consecutive_failures = 0
+                    continue
+
+                consecutive_failures += 1
+                print(
+                    f"[{log_prefix}] [credits] Heartbeat returned "
+                    f"{response.status_code}: {response.text[:200]} "
+                    f"(failure {consecutive_failures}/{HEARTBEAT_MAX_CONSECUTIVE_FAILURES})"
+                )
+            except Exception as e:
+                consecutive_failures += 1
+                print(
+                    f"[{log_prefix}] [credits] Heartbeat error: "
+                    f"{type(e).__name__}: {e} "
+                    f"(failure {consecutive_failures}/{HEARTBEAT_MAX_CONSECUTIVE_FAILURES})"
+                )
+
+            if consecutive_failures >= HEARTBEAT_MAX_CONSECUTIVE_FAILURES:
+                print(
+                    f"[{log_prefix}] [credits] Too many consecutive heartbeat "
+                    "failures — terminating session (fail-closed)"
+                )
+                await safe_send_json(
+                    {
+                        "type": "credits_exhausted",
+                        "reason": "heartbeat_failed",
+                    }
+                )
+                await close_ws()
+                return
+    except asyncio.CancelledError:
+        pass
+    finally:
+        print(f"[{log_prefix}] [credits] Heartbeat stopped")
+
 
 def cleanup_session_data():
     """Clean up session-specific data when WebSocket disconnects.
@@ -621,6 +763,12 @@ class ScopeApp(fal.App, keep_alive=300):
         # Track WebRTC session ID for ICE candidate routing
         session_id = None
 
+        # Credit heartbeat — started on first successful WebRTC offer, cancelled
+        # on disconnect. Runs inside the fal runner so paid users can't skip it
+        # by tampering with their local client.
+        credit_heartbeat_task: asyncio.Task | None = None
+        credit_heartbeat_stop = asyncio.Event()
+
         # Track connection start time for max duration timeout
         connection_start_time = time.time()
 
@@ -633,6 +781,16 @@ class ScopeApp(fal.App, keep_alive=300):
                 ):
                     return
                 await ws.send_json(payload)
+            except (RuntimeError, WebSocketDisconnect):
+                pass
+
+        async def safe_close_ws():
+            """Close the WebSocket, tolerating already-closed state. The main
+            loop's `finally` block then tears down the WebRTC session and
+            cleans up subprocess state."""
+            try:
+                if ws.application_state == WebSocketState.CONNECTED:
+                    await ws.close(code=4002, reason="Credits exhausted")
             except (RuntimeError, WebSocketDisconnect):
                 pass
 
@@ -717,7 +875,7 @@ class ScopeApp(fal.App, keep_alive=300):
 
         async def handle_offer(payload: dict):
             """Proxy POST /api/v1/webrtc/offer"""
-            nonlocal session_id
+            nonlocal session_id, credit_heartbeat_task
             request_id = payload.get("request_id")
 
             try:
@@ -738,6 +896,20 @@ class ScopeApp(fal.App, keep_alive=300):
                     if response.status_code == 200:
                         data = response.json()
                         session_id = data.get("sessionId")
+                        # Start the credit heartbeat on the first successful
+                        # offer. Subsequent offers (renegotiation) reuse it.
+                        if credit_heartbeat_task is None and user_id:
+                            credit_heartbeat_task = asyncio.create_task(
+                                run_credit_heartbeat(
+                                    user_id=user_id,
+                                    connection_id=connection_id,
+                                    gpu_type=connection_info.get("gpu_type", ""),
+                                    safe_send_json=safe_send_json,
+                                    close_ws=safe_close_ws,
+                                    stop_event=credit_heartbeat_stop,
+                                    log_prefix=log_prefix(),
+                                )
+                            )
                         return {
                             "type": "answer",
                             "request_id": request_id,
@@ -1176,6 +1348,21 @@ class ScopeApp(fal.App, keep_alive=300):
             print(f"[{log_prefix()}] WebSocket error ({type(e).__name__}): {e}")
             await safe_send_json({"type": "error", "error": f"{type(e).__name__}: {e}"})
         finally:
+            # Stop the credit heartbeat first so the last partial interval
+            # doesn't race the session teardown.
+            credit_heartbeat_stop.set()
+            if credit_heartbeat_task is not None:
+                try:
+                    await asyncio.wait_for(credit_heartbeat_task, timeout=5.0)
+                except (asyncio.TimeoutError, TimeoutError):  # noqa: UP041
+                    credit_heartbeat_task.cancel()
+                    try:
+                        await credit_heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
+                except asyncio.CancelledError:
+                    pass
+
             # Cancel log forwarder task
             if log_forwarder_task is not None:
                 log_forwarder_task.cancel()
