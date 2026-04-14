@@ -3,9 +3,9 @@
 Provides a base class and registry for defining fine-grained processing
 nodes that can be wired into pipeline graphs. Nodes are simpler than full
 pipelines — they declare typed input/output ports, editable parameters,
-and a small execution contract. Built-in nodes and custom nodes (from
-plugins or local packs) are discovered here and rendered generically by
-the frontend via ``GET /api/v1/nodes/definitions``.
+and a small execution contract. Built-in nodes and plugin-provided nodes
+are discovered here and rendered generically by the frontend via
+``GET /api/v1/nodes/definitions``.
 """
 
 from .base import BaseNode, NodeDefinition, NodeParam, NodePort
@@ -18,14 +18,6 @@ def register_builtin_nodes() -> None:
     NodeRegistry.register(AudioSourceNode)
 
 
-def load_and_register_local_nodes() -> None:
-    """Scan ``~/.daydream-scope/custom_nodes/`` for ComfyUI-style node packs."""
-    from .loader import load_local_nodes
-
-    for _node_type_id, node_cls in load_local_nodes().items():
-        NodeRegistry.register(node_cls)
-
-
 __all__ = [
     "AudioSourceNode",
     "BaseNode",
@@ -33,6 +25,5 @@ __all__ = [
     "NodeParam",
     "NodePort",
     "NodeRegistry",
-    "load_and_register_local_nodes",
     "register_builtin_nodes",
 ]
