@@ -707,6 +707,21 @@ class LivepeerClient:
 
                 decoded_kind = getattr(decoded, "kind", None)
                 if decoded_kind == "audio":
+                    time_base = getattr(frame, "time_base", None)
+                    audio_ts = (
+                        frame.pts * float(time_base)
+                        if time_base is not None and frame.pts is not None
+                        else None
+                    )
+                    decision = compute_pacing_decision(
+                        pacing,
+                        media_ts=audio_ts,
+                        now_monotonic=time.monotonic(),
+                    )
+                    self._record_pacing_observation(decision)
+                    if decision.sleep_s > 0:
+                        await asyncio.sleep(decision.sleep_s)
+                    pacing.prev_wall_monotonic = time.monotonic()
                     self.audio_output_handler.handle_frame(frame)
                     continue
                 if decoded_kind != "video":

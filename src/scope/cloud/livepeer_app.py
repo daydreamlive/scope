@@ -540,13 +540,16 @@ async def _media_audio_output_loop(
 
     next_audio_pts = 0
     pts_sample_rate: int | None = None
+    last_audio_media_ts: float | None = None
 
     try:
         while not stop_event.is_set():
-            audio_tensor, sample_rate = frame_processor.get_audio()
-            if audio_tensor is None:
+            audio_packet = frame_processor.get_audio_packet()
+            if audio_packet is None:
                 await asyncio.sleep(0.01)
                 continue
+            audio_tensor = audio_packet.audio
+            sample_rate = audio_packet.sample_rate
             if sample_rate is None or sample_rate <= 0:
                 continue
 
@@ -564,8 +567,39 @@ async def _media_audio_output_loop(
             frame_samples = int(getattr(frame, "samples", 0) or 0)
             if frame_samples <= 0:
                 continue
-            # Stamp explicit monotonic PTS in sample-time so mux timing does
-            # not fall back to wall-clock heuristics.
+
+            should_use_preserved_ts = False
+            if audio_packet.timestamp.is_valid:
+                media_ts = audio_packet.timestamp.pts * float(
+                    audio_packet.timestamp.time_base
+                )
+                frame_duration_s = frame_samples / sample_rate_int
+                if last_audio_media_ts is None or media_ts >= last_audio_media_ts:
+                    should_use_preserved_ts = True
+                    frame.pts = int(audio_packet.timestamp.pts)
+                    frame.time_base = audio_packet.timestamp.time_base
+                    last_audio_media_ts = media_ts + frame_duration_s
+                    # Keep synthetic fallback aligned with the preserved timeline.
+                    pts_sample_rate = sample_rate_int
+                    next_audio_pts = (
+                        int(round(media_ts * sample_rate_int)) + frame_samples
+                    )
+                else:
+                    logger.warning(
+                        "Ignoring non-monotonic preserved audio timestamp "
+                        "(pts=%s, time_base=%s, start=%.6f, previous_end=%.6f)",
+                        audio_packet.timestamp.pts,
+                        audio_packet.timestamp.time_base,
+                        media_ts,
+                        last_audio_media_ts,
+                    )
+
+            if should_use_preserved_ts:
+                await publisher.write_frame(frame)
+                continue
+
+            # Fallback: stamp explicit monotonic PTS in sample-time so mux timing
+            # does not fall back to wall-clock heuristics.
             if pts_sample_rate is None:
                 pts_sample_rate = sample_rate_int
             elif sample_rate_int != pts_sample_rate:
@@ -580,6 +614,9 @@ async def _media_audio_output_loop(
             frame.pts = next_audio_pts
             frame.time_base = fractions.Fraction(1, sample_rate_int)
             next_audio_pts += frame_samples
+            last_audio_media_ts = (frame.pts * float(frame.time_base)) + (
+                frame_samples / sample_rate_int
+            )
             await publisher.write_frame(frame)
     except asyncio.CancelledError:
         raise
