@@ -221,6 +221,13 @@ class NodeProcessor:
             return
         if hasattr(audio_tensor, "is_cuda") and audio_tensor.is_cuda:
             audio_tensor = audio_tensor.detach().cpu()
+        # VAE decoders (e.g. ACEStep) return (1, C, T); the audio track
+        # expects (C, T). Drop a leading singleton batch dim so the
+        # channel/interleave path in AudioProcessingTrack doesn't misread
+        # the layout and produce slowed-down / garbled playback.
+        if hasattr(audio_tensor, "dim") and audio_tensor.dim() == 3:
+            if audio_tensor.shape[0] == 1:
+                audio_tensor = audio_tensor.squeeze(0)
         try:
             self.audio_output_queue.put_nowait((audio_tensor, audio_sr))
         except queue.Full:
