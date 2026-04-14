@@ -5,9 +5,9 @@ import fractions
 
 import torch
 
+from scope.core.pacing import MediaPacingState, compute_pacing_decision
 from scope.server import tracks as tracks_module
 from scope.server.media_packets import MediaTimestamp, VideoPacket
-from scope.server.pacing import MediaPacingState, compute_pacing_decision
 from scope.server.tracks import _pace_preserved_timestamp
 
 
