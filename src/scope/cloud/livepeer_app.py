@@ -574,10 +574,7 @@ async def _media_audio_output_loop(
                     audio_packet.timestamp.time_base
                 )
                 frame_duration_s = frame_samples / sample_rate_int
-                if (
-                    last_audio_media_ts is None
-                    or media_ts >= last_audio_media_ts
-                ):
+                if last_audio_media_ts is None or media_ts >= last_audio_media_ts:
                     should_use_preserved_ts = True
                     frame.pts = int(audio_packet.timestamp.pts)
                     frame.time_base = audio_packet.timestamp.time_base
