@@ -573,11 +573,15 @@ async def _media_audio_output_loop(
                 media_ts = audio_packet.timestamp.pts * float(
                     audio_packet.timestamp.time_base
                 )
-                if last_audio_media_ts is None or media_ts > last_audio_media_ts:
+                frame_duration_s = frame_samples / sample_rate_int
+                if (
+                    last_audio_media_ts is None
+                    or media_ts >= last_audio_media_ts
+                ):
                     should_use_preserved_ts = True
                     frame.pts = int(audio_packet.timestamp.pts)
                     frame.time_base = audio_packet.timestamp.time_base
-                    last_audio_media_ts = media_ts
+                    last_audio_media_ts = media_ts + frame_duration_s
                     # Keep synthetic fallback aligned with the preserved timeline.
                     pts_sample_rate = sample_rate_int
                     next_audio_pts = (
@@ -586,9 +590,11 @@ async def _media_audio_output_loop(
                 else:
                     logger.warning(
                         "Ignoring non-monotonic preserved audio timestamp "
-                        "(pts=%s, time_base=%s)",
+                        "(pts=%s, time_base=%s, start=%.6f, previous_end=%.6f)",
                         audio_packet.timestamp.pts,
                         audio_packet.timestamp.time_base,
+                        media_ts,
+                        last_audio_media_ts,
                     )
 
             if should_use_preserved_ts:
@@ -611,7 +617,9 @@ async def _media_audio_output_loop(
             frame.pts = next_audio_pts
             frame.time_base = fractions.Fraction(1, sample_rate_int)
             next_audio_pts += frame_samples
-            last_audio_media_ts = frame.pts * float(frame.time_base)
+            last_audio_media_ts = (frame.pts * float(frame.time_base)) + (
+                frame_samples / sample_rate_int
+            )
             await publisher.write_frame(frame)
     except asyncio.CancelledError:
         raise
