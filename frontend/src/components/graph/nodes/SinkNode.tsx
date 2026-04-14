@@ -73,6 +73,9 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
     if (videoRef.current) {
       videoRef.current.muted = isMuted;
     }
+    if (audioRef.current) {
+      audioRef.current.muted = isMuted;
+    }
   }, [isMuted]);
 
   // Auto-unmute when audio arrives without video (audio-only workflow)
@@ -137,7 +140,12 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
                   onResize={handleResize}
                 />
                 {/* Always-present audio element for reliable audio playback */}
-                <audio ref={audioRef} autoPlay style={{ display: "none" }} />
+                <audio
+                  ref={audioRef}
+                  autoPlay
+                  muted={isMuted}
+                  style={{ display: "none" }}
+                />
                 {!hasVideoTrack && (
                   <div className="flex flex-col items-center justify-center h-full gap-1 text-[#8c8c8d]">
                     <Volume2 className="h-5 w-5" />
