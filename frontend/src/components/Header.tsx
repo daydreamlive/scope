@@ -277,7 +277,7 @@ export function Header({
                 <Clock className="h-3.5 w-3.5" />
                 Trial:{" "}
                 {formatTrialTime(
-                  billing.trial.secondsLimit - billing.trial.secondsUsed,
+                  billing.trial.secondsLimit - billing.trial.secondsUsed
                 )}
               </span>
             )}
