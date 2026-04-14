@@ -47,12 +47,15 @@ class MemFlowPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
     ):
         from .modules.causal_model import CausalWanModel
 
-        # Validate resolution requirements
-        # VAE downsample (8) * patch embedding downsample (2) = 16
-        validate_resolution(
+        # Snap resolution to the nearest multiple of 16.
+        # VAE downsample (8) × patch embedding downsample (2) = 16.
+        # Instead of hard-failing, round down and log a warning so that
+        # non-standard input resolutions (e.g. 674×389) still work.
+        config.height, config.width = validate_resolution(
             height=config.height,
             width=config.width,
             scale_factor=16,
+            snap=True,
         )
 
         model_dir = getattr(config, "model_dir", None)
