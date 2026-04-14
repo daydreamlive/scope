@@ -8,8 +8,15 @@ import {
   Monitor,
   Clock,
   AlertTriangle,
+  HelpCircle,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 import { SettingsDialog } from "./SettingsDialog";
 import { PluginsDialog } from "./PluginsDialog";
 import { PaywallModal } from "./PaywallModal";
@@ -17,6 +24,11 @@ import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 import { useBilling } from "../contexts/BillingContext";
 import { isAuthenticated, redirectToSignIn } from "../lib/auth";
+import { openExternalUrl } from "../lib/openExternal";
+
+const DAYDREAM_APP_BASE =
+  (import.meta.env.VITE_DAYDREAM_APP_BASE as string | undefined) ||
+  "https://app.daydream.monster";
 
 function formatTrialTime(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -228,8 +240,56 @@ export function Header({
         <div className="flex items-center gap-1">
           {/* Credit balance (left of cloud button) */}
           {isSignedIn && billing.credits && (
-            <span className="flex items-center gap-1 text-xs font-medium px-2 text-muted-foreground">
-              {Math.round(billing.credits.balance)} credits
+            <span className="flex items-center gap-1.5 text-xs font-medium px-2 text-muted-foreground">
+              <span className="tabular-nums">
+                {billing.credits.balance.toFixed(2)}
+              </span>{" "}
+              credits remaining
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label="Credit info"
+                    >
+                      <HelpCircle className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="bottom"
+                    className="max-w-[260px] text-xs leading-relaxed"
+                  >
+                    Daydream Cloud inference requires credit purchases. For more
+                    information, please refer to our{" "}
+                    <a
+                      href="https://daydream.live/pricing"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-primary-foreground/80"
+                      onClick={e => {
+                        e.preventDefault();
+                        openExternalUrl("https://daydream.live/pricing");
+                      }}
+                    >
+                      Pricing page
+                    </a>
+                    .
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() =>
+                  openExternalUrl(
+                    `${DAYDREAM_APP_BASE}/dashboard/usage`
+                  )
+                }
+                className="h-6 px-1.5 text-xs text-muted-foreground hover:text-foreground"
+              >
+                Top Up
+              </Button>
             </span>
           )}
           <Button
@@ -283,7 +343,7 @@ export function Header({
               onClick={() => billing.openCheckout("pro")}
               className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
             >
-              Free Plan - Subscribe for more credits
+              Upgrade for more credits
             </Button>
           ) : (
             <Button
