@@ -144,17 +144,13 @@ class BaseNode(ABC):
     def get_definition(cls) -> NodeDefinition:
         """Return static metadata for this node type."""
 
+    @abstractmethod
     def execute(
         self,
         inputs: dict[str, Any],
         **kwargs,
     ) -> dict[str, Any]:
         """Execute the node with the given inputs.
-
-        Plain backend nodes override this; :class:`Pipeline` subclasses
-        leave the default in place because they're invoked through
-        ``__call__`` from ``PipelineProcessor``, not through
-        ``execute`` from ``NodeProcessor``.
 
         Args:
             inputs: Dict mapping input port names to their values.
@@ -165,7 +161,3 @@ class BaseNode(ABC):
         Returns:
             Dict mapping output port names to their values.
         """
-        raise NotImplementedError(
-            f"{type(self).__name__} must override execute() or be invoked "
-            "via PipelineProcessor (Pipeline subclass) instead of NodeProcessor."
-        )

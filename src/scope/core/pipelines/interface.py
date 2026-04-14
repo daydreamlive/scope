@@ -9,7 +9,7 @@ working unchanged.
 """
 
 from abc import ABC, abstractmethod
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel
 
@@ -74,6 +74,18 @@ class Pipeline(BaseNode, ABC):
             params=[],
             continuous=False,
             pipeline_meta=config.get_schema_with_metadata(),
+        )
+
+    def execute(self, inputs: dict[str, Any], **kwargs) -> dict[str, Any]:
+        """Satisfies :meth:`BaseNode.execute`.
+
+        Pipelines are driven by :meth:`__call__` from ``PipelineProcessor``;
+        they never reach ``NodeProcessor.execute``. Raise if that
+        invariant is somehow broken so the bug surfaces loudly.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} is a Pipeline: invoke via __call__ "
+            "from PipelineProcessor, not execute from NodeProcessor."
         )
 
     @abstractmethod
