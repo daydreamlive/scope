@@ -64,6 +64,11 @@ class NodeProcessor:
         self._source_executed = False
         self._has_executed = False
         self._continuous = definition.continuous
+        # Cached inputs from the last successful run, replayed when
+        # parameters change so non-continuous nodes can refresh their
+        # output without requiring upstream to re-emit.
+        self._last_inputs: dict[str, Any] = {}
+        self._needs_rerun = False
 
         # PipelineProcessor interface compatibility: graph_executor populates
         # this for every processor; kept as an empty dict so that write is safe.
@@ -96,6 +101,10 @@ class NodeProcessor:
 
     def update_parameters(self, parameters: dict[str, Any]) -> None:
         self.parameters.update(parameters)
+        # Ask the worker to re-run with the updated params so non-continuous
+        # nodes (which would otherwise sit idle until new inputs arrived)
+        # reflect the change in their next output.
+        self._needs_rerun = True
 
     def set_beat_cache_reset_rate(self, rate):  # PipelineProcessor compat
         pass
@@ -127,12 +136,6 @@ class NodeProcessor:
 
         is_source_node = not all_queues
 
-        # Source nodes execute once; continuous=True nodes re-execute every
-        # tick (for streaming I/O like AudioSource chunking).
-        if is_source_node and self._source_executed and not self._continuous:
-            self.shutdown_event.wait(1.0)
-            return
-
         # Gather inputs. Continuous nodes consume whatever's available
         # (empty inputs stay absent). Non-continuous nodes wait until every
         # input queue has data, so they execute with a complete input set.
@@ -144,28 +147,43 @@ class NodeProcessor:
                         inputs[port_name] = q.get_nowait()
                     except queue.Empty:
                         pass
-            else:
-                if any(q.empty() for q in all_queues.values()):
-                    self.shutdown_event.wait(SLEEP_TIME)
-                    return
+            elif not any(q.empty() for q in all_queues.values()):
                 inputs = {name: q.get_nowait() for name, q in all_queues.items()}
 
-        # Non-continuous nodes skip re-execution when no new inputs arrived
-        # and they already have a cached output.
-        if self._has_executed and not inputs and not self._continuous:
-            self.shutdown_event.wait(SLEEP_TIME)
-            return
+        # Decide whether to actually run. The worker re-executes when:
+        #   - the node is continuous (every tick), OR
+        #   - it's a source node that hasn't run yet, OR
+        #   - new inputs arrived on every port (non-continuous), OR
+        #   - update_parameters() flagged _needs_rerun — replay the last
+        #     inputs with the new parameters so live tweaks take effect.
+        consume_rerun = False
+        if not self._continuous:
+            if is_source_node:
+                if self._source_executed and not self._needs_rerun:
+                    self.shutdown_event.wait(1.0)
+                    return
+            else:
+                if not inputs:
+                    if self._has_executed and self._needs_rerun:
+                        inputs = self._last_inputs
+                        consume_rerun = True
+                    else:
+                        self.shutdown_event.wait(SLEEP_TIME)
+                        return
 
         outputs = self.node.execute(inputs, **self.parameters)
 
         if is_source_node:
             self._source_executed = True
+        if consume_rerun or self._needs_rerun:
+            self._needs_rerun = False
 
         if not outputs:
             self.shutdown_event.wait(SLEEP_TIME)
             return
 
         self._has_executed = True
+        self._last_inputs = inputs
         self._route_outputs(outputs)
 
     def _route_outputs(self, outputs: dict[str, Any]) -> None:
