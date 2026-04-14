@@ -125,10 +125,14 @@ class AudioSourceNode(BaseNode):
         self._position = 0
         self._loaded_file: str = ""
         self._last_call_time: float | None = None
-        # In mode=full we emit the entire clip once and then stay silent
-        # (returning {}) until the loaded file or mode changes. Otherwise
+        # In mode=full + loop=false we emit the entire clip once and then
+        # stay silent until the loaded file or mode changes. Otherwise
         # every worker tick would re-push a 15s clip and flood the graph.
         self._full_emitted_key: tuple[str, str] | None = None
+        # In mode=full + loop=true we re-emit the full clip paced to
+        # wall clock so downstream (e.g. ACEStep) re-processes at roughly
+        # real-time without flooding.
+        self._last_full_emit_time: float | None = None
 
     @classmethod
     def get_definition(cls) -> NodeDefinition:
@@ -162,6 +166,12 @@ class AudioSourceNode(BaseNode):
                     default="full",
                     description="Output mode",
                     ui={"options": ["full", "stream"]},
+                ),
+                NodeParam(
+                    name="loop",
+                    param_type="boolean",
+                    default=False,
+                    description="Repeat the audio continuously",
                 ),
             ],
         )
@@ -203,6 +213,7 @@ class AudioSourceNode(BaseNode):
         duration = float(kwargs.get("duration", 15.0))
         # "full" = emit entire clip once (for batch DAGs); "stream" = 100ms chunks
         mode = kwargs.get("mode", "stream")
+        loop = bool(kwargs.get("loop", False))
 
         if not file_id:
             return {}
@@ -221,19 +232,32 @@ class AudioSourceNode(BaseNode):
             return {}
 
         if mode == "full":
-            # Emit the entire clip once per (file, mode) pair. Subsequent
-            # ticks stay silent until the loaded file changes. Streaming
-            # downstream through the latch-fallback cache keeps the DAG
-            # alive without spamming the audio track.
+            if loop:
+                # Loop=true: re-emit the full clip paced by clip duration
+                # on the wall clock so downstream re-processes at roughly
+                # real-time without flooding the audio track.
+                clip_seconds = self._audio_data.shape[1] / SAMPLE_RATE
+                now = time.monotonic()
+                if (
+                    self._last_full_emit_time is not None
+                    and now - self._last_full_emit_time < clip_seconds
+                ):
+                    return {}
+                self._last_full_emit_time = now
+                return self._emit_full()
+            # Loop=false: emit the entire clip once per (file, mode) pair
+            # and then stay silent.
+            self._last_full_emit_time = None
             key = (self._loaded_file, "full")
             if self._full_emitted_key == key:
                 return {}
             self._full_emitted_key = key
             return self._emit_full()
-        # Stream mode re-emits 100ms chunks, so clear the "emitted" flag
-        # in case we ever switch back to full.
+        # Stream mode: clear the full-mode flags so switching back to full
+        # later re-emits once.
         self._full_emitted_key = None
-        return self._emit_chunk()
+        self._last_full_emit_time = None
+        return self._emit_chunk(loop=loop)
 
     @staticmethod
     def _resolve_path(file_id: str) -> str | None:
@@ -253,7 +277,7 @@ class AudioSourceNode(BaseNode):
     def _emit_full(self) -> dict[str, Any]:
         return {"audio": (torch.from_numpy(self._audio_data.copy()), SAMPLE_RATE)}
 
-    def _emit_chunk(self) -> dict[str, Any]:
+    def _emit_chunk(self, loop: bool = True) -> dict[str, Any]:
         # Pace to real-time
         now = time.monotonic()
         if self._last_call_time is not None:
@@ -263,15 +287,25 @@ class AudioSourceNode(BaseNode):
         self._last_call_time = time.monotonic()
 
         total = self._audio_data.shape[1]
+        if not loop and self._position >= total:
+            return {}
+
         chunk = np.zeros((self._audio_data.shape[0], CHUNK_SAMPLES), dtype=np.float32)
         remaining = CHUNK_SAMPLES
         offset = 0
         while remaining > 0:
             avail = min(remaining, total - self._position)
+            if avail <= 0:
+                if not loop:
+                    # Stop at end of clip; emit a partial chunk (remaining
+                    # samples stay zero-padded).
+                    break
+                self._position = 0
+                avail = min(remaining, total - self._position)
             chunk[:, offset : offset + avail] = self._audio_data[
                 :, self._position : self._position + avail
             ]
-            self._position = (self._position + avail) % total
+            self._position += avail
             offset += avail
             remaining -= avail
         return {"audio": (torch.from_numpy(chunk), SAMPLE_RATE)}
