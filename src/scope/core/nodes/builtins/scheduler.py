@@ -69,9 +69,13 @@ class SchedulerNode(BaseNode):
         self._pending_outputs: dict[str, Any] = {}
         # Previous counter values on edge-triggered inputs. Any strict
         # increment toggles the corresponding action; a stale value
-        # sitting on the queue is ignored.
-        self._prev_start_counter: int | None = None
-        self._prev_reset_counter: int | None = None
+        # sitting on the queue is ignored. Seeded at 0 so the first
+        # positive counter delivered from upstream is treated as a fire.
+        self._prev_start_counter: int = 0
+        self._prev_reset_counter: int = 0
+        # Auto-start fires once per node lifetime, regardless of later
+        # stale zeros observed on start/reset inputs.
+        self._auto_start_done = False
 
     @classmethod
     def get_definition(cls) -> NodeDefinition:
@@ -232,19 +236,12 @@ class SchedulerNode(BaseNode):
         duration = kwargs.get("duration", self.config.get("duration", 0.0))
 
         # Edge-detect start/reset counters so stale values on the input
-        # queue don't retrigger actions.
+        # queue don't retrigger actions. Prev counters seeded at 0 in
+        # __init__ so the first positive pulse from upstream fires.
         start_val = _as_counter(inputs.get("start"))
         reset_val = _as_counter(inputs.get("reset"))
-        start_fired = (
-            start_val is not None
-            and self._prev_start_counter is not None
-            and start_val > self._prev_start_counter
-        )
-        reset_fired = (
-            reset_val is not None
-            and self._prev_reset_counter is not None
-            and reset_val > self._prev_reset_counter
-        )
+        start_fired = start_val is not None and start_val > self._prev_start_counter
+        reset_fired = reset_val is not None and reset_val > self._prev_reset_counter
         if start_val is not None:
             self._prev_start_counter = start_val
         if reset_val is not None:
@@ -272,22 +269,25 @@ class SchedulerNode(BaseNode):
 
             if start_fired:
                 self._playing = not self._playing
+                self._pending_outputs["is_playing"] = self._playing
                 if self._playing:
                     self._start_time = time.monotonic() - self._elapsed
                     self._start_timer()
 
             # Auto-start on first execute so wiring the node into a graph
             # drives downstream triggers without requiring an explicit start
-            # pulse.
+            # pulse. Gated by an explicit flag so a later stale zero on
+            # start/reset can't accidentally re-arm it.
             if (
-                not self._playing
+                not self._auto_start_done
+                and not self._playing
                 and self._start_time is None
                 and self._triggers
-                and self._prev_start_counter is None
-                and self._prev_reset_counter is None
             ):
+                self._auto_start_done = True
                 self._playing = True
                 self._start_time = time.monotonic()
+                self._pending_outputs["is_playing"] = True
                 self._start_timer()
 
             if not self._pending_outputs:
