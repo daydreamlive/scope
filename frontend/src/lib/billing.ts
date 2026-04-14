@@ -48,7 +48,7 @@ function headers(apiKey: string | null): Record<string, string> {
 
 export async function fetchCreditsBalance(
   apiKey: string,
-  deviceId?: string,
+  deviceId?: string
 ): Promise<CreditsBalance> {
   const url = deviceId
     ? `${DAYDREAM_API_BASE}/credits/balance?deviceId=${encodeURIComponent(deviceId)}`
@@ -61,23 +61,20 @@ export async function fetchCreditsBalance(
 
 export async function sendTrialHeartbeat(
   apiKey: string | null,
-  deviceId: string,
+  deviceId: string
 ): Promise<TrialHeartbeatResponse> {
   const res = await fetch(`${DAYDREAM_API_BASE}/credits/trial/heartbeat`, {
     method: "POST",
     headers: headers(apiKey),
     body: JSON.stringify({ deviceId }),
   });
-  if (!res.ok)
-    throw new Error(`Failed to send trial heartbeat: ${res.status}`);
+  if (!res.ok) throw new Error(`Failed to send trial heartbeat: ${res.status}`);
   return res.json();
 }
 
-export async function fetchTrialStatus(
-  deviceId: string,
-): Promise<TrialStatus> {
+export async function fetchTrialStatus(deviceId: string): Promise<TrialStatus> {
   const res = await fetch(
-    `${DAYDREAM_API_BASE}/credits/trial/status?deviceId=${encodeURIComponent(deviceId)}`,
+    `${DAYDREAM_API_BASE}/credits/trial/status?deviceId=${encodeURIComponent(deviceId)}`
   );
   if (!res.ok) throw new Error(`Failed to fetch trial status: ${res.status}`);
   return res.json();
@@ -85,7 +82,7 @@ export async function fetchTrialStatus(
 
 export async function createCheckoutSession(
   apiKey: string,
-  tier: "pro" | "max",
+  tier: "pro" | "max"
 ): Promise<{ checkoutUrl: string }> {
   const res = await fetch(`${DAYDREAM_API_BASE}/credits/checkout`, {
     method: "POST",
@@ -98,7 +95,7 @@ export async function createCheckoutSession(
 }
 
 export async function createPortalSession(
-  apiKey: string,
+  apiKey: string
 ): Promise<{ portalUrl: string }> {
   const res = await fetch(`${DAYDREAM_API_BASE}/credits/portal`, {
     method: "POST",
@@ -111,7 +108,7 @@ export async function createPortalSession(
 
 export async function setOverageEnabled(
   apiKey: string,
-  enabled: boolean,
+  enabled: boolean
 ): Promise<void> {
   const res = await fetch(`${DAYDREAM_API_BASE}/credits/overage`, {
     method: "POST",
@@ -138,7 +135,7 @@ export interface InferenceTokenResponse {
 
 export async function requestInferenceToken(
   apiKey: string,
-  deviceId?: string,
+  deviceId?: string
 ): Promise<InferenceTokenResponse> {
   const res = await fetch(`${DAYDREAM_API_BASE}/credits/inference-token`, {
     method: "POST",
@@ -154,7 +151,7 @@ export async function requestInferenceToken(
 
 export async function redeemCreditCode(
   apiKey: string,
-  code: string,
+  code: string
 ): Promise<RedeemCodeResponse> {
   const res = await fetch(`${DAYDREAM_API_BASE}/credits/codes/redeem`, {
     method: "POST",

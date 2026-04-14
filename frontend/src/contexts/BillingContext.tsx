@@ -55,7 +55,7 @@ interface BillingContextValue extends BillingState {
   setShowPaywall: (show: boolean) => void;
   paywallReason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null;
   setPaywallReason: (
-    reason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null,
+    reason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null
   ) => void;
   /** Get a valid inference token (requests new one if expired) */
   getInferenceToken: () => Promise<string | null>;
@@ -116,7 +116,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
   // Warning thresholds (tracked so we only toast once per threshold)
   const creditWarningShown = useRef<"none" | "low" | "critical" | "grace">(
-    "none",
+    "none"
   );
   const trialWarningShown = useRef<"none" | "2min" | "30sec">("none");
   const upsellShown = useRef(false);
@@ -274,7 +274,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
               setShowPaywall(true);
             },
           },
-        },
+        }
       );
     } else if (
       pct <= 0.05 &&
@@ -284,7 +284,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       creditWarningShown.current = "critical";
       toast.warning(
         `Credits critically low — ${Math.round(balance)} credits remaining (~${minutesLeft} min)`,
-        { duration: 10000 },
+        { duration: 10000 }
       );
     } else if (
       pct <= 0.15 &&
@@ -293,7 +293,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     ) {
       creditWarningShown.current = "low";
       toast.warning(
-        `Credits running low — ${Math.round(balance)} credits remaining (~${minutesLeft} min)`,
+        `Credits running low — ${Math.round(balance)} credits remaining (~${minutesLeft} min)`
       );
     }
 
@@ -307,7 +307,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       upsellShown.current = true;
       toast.info(
         "Running low on credits? Upgrade to Max for more credits per month.",
-        { duration: 8000 },
+        { duration: 8000 }
       );
     }
   }, [isConnected, state.credits, state.tier, state.creditsPerMin]);
@@ -322,12 +322,9 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
     if (remaining <= 30 && trialWarningShown.current !== "30sec") {
       trialWarningShown.current = "30sec";
-      toast.warning(
-        "Free trial ending in 30 seconds. Subscribe to continue.",
-        {
-          duration: 30000,
-        },
-      );
+      toast.warning("Free trial ending in 30 seconds. Subscribe to continue.", {
+        duration: 30000,
+      });
     } else if (
       remaining <= 120 &&
       remaining > 30 &&
@@ -335,7 +332,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     ) {
       trialWarningShown.current = "2min";
       toast.warning(
-        "Free trial ending in 2 minutes. Subscribe or switch to local inference.",
+        "Free trial ending in 2 minutes. Subscribe or switch to local inference."
       );
     }
   }, [isConnected, state.trial]);
@@ -425,7 +422,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         if (!apiKey) return;
         await setOverageEnabled(apiKey, enabled);
         toast.success(
-          enabled ? "Overage billing enabled" : "Overage billing disabled",
+          enabled ? "Overage billing enabled" : "Overage billing disabled"
         );
         await refresh();
       } catch (err) {
@@ -436,7 +433,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         });
       }
     },
-    [refresh],
+    [refresh]
   );
 
   return (

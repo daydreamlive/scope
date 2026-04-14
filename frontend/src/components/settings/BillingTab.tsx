@@ -33,14 +33,12 @@ function RedeemCodeSection({ onRedeemed }: { onRedeemed: () => void }) {
       }
       const result = await redeemCreditCode(apiKey, trimmed);
       toast.success(
-        `${result.credits} credits added${result.label ? ` — ${result.label}` : ""}`,
+        `${result.credits} credits added${result.label ? ` — ${result.label}` : ""}`
       );
       setCode("");
       onRedeemed();
     } catch (err) {
-      toast.error(
-        err instanceof Error ? err.message : "Failed to redeem code",
-      );
+      toast.error(err instanceof Error ? err.message : "Failed to redeem code");
     } finally {
       setIsRedeeming(false);
     }
@@ -229,8 +227,8 @@ export function BillingTab() {
             Overage billing
           </div>
           <p className="text-xs text-muted-foreground">
-            When your monthly credits run out, automatically add 500 credits
-            for $10 (up to 5 times per cycle, $50 max).
+            When your monthly credits run out, automatically add 500 credits for
+            $10 (up to 5 times per cycle, $50 max).
           </p>
         </div>
       </div>
@@ -244,8 +242,7 @@ export function BillingTab() {
           <AlertDialogHeader>
             <AlertDialogTitle>Enable overage billing?</AlertDialogTitle>
             <AlertDialogDescription>
-              When your monthly credits run out, you'll be automatically
-              charged{" "}
+              When your monthly credits run out, you'll be automatically charged{" "}
               <span className="font-medium text-foreground">
                 $10 for 500 additional credits
               </span>
@@ -278,7 +275,7 @@ export function BillingTab() {
           onClick={() =>
             window.open(
               "https://app.daydream.monster/dashboard/usage",
-              "_blank",
+              "_blank"
             )
           }
         >
