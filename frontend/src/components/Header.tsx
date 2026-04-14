@@ -16,6 +16,7 @@ import { PaywallModal } from "./PaywallModal";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 import { useBilling } from "../contexts/BillingContext";
+import { isAuthenticated, redirectToSignIn } from "../lib/auth";
 
 function formatTrialTime(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -70,6 +71,19 @@ export function Header({
 
   // Billing state
   const billing = useBilling();
+
+  // Auth state — reactive to sign-in / sign-out
+  const [isSignedIn, setIsSignedIn] = useState(() => isAuthenticated());
+
+  useEffect(() => {
+    const handleAuthChange = () => setIsSignedIn(isAuthenticated());
+    window.addEventListener("daydream-auth-change", handleAuthChange);
+    window.addEventListener("daydream-auth-success", handleAuthChange);
+    return () => {
+      window.removeEventListener("daydream-auth-change", handleAuthChange);
+      window.removeEventListener("daydream-auth-success", handleAuthChange);
+    };
+  }, []);
 
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
@@ -212,6 +226,12 @@ export function Header({
           )}
         </div>
         <div className="flex items-center gap-1">
+          {/* Credit balance (left of cloud button) */}
+          {isSignedIn && billing.credits && (
+            <span className="flex items-center gap-1 text-xs font-medium px-2 text-muted-foreground">
+              {Math.round(billing.credits.balance)} credits
+            </span>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -246,15 +266,36 @@ export function Header({
                   : "Connect to Cloud"}
             </span>
           </Button>
-          {/* Subscribe CTA (free tier only) */}
-          {billing.tier === "free" && !billing.credits && (
+          {/* Subscribe CTA / Plan badge */}
+          {!isSignedIn ? (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => redirectToSignIn()}
+              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              Subscribe
+            </Button>
+          ) : billing.tier === "free" ? (
             <Button
               variant="ghost"
               size="sm"
               onClick={() => billing.openCheckout("pro")}
               className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
             >
-              Subscribe
+              Free Plan - Subscribe for more credits
+            </Button>
+          ) : (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => {
+                setInitialTab("billing");
+                setSettingsOpen(true);
+              }}
+              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+            >
+              {billing.tier === "pro" ? "Pro" : "Max"}
             </Button>
           )}
           {isConnected &&

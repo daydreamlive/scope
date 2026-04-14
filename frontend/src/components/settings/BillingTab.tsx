@@ -101,8 +101,8 @@ export function BillingTab() {
           Subscription & Billing
         </h3>
         <p className="text-sm text-muted-foreground">
-          You're on the free plan. Subscribe to get credits for remote
-          inference.
+          You're on the free plan. Subscribe to get credits for Daydream
+          Cloud.
         </p>
         {credits && credits.balance > 0 && (
           <div className="text-sm text-muted-foreground">
