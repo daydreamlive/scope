@@ -73,6 +73,22 @@ class RecordingCoordinator:
         """Return the list of record node IDs."""
         return list(self._record_queues.keys())
 
+    @staticmethod
+    def _drain_queue(q: queue.Queue) -> int:
+        """Drop all currently buffered items and return the count removed.
+
+        Record queues are live as soon as the graph starts, so they may already
+        contain stale frames by the time recording begins. Starting from stale
+        backlog skews content-vs-duration checks and can hide timing bugs.
+        """
+        dropped = 0
+        while True:
+            try:
+                q.get_nowait()
+                dropped += 1
+            except queue.Empty:
+                return dropped
+
     def get(self, record_node_id: str) -> torch.Tensor | None:
         """Read a frame from a record node's output queue."""
         rec_q = self._record_queues.get(record_node_id)
@@ -122,6 +138,14 @@ class RecordingCoordinator:
             if self._entries[node_id].manager.is_recording_started:
                 logger.info(f"Record node {node_id} already recording")
                 return True
+
+        dropped = self._drain_queue(rec_q)
+        if dropped > 0:
+            logger.info(
+                "Dropped %d stale frame(s) from record queue %s before start",
+                dropped,
+                node_id,
+            )
 
         from .recording import RecordingManager
         from .tracks import QueueVideoTrack
