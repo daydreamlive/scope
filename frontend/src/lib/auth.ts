@@ -99,6 +99,22 @@ interface UserProfile {
   isAdmin: boolean;
 }
 
+// Dedup guard: prevent firing the event more than once per 30-second window
+let _sessionExpiredFiredAt = 0;
+
+/**
+ * Handle an expired auth session: clear stored credentials and notify the app
+ * so it can surface a "session expired — please log in again" prompt.
+ * Safe to call multiple times concurrently; fires at most once per 30 seconds.
+ */
+export function handleSessionExpired(): void {
+  const now = Date.now();
+  if (now - _sessionExpiredFiredAt < 30_000) return;
+  _sessionExpiredFiredAt = now;
+  clearDaydreamAuth();
+  window.dispatchEvent(new CustomEvent("daydream-session-expired"));
+}
+
 /**
  * Fetch user profile from API
  */
@@ -106,6 +122,10 @@ async function fetchUserProfile(apiKey: string): Promise<UserProfile> {
   const response = await fetch(`${DAYDREAM_API_BASE}/users/profile`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  if (response.status === 401) {
+    handleSessionExpired();
+    throw new Error("Session expired");
+  }
   if (!response.ok) {
     throw new Error(`Failed to fetch profile: ${response.status}`);
   }
@@ -199,7 +219,9 @@ export async function refreshUserProfile(): Promise<void> {
 }
 
 /**
- * Clear the stored Daydream auth credentials
+ * Clear the stored Daydream auth credentials.
+ * Prefer handleSessionExpired() when clearing due to an expired token so the
+ * app can surface a user-facing message.
  */
 export function clearDaydreamAuth(): void {
   localStorage.removeItem(AUTH_STORAGE_KEY);
@@ -231,6 +253,10 @@ export async function initEnvKeyAuth(): Promise<boolean> {
   const response = await fetch(`${DAYDREAM_API_BASE}/users/profile`, {
     headers: { Authorization: `Bearer ${envKey}` },
   });
+  if (response.status === 401) {
+    handleSessionExpired();
+    throw new Error("Session expired");
+  }
   if (!response.ok) {
     throw new Error(
       `Failed to fetch profile with env API key: ${response.status}`
@@ -294,6 +320,10 @@ export async function fetchFalCdnToken(): Promise<FalCdnToken> {
   const response = await fetch(`${DAYDREAM_API_BASE}/auth/fal/cdn-token`, {
     headers: { Authorization: `Bearer ${apiKey}` },
   });
+  if (response.status === 401) {
+    handleSessionExpired();
+    throw new Error("Session expired");
+  }
   if (!response.ok) {
     throw new Error(`Failed to fetch fal CDN token: ${response.status}`);
   }

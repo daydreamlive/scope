@@ -12,6 +12,7 @@ import {
   handleOAuthCallback,
   initElectronAuthListener,
   initEnvKeyAuth,
+  redirectToSignIn,
 } from "./lib/auth";
 import { toast } from "sonner";
 import { TelemetryProvider } from "./contexts/TelemetryContext";
@@ -32,6 +33,25 @@ type AuthResult =
 function App() {
   const [isHandlingAuth, setIsHandlingAuth] = useState(true);
   const [authResult, setAuthResult] = useState<AuthResult>(null);
+
+  // Show a persistent toast when the Daydream session expires so the user can
+  // log in again without seeing a raw error. Handled globally here so it
+  // fires regardless of which component triggered the 401.
+  useEffect(() => {
+    const onSessionExpired = () => {
+      toast.error("Your session has expired — please log in again", {
+        duration: Infinity,
+        action: {
+          label: "Log in",
+          onClick: redirectToSignIn,
+        },
+      });
+    };
+    window.addEventListener("daydream-session-expired", onSessionExpired);
+    return () => {
+      window.removeEventListener("daydream-session-expired", onSessionExpired);
+    };
+  }, []);
 
   useEffect(() => {
     // Initialize Electron auth callback listener (if running in Electron)

@@ -219,6 +219,9 @@ export class CloudAdapter {
         message.type === "error" ||
         (message.status && message.status >= 400)
       ) {
+        if (message.status === 401) {
+          window.dispatchEvent(new CustomEvent("daydream-session-expired"));
+        }
         pending.reject(
           new Error(
             message.error || `Request failed with status ${message.status}`

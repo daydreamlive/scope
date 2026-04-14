@@ -1,3 +1,5 @@
+import { handleSessionExpired } from "./auth";
+
 const DAYDREAM_API_BASE =
   (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
   "https://api.daydream.live";
@@ -29,6 +31,10 @@ export async function createDaydreamImportSession(
     }
   );
 
+  if (response.status === 401) {
+    handleSessionExpired();
+    throw new Error("Session expired");
+  }
   if (!response.ok) {
     const text = await response.text();
     throw new Error(
