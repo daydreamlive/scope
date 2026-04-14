@@ -135,7 +135,7 @@ class NodeProcessor:
         is_source_node = not all_queues
 
         # Source nodes execute once; continuous=True nodes re-execute every
-        # tick (for streaming I/O like AudioSource/AudioSink looping).
+        # tick (for streaming I/O like AudioSource chunking).
         if is_source_node and self._source_executed and not self._continuous:
             self.shutdown_event.wait(1.0)
             return

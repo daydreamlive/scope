@@ -1,8 +1,8 @@
-"""Built-in audio I/O nodes: AudioSource (file → stream) and AudioSink (terminal).
+"""Built-in audio I/O nodes: AudioSource (WAV file → audio stream).
 
-These are generic audio primitives decoupled from any pipeline. AudioSource
-reads a WAV file and streams it in chunks; AudioSink terminates an audio
-graph and forwards audio to the session's output.
+Terminal audio output is handled by the regular Sink node: audio edges
+into a Sink are routed straight to the WebRTC audio track via the
+session's audio_output_queue, with no intermediate node needed.
 """
 
 from __future__ import annotations
@@ -209,99 +209,3 @@ class AudioSourceNode(BaseNode):
     def _wrap(audio_tensor: torch.Tensor) -> dict[str, Any]:
         """Emit audio as a (tensor, sample_rate) tuple."""
         return {"audio": (audio_tensor, SAMPLE_RATE)}
-
-
-class AudioSinkNode(BaseNode):
-    """Audio sink — streams audio to the session, looping when upstream pauses.
-
-    When a new audio chunk arrives it replaces the looping buffer. On every
-    tick the sink emits a 100ms slice (wrapping at the end of the buffer),
-    giving the WebRTC audio track a continuous supply even after the DAG
-    has produced its final chunk.
-    """
-
-    node_type_id: ClassVar[str] = "audio.AudioSink"
-
-    def __init__(self, node_id: str, config: dict[str, Any] | None = None):
-        super().__init__(node_id, config)
-        self._buffer: torch.Tensor | None = None
-        self._position = 0
-        self._last_emit_time: float | None = None
-
-    @classmethod
-    def get_definition(cls) -> NodeDefinition:
-        return NodeDefinition(
-            node_type_id=cls.node_type_id,
-            display_name="Audio Sink",
-            category="audio",
-            description="Terminal audio output. Loops its input continuously.",
-            continuous=True,
-            inputs=[
-                NodePort(
-                    name="audio",
-                    port_type="audio",
-                    required=False,
-                    description="Audio to play (latest chunk is looped)",
-                ),
-            ],
-            outputs=[
-                NodePort(name="audio", port_type="audio", description="Pass-through"),
-            ],
-        )
-
-    def execute(self, inputs: dict[str, Any], **kwargs) -> dict[str, Any]:
-        new_audio = inputs.get("audio")
-        if new_audio is not None:
-            waveform = self._extract_waveform(new_audio)
-            if waveform is not None:
-                self._buffer = waveform
-                self._position = 0
-
-        if self._buffer is None or self._buffer.shape[-1] == 0:
-            time.sleep(CHUNK_DURATION)
-            return {}
-
-        # Pace emission to real-time
-        now = time.monotonic()
-        if self._last_emit_time is not None:
-            elapsed = now - self._last_emit_time
-            if elapsed < CHUNK_DURATION * 0.8:
-                time.sleep(CHUNK_DURATION - elapsed)
-        self._last_emit_time = time.monotonic()
-
-        # Emit next 100ms slice, wrapping at the end
-        total = self._buffer.shape[-1]
-        chunk = torch.zeros(
-            (self._buffer.shape[0], CHUNK_SAMPLES), dtype=self._buffer.dtype
-        )
-        remaining = CHUNK_SAMPLES
-        offset = 0
-        while remaining > 0:
-            avail = min(remaining, total - self._position)
-            chunk[:, offset : offset + avail] = self._buffer[
-                :, self._position : self._position + avail
-            ]
-            self._position = (self._position + avail) % total
-            offset += avail
-            remaining -= avail
-
-        return AudioSourceNode._wrap(chunk)
-
-    @staticmethod
-    def _extract_waveform(audio: Any) -> torch.Tensor | None:
-        """Extract a (channels, samples) float tensor on CPU."""
-        if isinstance(audio, tuple) and len(audio) == 2:
-            waveform = audio[0]
-        else:
-            waveform = getattr(audio, "waveform", None)
-        if waveform is None:
-            return None
-        if hasattr(waveform, "is_cuda") and waveform.is_cuda:
-            waveform = waveform.detach().cpu()
-        if waveform.dtype != torch.float32:
-            waveform = waveform.float()
-        if waveform.dim() == 3:
-            waveform = waveform.squeeze(0)
-        if waveform.dim() == 1:
-            waveform = waveform.unsqueeze(0)
-        return waveform.contiguous()
