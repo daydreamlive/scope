@@ -36,6 +36,7 @@ import type {
   AssetsResponse,
   AssetFileInfo,
 } from "./api";
+import { handleSessionExpired } from "./auth";
 
 type MessageHandler = (response: ApiResponse) => void;
 
@@ -220,7 +221,7 @@ export class CloudAdapter {
         (message.status && message.status >= 400)
       ) {
         if (message.status === 401) {
-          window.dispatchEvent(new CustomEvent("daydream-session-expired"));
+          handleSessionExpired();
         }
         pending.reject(
           new Error(
