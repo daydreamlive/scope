@@ -30,6 +30,33 @@ class _SingleFrameProcessor:
         self.running = False
 
 
+class _SinkOnlyFrameProcessor:
+    def __init__(self, frames_by_sink: dict[str, torch.Tensor]):
+        self.running = True
+        self._sink_ids = list(frames_by_sink.keys())
+        self._frames_by_sink = dict(frames_by_sink)
+        self.get_calls = 0
+
+    def get_sink_node_ids(self):
+        return list(self._sink_ids)
+
+    def get_from_sink(self, sink_node_id):
+        frame = self._frames_by_sink.pop(sink_node_id, None)
+        if not self._frames_by_sink:
+            self.running = False
+        return frame
+
+    def get(self):
+        self.get_calls += 1
+        raise AssertionError("headless graph mode should not call get()")
+
+    def get_audio(self):
+        return None, None
+
+    def stop(self):
+        self.running = False
+
+
 class _CountingRecorder(HeadlessMediaSink):
     def __init__(self):
         self.is_recording = True
@@ -53,6 +80,20 @@ class _CountingRecorder(HeadlessMediaSink):
 class _FailingRecorder(_CountingRecorder):
     def on_video_frame(self, video_frame) -> None:
         raise RuntimeError("synthetic sink failure")
+
+
+class _CollectingSink(HeadlessMediaSink):
+    def __init__(self):
+        self.frames = []
+
+    def on_video_frame(self, video_frame) -> None:
+        self.frames.append(torch.from_numpy(video_frame.to_ndarray(format="rgb24")))
+
+    def on_audio_chunk(self, audio_tensor, sample_rate) -> None:
+        return
+
+    def close(self) -> None:
+        return
 
 
 @pytest.mark.anyio
@@ -87,3 +128,56 @@ async def test_headless_clears_recorder_reference_on_sink_failure():
 
     assert session._recorder is None
     assert recorder not in session._get_sinks_snapshot()
+
+
+@pytest.mark.anyio
+async def test_headless_graph_mode_avoids_primary_queue_double_drain():
+    primary = torch.full((16, 16, 3), 7, dtype=torch.uint8)
+    frame_processor = _SinkOnlyFrameProcessor({"output": primary})
+    session = HeadlessSession(frame_processor=frame_processor)
+
+    sink = _CollectingSink()
+    session.add_media_sink(sink)
+    session._frame_consumer_running = True
+
+    await session._consume_frames()
+
+    assert frame_processor.get_calls == 0
+    assert len(sink.frames) == 1
+    assert torch.equal(sink.frames[0], primary)
+    assert torch.equal(
+        torch.from_numpy(session.get_last_frame("output").to_ndarray(format="rgb24")),
+        primary,
+    )
+
+
+@pytest.mark.anyio
+async def test_headless_graph_mode_keeps_latest_consumed_frame_behavior():
+    primary = torch.full((16, 16, 3), 11, dtype=torch.uint8)
+    secondary = torch.full((16, 16, 3), 22, dtype=torch.uint8)
+    frame_processor = _SinkOnlyFrameProcessor(
+        {"output": primary, "output_1": secondary}
+    )
+    session = HeadlessSession(frame_processor=frame_processor)
+
+    sink = _CollectingSink()
+    session.add_media_sink(sink)
+    session._frame_consumer_running = True
+
+    await session._consume_frames()
+
+    assert frame_processor.get_calls == 0
+    assert len(sink.frames) == 1
+    assert torch.equal(sink.frames[0], primary)
+    assert torch.equal(
+        torch.from_numpy(session.get_last_frame("output").to_ndarray(format="rgb24")),
+        primary,
+    )
+    assert torch.equal(
+        torch.from_numpy(session.get_last_frame("output_1").to_ndarray(format="rgb24")),
+        secondary,
+    )
+    assert torch.equal(
+        torch.from_numpy(session.get_last_frame().to_ndarray(format="rgb24")),
+        secondary,
+    )

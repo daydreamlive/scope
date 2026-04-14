@@ -335,6 +335,11 @@ class HeadlessSession:
 
         self.frame_processor: FrameProcessor = frame_processor
         self.expect_audio = expect_audio
+        # In graph mode this tracks the most recently consumed frame across all
+        # sink queues, not a canonical sink. Callers that need stable per-sink
+        # capture should pass sink_node_id to get_last_frame().
+        # TODO: Revisit whether get_last_frame() should instead use explicit
+        # primary-sink semantics for graph sessions.
         self._last_frame = None
         self._last_frames_by_sink: dict[str, object] = {}
         self._frame_lock = threading.Lock()
@@ -354,6 +359,13 @@ class HeadlessSession:
         self._frame_consumer_running = True
         self._frame_consumer_task = asyncio.create_task(self._consume_frames())
 
+    def _dispatch_video_frame(self, video_frame) -> None:
+        for sink in self._get_sinks_snapshot():
+            try:
+                sink.on_video_frame(video_frame)
+            except Exception as e:
+                self._handle_failed_sink(sink, e, stream_type="video")
+
     async def _consume_frames(self):
         """Pull frames from FrameProcessor so pipeline workers don't stall."""
         from av import VideoFrame
@@ -361,30 +373,35 @@ class HeadlessSession:
         while self._frame_consumer_running and self.frame_processor.running:
             got_any = False
 
-            # Consume from per-sink queues (multi-sink graph mode)
-            for sid in self.frame_processor.get_sink_node_ids():
-                sink_tensor = self.frame_processor.get_from_sink(sid)
-                if sink_tensor is not None:
+            sink_node_ids = self.frame_processor.get_sink_node_ids()
+            if sink_node_ids:
+                # Graph mode: drain each sink queue exactly once. The first sink
+                # still drives the single headless media stream (TS/MP4), while
+                # bare get_last_frame() keeps its existing latest-consumed-frame
+                # semantics across all sinks.
+                for idx, sid in enumerate(sink_node_ids):
+                    sink_tensor = self.frame_processor.get_from_sink(sid)
+                    if sink_tensor is None:
+                        continue
                     got_any = True
-                    frame_np = sink_tensor.numpy()
-                    vf = VideoFrame.from_ndarray(frame_np, format="rgb24")
+                    vf = VideoFrame.from_ndarray(sink_tensor.numpy(), format="rgb24")
                     with self._frame_lock:
                         self._last_frames_by_sink[sid] = vf
                         self._last_frame = vf
-
-            # Also consume from the primary output queue
-            frame_tensor = self.frame_processor.get()
-            if frame_tensor is not None:
-                got_any = True
-                frame_np = frame_tensor.numpy()
-                vf = VideoFrame.from_ndarray(frame_np, format="rgb24")
-                with self._frame_lock:
-                    self._last_frame = vf
-                for sink in self._get_sinks_snapshot():
-                    try:
-                        sink.on_video_frame(vf)
-                    except Exception as e:
-                        self._handle_failed_sink(sink, e, stream_type="video")
+                    # Preserve existing single-stream headless behavior:
+                    # only the first sink feeds TS/MP4 fanout.
+                    if idx == 0:
+                        self._dispatch_video_frame(vf)
+            else:
+                frame_tensor = self.frame_processor.get()
+                if frame_tensor is not None:
+                    got_any = True
+                    vf = VideoFrame.from_ndarray(frame_tensor.numpy(), format="rgb24")
+                    # Without explicit sink queues, the latest frame is simply
+                    # the latest primary output frame consumed by headless.
+                    with self._frame_lock:
+                        self._last_frame = vf
+                    self._dispatch_video_frame(vf)
 
             while True:
                 audio_tensor, sample_rate = self.frame_processor.get_audio()
@@ -518,6 +535,8 @@ class HeadlessSession:
         """Return the most recently cached frame, or None.
 
         If sink_node_id is provided, return the frame from that specific sink.
+        Without sink_node_id in graph mode, this returns the latest frame
+        consumed from any sink rather than a stable primary-sink frame.
         """
         with self._frame_lock:
             if sink_node_id and sink_node_id in self._last_frames_by_sink:
