@@ -411,11 +411,16 @@ export function AddNodeModal({
       .then(data => {
         // The unified endpoint returns both pipelines (pipeline_meta != null)
         // and plain custom nodes. Pipelines are still added via the hardcoded
-        // "Pipeline" catalog entry (placeholder + dropdown), so we filter
-        // them out of the plugin listing here to avoid duplication.
+        // "Pipeline" catalog entry (placeholder + dropdown); the scheduler
+        // has its own catalog entry with a bespoke widget. Filter both out
+        // of the plugin listing to avoid duplication.
         const items: NodeCatalogItem[] = (data.nodes ?? [])
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .filter((n: any) => n.pipeline_meta == null)
+
+          .filter(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (n: any) =>
+              n.pipeline_meta == null && n.node_type_id !== "scheduler"
+          )
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           .map((n: any) => ({
             type: "custom_node" as const,

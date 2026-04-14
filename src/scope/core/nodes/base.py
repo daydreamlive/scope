@@ -144,6 +144,26 @@ class BaseNode(ABC):
     def get_definition(cls) -> NodeDefinition:
         """Return static metadata for this node type."""
 
+    @classmethod
+    def get_dynamic_output_ports(cls, params: dict[str, Any]) -> set[str]:
+        """Return output port names that depend on runtime params.
+
+        Used by the graph executor to accept edges from ports that are
+        not declared statically in :meth:`get_definition` — e.g. the
+        scheduler node derives one output port per user-configured
+        trigger. The default returns an empty set; nodes with dynamic
+        outputs override.
+        """
+        return set()
+
+    def shutdown(self) -> None:  # noqa: B027 — intentional no-op hook
+        """Release any resources held by the node.
+
+        Called by :class:`NodeProcessor` when the graph is torn down.
+        The default is a no-op; nodes that start background threads or
+        hold OS handles override.
+        """
+
     def execute(
         self,
         inputs: dict[str, Any],
