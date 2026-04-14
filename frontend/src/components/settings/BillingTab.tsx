@@ -80,15 +80,13 @@ export function BillingTab() {
     creditsPerMin,
     toggleOverage,
     refresh,
-    setShowPaywall,
-    setPaywallReason,
+    openCheckout,
   } = useBilling();
 
   const [showOverageConfirm, setShowOverageConfirm] = useState(false);
 
   const handleSubscribe = () => {
-    setPaywallReason("subscribe");
-    setShowPaywall(true);
+    openCheckout("pro");
   };
 
   const estimatedMinutes =

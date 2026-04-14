@@ -251,10 +251,7 @@ export function Header({
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => {
-                billing.setPaywallReason("subscribe");
-                billing.setShowPaywall(true);
-              }}
+              onClick={() => billing.openCheckout("pro")}
               className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
             >
               Subscribe
