@@ -244,6 +244,13 @@ def build_graph(
                     # not dedicated sink queues — skip queue allocation so
                     # the feeder isn't blocked on a queue nobody drains.
                     if e.from_port == "audio" or e.to_port == "audio":
+                        # Mark the feeder's audio output port as sink-bound
+                        # so its _route_outputs pushes into audio_output_queue
+                        # (NodeProcessor only — PipelineProcessor has its own
+                        # always-on audio path via put_nowait).
+                        sink_ports = getattr(feeder_proc, "audio_sink_ports", None)
+                        if sink_ports is not None:
+                            sink_ports.add(e.from_port)
                         break
                     sink_node = node_by_id[sink_id]
                     sink_mode = sink_node.sink_mode

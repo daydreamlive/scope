@@ -47,13 +47,27 @@ class NodeProcessor:
         self.audio_input_ports: set[str] = {
             p.name for p in definition.inputs if p.port_type == "audio"
         }
-        self.audio_output_ports: set[str] = {
-            p.name for p in definition.outputs if p.port_type == "audio"
-        }
+        # Output ports wired to a sink node via graph_executor. Only these
+        # route through ``audio_output_queue`` → FrameProcessor.get_audio().
+        # A node whose audio output feeds another node (e.g. AudioSource →
+        # VAEEncodeAudio) must NOT push to audio_output_queue: with
+        # maxsize=1 + blocking put, nothing would ever drain it and the
+        # worker would deadlock after the second emission.
+        self.audio_sink_ports: set[str] = set()
+        # Names of parameters this node actually declares. Global param
+        # updates (no node_id) are broadcast to every processor; without
+        # this filter a graph-level tweak (quantize_mode, modulations…)
+        # would spuriously flag every custom node for re-execution.
+        self._declared_param_names: set[str] = {p.name for p in definition.params}
 
-        # Audio output queue consumed by FrameProcessor.get_audio() on the sink
+        # Audio output queue consumed by FrameProcessor.get_audio() on the
+        # sink. Size 1 + blocking producer (see _route_audio) gives us
+        # backpressure: audio_decode stalls until AudioProcessingTrack has
+        # served enough of the current chunk to pull a new one, which
+        # cascades upstream through node-to-node edge queues and
+        # rate-limits batch generators to real-time playback.
         self.audio_output_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
-            maxsize=10
+            maxsize=1
         )
 
         self.worker_thread: threading.Thread | None = None
@@ -100,11 +114,22 @@ class NodeProcessor:
         logger.info("NodeProcessor stopped: %s", self.node_id)
 
     def update_parameters(self, parameters: dict[str, Any]) -> None:
+        # Only mark the node dirty when the update actually touches a
+        # parameter this node declares AND the value differs from the
+        # current one. FrameProcessor.update_parameters broadcasts
+        # global updates (no node_id) to every processor, so without
+        # this guard a stream-level tweak like quantize_mode would fire
+        # _needs_rerun on every custom node and cascade through the DAG.
+        changed = False
+        for key, value in parameters.items():
+            if key not in self._declared_param_names:
+                continue
+            if self.parameters.get(key) != value:
+                changed = True
+                break
         self.parameters.update(parameters)
-        # Ask the worker to re-run with the updated params so non-continuous
-        # nodes (which would otherwise sit idle until new inputs arrived)
-        # reflect the change in their next output.
-        self._needs_rerun = True
+        if changed:
+            self._needs_rerun = True
 
     def set_beat_cache_reset_rate(self, rate):  # PipelineProcessor compat
         pass
@@ -197,7 +222,13 @@ class NodeProcessor:
                 continue
 
             # Audio outputs also feed the FrameProcessor's audio path
-            if port_name in self.audio_output_ports:
+            # — but only for ports that graph_executor wired to a sink,
+            # not every port whose type is "audio". Otherwise an
+            # intermediate audio-producing node (AudioSource → encoder)
+            # would also push to its own audio_output_queue, which
+            # nothing drains → worker deadlocks on the blocking put
+            # after the second emission.
+            if port_name in self.audio_sink_ports:
                 self._route_audio(value)
 
             # Fan out to all downstream queues on this port. Block briefly
@@ -231,7 +262,13 @@ class NodeProcessor:
         if hasattr(audio_tensor, "dim") and audio_tensor.dim() == 3:
             if audio_tensor.shape[0] == 1:
                 audio_tensor = audio_tensor.squeeze(0)
-        try:
-            self.audio_output_queue.put_nowait((audio_tensor, audio_sr))
-        except queue.Full:
-            pass
+        # Blocking-with-retry put. Stalls the worker thread when the audio
+        # track hasn't finished serving the previous chunk, which is the
+        # backpressure mechanism that rate-limits batch generators to
+        # real-time playback instead of silently dropping audio.
+        while not self.shutdown_event.is_set():
+            try:
+                self.audio_output_queue.put((audio_tensor, audio_sr), timeout=0.1)
+                break
+            except queue.Full:
+                continue

@@ -97,9 +97,15 @@ class AudioProcessingTrack(MediaStreamTrack):
         if self.frame_processor.paused:
             return self._create_silence_frame()
 
-        # Drain all available audio from the queue to minimise latency
-        # for bursty or small-chunk pipelines.
-        while True:
+        samples_needed = self._samples_per_frame * self.channels
+
+        # Lazy drain: pull chunks from the queue only until the local buffer
+        # has enough samples to serve this frame. Leaving unconsumed chunks
+        # in ``audio_output_queue`` creates natural backpressure — producers
+        # block on the (small) queue's blocking put and cascade the stall
+        # upstream through node-to-node edge queues, matching production
+        # rate to real-time consumption without silent drops.
+        while self._buffered_samples < samples_needed:
             audio_tensor, sample_rate = self.frame_processor.get_audio()
             if audio_tensor is None and sample_rate is None:
                 break
@@ -142,10 +148,9 @@ class AudioProcessingTrack(MediaStreamTrack):
             self._chunks.append(interleaved)
             self._buffered_samples += len(interleaved)
 
-        # Cap buffer to prevent unbounded growth.
-        # Trim-to-tail: concatenate and keep only the newest samples so a
-        # single large chunk (e.g. LTX2 delivering >1s at once) is never
-        # discarded entirely.
+        # Safety net: if something managed to push more than the cap anyway
+        # (shouldn't happen with lazy drain + maxsize=1 backpressure), keep
+        # the tail so we don't grow unbounded.
         max_interleaved = AUDIO_MAX_BUFFER_SAMPLES * self.channels
         if self._buffered_samples > max_interleaved:
             flat = np.concatenate(list(self._chunks))
@@ -156,7 +161,6 @@ class AudioProcessingTrack(MediaStreamTrack):
             logger.warning("Audio buffer overflow, dropped oldest chunks")
 
         # Serve a 20ms frame from the buffer
-        samples_needed = self._samples_per_frame * self.channels
         if self._buffered_samples >= samples_needed:
             flat = np.concatenate(list(self._chunks))
             self._chunks.clear()
