@@ -75,6 +75,7 @@ import {
   applyHardwareInputSourceToLinearGraph,
   linearGraphFromSettings,
   stripUIFields,
+  validateGraphForStream,
 } from "../lib/graphUtils";
 import { resolveLoRAPath } from "../lib/workflowSettings";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
@@ -2255,6 +2256,14 @@ export function StreamPage() {
 
       if (graphMode || nonLinearGraph) {
         try {
+          // Validate graph structure before sending to backend
+          const graphValidationError =
+            graphEditorRef.current?.validateForStream();
+          if (graphValidationError) {
+            toast.error(graphValidationError);
+            return false;
+          }
+
           // Read graph from frontend React state (always up-to-date)
           const frontendGraph = graphEditorRef.current?.getCurrentGraphConfig();
           if (frontendGraph) {

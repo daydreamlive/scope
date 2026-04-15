@@ -143,7 +143,10 @@ class GraphConfig(BaseModel):
 
         # At least one sink
         if not self.get_sink_node_ids():
-            errors.append("Graph must have at least one sink node")
+            errors.append(
+                "Graph must have at least one sink node. "
+                "Add a Preview (Sink) node to your graph, or enable an Output node (Spout/NDI/Syphon)."
+            )
 
         # Pipeline nodes must have pipeline_id
         for node in self.nodes:

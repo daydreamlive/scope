@@ -1817,5 +1817,74 @@ export function workflowToGraphConfig(
   };
 }
 
+/**
+ * Validate a flow graph before submitting it to the backend for streaming.
+ * Returns a user-friendly error message if invalid, or null if valid.
+ *
+ * This catches cases the backend would reject with a cryptic error, such as:
+ * - Graph has no sink node because all Output nodes are disabled
+ * - Graph has no pipeline nodes
+ */
+export function validateGraphForStream(
+  nodes: Node<FlowNodeData>[],
+  edges: Edge[]
+): string | null {
+  const flatNodes = nodes;
+
+  // Check for pipeline nodes
+  const hasPipeline = flatNodes.some(n => n.data.nodeType === "pipeline");
+  if (!hasPipeline) {
+    return "Your graph has no pipeline nodes. Add at least one pipeline to your graph before starting.";
+  }
+
+  // Check for sink nodes (type === "sink" in backend, nodeType === "sink" in frontend)
+  const hasSinkNode = flatNodes.some(n => n.data.nodeType === "sink");
+
+  // Check for enabled output nodes (these become backend sink nodes)
+  const hasEnabledOutput = flatNodes.some(
+    n =>
+      n.data.nodeType === "output" &&
+      ((n.data.outputSinkEnabled as boolean) ?? false)
+  );
+
+  // Check if there are any output nodes at all (even disabled)
+  const hasDisabledOutputOnly =
+    !hasSinkNode &&
+    !hasEnabledOutput &&
+    flatNodes.some(n => n.data.nodeType === "output");
+
+  if (hasDisabledOutputOnly) {
+    return "Your graph has no active output. Enable an Output node (Spout/NDI/Syphon) or add a Preview (Sink) node to see results.";
+  }
+
+  if (!hasSinkNode && !hasEnabledOutput) {
+    return "Your graph has no output node. Add a Preview (Sink) node or an Output node to your graph before starting.";
+  }
+
+  // Check that at least one pipeline feeds into a sink
+  const pipelineIds = new Set(
+    flatNodes.filter(n => n.data.nodeType === "pipeline").map(n => n.id)
+  );
+  const sinkIds = new Set([
+    ...flatNodes.filter(n => n.data.nodeType === "sink").map(n => n.id),
+    ...flatNodes
+      .filter(
+        n =>
+          n.data.nodeType === "output" &&
+          ((n.data.outputSinkEnabled as boolean) ?? false)
+      )
+      .map(n => n.id),
+  ]);
+
+  const connectedToSink = edges.some(
+    e => pipelineIds.has(e.source) && sinkIds.has(e.target)
+  );
+  if (pipelineIds.size > 0 && sinkIds.size > 0 && !connectedToSink) {
+    return "Your pipeline is not connected to an output node. Connect a pipeline to a Preview or Output node before starting.";
+  }
+
+  return null;
+}
+
 // Default node dimensions for reference
 export { NODE_WIDTH, NODE_HEIGHT };
