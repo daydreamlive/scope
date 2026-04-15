@@ -321,17 +321,24 @@ class PipelineProcessor:
     def prepare_chunk(
         self, input_queue_ref: queue.Queue, chunk_size: int
     ) -> list[VideoPacket]:
+        """Take ``chunk_size`` consecutive frames in capture order (FIFO).
+
+        When the queue holds more than ``chunk_size`` frames (backlog), drop
+        the oldest excess first so we always process the newest window of
+        consecutive frames. Older code sampled indices uniformly across the
+        whole depth, which breaks temporal pipelines (e.g. RIFE) that need
+        true consecutive input pairs—not every Nth frame from a deep queue.
         """
-        Sample frames uniformly from one queue (used when only video port is present).
-        """
-        step = input_queue_ref.qsize() / chunk_size
-        indices = [round(i * step) for i in range(chunk_size)]
+        while input_queue_ref.qsize() > chunk_size:
+            try:
+                input_queue_ref.get_nowait()
+            except queue.Empty:
+                break
+
         video_frames: list[VideoPacket] = []
-        last_idx = indices[-1]
-        for i in range(last_idx + 1):
+        for _ in range(chunk_size):
             frame = ensure_video_packet(input_queue_ref.get_nowait())
-            if i in indices:
-                video_frames.append(frame)
+            video_frames.append(frame)
         return video_frames
 
     def prepare_multi_chunk(
@@ -339,11 +346,10 @@ class PipelineProcessor:
         input_queues_ref: dict[str, queue.Queue],
         chunk_size: int,
     ) -> dict[str, list[VideoPacket]]:
-        """
-        Sample chunk_size frames uniformly from each wired queue.
+        """Take ``chunk_size`` consecutive frames from each wired queue.
 
-        All queues must have >= chunk_size frames (caller checks readiness).
-        Each port is sampled independently using the same uniform strategy.
+        See :meth:`prepare_chunk` for the per-queue semantics. All queues must
+        have at least ``chunk_size`` frames (caller checks readiness).
         """
         return {
             port: self.prepare_chunk(q, chunk_size)
@@ -472,6 +478,13 @@ class PipelineProcessor:
                 # Preserve popped one-shot parameters so they are applied once frames arrive
                 if lora_scales is not None:
                     self.parameters["lora_scales"] = lora_scales
+                # Clear the batch-time anchor so the next successful batch
+                # measures its interval from processing time alone, not from
+                # the idle wait. Otherwise, input-starvation periods pollute
+                # the rolling FPS estimate and downstream pacing throttles.
+                # See _track_output_batch for the counterpart logic.
+                with self.output_fps_lock:
+                    self._last_batch_time = None
                 self.shutdown_event.wait(SLEEP_TIME)
                 return
             if len(input_queues_ref) == 1:
@@ -740,16 +753,25 @@ class PipelineProcessor:
         tracking where near-zero intra-batch deltas mixed with large
         inter-batch gaps cause the FPS estimate to swing permanently.
 
-        On the first call, processing_time is used as the interval since
-        there is no previous batch to measure against. This gives a useful
-        FPS estimate immediately rather than waiting for a second batch.
+        ``_last_batch_time`` is cleared by ``process_chunk`` whenever the
+        worker has to wait for input, so each successful batch that follows
+        an idle gap uses ``processing_time`` as its interval. This keeps the
+        rolling estimate tied to what the pipeline can actually produce,
+        instead of being dragged down by input-starvation periods. The
+        symptom: RIFE (12 in, 23 out) fed by NDI/Spout/Syphon would report
+        a very low FPS because every batch's wall-clock interval included
+        the 400ms+ wait for the next 12 input frames — downstream pacing
+        then throttled the sink queue faster than RIFE could drain it.
         """
         now = time.time()
         with self.output_fps_lock:
             if self._last_batch_time is not None:
+                # Back-to-back batch with no idle gap — use wall-clock delta
+                # so we can still pick up on real slowdowns (pipeline itself
+                # running slower) instead of always showing the raw compute
+                # rate.
                 interval = now - self._last_batch_time
             elif processing_time > 0:
-                # First batch: use processing time as initial interval estimate
                 interval = processing_time
             else:
                 interval = 0
