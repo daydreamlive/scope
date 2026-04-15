@@ -321,17 +321,24 @@ class PipelineProcessor:
     def prepare_chunk(
         self, input_queue_ref: queue.Queue, chunk_size: int
     ) -> list[VideoPacket]:
+        """Take ``chunk_size`` consecutive frames in capture order (FIFO).
+
+        When the queue holds more than ``chunk_size`` frames (backlog), drops
+        the oldest excess first so we always process the **newest** window of
+        consecutive frames. Older code sampled indices uniformly across the
+        whole depth, which breaks temporal pipelines (e.g. RIFE) that need true
+        consecutive input pairs—not every Nth frame from a deep queue.
         """
-        Sample frames uniformly from one queue (used when only video port is present).
-        """
-        step = input_queue_ref.qsize() / chunk_size
-        indices = [round(i * step) for i in range(chunk_size)]
+        while input_queue_ref.qsize() > chunk_size:
+            try:
+                input_queue_ref.get_nowait()
+            except queue.Empty:
+                break
+
         video_frames: list[VideoPacket] = []
-        last_idx = indices[-1]
-        for i in range(last_idx + 1):
+        for _ in range(chunk_size):
             frame = ensure_video_packet(input_queue_ref.get_nowait())
-            if i in indices:
-                video_frames.append(frame)
+            video_frames.append(frame)
         return video_frames
 
     def prepare_multi_chunk(
@@ -340,10 +347,9 @@ class PipelineProcessor:
         chunk_size: int,
     ) -> dict[str, list[VideoPacket]]:
         """
-        Sample chunk_size frames uniformly from each wired queue.
-
-        All queues must have >= chunk_size frames (caller checks readiness).
-        Each port is sampled independently using the same uniform strategy.
+        Take ``chunk_size`` consecutive frames from each wired queue (see
+        :meth:`prepare_chunk`). All queues must have at least ``chunk_size``
+        frames (caller checks readiness).
         """
         return {
             port: self.prepare_chunk(q, chunk_size)
