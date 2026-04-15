@@ -12,6 +12,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import {
   Tooltip,
   TooltipContent,
@@ -215,35 +216,41 @@ export function Header({
     <header className={`w-full bg-background px-6 py-4 ${className}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-medium text-foreground">
-            Daydream Scope
-          </h1>
+          <img
+            src="/icon.png"
+            alt="Daydream Scope"
+            className="h-7 w-7 rounded-md"
+          />
           {onGraphModeToggle && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                onGraphModeToggle();
+            <ToggleGroup
+              type="single"
+              value={graphMode ? "workflow" : "perform"}
+              onValueChange={value => {
+                if (!value) return;
+                const nextGraphMode = value === "workflow";
+                if (nextGraphMode !== graphMode) onGraphModeToggle();
               }}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors gap-1.5"
-              title={
-                graphMode
-                  ? "Switch to Perform Mode"
-                  : "Switch to Workflow Builder"
-              }
+              className="h-8 rounded-md bg-muted/40 p-0.5 gap-0.5"
             >
-              {graphMode ? (
-                <>
-                  <Monitor className="h-4 w-4" />
-                  Perform Mode
-                </>
-              ) : (
-                <>
-                  <Workflow className="h-4 w-4" />
-                  Workflow Builder
-                </>
-              )}
-            </Button>
+              <ToggleGroupItem
+                value="workflow"
+                size="sm"
+                className="h-7 px-3 text-xs gap-1.5 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm text-muted-foreground"
+                aria-label="Workflow Builder"
+              >
+                <Workflow className="h-4 w-4" />
+                Workflow
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="perform"
+                size="sm"
+                className="h-7 px-3 text-xs gap-1.5 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm text-muted-foreground"
+                aria-label="Perform Mode"
+              >
+                <Monitor className="h-4 w-4" />
+                Perform
+              </ToggleGroupItem>
+            </ToggleGroup>
           )}
         </div>
         <div className="flex items-center gap-1">
