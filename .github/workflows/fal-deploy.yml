@@ -11,6 +11,15 @@ on:
           - main
           - prod
         default: 'main'
+      app:
+        description: 'Which app to deploy'
+        required: true
+        type: choice
+        options:
+          - both
+          - scope-app
+          - scope-livepeer
+        default: 'both'
   workflow_run:
     workflows: ["Build and Push Docker Image"]
     types:
@@ -42,6 +51,10 @@ jobs:
         run: pip install fal
 
       - name: Deploy Scope app to fal
+        if: >
+          github.event_name == 'workflow_run' ||
+          github.event.inputs.app == 'both' ||
+          github.event.inputs.app == 'scope-app'
         env:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
@@ -52,10 +65,14 @@ jobs:
             ENV="main"
           fi
 
-          echo "Deploying to $ENV"
+          echo "Deploying Scope app to $ENV"
           fal deploy --env $ENV --auth public src/scope/cloud/fal_app.py
 
       - name: Deploy Livepeer runner to fal
+        if: >
+          github.event_name == 'workflow_run' ||
+          github.event.inputs.app == 'both' ||
+          github.event.inputs.app == 'scope-livepeer'
         env:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
