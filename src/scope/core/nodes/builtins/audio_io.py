@@ -173,6 +173,13 @@ class AudioSourceNode(BaseNode):
                     default=False,
                     description="Repeat the audio continuously",
                 ),
+                NodeParam(
+                    name="pacing",
+                    param_type="select",
+                    default="realtime",
+                    description="Loop pacing",
+                    ui={"options": ["realtime", "downstream"]},
+                ),
             ],
         )
 
@@ -214,6 +221,7 @@ class AudioSourceNode(BaseNode):
         # "full" = emit entire clip once (for batch DAGs); "stream" = 100ms chunks
         mode = kwargs.get("mode", "stream")
         loop = bool(kwargs.get("loop", False))
+        pacing = kwargs.get("pacing", "realtime")
 
         if not file_id:
             return {}
@@ -233,7 +241,13 @@ class AudioSourceNode(BaseNode):
 
         if mode == "full":
             if loop:
-                # Loop=true: re-emit the full clip paced by clip duration
+                if pacing == "downstream":
+                    # Skip the wall-clock gate: re-emit every tick and let
+                    # the downstream edge queue's maxsize=1 + blocking put
+                    # in _route_outputs backpressure us to consumer speed.
+                    self._last_full_emit_time = None
+                    return self._emit_full()
+                # realtime: re-emit the full clip paced by clip duration
                 # on the wall clock so downstream re-processes at roughly
                 # real-time without flooding the audio track.
                 clip_seconds = self._audio_data.shape[1] / SAMPLE_RATE
@@ -257,7 +271,7 @@ class AudioSourceNode(BaseNode):
         # later re-emits once.
         self._full_emitted_key = None
         self._last_full_emit_time = None
-        return self._emit_chunk(loop=loop)
+        return self._emit_chunk(loop=loop, pacing=pacing)
 
     @staticmethod
     def _resolve_path(file_id: str) -> str | None:
@@ -277,14 +291,20 @@ class AudioSourceNode(BaseNode):
     def _emit_full(self) -> dict[str, Any]:
         return {"audio": (torch.from_numpy(self._audio_data.copy()), SAMPLE_RATE)}
 
-    def _emit_chunk(self, loop: bool = True) -> dict[str, Any]:
-        # Pace to real-time
-        now = time.monotonic()
-        if self._last_call_time is not None:
-            elapsed = now - self._last_call_time
-            if elapsed < CHUNK_DURATION * 0.8:
-                time.sleep(CHUNK_DURATION - elapsed)
-        self._last_call_time = time.monotonic()
+    def _emit_chunk(
+        self, loop: bool = True, pacing: str = "realtime"
+    ) -> dict[str, Any]:
+        # Pace to real-time unless downstream-paced — in that mode the
+        # maxsize=1 edge queues handle rate limiting via backpressure.
+        if pacing != "downstream":
+            now = time.monotonic()
+            if self._last_call_time is not None:
+                elapsed = now - self._last_call_time
+                if elapsed < CHUNK_DURATION * 0.8:
+                    time.sleep(CHUNK_DURATION - elapsed)
+            self._last_call_time = time.monotonic()
+        else:
+            self._last_call_time = None
 
         total = self._audio_data.shape[1]
         if not loop and self._position >= total:
