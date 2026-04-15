@@ -9,6 +9,7 @@ import {
   Menu as MenuIcon,
   AlertTriangle,
   HelpCircle,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "./ui/button";
 import {
@@ -252,7 +253,7 @@ export function Header({
             onClick={handleCloudIconClick}
             className={`hover:opacity-80 transition-opacity h-8 gap-1.5 px-2 ${
               isConnected
-                ? "text-green-500 opacity-100"
+                ? "text-emerald-600 opacity-100"
                 : isConnecting
                   ? "text-amber-400 opacity-100"
                   : "text-muted-foreground opacity-80"
@@ -290,17 +291,19 @@ export function Header({
                 <button
                   type="button"
                   onClick={() => redirectToSignIn()}
-                  className="h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
+                  className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#2FBEC5] to-[#36619D] hover:brightness-110 transition-all"
                 >
                   Upgrade
+                  <ExternalLink className="h-3 w-3" />
                 </button>
               ) : billing.tier === "free" ? (
                 <button
                   type="button"
                   onClick={() => billing.openCheckout("pro")}
-                  className="h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
+                  className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#2FBEC5] to-[#36619D] hover:brightness-110 transition-all"
                 >
                   Upgrade for more credits
+                  <ExternalLink className="h-3 w-3" />
                 </button>
               ) : (
                 <Button
@@ -384,15 +387,20 @@ export function Header({
                         </Tooltip>
                       </TooltipProvider>
                     </span>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        openExternalUrl(`${DAYDREAM_APP_BASE}/dashboard/usage`)
-                      }
-                      className="h-6 px-2 rounded-md text-[11px] font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
-                    >
-                      Top Up
-                    </button>
+                    {(billing.tier === "pro" || billing.tier === "max") && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openExternalUrl(
+                            `${DAYDREAM_APP_BASE}/dashboard/usage`
+                          )
+                        }
+                        className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold border border-[#2FBEC5]/40 text-[#2FBEC5] hover:bg-[#2FBEC5]/10 transition-colors"
+                      >
+                        Top Up
+                        <ExternalLink className="h-3 w-3" />
+                      </button>
+                    )}
                   </div>
                   <DropdownMenuSeparator />
                 </>
