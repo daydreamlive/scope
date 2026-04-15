@@ -28,7 +28,7 @@ import { openExternalUrl } from "../lib/openExternal";
 
 const DAYDREAM_APP_BASE =
   (import.meta.env.VITE_DAYDREAM_APP_BASE as string | undefined) ||
-  "https://app.daydream.monster";
+  "https://app.daydream.live";
 
 function formatTrialTime(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -281,9 +281,7 @@ export function Header({
               <button
                 type="button"
                 onClick={() =>
-                  openExternalUrl(
-                    `${DAYDREAM_APP_BASE}/dashboard/usage`
-                  )
+                  openExternalUrl(`${DAYDREAM_APP_BASE}/dashboard/usage`)
                 }
                 className="h-6 px-2 rounded-md text-[11px] font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
               >

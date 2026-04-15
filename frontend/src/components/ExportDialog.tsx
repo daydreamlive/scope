@@ -96,12 +96,12 @@ export function ExportDialog({
             <div className="flex flex-col items-start">
               <span className="font-semibold">
                 {isAuthenticated
-                  ? "Export to daydream.monster"
-                  : "Log in to export to daydream.monster"}
+                  ? "Export to daydream.live"
+                  : "Log in to export to daydream.live"}
               </span>
               <span className="text-xs text-muted-foreground">
                 {isAuthenticated
-                  ? "Publish your workflow on daydream.monster"
+                  ? "Publish your workflow on daydream.live"
                   : "Sign in to your Daydream account to publish"}
               </span>
             </div>

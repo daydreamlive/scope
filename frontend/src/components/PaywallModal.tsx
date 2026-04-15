@@ -203,7 +203,7 @@ export function PaywallModal() {
           <p className="text-xs text-center text-muted-foreground">
             Questions?{" "}
             <a
-              href="mailto:support@daydream.monster"
+              href="mailto:support@daydream.live"
               className="underline hover:text-foreground transition-colors"
             >
               Contact support

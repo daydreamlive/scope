@@ -101,8 +101,7 @@ export function BillingTab() {
           Subscription & Billing
         </h3>
         <p className="text-sm text-muted-foreground">
-          You're on the free plan. Subscribe to get credits for Daydream
-          Cloud.
+          You're on the free plan. Subscribe to get credits for Daydream Cloud.
         </p>
         {credits && credits.balance > 0 && (
           <div className="text-sm text-muted-foreground">
@@ -127,7 +126,7 @@ export function BillingTab() {
         <p className="text-xs text-muted-foreground">
           Questions about billing?{" "}
           <a
-            href="mailto:support@daydream.monster"
+            href="mailto:support@daydream.live"
             className="underline hover:text-foreground transition-colors"
           >
             Contact support
@@ -271,10 +270,7 @@ export function BillingTab() {
           variant="outline"
           size="sm"
           onClick={() =>
-            window.open(
-              "https://app.daydream.monster/dashboard/usage",
-              "_blank"
-            )
+            window.open("https://app.daydream.live/dashboard/usage", "_blank")
           }
         >
           Manage Subscription
@@ -290,14 +286,14 @@ export function BillingTab() {
       <p className="text-xs text-muted-foreground">
         Questions about billing?{" "}
         <a
-          href="mailto:support@daydream.monster"
+          href="mailto:support@daydream.live"
           className="underline hover:text-foreground transition-colors"
         >
           Contact support
         </a>
         {" · "}
         <a
-          href="https://docs.daydream.monster/billing"
+          href="https://docs.daydream.live/billing"
           target="_blank"
           rel="noopener noreferrer"
           className="underline hover:text-foreground transition-colors"

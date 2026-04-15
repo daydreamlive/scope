@@ -456,14 +456,14 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         } else {
           openExternalUrl(result.createUrl);
         }
-        toast.success("Opening daydream.monster...", {
+        toast.success("Opening daydream.live...", {
           description:
-            "Your workflow has been sent to daydream.monster for publishing.",
+            "Your workflow has been sent to daydream.live for publishing.",
         });
         setShowExportDialog(false);
       } catch (err) {
         pendingTab?.close();
-        console.error("Export to daydream.monster failed:", err);
+        console.error("Export to daydream.live failed:", err);
         toast.error("Export failed", {
           description: err instanceof Error ? err.message : String(err),
         });

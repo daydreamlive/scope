@@ -15,7 +15,7 @@ import {
   requestInferenceToken,
 } from "../lib/billing";
 
-const SUBSCRIBE_URL = "https://app.daydream.monster/dashboard/usage";
+const SUBSCRIBE_URL = "https://app.daydream.live/dashboard/usage";
 import { getDaydreamAPIKey } from "../lib/auth";
 import { getDeviceId } from "../lib/deviceId";
 import { openExternalUrl } from "../lib/openExternal";
@@ -392,7 +392,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       console.error("[Billing] Portal failed:", err);
       const msg = err instanceof Error ? err.message : "Unknown error";
       toast.error(`Failed to open subscription management: ${msg}`, {
-        description: "If this persists, contact support@daydream.monster",
+        description: "If this persists, contact support@daydream.live",
       });
     }
   }, []);
@@ -415,7 +415,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         console.error("[Billing] Overage toggle failed:", err);
         const msg = err instanceof Error ? err.message : "Unknown error";
         toast.error(`Failed to update overage setting: ${msg}`, {
-          description: "If this persists, contact support@daydream.monster",
+          description: "If this persists, contact support@daydream.live",
         });
       }
     },
