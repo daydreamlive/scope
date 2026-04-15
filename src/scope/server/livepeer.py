@@ -34,7 +34,7 @@ if os.getenv("LIVEPEER_DEBUG"):
 
 def is_livepeer_enabled() -> bool:
     """Check if Livepeer mode is enabled via environment variables."""
-    return os.getenv("SCOPE_CLOUD_MODE", "").lower() == "livepeer"
+    return os.getenv("SCOPE_CLOUD_MODE", "livepeer").lower() == "livepeer"
 
 
 class LivepeerConnection:
