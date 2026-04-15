@@ -20,7 +20,7 @@ const MODES: {
     icon: Cloud,
     title: "Use Daydream Cloud",
     description: "Use cloud GPU provided by Daydream",
-    detail: "Requires Pro account after free trial",
+    detail: "Requires credits — get started with free credits",
   },
   {
     mode: "local",

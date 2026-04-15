@@ -23,12 +23,8 @@ const TIERS = [
   },
 ];
 
-function getHeadline(
-  reason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null
-): string {
+function getHeadline(reason: "credits_exhausted" | "subscribe" | null): string {
   switch (reason) {
-    case "trial_exhausted":
-      return "Your free remote inference time is up";
     case "credits_exhausted":
       return "You've run out of credits";
     case "subscribe":
@@ -161,9 +157,8 @@ export function PaywallModal() {
             </Button>
           )}
 
-          {/* Redeem code — show for trial exhausted or credits exhausted */}
-          {(paywallReason === "trial_exhausted" ||
-            paywallReason === "credits_exhausted") && (
+          {/* Redeem code — show when credits exhausted */}
+          {paywallReason === "credits_exhausted" && (
             <div className="flex gap-2">
               <input
                 type="text"

@@ -9,7 +9,6 @@ import {
 } from "react";
 import {
   fetchCreditsBalance,
-  sendTrialHeartbeat,
   createPortalSession,
   setOverageEnabled,
   requestInferenceToken,
@@ -36,11 +35,6 @@ export interface BillingState {
     cancelAtPeriodEnd: boolean;
     overageEnabled: boolean;
   } | null;
-  trial: {
-    secondsUsed: number;
-    secondsLimit: number;
-    exhausted: boolean;
-  } | null;
   creditsPerMin: number;
   allRates: Record<string, number> | null;
   isLoading: boolean;
@@ -54,10 +48,8 @@ interface BillingContextValue extends BillingState {
   toggleOverage: (enabled: boolean) => Promise<void>;
   showPaywall: boolean;
   setShowPaywall: (show: boolean) => void;
-  paywallReason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null;
-  setPaywallReason: (
-    reason: "trial_exhausted" | "credits_exhausted" | "subscribe" | null
-  ) => void;
+  paywallReason: "credits_exhausted" | "subscribe" | null;
+  setPaywallReason: (reason: "credits_exhausted" | "subscribe" | null) => void;
   /** Get a valid inference token (requests new one if expired) */
   getInferenceToken: () => Promise<string | null>;
 }
@@ -66,7 +58,6 @@ const defaultState: BillingContextValue = {
   tier: "free",
   credits: null,
   subscription: null,
-  trial: null,
   creditsPerMin: 7.5,
   allRates: null,
   isLoading: true,
@@ -93,7 +84,6 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     tier: "free",
     credits: null,
     subscription: null,
-    trial: null,
     creditsPerMin: 7.5,
     allRates: null,
     isLoading: true,
@@ -101,13 +91,11 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   });
   const [showPaywall, setShowPaywall] = useState(false);
   const [paywallReason, setPaywallReason] = useState<
-    "trial_exhausted" | "credits_exhausted" | "subscribe" | null
+    "credits_exhausted" | "subscribe" | null
   >(null);
 
   const { isConnected } = useCloudStatus();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const prevTrialExhausted = useRef(false);
 
   // Inference token cache — refresh before 5-min expiry
   const inferenceTokenRef = useRef<{
@@ -119,26 +107,13 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const creditWarningShown = useRef<"none" | "low" | "critical" | "grace">(
     "none"
   );
-  const trialWarningShown = useRef<"none" | "2min" | "30sec">("none");
   const upsellShown = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
       const apiKey = getDaydreamAPIKey();
       if (!apiKey) {
-        // Not authenticated — try trial status
-        const deviceId = getDeviceId();
-        const { secondsUsed, secondsLimit, exhausted } =
-          await sendTrialHeartbeat(null, deviceId);
-        setState(prev => ({
-          ...prev,
-          tier: "free",
-          credits: null,
-          subscription: null,
-          trial: { secondsUsed, secondsLimit, exhausted },
-          isLoading: false,
-          billingError: false,
-        }));
+        setState(prev => ({ ...prev, isLoading: false }));
         return;
       }
 
@@ -158,7 +133,6 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         tier: data.tier,
         credits: data.credits,
         subscription: data.subscription,
-        trial: data.trial,
         creditsPerMin: scopeRate,
         allRates: rateMap,
         isLoading: false,
@@ -201,49 +175,6 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       if (pollRef.current) clearInterval(pollRef.current);
     };
   }, [isConnected, refresh]);
-
-  // Trial heartbeat every 60s when streaming on free trial
-  useEffect(() => {
-    if (
-      isConnected &&
-      state.tier === "free" &&
-      state.trial &&
-      !state.trial.exhausted
-    ) {
-      heartbeatRef.current = setInterval(async () => {
-        try {
-          const apiKey = getDaydreamAPIKey();
-          const deviceId = getDeviceId();
-          const result = await sendTrialHeartbeat(apiKey, deviceId);
-          setState(prev => ({
-            ...prev,
-            trial: {
-              secondsUsed: result.secondsUsed,
-              secondsLimit: result.secondsLimit,
-              exhausted: result.exhausted,
-            },
-          }));
-        } catch (err) {
-          console.error("[Billing] Trial heartbeat failed:", err);
-        }
-      }, 60_000);
-    } else {
-      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-      heartbeatRef.current = null;
-    }
-    return () => {
-      if (heartbeatRef.current) clearInterval(heartbeatRef.current);
-    };
-  }, [isConnected, state.tier, state.trial?.exhausted]);
-
-  // Show paywall when trial exhausts
-  useEffect(() => {
-    if (state.trial?.exhausted && !prevTrialExhausted.current) {
-      setPaywallReason("trial_exhausted");
-      setShowPaywall(true);
-    }
-    prevTrialExhausted.current = state.trial?.exhausted ?? false;
-  }, [state.trial?.exhausted]);
 
   // Low credit warnings — toast once per threshold, with grace period warning
   useEffect(() => {
@@ -312,31 +243,6 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       );
     }
   }, [isConnected, state.credits, state.tier, state.creditsPerMin]);
-
-  // Trial time warnings — toast at 2 min and 30 sec remaining
-  useEffect(() => {
-    if (!isConnected || !state.trial || state.trial.exhausted) {
-      trialWarningShown.current = "none";
-      return;
-    }
-    const remaining = state.trial.secondsLimit - state.trial.secondsUsed;
-
-    if (remaining <= 30 && trialWarningShown.current !== "30sec") {
-      trialWarningShown.current = "30sec";
-      toast.warning("Free trial ending in 30 seconds. Subscribe to continue.", {
-        duration: 30000,
-      });
-    } else if (
-      remaining <= 120 &&
-      remaining > 30 &&
-      trialWarningShown.current === "none"
-    ) {
-      trialWarningShown.current = "2min";
-      toast.warning(
-        "Free trial ending in 2 minutes. Subscribe or switch to local inference."
-      );
-    }
-  }, [isConnected, state.trial]);
 
   // Listen for credits-exhausted events from API error handling
   useEffect(() => {

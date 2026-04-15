@@ -6,7 +6,7 @@ import {
   Plug,
   Workflow,
   Monitor,
-  Clock,
+  Menu as MenuIcon,
   AlertTriangle,
   HelpCircle,
 } from "lucide-react";
@@ -25,17 +25,18 @@ import { useCloudStatus } from "../hooks/useCloudStatus";
 import { useBilling } from "../contexts/BillingContext";
 import { isAuthenticated, redirectToSignIn } from "../lib/auth";
 import { openExternalUrl } from "../lib/openExternal";
+import { useOnboarding } from "../contexts/OnboardingContext";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
 
 const DAYDREAM_APP_BASE =
   (import.meta.env.VITE_DAYDREAM_APP_BASE as string | undefined) ||
   "https://app.daydream.live";
-
-function formatTrialTime(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  const m = Math.floor(s / 60);
-  const sec = s % 60;
-  return `${m}:${String(sec).padStart(2, "0")}`;
-}
 
 interface HeaderProps {
   className?: string;
@@ -84,6 +85,9 @@ export function Header({
   // Billing state
   const billing = useBilling();
 
+  // Onboarding state — used to determine if upgrade CTA should show
+  const { state: onboardingState } = useOnboarding();
+
   // Auth state — reactive to sign-in / sign-out
   const [isSignedIn, setIsSignedIn] = useState(() => isAuthenticated());
 
@@ -102,6 +106,9 @@ export function Header({
 
   // Only show "connection lost" after we've seen a successful connection this session
   const hasBeenConnectedRef = useRef(false);
+
+  // Track whether the user has clicked the cloud button this session
+  const [hasClickedCloud, setHasClickedCloud] = useState(false);
 
   // Track previous connection state to detect transitions for pipeline refresh
   const prevConnectedRef = useRef(false);
@@ -145,6 +152,7 @@ export function Header({
   }, [isConnected, onPipelinesRefresh]);
 
   const handleCloudIconClick = () => {
+    setHasClickedCloud(true);
     setInitialTab("account");
     setSettingsOpen(true);
   };
@@ -238,57 +246,6 @@ export function Header({
           )}
         </div>
         <div className="flex items-center gap-1">
-          {/* Credit balance (left of cloud button) */}
-          {isSignedIn && billing.credits && (
-            <span className="flex items-center gap-1.5 text-xs font-medium px-2 text-muted-foreground">
-              <span className="tabular-nums">
-                {billing.credits.balance.toFixed(2)}
-              </span>{" "}
-              credits remaining
-              <TooltipProvider delayDuration={0}>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <button
-                      type="button"
-                      className="inline-flex text-muted-foreground hover:text-foreground transition-colors"
-                      aria-label="Credit info"
-                    >
-                      <HelpCircle className="h-3.5 w-3.5" />
-                    </button>
-                  </TooltipTrigger>
-                  <TooltipContent
-                    side="bottom"
-                    className="max-w-[260px] text-xs leading-relaxed"
-                  >
-                    Daydream Cloud inference requires credit purchases. For more
-                    information, please refer to our{" "}
-                    <a
-                      href="https://daydream.live/pricing"
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="underline hover:text-primary-foreground/80"
-                      onClick={e => {
-                        e.preventDefault();
-                        openExternalUrl("https://daydream.live/pricing");
-                      }}
-                    >
-                      Pricing page
-                    </a>
-                    .
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-              <button
-                type="button"
-                onClick={() =>
-                  openExternalUrl(`${DAYDREAM_APP_BASE}/dashboard/usage`)
-                }
-                className="h-6 px-2 rounded-md text-[11px] font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
-              >
-                Top Up
-              </button>
-            </span>
-          )}
           <Button
             variant="ghost"
             size="sm"
@@ -323,108 +280,151 @@ export function Header({
                   : "Connect to Cloud"}
             </span>
           </Button>
-          {/* Upgrade CTA / Plan badge */}
-          {!isSignedIn ? (
-            <button
-              type="button"
-              onClick={() => redirectToSignIn()}
-              className="h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
-            >
-              Upgrade
-            </button>
-          ) : billing.tier === "free" ? (
-            <button
-              type="button"
-              onClick={() => billing.openCheckout("pro")}
-              className="h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
-            >
-              Upgrade for more credits
-            </button>
-          ) : (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                setInitialTab("billing");
-                setSettingsOpen(true);
-              }}
-              className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
-            >
-              {billing.tier === "pro" ? "Pro" : "Max"}
-            </Button>
+          {/* Upgrade CTA / Plan badge — only show when user has cloud intent */}
+          {(onboardingState.inferenceMode === "cloud" ||
+            hasClickedCloud ||
+            isConnected ||
+            isConnecting) && (
+            <>
+              {!isSignedIn ? (
+                <button
+                  type="button"
+                  onClick={() => redirectToSignIn()}
+                  className="h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
+                >
+                  Upgrade
+                </button>
+              ) : billing.tier === "free" ? (
+                <button
+                  type="button"
+                  onClick={() => billing.openCheckout("pro")}
+                  className="h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
+                >
+                  Upgrade for more credits
+                </button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setInitialTab("billing");
+                    setSettingsOpen(true);
+                  }}
+                  className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {billing.tier === "pro" ? "Pro" : "Max"}
+                </Button>
+              )}
+            </>
           )}
-          {isConnected &&
-            billing.tier === "free" &&
-            billing.trial &&
-            !billing.trial.exhausted && (
-              <span
-                className={`flex items-center gap-1 text-xs font-medium px-2 ${
-                  billing.trial.secondsLimit - billing.trial.secondsUsed < 300
-                    ? billing.trial.secondsLimit - billing.trial.secondsUsed <
-                      60
-                      ? "text-red-500"
-                      : "text-amber-400"
-                    : "text-muted-foreground"
-                }`}
-              >
-                <Clock className="h-3.5 w-3.5" />
-                Trial:{" "}
-                {formatTrialTime(
-                  billing.trial.secondsLimit - billing.trial.secondsUsed
-                )}
-              </span>
-            )}
           {/* Billing unavailable fallback */}
-          {isConnected &&
-            billing.billingError &&
-            !billing.credits &&
-            !billing.trial && (
-              <span
-                className="flex items-center gap-1 text-xs font-medium px-2 text-amber-400"
-                title="Unable to load billing status. Usage may not be tracked."
+          {isConnected && billing.billingError && !billing.credits && (
+            <span
+              className="flex items-center gap-1 text-xs font-medium px-2 text-amber-400"
+              title="Unable to load billing status. Usage may not be tracked."
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Billing unavailable
+            </span>
+          )}
+          {/* Menu dropdown: credits, nodes, workflows, settings */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
               >
-                <AlertTriangle className="h-3.5 w-3.5" />
-                Billing unavailable
-              </span>
-            )}
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setPluginsInitialTab("discover");
-              setPluginsOpen(true);
-            }}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
-            title="Nodes"
-          >
-            <Plug className="h-4 w-4" />
-            <span className="text-xs font-medium">Nodes</span>
-          </Button>
-          <Button
-            data-tour="workflows-button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setPluginsInitialTab("workflows");
-              setPluginsOpen(true);
-            }}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
-            title="Workflows"
-          >
-            <Workflow className="h-4 w-4" />
-            <span className="text-xs font-medium">Workflows</span>
-          </Button>
-          <Button
-            data-tour="settings-button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setSettingsOpen(true)}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
-            title="Settings"
-          >
-            <Settings className="h-4 w-4" />
-            <span className="text-xs font-medium">Settings</span>
-          </Button>
+                <MenuIcon className="h-4 w-4" />
+                <span className="text-xs font-medium">Menu</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              {isSignedIn && billing.credits && (
+                <>
+                  <div className="flex items-center justify-between px-2 py-1.5">
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <span className="tabular-nums">
+                        {billing.credits.balance.toFixed(2)}
+                      </span>{" "}
+                      credits remaining
+                      <TooltipProvider delayDuration={0}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex text-muted-foreground hover:text-foreground transition-colors"
+                              aria-label="Credit info"
+                            >
+                              <HelpCircle className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            className="max-w-[260px] text-xs leading-relaxed"
+                          >
+                            Daydream Cloud inference requires credit purchases.
+                            For more information, please refer to our{" "}
+                            <a
+                              href="https://daydream.live/pricing"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline hover:text-primary-foreground/80"
+                              onClick={e => {
+                                e.preventDefault();
+                                openExternalUrl(
+                                  "https://daydream.live/pricing"
+                                );
+                              }}
+                            >
+                              Pricing page
+                            </a>
+                            .
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        openExternalUrl(`${DAYDREAM_APP_BASE}/dashboard/usage`)
+                      }
+                      className="h-6 px-2 rounded-md text-[11px] font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
+                    >
+                      Top Up
+                    </button>
+                  </div>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem
+                onClick={() => {
+                  setPluginsInitialTab("discover");
+                  setPluginsOpen(true);
+                }}
+              >
+                <Plug className="h-4 w-4" />
+                Nodes
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-tour="workflows-button"
+                onClick={() => {
+                  setPluginsInitialTab("workflows");
+                  setPluginsOpen(true);
+                }}
+              >
+                <Workflow className="h-4 w-4" />
+                Workflows
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-tour="settings-button"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <Settings className="h-4 w-4" />
+                Settings
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 

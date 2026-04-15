@@ -8,16 +8,6 @@ const DAYDREAM_API_BASE =
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-export interface TrialStatus {
-  secondsUsed: number;
-  secondsLimit: number;
-  exhausted: boolean;
-}
-
-export interface TrialHeartbeatResponse extends TrialStatus {
-  hasSubscription: boolean;
-}
-
 export interface CreditsBalance {
   tier: "free" | "pro" | "max";
   credits: {
@@ -34,7 +24,6 @@ export interface CreditsBalance {
     cancelAtPeriodEnd: boolean;
     overageEnabled: boolean;
   } | null;
-  trial: TrialStatus | null;
   creditsPerMin: number | Record<string, number>;
 }
 
@@ -56,27 +45,6 @@ export async function fetchCreditsBalance(
   const res = await fetch(url, { headers: headers(apiKey) });
   if (!res.ok)
     throw new Error(`Failed to fetch credits balance: ${res.status}`);
-  return res.json();
-}
-
-export async function sendTrialHeartbeat(
-  apiKey: string | null,
-  deviceId: string
-): Promise<TrialHeartbeatResponse> {
-  const res = await fetch(`${DAYDREAM_API_BASE}/credits/trial/heartbeat`, {
-    method: "POST",
-    headers: headers(apiKey),
-    body: JSON.stringify({ deviceId }),
-  });
-  if (!res.ok) throw new Error(`Failed to send trial heartbeat: ${res.status}`);
-  return res.json();
-}
-
-export async function fetchTrialStatus(deviceId: string): Promise<TrialStatus> {
-  const res = await fetch(
-    `${DAYDREAM_API_BASE}/credits/trial/status?deviceId=${encodeURIComponent(deviceId)}`
-  );
-  if (!res.ok) throw new Error(`Failed to fetch trial status: ${res.status}`);
   return res.json();
 }
 
