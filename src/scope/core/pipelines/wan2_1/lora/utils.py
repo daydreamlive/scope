@@ -90,9 +90,69 @@ def normalize_lora_key(lora_base_key: str) -> str:
     return lora_base_key
 
 
+def _wait_for_lora_file(
+    lora_path: str,
+    timeout: float | None = None,
+    poll_interval: float = 2.0,
+) -> bool:
+    """Poll until *lora_path* exists on disk or *timeout* is exceeded.
+
+    Handles the race condition where a LoRA file is being downloaded from a
+    remote source (e.g. Civitai) concurrently with pipeline initialisation.
+    The pipeline calls ``load_lora_weights`` synchronously while the download
+    runs in a separate thread; without the poll the load fails with
+    ``FileNotFoundError`` even though the file will be available shortly.
+
+    Args:
+        lora_path:     Absolute path of the LoRA file to wait for.
+        timeout:       Maximum seconds to wait.  Defaults to the value of the
+                       ``SCOPE_LORA_DOWNLOAD_WAIT_TIMEOUT`` environment variable
+                       (default: 120 s).  Pass 0 to disable waiting entirely.
+        poll_interval: Seconds between existence checks (default 2 s).
+
+    Returns:
+        ``True`` if the file appeared within the timeout, ``False`` otherwise.
+    """
+    import time
+
+    if timeout is None:
+        timeout = float(os.getenv("SCOPE_LORA_DOWNLOAD_WAIT_TIMEOUT", "120"))
+
+    if timeout <= 0 or os.path.exists(lora_path):
+        return os.path.exists(lora_path)
+
+    logger.info(
+        "_wait_for_lora_file: '%s' not yet present — waiting up to %.0fs for "
+        "in-flight download to complete (poll every %.1fs)",
+        lora_path,
+        timeout,
+        poll_interval,
+    )
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        time.sleep(poll_interval)
+        if os.path.exists(lora_path):
+            waited = timeout - (deadline - time.monotonic())
+            logger.info(
+                "_wait_for_lora_file: '%s' appeared after %.1fs",
+                lora_path,
+                waited,
+            )
+            return True
+
+    return False
+
+
 def load_lora_weights(lora_path: str) -> dict[str, torch.Tensor]:
     """
     Load LoRA weights from .safetensors or .bin file.
+
+    If the file does not exist immediately, this function will poll for up to
+    ``SCOPE_LORA_DOWNLOAD_WAIT_TIMEOUT`` seconds (default: 120) to allow an
+    in-flight Civitai/HuggingFace download to complete before raising.  This
+    prevents spurious ``FileNotFoundError`` failures during session reinit when
+    a LoRA asset download races with pipeline ``__init__``.
 
     Args:
         lora_path: Path to LoRA file (.safetensors or .bin)
@@ -101,15 +161,20 @@ def load_lora_weights(lora_path: str) -> dict[str, torch.Tensor]:
         Dictionary mapping parameter names to tensors
 
     Raises:
-        FileNotFoundError: If the LoRA file does not exist
+        FileNotFoundError: If the LoRA file does not exist (and did not appear
+            within the configured wait timeout).
     """
     if not os.path.exists(lora_path):
-        raise FileNotFoundError(f"load_lora_weights: LoRA file not found: {lora_path}")
+        if not _wait_for_lora_file(lora_path):
+            raise FileNotFoundError(
+                f"load_lora_weights: LoRA file not found: {lora_path}"
+            )
 
     if lora_path.endswith(".safetensors"):
         return load_file(lora_path)
     else:
         return torch.load(lora_path, map_location="cpu")
+
 
 
 def find_lora_pair(
