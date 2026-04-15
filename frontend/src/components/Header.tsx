@@ -216,7 +216,11 @@ export function Header({
     <header className={`w-full bg-background px-6 py-4 ${className}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <img src="/icon-white.svg" alt="Daydream Scope" className="h-7 w-auto" />
+          <img
+            src="/icon-white.svg"
+            alt="Daydream Scope"
+            className="h-5 w-auto"
+          />
           {onGraphModeToggle && (
             <ToggleGroup
               type="single"
