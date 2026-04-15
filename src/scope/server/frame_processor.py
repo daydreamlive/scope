@@ -762,6 +762,18 @@ class FrameProcessor:
 
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
+        # Trace: surface every inbound parameter update at its entry point
+        # so we can distinguish "UI never sent anything" from "UI sent but
+        # was stripped upstream of the NodeProcessor dispatch".
+        import os as _os
+
+        if _os.environ.get("SCOPE_NODE_TRACE", "").lower() in ("1", "true", "yes"):
+            logger.info(
+                "[scope.FrameProcessor.update_parameters] inbound keys=%s node_id=%s",
+                sorted(parameters.keys()),
+                parameters.get("node_id"),
+            )
+
         # Always strip tempo-control keys so they never leak into pipelines,
         # even when the corresponding helper (scheduler/engine/tempo_sync) is absent.
 

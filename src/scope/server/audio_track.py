@@ -2,7 +2,9 @@ import asyncio
 import collections
 import fractions
 import logging
+import threading
 import time
+import weakref
 
 import numpy as np
 from aiortc import MediaStreamTrack
@@ -23,6 +25,28 @@ AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
 # in a single chunk after each denoising pass, and for TTS pipelines that may
 # generate many seconds of speech before playback catches up.
 AUDIO_MAX_BUFFER_SAMPLES = AUDIO_CLOCK_RATE * 60
+
+
+# Registry of live audio tracks so graph nodes that need the playhead (e.g.
+# ACE-Step's StreamVAEDecode skip gate, which mirrors the realtime demo's
+# ``audio_eng.position / SAMPLE_RATE`` read in pipeline.py) can query it
+# without a hard dependency on FrameProcessor. Weak refs so closed tracks
+# drop out automatically.
+_PLAYHEAD_LOCK = threading.Lock()
+_PLAYHEAD_TRACKS: "weakref.WeakSet[AudioProcessingTrack]" = weakref.WeakSet()
+
+
+def get_current_playhead_seconds() -> float | None:
+    """Return the playhead position of the first live audio track, in seconds.
+
+    Returns None if no track is registered yet or none are live. Callers
+    should treat None as "skip gate disabled this tick".
+    """
+    with _PLAYHEAD_LOCK:
+        for track in _PLAYHEAD_TRACKS:
+            if track.readyState == "live":
+                return track.playhead_seconds
+    return None
 
 
 class AudioProcessingTrack(MediaStreamTrack):
@@ -53,6 +77,19 @@ class AudioProcessingTrack(MediaStreamTrack):
         self._first_audio_logged = False
         self._start: float | None = None
         self._timestamp: int = 0
+
+        with _PLAYHEAD_LOCK:
+            _PLAYHEAD_TRACKS.add(self)
+
+    @property
+    def playhead_seconds(self) -> float:
+        """Current playback position in seconds (monotonic recv timestamp).
+
+        Mirrors the realtime demo's ``audio_eng.position / SAMPLE_RATE``
+        (see ``demos/realtime_motion_graph/pipeline.py``). Value is 0 before
+        the first ``recv`` call.
+        """
+        return self._timestamp / AUDIO_CLOCK_RATE
 
     @staticmethod
     def _resample_audio(
