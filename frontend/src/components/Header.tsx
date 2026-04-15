@@ -8,14 +8,27 @@ import {
   Monitor,
   Clock,
   AlertTriangle,
+  HelpCircle,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 import { SettingsDialog } from "./SettingsDialog";
 import { PluginsDialog } from "./PluginsDialog";
 import { PaywallModal } from "./PaywallModal";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 import { useBilling } from "../contexts/BillingContext";
+import { isAuthenticated, redirectToSignIn } from "../lib/auth";
+import { openExternalUrl } from "../lib/openExternal";
+
+const DAYDREAM_APP_BASE =
+  (import.meta.env.VITE_DAYDREAM_APP_BASE as string | undefined) ||
+  "https://app.daydream.monster";
 
 function formatTrialTime(totalSeconds: number): string {
   const s = Math.max(0, Math.floor(totalSeconds));
@@ -70,6 +83,19 @@ export function Header({
 
   // Billing state
   const billing = useBilling();
+
+  // Auth state — reactive to sign-in / sign-out
+  const [isSignedIn, setIsSignedIn] = useState(() => isAuthenticated());
+
+  useEffect(() => {
+    const handleAuthChange = () => setIsSignedIn(isAuthenticated());
+    window.addEventListener("daydream-auth-change", handleAuthChange);
+    window.addEventListener("daydream-auth-success", handleAuthChange);
+    return () => {
+      window.removeEventListener("daydream-auth-change", handleAuthChange);
+      window.removeEventListener("daydream-auth-success", handleAuthChange);
+    };
+  }, []);
 
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
@@ -212,6 +238,59 @@ export function Header({
           )}
         </div>
         <div className="flex items-center gap-1">
+          {/* Credit balance (left of cloud button) */}
+          {isSignedIn && billing.credits && (
+            <span className="flex items-center gap-1.5 text-xs font-medium px-2 text-muted-foreground">
+              <span className="tabular-nums">
+                {billing.credits.balance.toFixed(2)}
+              </span>{" "}
+              credits remaining
+              <TooltipProvider delayDuration={0}>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <button
+                      type="button"
+                      className="inline-flex text-muted-foreground hover:text-foreground transition-colors"
+                      aria-label="Credit info"
+                    >
+                      <HelpCircle className="h-3.5 w-3.5" />
+                    </button>
+                  </TooltipTrigger>
+                  <TooltipContent
+                    side="bottom"
+                    className="max-w-[260px] text-xs leading-relaxed"
+                  >
+                    Daydream Cloud inference requires credit purchases. For more
+                    information, please refer to our{" "}
+                    <a
+                      href="https://daydream.live/pricing"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="underline hover:text-primary-foreground/80"
+                      onClick={e => {
+                        e.preventDefault();
+                        openExternalUrl("https://daydream.live/pricing");
+                      }}
+                    >
+                      Pricing page
+                    </a>
+                    .
+                  </TooltipContent>
+                </Tooltip>
+              </TooltipProvider>
+              <button
+                type="button"
+                onClick={() =>
+                  openExternalUrl(
+                    `${DAYDREAM_APP_BASE}/dashboard/usage`
+                  )
+                }
+                className="h-6 px-2 rounded-md text-[11px] font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
+              >
+                Top Up
+              </button>
+            </span>
+          )}
           <Button
             variant="ghost"
             size="sm"
@@ -246,15 +325,34 @@ export function Header({
                   : "Connect to Cloud"}
             </span>
           </Button>
-          {/* Subscribe CTA (free tier only) */}
-          {billing.tier === "free" && !billing.credits && (
+          {/* Upgrade CTA / Plan badge */}
+          {!isSignedIn ? (
+            <button
+              type="button"
+              onClick={() => redirectToSignIn()}
+              className="h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
+            >
+              Upgrade
+            </button>
+          ) : billing.tier === "free" ? (
+            <button
+              type="button"
+              onClick={() => billing.openCheckout("pro")}
+              className="h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#36619D] via-[#2FBEC5] to-[#FF982E] hover:brightness-110 transition-all"
+            >
+              Upgrade for more credits
+            </button>
+          ) : (
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => billing.openCheckout("pro")}
+              onClick={() => {
+                setInitialTab("billing");
+                setSettingsOpen(true);
+              }}
               className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
             >
-              Subscribe
+              {billing.tier === "pro" ? "Pro" : "Max"}
             </Button>
           )}
           {isConnected &&
