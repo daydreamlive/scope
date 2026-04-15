@@ -345,7 +345,7 @@ export function Header({
             <DropdownMenuContent align="end" className="w-64">
               {isSignedIn && billing.credits && (
                 <>
-                  <div className="flex items-center justify-between px-2 py-1.5">
+                  <div className="flex flex-col gap-2 px-2 py-1.5">
                     <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                       <span className="tabular-nums">
                         {billing.credits.balance.toFixed(2)}
@@ -395,7 +395,7 @@ export function Header({
                             `${DAYDREAM_APP_BASE}/dashboard/usage`
                           )
                         }
-                        className="inline-flex items-center gap-1 h-6 px-2 rounded-md text-[11px] font-semibold border border-[#2FBEC5]/40 text-[#2FBEC5] hover:bg-[#2FBEC5]/10 transition-colors"
+                        className="inline-flex items-center justify-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#2FBEC5] to-[#36619D] hover:brightness-110 transition-all w-full"
                       >
                         Top Up
                         <ExternalLink className="h-3 w-3" />

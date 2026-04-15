@@ -60,13 +60,8 @@ function getSubcopy(
 }
 
 export function PaywallModal() {
-  const {
-    showPaywall,
-    setShowPaywall,
-    paywallReason,
-    tier,
-    refresh,
-  } = useBilling();
+  const { showPaywall, setShowPaywall, paywallReason, tier, refresh } =
+    useBilling();
 
   const [redeemCode, setRedeemCode] = useState("");
   const [isRedeeming, setIsRedeeming] = useState(false);
