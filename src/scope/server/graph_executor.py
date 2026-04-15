@@ -207,6 +207,13 @@ def build_graph(
     # 3d) Resize inter-pipeline queues based on downstream pipeline requirements
     _resize_graph_queues(graph, node_processors)
 
+    # 3d2) Propagate "dynamic" marking from continuous source nodes forward.
+    # A non-continuous NodeProcessor only re-fires once every dynamic input
+    # port has caught up for the current upstream cycle; static ports latch
+    # from cache. Without this, latch-fallback fires the node once per
+    # fresh-port arrival, which can double or triple GPU work per cycle.
+    _mark_dynamic_input_ports(graph, node_processors)
+
     # 3e) Derive source_queues from processor input_queues (post-resize).
     # Also build per-source-node queue mappings for multi-source support.
     source_queues: list[queue.Queue] = []
@@ -417,6 +424,64 @@ def _validate_edge_ports(
                 )
     if errors:
         raise ValueError(f"Invalid graph ports: {'; '.join(errors)}")
+
+
+def _mark_dynamic_input_ports(
+    graph: GraphConfig,
+    node_processors: dict[str, Any],
+) -> None:
+    """Populate ``dynamic_input_ports`` on each NodeProcessor.
+
+    A node is "dynamic" if it is ``continuous=True`` (streaming source)
+    or reachable from one through stream edges. An input port on a
+    non-continuous node is "dynamic" when its upstream producer is
+    dynamic — meaning fresh values are expected once per upstream cycle.
+    Ports whose upstream is a one-shot static node (e.g. ``LoadModel``,
+    ``DiffusionConfig``) stay empty and fall back to latch-from-cache.
+
+    PipelineProcessor has its own tick loop and does not use this
+    attribute; we guard on ``hasattr`` rather than isinstance to avoid
+    dragging a type import into graph_executor.
+    """
+    dynamic_nodes: set[str] = set()
+    for node_id, proc in node_processors.items():
+        node = getattr(proc, "node", None)
+        if node is None:
+            continue
+        try:
+            if node.get_definition().continuous:
+                dynamic_nodes.add(node_id)
+        except Exception:  # pragma: no cover — defensive
+            continue
+
+    # Fixed-point forward propagation over stream edges.
+    changed = True
+    while changed:
+        changed = False
+        for e in graph.edges:
+            if e.kind != "stream":
+                continue
+            if e.from_node in dynamic_nodes and e.to_node not in dynamic_nodes:
+                if e.to_node in node_processors:
+                    dynamic_nodes.add(e.to_node)
+                    changed = True
+
+    for node_id, proc in node_processors.items():
+        if not hasattr(proc, "dynamic_input_ports"):
+            continue
+        dynamic_ports: set[str] = set()
+        for e in graph.edges:
+            if e.kind != "stream" or e.to_node != node_id:
+                continue
+            if e.from_node in dynamic_nodes:
+                dynamic_ports.add(e.to_port)
+        proc.dynamic_input_ports = dynamic_ports
+        if dynamic_ports:
+            logger.debug(
+                "Node %s: dynamic input ports = %s",
+                node_id,
+                sorted(dynamic_ports),
+            )
 
 
 def _resize_graph_queues(

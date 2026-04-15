@@ -84,6 +84,21 @@ class NodeProcessor:
         self._last_inputs: dict[str, Any] = {}
         self._needs_rerun = False
 
+        # Input ports whose upstream is transitively reachable from a
+        # ``continuous=True`` node. Populated by graph_executor at build
+        # time. When non-empty, ``_process_once`` waits until every
+        # dynamic port has received fresh data since the last run before
+        # firing, so a single upstream cycle triggers exactly one run
+        # (not one run per fresh-port arrival). Static ports — typically
+        # one-shot handles like MODEL/VAE/CONFIG — always latch from
+        # ``_last_inputs``. Empty set falls back to the legacy "fire on
+        # any fresh input" behaviour.
+        self.dynamic_input_ports: set[str] = set()
+        # Fresh values drained from input queues while waiting for every
+        # dynamic port to catch up. Draining unblocks upstream producers
+        # without committing to a run yet.
+        self._pending_inputs: dict[str, Any] = {}
+
         # PipelineProcessor interface compatibility: graph_executor populates
         # this for every processor; kept as an empty dict so that write is safe.
         self.output_consumers: dict[str, list] = {}
@@ -180,27 +195,45 @@ class NodeProcessor:
             # Non-continuous node with inputs:
             # - First run waits until every port has received data at least
             #   once so the latch cache (_last_inputs) is populated.
-            # - Subsequent runs act as latches: they fire when any port has
-            #   fresh data or when parameters changed, and fall back to the
-            #   cached value on ports whose queue is currently empty. This
-            #   lets a parameter change on one node propagate through the
-            #   DAG without upstream having to re-emit every input.
+            # - Subsequent runs drain fresh values into ``_pending_inputs``
+            #   (so upstream producers unblock immediately) and fire once
+            #   every dynamic input port has caught up. Static ports —
+            #   upstreams that never re-emit, e.g. MODEL/VAE handles —
+            #   are latched from ``_last_inputs``. Parameter changes on
+            #   this node bypass the gate via ``_needs_rerun``.
+            # - When ``dynamic_input_ports`` is empty (graph_executor did
+            #   not classify this node, e.g. a static-only subgraph), we
+            #   fall back to the legacy "fire on any fresh input" gate.
             if not self._has_executed:
                 if any(q.empty() for q in all_queues.values()):
                     self.shutdown_event.wait(SLEEP_TIME)
                     return
                 inputs = {name: q.get_nowait() for name, q in all_queues.items()}
             else:
-                has_fresh = any(not q.empty() for q in all_queues.values())
-                if not has_fresh and not self._needs_rerun:
-                    self.shutdown_event.wait(SLEEP_TIME)
-                    return
                 for port_name, q in all_queues.items():
                     try:
-                        inputs[port_name] = q.get_nowait()
+                        self._pending_inputs[port_name] = q.get_nowait()
                     except queue.Empty:
-                        if port_name in self._last_inputs:
-                            inputs[port_name] = self._last_inputs[port_name]
+                        pass
+
+                if self._needs_rerun:
+                    fire = True
+                elif self.dynamic_input_ports:
+                    fire = self.dynamic_input_ports <= self._pending_inputs.keys()
+                else:
+                    fire = bool(self._pending_inputs)
+
+                if not fire:
+                    self.shutdown_event.wait(SLEEP_TIME)
+                    return
+
+                inputs = {}
+                for port_name in all_queues:
+                    if port_name in self._pending_inputs:
+                        inputs[port_name] = self._pending_inputs[port_name]
+                    elif port_name in self._last_inputs:
+                        inputs[port_name] = self._last_inputs[port_name]
+                self._pending_inputs.clear()
 
         outputs = self.node.execute(inputs, **self.parameters)
 
