@@ -57,6 +57,31 @@ SHUTDOWN_TIMEOUT_S = 5.0
 TASK_DRAIN_TIMEOUT_S = 0.25
 RUNNER_RESTART_TIMEOUT_S = 30.0
 PAYMENT_SEND_INTERVAL_S = 10.0
+SCOPE_CLOUD_GPU_ENV = "SCOPE_CLOUD_GPU"
+DEFAULT_LIVEPEER_APP_ID = "daydream/scope-livepeer--prod/ws"
+
+
+def _normalize_optional_string(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _resolve_livepeer_app_id(
+    app_id: str | None,
+) -> str | None:
+    normalized_app_id = _normalize_optional_string(app_id)
+    if normalized_app_id is not None:
+        return normalized_app_id.strip("/")
+
+    gpu = _normalize_optional_string(os.getenv(SCOPE_CLOUD_GPU_ENV))
+    if gpu not in {None, "h100", "rtx4090", "rtx5090"}:
+        raise ValueError(
+            "Invalid SCOPE_CLOUD_GPU. Expected `h100`, `rtx4090`, `rtx5090`, or unset."
+        )
+    gpu_suffix = "" if gpu in {None, "h100"} else f"-{gpu}"
+    return f"daydream/scope-livepeer{gpu_suffix}--prod/ws"
 
 
 @dataclass(slots=True)
@@ -312,14 +337,11 @@ class LivepeerClient:
 
     @staticmethod
     def _ws_url_from_app_id(value: str | None) -> str | None:
-        # HACK: Ignore the default app_id to use the orchestrator's own config
-        if not value or value == "Daydream/scope-app--prod/ws":
+        resolved_app_id = _resolve_livepeer_app_id(value)
+        if not resolved_app_id:
             return None
         try:
-            trimmed = value.strip()
-            if not trimmed:
-                raise ValueError
-            app_id = trimmed.strip("/")
+            app_id = resolved_app_id.strip("/")
             if not app_id.endswith("/ws"):
                 raise ValueError
             ws_url = f"wss://fal.run/{app_id}"
@@ -329,7 +351,7 @@ class LivepeerClient:
         except Exception:
             raise ValueError(
                 "Invalid cloud app id. Expected a non-empty app id ending in "
-                "`/ws` (for example `daydream/scope-app/ws`)."
+                "`/ws` (for example `daydream/custom-runner--prod/ws`)."
             ) from None
         if parsed.scheme not in {"ws", "wss"}:
             raise ValueError("Invalid ws_url. Expected a valid ws:// or wss:// URL.")

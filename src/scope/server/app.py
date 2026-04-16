@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import click
+import click.core
 import uvicorn
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -3115,7 +3116,7 @@ async def connect_to_cloud(
         # Use request body credentials if provided, otherwise fall back to CLI/env
         app_id = request.app_id or os.environ.get("SCOPE_CLOUD_APP_ID")
         api_key = request.api_key or os.environ.get("SCOPE_CLOUD_API_KEY")
-        if not app_id:
+        if not app_id and not is_livepeer_enabled():
             raise HTTPException(
                 status_code=400,
                 detail="cloud credentials not configured. Use --cloud-app-id and --cloud-api-key CLI args, "
@@ -3425,7 +3426,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
 )
 @click.option(
     "--cloud-app-id",
-    default="Daydream/scope-app--prod/ws",
+    default=None,
     envvar="SCOPE_CLOUD_APP_ID",
     help="Cloud app ID for cloud mode (e.g., 'username/scope-app')",
 )
@@ -3460,8 +3461,6 @@ def main(
 
     # MCP mode: run the MCP stdio server instead of the HTTP server
     if mcp:
-        import click.core
-
         from .mcp_server import run_mcp_server
 
         # Only pre-connect if --port was explicitly provided on the command line

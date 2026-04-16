@@ -27,6 +27,7 @@ RUNNER_RETRY_DELAY_SECONDS = 2.5
 RUNNER_MAX_FAILURES_PER_WINDOW = 20
 RUNNER_FAILURE_WINDOW_SECONDS = 60.0
 ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
+SCOPE_DEPLOY_GPU_ENV = "SCOPE_DEPLOY_GPU"
 
 # Gates startup cleanup so only one cleanup run executes at a time.
 _cleanup_event: asyncio.Event | None = None
@@ -129,6 +130,21 @@ custom_image = ContainerImage.from_dockerfile_str(
 )
 
 
+def _get_livepeer_machine_type() -> str:
+    """Return the Fal machine type selected by SCOPE_DEPLOY_GPU."""
+    deploy_gpu = os.getenv(SCOPE_DEPLOY_GPU_ENV, "").strip()
+    if not deploy_gpu:
+        return "GPU-H100"
+    if deploy_gpu in {"GPU-RTX4090", "GPU-RTX5090"}:
+        return deploy_gpu
+    raise ValueError(
+        "Invalid SCOPE_DEPLOY_GPU. Expected `GPU-RTX4090`, `GPU-RTX5090`, or unset."
+    )
+
+
+LIVEPEER_MACHINE_TYPE = _get_livepeer_machine_type()
+
+
 def _runner_is_ready() -> bool:
     """Return True when the local runner HTTP server responds."""
     import urllib.error
@@ -224,7 +240,7 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
     """fal entrypoint that runs and proxies the existing Livepeer Scope runner."""
 
     image = custom_image
-    machine_type = "GPU-H100"
+    machine_type = LIVEPEER_MACHINE_TYPE
     requirements = [
         "websockets",
         "httpx",
@@ -235,6 +251,11 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         import subprocess
 
         print(f"Starting Livepeer runner wrapper setup... (version: {GIT_SHA})")
+        print(
+            "Resolved Livepeer deploy GPU: "
+            f"{os.getenv(SCOPE_DEPLOY_GPU_ENV, '').strip() or 'default'} "
+            f"-> {self.machine_type}"
+        )
 
         try:
             result = subprocess.run(
