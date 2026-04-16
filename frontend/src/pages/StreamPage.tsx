@@ -81,8 +81,21 @@ import { toast } from "sonner";
 import { useOnboarding } from "../contexts/OnboardingContext";
 import { OnboardingOverlay } from "../components/onboarding/OnboardingOverlay";
 import { WorkspaceTour } from "../components/onboarding/WorkspaceTour";
-import { SurveyModal } from "../components/SurveyModal";
+import { SeanEllisSurvey, NpsSurvey } from "../components/SurveyModal";
 import { useTelemetry } from "../contexts/TelemetryContext";
+import {
+  MEANINGFUL_USE_MIN_SECONDS,
+  POST_STREAM_DELAY_MS,
+  getFirstMeaningfulUseAt,
+  getLastMeaningfulUseAt,
+  getNpsLastShownAt,
+  getSeanEllisShownAt,
+  isNpsEligible,
+  isSeanEllisEligible,
+  markNpsShown,
+  markSeanEllisShown,
+  recordMeaningfulUse,
+} from "../lib/surveyEligibility";
 
 import {
   isAuthenticated as checkIsAuthenticated,
@@ -154,8 +167,11 @@ export function StreamPage() {
   // Telemetry opt-in status (used for survey gating)
   const { isEnabled: isTelemetryEnabled } = useTelemetry();
 
-  // Post-session survey state
-  const [showSurvey, setShowSurvey] = useState(false);
+  // Post-session survey state — two independent surveys with different gating.
+  // Sean Ellis has priority: if both are eligible the same session, we show
+  // Sean Ellis and defer NPS to the next eligible session.
+  const [showSeanEllis, setShowSeanEllis] = useState(false);
+  const [showNps, setShowNps] = useState(false);
 
   // Get API functions that work in both local and cloud modes
   const api = useApi();
@@ -645,18 +661,62 @@ export function StreamPage() {
     onTempoUpdate: updateTempoFromNotification,
   });
 
-  // Show post-session survey once after the first completed stream
+  // Track stream start time to measure session duration for "meaningful use".
+  const streamStartedAtRef = useRef<number | null>(null);
   const prevIsStreamingRef = useRef(isStreaming);
   useEffect(() => {
-    if (prevIsStreamingRef.current && !isStreaming) {
-      // Stream just stopped — trigger survey if not yet shown and telemetry opted in
-      const alreadyShown = localStorage.getItem("scope_survey_shown");
-      if (!alreadyShown && isTelemetryEnabled) {
-        localStorage.setItem("scope_survey_shown", "true");
-        setShowSurvey(true);
+    const wasStreaming = prevIsStreamingRef.current;
+    prevIsStreamingRef.current = isStreaming;
+
+    // true → false transition: session just ended.
+    if (wasStreaming && !isStreaming) {
+      const startedAt = streamStartedAtRef.current;
+      streamStartedAtRef.current = null;
+      const durationSec =
+        startedAt !== null ? (Date.now() - startedAt) / 1000 : 0;
+
+      // Record meaningful use if the session was long enough.
+      if (durationSec >= MEANINGFUL_USE_MIN_SECONDS) {
+        recordMeaningfulUse();
+      }
+
+      // Evaluate eligibility against the freshly-updated timestamps. Sean Ellis
+      // wins if both are eligible; we defer the NPS ask to the next stop.
+      const commonInputs = {
+        telemetryEnabled: isTelemetryEnabled,
+        firstMeaningfulUseAt: getFirstMeaningfulUseAt(),
+        lastMeaningfulUseAt: getLastMeaningfulUseAt(),
+      };
+      const seanEllisEligible = isSeanEllisEligible({
+        ...commonInputs,
+        seanEllisShownAt: getSeanEllisShownAt(),
+      });
+      const npsEligible =
+        !seanEllisEligible &&
+        isNpsEligible({
+          ...commonInputs,
+          npsLastShownAt: getNpsLastShownAt(),
+        });
+
+      if (seanEllisEligible) {
+        markSeanEllisShown();
+        const t = setTimeout(
+          () => setShowSeanEllis(true),
+          POST_STREAM_DELAY_MS
+        );
+        return () => clearTimeout(t);
+      }
+      if (npsEligible) {
+        markNpsShown();
+        const t = setTimeout(() => setShowNps(true), POST_STREAM_DELAY_MS);
+        return () => clearTimeout(t);
       }
     }
-    prevIsStreamingRef.current = isStreaming;
+
+    // false → true transition: note the start time.
+    if (!wasStreaming && isStreaming) {
+      streamStartedAtRef.current = Date.now();
+    }
   }, [isStreaming, isTelemetryEnabled]);
 
   // Whether beat-quantized output gating is active
@@ -3799,8 +3859,12 @@ export function StreamPage() {
         )}
       </div>
 
-      {/* Post-session survey modal */}
-      <SurveyModal open={showSurvey} onClose={() => setShowSurvey(false)} />
+      {/* Post-session surveys — independently gated; rendered as peers. */}
+      <SeanEllisSurvey
+        open={showSeanEllis}
+        onClose={() => setShowSeanEllis(false)}
+      />
+      <NpsSurvey open={showNps} onClose={() => setShowNps(false)} />
     </MIDIProvider>
   );
 }
