@@ -7,6 +7,7 @@ import time
 import weakref
 
 import numpy as np
+import torch
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import MediaStreamError
 from av import AudioFrame
@@ -162,6 +163,10 @@ class AudioProcessingTrack(MediaStreamTrack):
                 )
                 self._first_audio_logged = True
 
+            # numpy() rejects bfloat16/float16; upcast so half-precision tensors
+            # from GPU models (e.g. ACE-Step VAE decode) don't silently become silence.
+            if audio_tensor.dtype in (torch.bfloat16, torch.float16):
+                audio_tensor = audio_tensor.float()
             audio_np = audio_tensor.numpy()
             if audio_np.ndim == 1:
                 audio_np = audio_np.reshape(1, -1)
