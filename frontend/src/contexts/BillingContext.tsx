@@ -96,6 +96,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
   const { isConnected } = useCloudStatus();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const bgPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Inference token cache — refresh before 5-min expiry
   const inferenceTokenRef = useRef<{
@@ -173,6 +174,48 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, [isConnected, refresh]);
+
+  // Background poll every 30s when authenticated but not streaming, so top-ups,
+  // subscription changes, and credit deductions are reflected in the UI.
+  // Pauses when the window is hidden to save resources.
+  useEffect(() => {
+    if (isConnected) {
+      // Fast poll above handles this case — skip background poll.
+      if (bgPollRef.current) clearInterval(bgPollRef.current);
+      bgPollRef.current = null;
+      return;
+    }
+
+    const apiKey = getDaydreamAPIKey();
+    if (!apiKey) return;
+
+    const startBgPoll = () => {
+      if (bgPollRef.current) clearInterval(bgPollRef.current);
+      bgPollRef.current = setInterval(refresh, 30_000);
+    };
+
+    const stopBgPoll = () => {
+      if (bgPollRef.current) clearInterval(bgPollRef.current);
+      bgPollRef.current = null;
+    };
+
+    const onVisibility = () => {
+      if (document.hidden) {
+        stopBgPoll();
+      } else {
+        refresh(); // Immediately refresh when tab becomes visible
+        startBgPoll();
+      }
+    };
+
+    if (!document.hidden) startBgPoll();
+    document.addEventListener("visibilitychange", onVisibility);
+
+    return () => {
+      stopBgPoll();
+      document.removeEventListener("visibilitychange", onVisibility);
     };
   }, [isConnected, refresh]);
 
