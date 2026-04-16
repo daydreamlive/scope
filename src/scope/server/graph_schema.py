@@ -51,11 +51,11 @@ class GraphNode(BaseModel):
     )
     source_mode: str | None = Field(
         default=None,
-        description="Video source mode for source nodes: 'video', 'camera', 'spout', 'ndi', 'syphon'",
+        description="Video source mode for source nodes: 'video', 'camera', 'spout', 'ndi', 'syphon', 'youtube'",
     )
     source_name: str | None = Field(
         default=None,
-        description="Source name/identifier for Spout/NDI/Syphon sources (sender name for Spout, source identifier for NDI/Syphon)",
+        description="Source name/identifier for Spout/NDI/Syphon/YouTube sources (sender name for Spout, source identifier for NDI/Syphon, video URL for YouTube)",
     )
     tempo_sync: bool = Field(
         default=False,

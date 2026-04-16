@@ -47,6 +47,7 @@ export interface EnrichNodesDeps {
   spoutAvailable: boolean;
   ndiAvailable: boolean;
   syphonAvailable: boolean;
+  youtubeAvailable: boolean;
   spoutOutputAvailable: boolean;
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
@@ -171,6 +172,7 @@ export function enrichNodes(
           spoutAvailable: deps.spoutAvailable,
           ndiAvailable: deps.ndiAvailable,
           syphonAvailable: deps.syphonAvailable,
+          youtubeAvailable: deps.youtubeAvailable,
           onSpoutSourceChange: (name: string) =>
             deps.onSpoutSourceChangeRef.current?.(name),
           onNdiSourceChange: (identifier: string) =>

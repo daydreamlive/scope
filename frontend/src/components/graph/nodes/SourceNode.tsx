@@ -2,7 +2,11 @@ import { useEffect, useRef, useCallback, useState } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
-import { getInputSourceSources, type DiscoveredSource } from "../../../lib/api";
+import {
+  getInputSourceResolution,
+  getInputSourceSources,
+  type DiscoveredSource,
+} from "../../../lib/api";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import {
@@ -27,7 +31,17 @@ const SOURCE_MODE_OPTIONS = [
   { value: "spout", label: "Spout" },
   { value: "ndi", label: "NDI" },
   { value: "syphon", label: "Syphon" },
+  { value: "youtube", label: "YouTube" },
 ];
+
+const YOUTUBE_URL_REGEX =
+  /^(?:https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com\/(?:watch\?[^#\s]*\bv=|shorts\/|embed\/)|youtu\.be\/)[A-Za-z0-9_-]{11}(?:[?&#/][^\s]*)?$/;
+
+type YoutubeStatus =
+  | { kind: "idle" }
+  | { kind: "probing" }
+  | { kind: "ready"; width: number; height: number }
+  | { kind: "error"; message: string };
 
 export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const { updateData } = useNodeData(id);
@@ -44,6 +58,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const spoutAvailable = data.spoutAvailable ?? false;
   const ndiAvailable = data.ndiAvailable ?? false;
   const syphonAvailable = data.syphonAvailable ?? false;
+  const youtubeAvailable = data.youtubeAvailable ?? false;
   const onSpoutSourceChange = data.onSpoutSourceChange as
     | ((name: string) => void)
     | undefined;
@@ -63,6 +78,9 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const [isDiscoveringNdi, setIsDiscoveringNdi] = useState(false);
   const [syphonSources, setSyphonSources] = useState<DiscoveredSource[]>([]);
   const [isDiscoveringSyphon, setIsDiscoveringSyphon] = useState(false);
+  const [youtubeStatus, setYoutubeStatus] = useState<YoutubeStatus>({
+    kind: "idle",
+  });
 
   useEffect(() => {
     if (videoRef.current && localStream instanceof MediaStream) {
@@ -113,6 +131,55 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     }
   }, [sourceMode, syphonAvailable]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Probe YouTube URL (debounced) when in youtube mode.
+  useEffect(() => {
+    if (sourceMode !== "youtube") return;
+    if (!youtubeAvailable) {
+      setYoutubeStatus({
+        kind: "error",
+        message: "yt-dlp not installed on server",
+      });
+      return;
+    }
+    const url = sourceName.trim();
+    if (!url) {
+      setYoutubeStatus({ kind: "idle" });
+      return;
+    }
+    if (!YOUTUBE_URL_REGEX.test(url)) {
+      setYoutubeStatus({ kind: "error", message: "Invalid YouTube URL" });
+      return;
+    }
+    let cancelled = false;
+    setYoutubeStatus({ kind: "probing" });
+    const handle = window.setTimeout(async () => {
+      try {
+        const res = await getInputSourceResolution("youtube", url, 10000);
+        if (cancelled) return;
+        setYoutubeStatus({
+          kind: "ready",
+          width: res.width,
+          height: res.height,
+        });
+      } catch (e) {
+        if (cancelled) return;
+        const msg = e instanceof Error ? e.message : String(e);
+        // Map common HTTP statuses to friendlier messages.
+        let friendly = msg;
+        if (/\b400\b/.test(msg)) friendly = "Invalid YouTube URL";
+        else if (/\b404\b/.test(msg)) friendly = "Video unavailable or private";
+        else if (/\b408\b/.test(msg))
+          friendly = "Timed out — check your network";
+        else if (/\b500\b/.test(msg)) friendly = "Server error — see logs";
+        setYoutubeStatus({ kind: "error", message: friendly });
+      }
+    }, 500);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(handle);
+    };
+  }, [sourceMode, sourceName, youtubeAvailable]);
+
   const discoverSyphonSources = useCallback(async () => {
     if (!syphonAvailable) return;
     setIsDiscoveringSyphon(true);
@@ -129,12 +196,27 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
 
   const handleSourceModeChange = (newMode: string) => {
     updateData({
-      sourceMode: newMode as "video" | "camera" | "spout" | "ndi" | "syphon",
-      ...(newMode !== "spout" && newMode !== "ndi" && newMode !== "syphon"
+      sourceMode: newMode as
+        | "video"
+        | "camera"
+        | "spout"
+        | "ndi"
+        | "syphon"
+        | "youtube",
+      ...(newMode !== "spout" &&
+      newMode !== "ndi" &&
+      newMode !== "syphon" &&
+      newMode !== "youtube"
         ? { sourceName: undefined }
         : {}),
     });
+    setYoutubeStatus({ kind: "idle" });
     onSourceModeChange?.(newMode);
+  };
+
+  const handleYoutubeUrlChange = (value: string | number) => {
+    const url = String(value);
+    updateData({ sourceName: url });
   };
 
   const handleSpoutNameChange = (value: string | number) => {
@@ -176,6 +258,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     if (opt.value === "spout") return spoutAvailable;
     if (opt.value === "ndi") return ndiAvailable;
     if (opt.value === "syphon") return syphonAvailable;
+    if (opt.value === "youtube") return youtubeAvailable;
     return true;
   });
 
@@ -219,6 +302,35 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                   disabled={!spoutAvailable}
                 />
               </NodeParamRow>
+            </div>
+          )}
+
+          {sourceMode === "youtube" && (
+            <div className="px-2 flex flex-col gap-1">
+              <NodeParamRow label="URL">
+                <NodePillInput
+                  type="text"
+                  value={sourceName}
+                  onChange={handleYoutubeUrlChange}
+                  placeholder="https://youtube.com/watch?v=..."
+                  disabled={!youtubeAvailable}
+                />
+              </NodeParamRow>
+              <div
+                className={`text-[10px] px-1 ${
+                  youtubeStatus.kind === "error"
+                    ? "text-red-400"
+                    : youtubeStatus.kind === "ready"
+                      ? "text-green-400"
+                      : "text-[#8c8c8d]"
+                }`}
+              >
+                {youtubeStatus.kind === "idle" && "Paste a YouTube URL"}
+                {youtubeStatus.kind === "probing" && "Checking…"}
+                {youtubeStatus.kind === "ready" &&
+                  `Ready (${youtubeStatus.width}×${youtubeStatus.height})`}
+                {youtubeStatus.kind === "error" && youtubeStatus.message}
+              </div>
             </div>
           )}
 
@@ -381,7 +493,8 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
           {!showPreview &&
             sourceMode !== "spout" &&
             sourceMode !== "ndi" &&
-            sourceMode !== "syphon" && (
+            sourceMode !== "syphon" &&
+            sourceMode !== "youtube" && (
               <div className="flex items-center justify-center rounded-md bg-black/30 text-[10px] text-[#8c8c8d] flex-1 min-h-[40px]">
                 Waiting for input...
               </div>

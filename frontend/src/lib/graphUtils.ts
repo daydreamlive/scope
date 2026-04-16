@@ -174,9 +174,9 @@ export interface FlowNodeData {
   outputSinkEnabled?: boolean;
   /** For output nodes: the sender name */
   outputSinkName?: string;
-  /** For source nodes: video source mode (video, camera, spout, ndi, syphon) */
-  sourceMode?: "video" | "camera" | "spout" | "ndi" | "syphon";
-  /** For source nodes: source name/identifier for Spout/NDI (sender name for Spout, identifier for NDI) */
+  /** For source nodes: video source mode (video, camera, spout, ndi, syphon, youtube) */
+  sourceMode?: "video" | "camera" | "spout" | "ndi" | "syphon" | "youtube";
+  /** For source nodes: source name/identifier (sender name for Spout, identifier for NDI/Syphon, video URL for YouTube) */
   sourceName?: string;
   /** For source nodes: local video preview stream (camera or file) */
   localStream?: MediaStream | null;
@@ -190,6 +190,8 @@ export interface FlowNodeData {
   ndiAvailable?: boolean;
   /** For source nodes: whether Syphon is available (macOS) */
   syphonAvailable?: boolean;
+  /** For source nodes: whether YouTube (yt-dlp) is available on the server */
+  youtubeAvailable?: boolean;
   /** For source nodes: callback when Spout receiver name changes */
   onSpoutSourceChange?: (name: string) => void;
   /** For source nodes: callback when NDI source changes */

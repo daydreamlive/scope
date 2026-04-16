@@ -1,6 +1,12 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-export type VideoSourceMode = "video" | "camera" | "spout" | "ndi" | "syphon";
+export type VideoSourceMode =
+  | "video"
+  | "camera"
+  | "spout"
+  | "ndi"
+  | "syphon"
+  | "youtube";
 
 export const SAMPLE_VIDEOS = [
   "/assets/test.mp4",
@@ -200,8 +206,13 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       setMode(newMode);
       setError(null);
 
-      // Spout/NDI/Syphon mode - no local stream needed, input comes from server-side receiver
-      if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
+      // Spout/NDI/Syphon/YouTube mode - no local stream needed, input comes from server-side receiver
+      if (
+        newMode === "spout" ||
+        newMode === "ndi" ||
+        newMode === "syphon" ||
+        newMode === "youtube"
+      ) {
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop());
         }

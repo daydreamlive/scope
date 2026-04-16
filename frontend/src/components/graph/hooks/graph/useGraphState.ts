@@ -119,6 +119,7 @@ export interface GraphEditorAvailability {
   spoutAvailable: boolean;
   ndiAvailable: boolean;
   syphonAvailable: boolean;
+  youtubeAvailable: boolean;
   spoutOutputAvailable: boolean;
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
@@ -296,6 +297,7 @@ export function useGraphState(
     spoutAvailable: availability.spoutAvailable,
     ndiAvailable: availability.ndiAvailable,
     syphonAvailable: availability.syphonAvailable,
+    youtubeAvailable: availability.youtubeAvailable,
     spoutOutputAvailable: availability.spoutOutputAvailable,
     ndiOutputAvailable: availability.ndiOutputAvailable,
     syphonOutputAvailable: availability.syphonOutputAvailable,
@@ -345,6 +347,7 @@ export function useGraphState(
     availability.spoutAvailable,
     availability.ndiAvailable,
     availability.syphonAvailable,
+    availability.youtubeAvailable,
     availability.spoutOutputAvailable,
     availability.ndiOutputAvailable,
     availability.syphonOutputAvailable,

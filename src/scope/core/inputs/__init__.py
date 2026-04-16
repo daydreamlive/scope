@@ -48,6 +48,13 @@ def get_input_source_classes() -> dict[str, type[InputSource]]:
     except Exception:
         pass
 
+    try:
+        from .youtube import YouTubeInputSource
+
+        sources[YouTubeInputSource.source_id] = YouTubeInputSource
+    except Exception:
+        pass
+
     return sources
 
 

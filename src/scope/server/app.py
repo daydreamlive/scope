@@ -2464,6 +2464,11 @@ def get_input_source_resolution(
     """Probe the native resolution of a specific input source."""
     source_class = _resolve_input_source_class(source_type)
 
+    from scope.core.inputs.interface import (
+        InvalidSourceURLError,
+        SourceUnavailableError,
+    )
+
     try:
         instance = source_class()
         try:
@@ -2482,6 +2487,10 @@ def get_input_source_resolution(
             instance.close()
     except HTTPException:
         raise
+    except InvalidSourceURLError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except SourceUnavailableError as e:
+        raise HTTPException(status_code=404, detail=str(e)) from e
     except Exception as e:
         logger.error(f"Error probing resolution for '{source_type}/{identifier}': {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e

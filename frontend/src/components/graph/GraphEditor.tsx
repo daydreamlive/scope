@@ -189,6 +189,7 @@ interface GraphEditorProps {
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
   syphonAvailable?: boolean;
+  youtubeAvailable?: boolean;
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
@@ -241,6 +242,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       spoutAvailable = false,
       ndiAvailable = false,
       syphonAvailable = false,
+      youtubeAvailable = false,
       onSpoutSourceChange,
       onNdiSourceChange,
       onSyphonSourceChange,
@@ -342,6 +344,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         spoutAvailable,
         ndiAvailable,
         syphonAvailable,
+        youtubeAvailable,
         spoutOutputAvailable,
         ndiOutputAvailable,
         syphonOutputAvailable,

@@ -7,6 +7,18 @@ from typing import ClassVar
 import numpy as np
 
 
+class InputSourceError(Exception):
+    """Base class for input source errors raised during probe/connect."""
+
+
+class InvalidSourceURLError(InputSourceError):
+    """Raised when a source identifier/URL is malformed or disallowed."""
+
+
+class SourceUnavailableError(InputSourceError):
+    """Raised when a source exists but cannot be accessed (private, deleted, geo-blocked, etc.)."""
+
+
 @dataclass
 class InputSourceInfo:
     """Information about a discovered input source."""

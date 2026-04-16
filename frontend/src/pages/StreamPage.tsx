@@ -144,7 +144,9 @@ function graphHasOnlyServerSideSources(graph: GraphConfig | null): boolean {
   if (sources.length === 0) return false;
   return sources.every(n => {
     const sm = n.source_mode || "video";
-    return sm === "spout" || sm === "ndi" || sm === "syphon";
+    return (
+      sm === "spout" || sm === "ndi" || sm === "syphon" || sm === "youtube"
+    );
   });
 }
 
@@ -233,12 +235,15 @@ export function StreamPage() {
     skipNextModeReset,
   } = useStreamState();
 
-  // Derive NDI and Syphon input availability from dynamic input sources list
+  // Derive NDI, Syphon, and YouTube input availability from dynamic input sources list
   const ndiAvailable = availableInputSources.some(
     s => s.source_id === "ndi" && s.available
   );
   const syphonAvailable = availableInputSources.some(
     s => s.source_id === "syphon" && s.available
+  );
+  const youtubeAvailable = availableInputSources.some(
+    s => s.source_id === "youtube" && s.available
   );
   // Output availability flags are passed to GraphEditor for output nodes
   const hasAvailableOutputs =
@@ -2302,7 +2307,12 @@ export function StreamPage() {
               // Use first server-side source for backward compat input_source param
               for (const sourceNode of sourceNodes) {
                 const sm = sourceNode.source_mode || "video";
-                if (sm === "spout" || sm === "ndi" || sm === "syphon") {
+                if (
+                  sm === "spout" ||
+                  sm === "ndi" ||
+                  sm === "syphon" ||
+                  sm === "youtube"
+                ) {
                   graphInputSource = {
                     enabled: true,
                     source_type: sm,
@@ -2989,7 +2999,8 @@ export function StreamPage() {
             n.type === "source" &&
             (n.source_mode || "video") !== "spout" &&
             (n.source_mode || "video") !== "ndi" &&
-            (n.source_mode || "video") !== "syphon"
+            (n.source_mode || "video") !== "syphon" &&
+            (n.source_mode || "video") !== "youtube"
         );
         if (webrtcSourceNodes.length > 0) {
           const streams: Record<string, MediaStream> = {};
@@ -3214,7 +3225,8 @@ export function StreamPage() {
                     | "camera"
                     | "spout"
                     | "ndi"
-                    | "syphon";
+                    | "syphon"
+                    | "youtube";
 
                   // Sync inputMode setting so perform mode reflects the graph's choice
                   const inputMode: InputMode =
@@ -3239,7 +3251,8 @@ export function StreamPage() {
                   if (
                     sourceMode === "spout" ||
                     sourceMode === "ndi" ||
-                    sourceMode === "syphon"
+                    sourceMode === "syphon" ||
+                    sourceMode === "youtube"
                   ) {
                     // For server-side sources, update settings.inputSource with graph's source_name
                     updateSettings({
@@ -3309,6 +3322,7 @@ export function StreamPage() {
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiAvailable}
             syphonAvailable={syphonAvailable}
+            youtubeAvailable={youtubeAvailable}
             onSpoutSourceChange={handleSpoutSourceChange}
             onNdiSourceChange={handleNdiSourceChange}
             onSyphonSourceChange={handleSyphonSourceChange}
