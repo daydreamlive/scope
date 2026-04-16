@@ -73,6 +73,10 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   const typeLabel =
     OUTPUT_TYPE_OPTIONS.find(o => o.value === sinkType)?.label ?? sinkType;
 
+  // Check if this is the only output node and it's disabled — we can't tell
+  // from within the node itself, so we just show a warning when disabled.
+  const showDisabledWarning = !enabled;
+
   return (
     <NodeCard selected={selected} collapsed={collapsed}>
       <NodeHeader
@@ -83,6 +87,12 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
       />
       {!collapsed && (
         <div className="px-2 py-1.5 flex flex-col gap-1.5">
+          {showDisabledWarning && (
+            <div className="mx-2 px-2 py-1 rounded text-[10px] leading-tight bg-amber-500/15 text-amber-400 border border-amber-500/30">
+              ⚠ Disabled — stream will not output unless a Preview (Sink) node
+              is also connected.
+            </div>
+          )}
           <div className="px-2">
             <NodeParamRow label="Type">
               <NodePillSelect
