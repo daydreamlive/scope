@@ -817,8 +817,13 @@ export function StreamPage() {
       // Import/restore calls this with (mode, nodeId). Clear the global
       // useVideoSource stream (e.g. test.mp4) when switching to server-side
       // capture — otherwise WebRTC still sends that track alongside Syphon/NDI/Spout.
-      if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
-        void switchMode(newMode as "spout" | "ndi" | "syphon");
+      if (
+        newMode === "spout" ||
+        newMode === "ndi" ||
+        newMode === "syphon" ||
+        newMode === "youtube"
+      ) {
+        void switchMode(newMode as "spout" | "ndi" | "syphon" | "youtube");
       }
       // When switching to file mode during streaming, auto-load a sample
       // video so the WebRTC track is replaced immediately.
@@ -2731,7 +2736,15 @@ export function StreamPage() {
         mode === "ndi" && settings.inputSource?.source_type === "ndi";
       const isSyphonMode =
         mode === "syphon" && settings.inputSource?.source_type === "syphon";
-      const isServerSideInput = isSpoutMode || isNdiMode || isSyphonMode;
+      // Graph-mode: if every Source node uses a server-side input (spout,
+      // ndi, syphon, youtube), suppress the WebRTC local track so the old
+      // sample video doesn't leak into the YouTube source node's queue
+      // while yt-dlp is still downloading.
+      const isGraphAllServerSide =
+        !!graphConfigForStream &&
+        graphHasOnlyServerSideSources(graphConfigForStream);
+      const isServerSideInput =
+        isSpoutMode || isNdiMode || isSyphonMode || isGraphAllServerSide;
 
       // Only send video stream for pipelines that need video input (not in Spout/NDI mode)
       const streamToSend =
