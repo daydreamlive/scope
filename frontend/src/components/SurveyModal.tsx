@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import {
   Dialog,
   DialogContent,
@@ -22,10 +22,6 @@ interface SurveyShellProps {
   title: string;
   description: string;
   size?: ShellSize;
-  /** Event name to fire when the modal opens. */
-  shownEvent?: string;
-  /** Event name to fire when the user skips/dismisses without answering. */
-  skippedEvent?: string;
   children: ReactNode;
 }
 
@@ -35,26 +31,15 @@ function SurveyShell({
   title,
   description,
   size = "md",
-  shownEvent,
-  skippedEvent,
   children,
 }: SurveyShellProps) {
-  // Fire _shown on open so we have a denominator for response rates.
-  useEffect(() => {
-    if (open && shownEvent) {
-      trackEvent(shownEvent);
-    }
-  }, [open, shownEvent]);
-
+  // Intentionally no telemetry on open, skip, or dismiss. The only event fired
+  // by surveys is a single `survey` event on answer (see child components).
   const handleOpenChange = (isOpen: boolean) => {
-    if (!isOpen) {
-      if (skippedEvent) trackEvent(skippedEvent);
-      onClose();
-    }
+    if (!isOpen) onClose();
   };
 
   const handleSkip = () => {
-    if (skippedEvent) trackEvent(skippedEvent);
     onClose();
   };
 
@@ -119,7 +104,7 @@ interface SurveyProps {
 
 export function SeanEllisSurvey({ open, onClose }: SurveyProps) {
   const handleSelect = (value: SeanEllisResponse) => {
-    trackEvent("sean_ellis_response", { response: value });
+    trackEvent("survey", { name: "sean_ellis", response: value });
     onClose();
   };
 
@@ -130,8 +115,6 @@ export function SeanEllisSurvey({ open, onClose }: SurveyProps) {
       title="Help us improve Scope"
       description="How would you feel if you could no longer use Daydream Scope?"
       size="md"
-      shownEvent="sean_ellis_shown"
-      skippedEvent="sean_ellis_skipped"
     >
       <div
         role="radiogroup"
@@ -186,7 +169,7 @@ export function SeanEllisSurvey({ open, onClose }: SurveyProps) {
 
 export function NpsSurvey({ open, onClose }: SurveyProps) {
   const handleSelect = (score: number) => {
-    trackEvent("nps_response", { score });
+    trackEvent("survey", { name: "nps", response: score });
     onClose();
   };
 
@@ -197,8 +180,6 @@ export function NpsSurvey({ open, onClose }: SurveyProps) {
       title="Help us improve Scope"
       description="How likely are you to recommend Daydream Scope to a friend or colleague?"
       size="lg"
-      shownEvent="nps_shown"
-      skippedEvent="nps_skipped"
     >
       <div className="mt-2">
         <div
