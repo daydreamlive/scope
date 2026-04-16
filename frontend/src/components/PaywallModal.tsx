@@ -3,6 +3,7 @@ import { Dialog, DialogContent } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { useBilling } from "../contexts/BillingContext";
 import { RedeemCodeSection } from "./settings/RedeemCodeSection";
+import { setInferenceMode } from "../lib/onboardingStorage";
 import { toast } from "sonner";
 
 const TIERS = [
@@ -44,7 +45,9 @@ function getSubcopy(
   isSubscribed: boolean
 ): string {
   if (isSubscribed) {
-    return "To continue generating, please purchase additional credits or enable auto-top-up.";
+    // Subscribed users only see the Manage Subscription CTA below — the copy
+    // must match, otherwise it promises options the modal doesn't expose.
+    return "Manage your subscription to top up credits or enable overage billing.";
   }
   switch (reason) {
     case "credits_exhausted":
@@ -81,6 +84,14 @@ export function PaywallModal() {
   };
 
   const handleRunLocally = async () => {
+    // Persist the inference-mode switch first so the app won't auto-reconnect
+    // to cloud on next launch. This is independent of the disconnect call,
+    // which only tears down the current session.
+    try {
+      await setInferenceMode("local");
+    } catch {
+      // persistence failures are already swallowed inside the helper
+    }
     try {
       await fetch("/api/v1/cloud/disconnect", { method: "POST" });
       toast.info("Switched to local inference");

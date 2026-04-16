@@ -4,6 +4,7 @@ import {
   useState,
   useEffect,
   useCallback,
+  useMemo,
   useRef,
   type ReactNode,
 } from "react";
@@ -96,17 +97,26 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bgPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Warning thresholds (tracked so we only toast once per threshold)
-  const creditWarningShown = useRef<"none" | "low" | "critical" | "grace">(
-    "none"
-  );
-  const upsellShown = useRef(false);
+  // Previous warning level — toasts fire only on transitions that worsen
+  // severity, so re-entering a threshold after a top-up re-arms the warning.
+  const prevWarningLevelRef = useRef<"ok" | "low" | "critical" | "grace">("ok");
+  // Same transition model for the pro-tier upsell toast.
+  const prevUpsellLevelRef = useRef<"ok" | "low">("ok");
 
   const refresh = useCallback(async () => {
     try {
       const apiKey = getDaydreamAPIKey();
       if (!apiKey) {
-        setState(prev => ({ ...prev, isLoading: false }));
+        // Signed out (or never signed in): reset to defaults so a previous
+        // user's tier/credits/subscription don't leak into the UI.
+        setState({
+          tier: "free",
+          credits: null,
+          subscription: null,
+          creditsPerMin: 7.5,
+          isLoading: false,
+          billingError: false,
+        });
         return;
       }
 
@@ -211,11 +221,13 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     };
   }, [isConnected, refresh]);
 
-  // Low credit warnings — toast once per threshold, with grace period warning
+  // Low credit warnings — fire only on transitions that worsen the severity
+  // level. A top-up that moves the balance back above a threshold resets the
+  // level, so the next drop re-arms the toast.
   useEffect(() => {
     if (!isConnected || !state.credits || state.tier === "free") {
-      creditWarningShown.current = "none";
-      upsellShown.current = false;
+      prevWarningLevelRef.current = "ok";
+      prevUpsellLevelRef.current = "ok";
       return;
     }
     const { balance, periodCredits } = state.credits;
@@ -223,60 +235,53 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     const minutesLeft =
       state.creditsPerMin > 0 ? Math.round(balance / state.creditsPerMin) : 0;
 
-    // Grace period: ~1 min of credits left — warn that stream will end soon
-    if (
-      minutesLeft <= 1 &&
-      balance > 0 &&
-      creditWarningShown.current !== "grace"
-    ) {
-      creditWarningShown.current = "grace";
-      toast.warning(
-        "Your stream will end in about 1 minute. Add credits to keep going.",
-        {
-          duration: 60000,
-          action: {
-            label: "Add Credits",
-            onClick: () => {
-              setPaywallReason("credits_exhausted");
-              setShowPaywall(true);
-            },
-          },
-        }
-      );
-    } else if (
-      pct <= 0.05 &&
-      creditWarningShown.current !== "critical" &&
-      creditWarningShown.current !== "grace"
-    ) {
-      creditWarningShown.current = "critical";
-      toast.warning(
-        `Credits critically low — ${Math.round(balance)} credits remaining (~${minutesLeft} min)`,
-        { duration: 10000 }
-      );
-    } else if (
-      pct <= 0.15 &&
-      pct > 0.05 &&
-      creditWarningShown.current === "none"
-    ) {
-      creditWarningShown.current = "low";
-      toast.warning(
-        `Credits running low — ${Math.round(balance)} credits remaining (~${minutesLeft} min)`
-      );
-    }
+    const severity = { ok: 0, low: 1, critical: 2, grace: 3 } as const;
+    let level: "ok" | "low" | "critical" | "grace" = "ok";
+    if (balance > 0 && minutesLeft <= 1) level = "grace";
+    else if (pct <= 0.05) level = "critical";
+    else if (pct <= 0.15) level = "low";
 
-    // Proactive upsell at 80% usage for Pro tier
-    if (
-      state.tier === "pro" &&
-      pct <= 0.2 &&
-      pct > 0.05 &&
-      !upsellShown.current
-    ) {
-      upsellShown.current = true;
+    const prev = prevWarningLevelRef.current;
+    if (severity[level] > severity[prev]) {
+      if (level === "grace") {
+        toast.warning(
+          "Your stream will end in about 1 minute. Add credits to keep going.",
+          {
+            duration: 60000,
+            action: {
+              label: "Add Credits",
+              onClick: () => {
+                setPaywallReason("credits_exhausted");
+                setShowPaywall(true);
+              },
+            },
+          }
+        );
+      } else if (level === "critical") {
+        toast.warning(
+          `Credits critically low — ${Math.round(balance)} credits remaining (~${minutesLeft} min)`,
+          { duration: 10000 }
+        );
+      } else if (level === "low") {
+        toast.warning(
+          `Credits running low — ${Math.round(balance)} credits remaining (~${minutesLeft} min)`
+        );
+      }
+    }
+    prevWarningLevelRef.current = level;
+
+    // Proactive upsell at 80% usage for Pro tier — fires each time the user
+    // re-enters the low bucket from ok (but not repeatedly while staying in
+    // it, and not while they're already in critical/grace).
+    const upsellLevel: "ok" | "low" =
+      state.tier === "pro" && pct <= 0.2 && pct > 0.05 ? "low" : "ok";
+    if (upsellLevel === "low" && prevUpsellLevelRef.current === "ok") {
       toast.info(
         "Running low on credits? Upgrade to Max for more credits per month.",
         { duration: 8000 }
       );
     }
+    prevUpsellLevelRef.current = upsellLevel;
   }, [isConnected, state.credits, state.tier, state.creditsPerMin]);
 
   // Listen for credits-exhausted events from API error handling
@@ -357,20 +362,21 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     [refresh]
   );
 
+  const value = useMemo<BillingContextValue>(
+    () => ({
+      ...state,
+      refresh,
+      openCheckout,
+      toggleOverage,
+      showPaywall,
+      setShowPaywall,
+      paywallReason,
+      setPaywallReason,
+    }),
+    [state, refresh, openCheckout, toggleOverage, showPaywall, paywallReason]
+  );
+
   return (
-    <BillingContext.Provider
-      value={{
-        ...state,
-        refresh,
-        openCheckout,
-        toggleOverage,
-        showPaywall,
-        setShowPaywall,
-        paywallReason,
-        setPaywallReason,
-      }}
-    >
-      {children}
-    </BillingContext.Provider>
+    <BillingContext.Provider value={value}>{children}</BillingContext.Provider>
   );
 }
