@@ -25,6 +25,7 @@ import { PaywallModal } from "./PaywallModal";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 import { useBilling } from "../contexts/BillingContext";
+import { DASHBOARD_USAGE_URL } from "../lib/billing";
 import { isAuthenticated, redirectToSignIn } from "../lib/auth";
 import { openExternalUrl } from "../lib/openExternal";
 import { useOnboarding } from "../contexts/OnboardingContext";
@@ -35,10 +36,6 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "./ui/dropdown-menu";
-
-const DAYDREAM_APP_BASE =
-  (import.meta.env.VITE_DAYDREAM_APP_BASE as string | undefined) ||
-  "https://app.daydream.live";
 
 interface HeaderProps {
   className?: string;
@@ -397,11 +394,7 @@ export function Header({
                     {(billing.tier === "pro" || billing.tier === "max") && (
                       <button
                         type="button"
-                        onClick={() =>
-                          openExternalUrl(
-                            `${DAYDREAM_APP_BASE}/dashboard/usage`
-                          )
-                        }
+                        onClick={() => openExternalUrl(DASHBOARD_USAGE_URL)}
                         className="inline-flex items-center justify-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#2FBEC5] to-[#36619D] hover:brightness-110 transition-all w-full"
                       >
                         Top Up

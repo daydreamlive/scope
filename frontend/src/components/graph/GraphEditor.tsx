@@ -202,8 +202,6 @@ interface GraphEditorProps {
   syphonOutputAvailable?: boolean;
   onStartRecording?: (nodeId?: string) => void;
   onStopRecording?: (nodeId?: string) => void;
-  onOpenSettings?: () => void;
-  onOpenPlugins?: () => void;
   tempoState?: import("../../hooks/useTempoSync").TempoState;
   tempoSources?: import("../../lib/api").TempoSourcesResponse | null;
   tempoLoading?: boolean;
@@ -250,8 +248,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       syphonOutputAvailable = false,
       onStartRecording,
       onStopRecording,
-      onOpenSettings,
-      onOpenPlugins,
       tempoState,
       tempoSources,
       tempoLoading,
@@ -1011,8 +1007,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             onExport={() => setShowExportDialog(true)}
             onClear={() => setShowClearConfirm(true)}
             onDefaultWorkflow={() => setShowDefaultConfirm(true)}
-            onOpenSettings={onOpenSettings}
-            onOpenPlugins={onOpenPlugins}
             fileInputRef={fileInputRef}
           />
 

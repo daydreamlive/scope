@@ -1,14 +1,11 @@
-import { useState } from "react";
 import { ExternalLink } from "lucide-react";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { useBilling } from "../contexts/BillingContext";
-import { redeemCreditCode } from "../lib/billing";
-import { getDaydreamAPIKey } from "../lib/auth";
+import { DASHBOARD_USAGE_URL } from "../lib/billing";
 import { openExternalUrl } from "../lib/openExternal";
+import { RedeemCodeSection } from "./settings/RedeemCodeSection";
 import { toast } from "sonner";
-
-const DASHBOARD_USAGE_URL = "https://app.daydream.live/dashboard/usage";
 
 const TIERS = [
   {
@@ -63,9 +60,6 @@ export function PaywallModal() {
   const { showPaywall, setShowPaywall, paywallReason, tier, refresh } =
     useBilling();
 
-  const [redeemCode, setRedeemCode] = useState("");
-  const [isRedeeming, setIsRedeeming] = useState(false);
-
   const isSubscribed = tier === "pro" || tier === "max";
 
   const handleSubscribe = (_tierId: "pro" | "max") => {
@@ -83,34 +77,9 @@ export function PaywallModal() {
       await fetch("/api/v1/cloud/disconnect", { method: "POST" });
       toast.info("Switched to local inference");
     } catch {
-      // Cloud may already be disconnected
+      // Cloud may already be disconnected — still close the paywall
     }
     setShowPaywall(false);
-  };
-
-  const handleRedeem = async () => {
-    const trimmed = redeemCode.trim();
-    if (!trimmed) return;
-
-    setIsRedeeming(true);
-    try {
-      const apiKey = getDaydreamAPIKey();
-      if (!apiKey) {
-        toast.error("Please sign in to redeem a code");
-        return;
-      }
-      const result = await redeemCreditCode(apiKey, trimmed);
-      toast.success(
-        `${result.credits} credits added${result.label ? ` — ${result.label}` : ""}`
-      );
-      setRedeemCode("");
-      refresh();
-      setShowPaywall(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to redeem code");
-    } finally {
-      setIsRedeeming(false);
-    }
   };
 
   return (
@@ -141,39 +110,39 @@ export function PaywallModal() {
             </div>
           ) : (
             <div className="grid gap-4 sm:grid-cols-2">
-              {TIERS.map(tier => (
+              {TIERS.map(planTier => (
                 <div
-                  key={tier.id}
+                  key={planTier.id}
                   className={`relative flex flex-col p-5 rounded-lg border ${
-                    tier.recommended
+                    planTier.recommended
                       ? "border-primary/60 bg-primary/5"
                       : "border-border"
                   }`}
                 >
-                  {tier.recommended && (
+                  {planTier.recommended && (
                     <span className="absolute top-3 right-3 text-[10px] font-medium uppercase tracking-wider text-primary">
                       Recommended
                     </span>
                   )}
                   <div className="flex items-baseline justify-between gap-2">
                     <span className="text-base font-semibold text-foreground">
-                      {tier.name}
+                      {planTier.name}
                     </span>
                     <span className="text-sm text-muted-foreground">
-                      {tier.creditsPerMo}
+                      {planTier.creditsPerMo}
                     </span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5">
-                    {tier.hours}
+                    {planTier.hours}
                   </p>
                   <p className="text-sm text-muted-foreground mt-3">
-                    {tier.description}
+                    {planTier.description}
                   </p>
                   <button
-                    onClick={() => handleSubscribe(tier.id)}
+                    onClick={() => handleSubscribe(planTier.id)}
                     className="mt-4 inline-flex items-center justify-center gap-1.5 h-10 rounded-full bg-white text-black text-sm font-medium hover:bg-white/90 transition-colors"
                   >
-                    Subscribe to {tier.name}
+                    Subscribe to {planTier.name}
                     <ExternalLink className="h-3.5 w-3.5" />
                   </button>
                 </div>
@@ -183,25 +152,12 @@ export function PaywallModal() {
 
           {/* Redeem code — show when credits exhausted */}
           {paywallReason === "credits_exhausted" && (
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={redeemCode}
-                onChange={e => setRedeemCode(e.target.value.toUpperCase())}
-                onKeyDown={e => e.key === "Enter" && handleRedeem()}
-                placeholder="Have a code? DD-XXXX-XXXX"
-                className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                disabled={isRedeeming}
-              />
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleRedeem}
-                disabled={!redeemCode.trim() || isRedeeming}
-              >
-                {isRedeeming ? "..." : "Redeem"}
-              </Button>
-            </div>
+            <RedeemCodeSection
+              onRedeemed={() => {
+                refresh();
+                setShowPaywall(false);
+              }}
+            />
           )}
 
           <div className="flex items-center justify-between pt-2 border-t border-border">

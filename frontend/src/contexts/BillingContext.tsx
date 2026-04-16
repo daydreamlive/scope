@@ -9,12 +9,9 @@ import {
 } from "react";
 import {
   fetchCreditsBalance,
-  createPortalSession,
   setOverageEnabled,
-  requestInferenceToken,
+  DASHBOARD_USAGE_URL,
 } from "../lib/billing";
-
-const SUBSCRIBE_URL = "https://app.daydream.live/dashboard/usage";
 import { getDaydreamAPIKey } from "../lib/auth";
 import { getDeviceId } from "../lib/deviceId";
 import { openExternalUrl } from "../lib/openExternal";
@@ -36,7 +33,6 @@ export interface BillingState {
     overageEnabled: boolean;
   } | null;
   creditsPerMin: number;
-  allRates: Record<string, number> | null;
   isLoading: boolean;
   billingError: boolean;
 }
@@ -44,14 +40,11 @@ export interface BillingState {
 interface BillingContextValue extends BillingState {
   refresh: () => Promise<void>;
   openCheckout: (tier: "pro" | "max") => Promise<void>;
-  openPortal: () => Promise<void>;
   toggleOverage: (enabled: boolean) => Promise<void>;
   showPaywall: boolean;
   setShowPaywall: (show: boolean) => void;
   paywallReason: "credits_exhausted" | "subscribe" | null;
   setPaywallReason: (reason: "credits_exhausted" | "subscribe" | null) => void;
-  /** Get a valid inference token (requests new one if expired) */
-  getInferenceToken: () => Promise<string | null>;
 }
 
 const defaultState: BillingContextValue = {
@@ -59,18 +52,15 @@ const defaultState: BillingContextValue = {
   credits: null,
   subscription: null,
   creditsPerMin: 7.5,
-  allRates: null,
   isLoading: true,
   billingError: false,
   refresh: async () => {},
   openCheckout: async () => {},
-  openPortal: async () => {},
   toggleOverage: async () => {},
   showPaywall: false,
   setShowPaywall: () => {},
   paywallReason: null,
   setPaywallReason: () => {},
-  getInferenceToken: async () => null,
 };
 
 const BillingContext = createContext<BillingContextValue>(defaultState);
@@ -85,7 +75,6 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     credits: null,
     subscription: null,
     creditsPerMin: 7.5,
-    allRates: null,
     isLoading: true,
     billingError: false,
   });
@@ -97,12 +86,6 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   const { isConnected } = useCloudStatus();
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const bgPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
-
-  // Inference token cache — refresh before 5-min expiry
-  const inferenceTokenRef = useRef<{
-    token: string;
-    expiresAt: number;
-  } | null>(null);
 
   // Warning thresholds (tracked so we only toast once per threshold)
   const creditWarningShown = useRef<"none" | "low" | "critical" | "grace">(
@@ -128,14 +111,13 @@ export function BillingProvider({ children }: { children: ReactNode }) {
           : null;
       const scopeRate = rateMap
         ? (rateMap[DEFAULT_GPU_TYPE] ?? rateMap.h100 ?? 7.5)
-        : (rawRate as number);
+        : ((rawRate as number) ?? 7.5);
 
       setState({
         tier: data.tier,
         credits: data.credits,
         subscription: data.subscription,
         creditsPerMin: scopeRate,
-        allRates: rateMap,
         isLoading: false,
         billingError: false,
       });
@@ -188,8 +170,9 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       return;
     }
 
-    const apiKey = getDaydreamAPIKey();
-    if (!apiKey) return;
+    // No early apiKey check here — refresh() already no-ops when no key is
+    // present, and checking at effect setup time would miss sign-ins that
+    // happen after the effect runs.
 
     const startBgPoll = () => {
       if (bgPollRef.current) clearInterval(bgPollRef.current);
@@ -298,56 +281,9 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("billing:credits-exhausted", handler);
   }, []);
 
-  const getInferenceToken = useCallback(async (): Promise<string | null> => {
-    // Return cached token if still valid (with 60s buffer)
-    const cached = inferenceTokenRef.current;
-    if (cached && cached.expiresAt > Date.now() + 60_000) {
-      return cached.token;
-    }
-
-    try {
-      const apiKey = getDaydreamAPIKey();
-      if (!apiKey) return null;
-      const deviceId = getDeviceId();
-      const result = await requestInferenceToken(apiKey, deviceId);
-
-      if (!result.authorized || !result.token) {
-        inferenceTokenRef.current = null;
-        return null;
-      }
-
-      inferenceTokenRef.current = {
-        token: result.token,
-        expiresAt: new Date(result.expiresAt!).getTime(),
-      };
-      return result.token;
-    } catch (err) {
-      console.error("[Billing] Failed to get inference token:", err);
-      return null;
-    }
-  }, []);
-
-  const openPortal = useCallback(async () => {
-    try {
-      const apiKey = getDaydreamAPIKey();
-      if (!apiKey) {
-        toast.error("Please sign in first");
-        return;
-      }
-      const { portalUrl } = await createPortalSession(apiKey);
-      openExternalUrl(portalUrl);
-      toast.info("Opening subscription management in your browser...");
-    } catch (err) {
-      console.error("[Billing] Portal failed:", err);
-      const msg = err instanceof Error ? err.message : "Unknown error";
-      toast.error(`Failed to open subscription management: ${msg}`, {
-        description: "If this persists, contact support@daydream.live",
-      });
-    }
-  }, []);
-
+  // tier param accepted for future use (tier-specific checkout pages)
   const openCheckout = useCallback(async (_tier: "pro" | "max") => {
-    openExternalUrl(SUBSCRIBE_URL);
+    openExternalUrl(DASHBOARD_USAGE_URL);
   }, []);
 
   const toggleOverage = useCallback(
@@ -377,13 +313,11 @@ export function BillingProvider({ children }: { children: ReactNode }) {
         ...state,
         refresh,
         openCheckout,
-        openPortal,
         toggleOverage,
         showPaywall,
         setShowPaywall,
         paywallReason,
         setPaywallReason,
-        getInferenceToken,
       }}
     >
       {children}

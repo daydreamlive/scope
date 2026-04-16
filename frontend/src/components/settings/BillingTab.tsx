@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useBilling } from "../../contexts/BillingContext";
-import { redeemCreditCode } from "../../lib/billing";
-import { getDaydreamAPIKey } from "../../lib/auth";
+import { DASHBOARD_USAGE_URL } from "../../lib/billing";
+import { openExternalUrl } from "../../lib/openExternal";
 import { Button } from "../ui/button";
 import { Switch } from "../ui/switch";
 import {
@@ -14,63 +14,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../ui/alert-dialog";
-import { toast } from "sonner";
-
-function RedeemCodeSection({ onRedeemed }: { onRedeemed: () => void }) {
-  const [code, setCode] = useState("");
-  const [isRedeeming, setIsRedeeming] = useState(false);
-
-  const handleRedeem = async () => {
-    const trimmed = code.trim();
-    if (!trimmed) return;
-
-    setIsRedeeming(true);
-    try {
-      const apiKey = getDaydreamAPIKey();
-      if (!apiKey) {
-        toast.error("Please sign in to redeem a code");
-        return;
-      }
-      const result = await redeemCreditCode(apiKey, trimmed);
-      toast.success(
-        `${result.credits} credits added${result.label ? ` — ${result.label}` : ""}`
-      );
-      setCode("");
-      onRedeemed();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Failed to redeem code");
-    } finally {
-      setIsRedeeming(false);
-    }
-  };
-
-  return (
-    <div className="space-y-2">
-      <div className="text-sm font-medium text-foreground">Redeem Code</div>
-      <div className="flex gap-2">
-        <input
-          type="text"
-          value={code}
-          onChange={e => setCode(e.target.value.toUpperCase())}
-          onKeyDown={e => e.key === "Enter" && handleRedeem()}
-          placeholder="DD-XXXX-XXXX"
-          className="flex-1 h-8 rounded-md border border-input bg-background px-3 text-sm font-mono placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-          disabled={isRedeeming}
-        />
-        <Button
-          size="sm"
-          onClick={handleRedeem}
-          disabled={!code.trim() || isRedeeming}
-        >
-          {isRedeeming ? "Redeeming..." : "Redeem"}
-        </Button>
-      </div>
-      <p className="text-xs text-muted-foreground">
-        Enter a credit code to add credits to your balance.
-      </p>
-    </div>
-  );
-}
+import { RedeemCodeSection } from "./RedeemCodeSection";
 
 export function BillingTab() {
   const {
@@ -194,7 +138,7 @@ export function BillingTab() {
                     : "bg-red-500"
               }`}
               style={{
-                width: `${Math.min(100, (credits.balance / credits.periodCredits) * 100)}%`,
+                width: `${credits.periodCredits > 0 ? Math.min(100, (credits.balance / credits.periodCredits) * 100) : 0}%`,
               }}
             />
           </div>
@@ -269,9 +213,7 @@ export function BillingTab() {
         <Button
           variant="outline"
           size="sm"
-          onClick={() =>
-            window.open("https://app.daydream.live/dashboard/usage", "_blank")
-          }
+          onClick={() => openExternalUrl(DASHBOARD_USAGE_URL)}
         >
           Manage Subscription
         </Button>

@@ -39,8 +39,6 @@ interface GraphToolbarProps {
   onExport: () => void;
   onClear: () => void;
   onDefaultWorkflow?: () => void;
-  onOpenSettings?: () => void;
-  onOpenPlugins?: () => void;
   fileInputRef?: RefObject<HTMLInputElement | null>;
 }
 

@@ -27,6 +27,8 @@ export interface CreditsBalance {
   creditsPerMin: number | Record<string, number>;
 }
 
+export const DASHBOARD_USAGE_URL = `${(import.meta.env.VITE_DAYDREAM_APP_BASE as string | undefined) || "https://app.daydream.live"}/dashboard/usage`;
+
 // ─── API functions ───────────────────────────────────────────────────────────
 
 function headers(apiKey: string | null): Record<string, string> {
@@ -48,32 +50,6 @@ export async function fetchCreditsBalance(
   return res.json();
 }
 
-export async function createCheckoutSession(
-  apiKey: string,
-  tier: "pro" | "max"
-): Promise<{ checkoutUrl: string }> {
-  const res = await fetch(`${DAYDREAM_API_BASE}/credits/checkout`, {
-    method: "POST",
-    headers: headers(apiKey),
-    body: JSON.stringify({ tier }),
-  });
-  if (!res.ok)
-    throw new Error(`Failed to create checkout session: ${res.status}`);
-  return res.json();
-}
-
-export async function createPortalSession(
-  apiKey: string
-): Promise<{ portalUrl: string }> {
-  const res = await fetch(`${DAYDREAM_API_BASE}/credits/portal`, {
-    method: "POST",
-    headers: headers(apiKey),
-  });
-  if (!res.ok)
-    throw new Error(`Failed to create portal session: ${res.status}`);
-  return res.json();
-}
-
 export async function setOverageEnabled(
   apiKey: string,
   enabled: boolean
@@ -90,31 +66,6 @@ export interface RedeemCodeResponse {
   credits: number;
   label: string | null;
   newBalance: number;
-}
-
-// ─── Inference token ──────────────────────────────────────────────────────
-
-export interface InferenceTokenResponse {
-  authorized: boolean;
-  token?: string;
-  expiresAt?: string;
-  reason?: string;
-}
-
-export async function requestInferenceToken(
-  apiKey: string,
-  deviceId?: string
-): Promise<InferenceTokenResponse> {
-  const res = await fetch(`${DAYDREAM_API_BASE}/credits/inference-token`, {
-    method: "POST",
-    headers: headers(apiKey),
-    body: JSON.stringify({ deviceId }),
-  });
-  // 403 is expected when unauthorized — parse the body, don't throw
-  if (!res.ok && res.status !== 403) {
-    throw new Error(`Failed to request inference token: ${res.status}`);
-  }
-  return res.json();
 }
 
 export async function redeemCreditCode(
