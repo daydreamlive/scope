@@ -113,7 +113,7 @@ If `SCOPE_CLOUD_APP_ID` is set, Scope will use that app id as-is and will not re
 | `LIVEPEER_ORCH_URL`  | No       | Explicit orchestrator URL. Formats: `host[:port]` or `http(s)://host[:port]`. If unset, token discovery is used. |
 | `LIVEPEER_SIGNER`    | No       | Override signer URL used for Livepeer payments. To disable payments, set to a falsy value such as `"off"`. |
 | `LIVEPEER_WS_URL`    | No       | Explicit runner WebSocket URL (e.g. `ws://127.0.0.1:8001/ws`). |
-| `SCOPE_CLOUD_APP_ID` | No       | Fal app id used to construct `ws_url` as `wss://fal.run/<app-id>`. Values must include the `/ws` suffix. When unset, Scope uses the built-in default `daydream/scope-livepeer--prod/ws`. |
+| `SCOPE_CLOUD_APP_ID` | No       | Fal app id used to construct `ws_url` as `wss://fal.run/<app-id>`. Must include `/ws` suffix. Used when `LIVEPEER_WS_URL` is not set. |
 | `SCOPE_CLOUD_GPU`    | No       | Livepeer GPU selector. Supported values: `h100`, `rtx4090`, `rtx5090`. Default `h100`. Ignored when `LIVEPEER_WS_URL` or `SCOPE_CLOUD_APP_ID` is set. |
 | `LIVEPEER_TOKEN`     | No       | Base64-encoded JSON token used to start the LV2V job. Can be used to override Livepeer orch / payments routing. |
 | `LIVEPEER_DEBUG`     | No       | Enables debug logging for the Livepeer Gateway SDK and local Livepeer modules. |
