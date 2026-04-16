@@ -3124,9 +3124,11 @@ async def connect_to_cloud(
             )
 
         logger.info(
-            f"Connecting to cloud (background): {app_id} (user_id: {request.user_id})"
+            f"Connecting to cloud (background): {app_id} (user_id: {request.user_id}, gpu: {request.gpu})"
         )
-        await cloud_manager.connect_background(app_id, api_key, request.user_id)
+        await cloud_manager.connect_background(
+            app_id, api_key, request.user_id, gpu=request.gpu
+        )
 
         # Invalidate cached pipeline schemas so that when the cloud connection
         # completes, subsequent requests either proxy to the cloud (returning

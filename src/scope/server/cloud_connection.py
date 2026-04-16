@@ -123,7 +123,11 @@ class CloudConnectionManager:
         )
 
     async def connect(
-        self, app_id: str, api_key: str, user_id: str | None = None
+        self,
+        app_id: str,
+        api_key: str,
+        user_id: str | None = None,
+        gpu: str | None = None,
     ) -> None:
         """Connect to cloud.
 
@@ -131,10 +135,13 @@ class CloudConnectionManager:
             app_id: The cloud app ID (e.g., "username/scope-app")
             api_key: The cloud API key
             user_id: Optional user ID for log correlation
+            gpu: Ignored in dev-relay mode. Accepted to match the LivepeerConnection
+                signature so the two backends are polymorphic.
 
         Raises:
             RuntimeError: If connection fails or times out
         """
+        del gpu  # unused in dev-relay mode
         if self.is_connected:
             logger.info("Already connected to cloud, disconnecting first")
             await self.disconnect()
@@ -227,7 +234,11 @@ class CloudConnectionManager:
         self._receive_task = asyncio.create_task(self._receive_loop())
 
     async def connect_background(
-        self, app_id: str, api_key: str, user_id: str | None = None
+        self,
+        app_id: str,
+        api_key: str,
+        user_id: str | None = None,
+        gpu: str | None = None,
     ) -> None:
         """Start connecting to cloud in the background.
 
@@ -238,7 +249,10 @@ class CloudConnectionManager:
             app_id: The cloud app ID
             api_key: The cloud API key
             user_id: Optional user ID for log correlation
+            gpu: Ignored in dev-relay mode. Accepted to match the LivepeerConnection
+                signature.
         """
+        del gpu  # unused in dev-relay mode
         # Cancel any existing connection task
         if self._connect_task is not None and not self._connect_task.done():
             self._connect_task.cancel()

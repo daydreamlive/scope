@@ -761,6 +761,14 @@ class CloudConnectRequest(BaseModel):
         default=None,
         description="The user ID for logging purposes.",
     )
+    gpu: Literal["h100", "rtx4090", "rtx5090"] | None = Field(
+        default=None,
+        description=(
+            "GPU selector for Livepeer cloud app routing. When unset, the server "
+            "falls back to the SCOPE_CLOUD_GPU env var, or H100 if neither is set. "
+            "Ignored when an explicit app_id is provided."
+        ),
+    )
 
 
 class CloudConnectionStats(BaseModel):
