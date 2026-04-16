@@ -60,7 +60,25 @@ function SurveyShell({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent className={cn(size === "lg" ? "max-w-lg" : "max-w-md")}>
+      <DialogContent
+        className={cn(
+          "overflow-hidden",
+          size === "lg" ? "max-w-lg" : "max-w-md"
+        )}
+      >
+        {/* Brand "fog" aurora — static CSS version of the onboarding
+            FogOfWarBackground effect. Subtle, non-interactive. */}
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-0 -z-10"
+          style={{
+            background: `
+              radial-gradient(ellipse 80% 60% at 85% 10%, rgba(255, 152, 46, 0.10) 0%, transparent 60%),
+              radial-gradient(ellipse 70% 60% at 15% 90%, rgba(47, 190, 197, 0.09) 0%, transparent 60%),
+              radial-gradient(ellipse 60% 50% at 50% 50%, rgba(247, 59, 65, 0.05) 0%, transparent 65%)
+            `,
+          }}
+        />
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>{description}</DialogDescription>
@@ -118,20 +136,45 @@ export function SeanEllisSurvey({ open, onClose }: SurveyProps) {
       <div
         role="radiogroup"
         aria-label="Disappointment level"
-        className="flex flex-col gap-2 mt-2"
+        className="flex flex-col mt-2"
       >
-        {SEAN_ELLIS_OPTIONS.map(({ label, value }) => (
-          <Button
-            key={value}
-            role="radio"
-            aria-checked={false}
-            variant="outline"
-            className="justify-start text-left h-auto py-3 px-4"
-            onClick={() => handleSelect(value)}
-          >
-            {label}
-          </Button>
-        ))}
+        {SEAN_ELLIS_OPTIONS.map(({ label, value }, i) => {
+          // Brand gradient mapping: "Very disappointed" is the strong PMF
+          // signal → teal (positive end), "Not disappointed" → red (negative
+          // end), middle → orange. Matches the NPS scale ordering and uses
+          // the onboarding fog-of-war palette. Applied on hover only so
+          // default state doesn't bias the user.
+          const bucketHover =
+            i === 0
+              ? "hover:bg-[#2FBEC5]/15 hover:border-[#2FBEC5]/25"
+              : i === 1
+                ? "hover:bg-[#FF982E]/15 hover:border-[#FF982E]/25"
+                : "hover:bg-[#F73B41]/15 hover:border-[#F73B41]/25";
+          // Connect buttons vertically: first keeps its top radius, last
+          // keeps its bottom radius, middle collapses.
+          const radius =
+            i === 0
+              ? "rounded-t-md rounded-b-none"
+              : i === SEAN_ELLIS_OPTIONS.length - 1
+                ? "rounded-b-md rounded-t-none"
+                : "rounded-none";
+          return (
+            <Button
+              key={value}
+              role="radio"
+              aria-checked={false}
+              variant="outline"
+              className={cn(
+                "justify-start text-left h-11 px-4 -mt-px first:mt-0 focus:z-10",
+                radius,
+                bucketHover
+              )}
+              onClick={() => handleSelect(value)}
+            >
+              {label}
+            </Button>
+          );
+        })}
       </div>
     </SurveyShell>
   );
@@ -165,14 +208,16 @@ export function NpsSurvey({ open, onClose }: SurveyProps) {
           className="flex flex-nowrap"
         >
           {Array.from({ length: 11 }, (_, i) => {
-            // Promoter/passive/detractor tints applied on hover only so
-            // the default state doesn't bias the user.
+            // Brand gradient mapping: promoters (9-10) → teal (positive end),
+            // passives (7-8) → orange, detractors (0-6) → red. Uses the
+            // onboarding fog-of-war palette. Applied on hover only so the
+            // default state doesn't bias the user.
             const bucketHover =
               i >= 9
-                ? "hover:bg-green-500/15 hover:border-green-500/40"
+                ? "hover:bg-[#2FBEC5]/15 hover:border-[#2FBEC5]/25"
                 : i >= 7
-                  ? "hover:bg-yellow-500/15 hover:border-yellow-500/40"
-                  : "hover:bg-red-500/15 hover:border-red-500/40";
+                  ? "hover:bg-[#FF982E]/15 hover:border-[#FF982E]/25"
+                  : "hover:bg-[#F73B41]/15 hover:border-[#F73B41]/25";
             // Connect buttons: only the first keeps its left radius,
             // only the last keeps its right radius.
             const radius =
