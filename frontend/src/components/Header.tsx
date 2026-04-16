@@ -6,12 +6,40 @@ import {
   Plug,
   Workflow,
   Monitor,
+  Menu as MenuIcon,
+  AlertTriangle,
+  HelpCircle,
+  ExternalLink,
 } from "lucide-react";
 import { Button } from "./ui/button";
+import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip";
 import { SettingsDialog } from "./SettingsDialog";
 import { PluginsDialog } from "./PluginsDialog";
+import { PaywallModal } from "./PaywallModal";
 import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
+import { useBilling } from "../contexts/BillingContext";
+import { isAuthenticated, redirectToSignIn } from "../lib/auth";
+import { openExternalUrl } from "../lib/openExternal";
+import { useOnboarding } from "../contexts/OnboardingContext";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "./ui/dropdown-menu";
+
+const DAYDREAM_APP_BASE =
+  (import.meta.env.VITE_DAYDREAM_APP_BASE as string | undefined) ||
+  "https://app.daydream.live";
+
 interface HeaderProps {
   className?: string;
   onPipelinesRefresh?: () => Promise<unknown>;
@@ -45,7 +73,7 @@ export function Header({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
-    "general" | "account" | "api-keys" | "loras" | "osc"
+    "general" | "account" | "api-keys" | "loras" | "osc" | "billing"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
   const [pluginsInitialTab, setPluginsInitialTab] = useState<
@@ -56,11 +84,33 @@ export function Header({
   const { isConnected, isConnecting, lastCloseCode, lastCloseReason } =
     useCloudStatus();
 
+  // Billing state
+  const billing = useBilling();
+
+  // Onboarding state — used to determine if upgrade CTA should show
+  const { state: onboardingState } = useOnboarding();
+
+  // Auth state — reactive to sign-in / sign-out
+  const [isSignedIn, setIsSignedIn] = useState(() => isAuthenticated());
+
+  useEffect(() => {
+    const handleAuthChange = () => setIsSignedIn(isAuthenticated());
+    window.addEventListener("daydream-auth-change", handleAuthChange);
+    window.addEventListener("daydream-auth-success", handleAuthChange);
+    return () => {
+      window.removeEventListener("daydream-auth-change", handleAuthChange);
+      window.removeEventListener("daydream-auth-success", handleAuthChange);
+    };
+  }, []);
+
   // Track the last close code we've shown a toast for to avoid duplicates
   const lastNotifiedCloseCodeRef = useRef<number | null>(null);
 
   // Only show "connection lost" after we've seen a successful connection this session
   const hasBeenConnectedRef = useRef(false);
+
+  // Track whether the user has clicked the cloud button this session
+  const [hasClickedCloud, setHasClickedCloud] = useState(false);
 
   // Track previous connection state to detect transitions for pipeline refresh
   const prevConnectedRef = useRef(false);
@@ -104,6 +154,7 @@ export function Header({
   }, [isConnected, onPipelinesRefresh]);
 
   const handleCloudIconClick = () => {
+    setHasClickedCloud(true);
     setInitialTab("account");
     setSettingsOpen(true);
   };
@@ -121,6 +172,7 @@ export function Header({
             | "api-keys"
             | "loras"
             | "osc"
+            | "billing"
         );
         setSettingsOpen(true);
       }
@@ -164,35 +216,41 @@ export function Header({
     <header className={`w-full bg-background px-6 py-4 ${className}`}>
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-xl font-medium text-foreground">
-            Daydream Scope
-          </h1>
+          <img
+            src="/icon-white.svg"
+            alt="Daydream Scope"
+            className="h-5 w-auto"
+          />
           {onGraphModeToggle && (
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => {
-                onGraphModeToggle();
+            <ToggleGroup
+              type="single"
+              value={graphMode ? "workflow" : "perform"}
+              onValueChange={value => {
+                if (!value) return;
+                const nextGraphMode = value === "workflow";
+                if (nextGraphMode !== graphMode) onGraphModeToggle();
               }}
-              className="text-xs text-muted-foreground hover:text-foreground transition-colors gap-1.5"
-              title={
-                graphMode
-                  ? "Switch to Perform Mode"
-                  : "Switch to Workflow Builder"
-              }
+              className="h-8 rounded-md bg-muted/40 p-0.5 gap-0.5"
             >
-              {graphMode ? (
-                <>
-                  <Monitor className="h-4 w-4" />
-                  Perform Mode
-                </>
-              ) : (
-                <>
-                  <Workflow className="h-4 w-4" />
-                  Workflow Builder
-                </>
-              )}
-            </Button>
+              <ToggleGroupItem
+                value="workflow"
+                size="sm"
+                className="h-7 px-3 text-xs gap-1.5 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm text-muted-foreground"
+                aria-label="Workflow Builder"
+              >
+                <Workflow className="h-4 w-4" />
+                Workflow
+              </ToggleGroupItem>
+              <ToggleGroupItem
+                value="perform"
+                size="sm"
+                className="h-7 px-3 text-xs gap-1.5 data-[state=on]:bg-background data-[state=on]:text-foreground data-[state=on]:shadow-sm text-muted-foreground"
+                aria-label="Perform Mode"
+              >
+                <Monitor className="h-4 w-4" />
+                Perform
+              </ToggleGroupItem>
+            </ToggleGroup>
           )}
         </div>
         <div className="flex items-center gap-1">
@@ -202,7 +260,7 @@ export function Header({
             onClick={handleCloudIconClick}
             className={`hover:opacity-80 transition-opacity h-8 gap-1.5 px-2 ${
               isConnected
-                ? "text-green-500 opacity-100"
+                ? "text-emerald-600 opacity-100"
                 : isConnecting
                   ? "text-amber-400 opacity-100"
                   : "text-muted-foreground opacity-80"
@@ -230,44 +288,158 @@ export function Header({
                   : "Connect to Cloud"}
             </span>
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setPluginsInitialTab("discover");
-              setPluginsOpen(true);
-            }}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
-            title="Nodes"
-          >
-            <Plug className="h-4 w-4" />
-            <span className="text-xs font-medium">Nodes</span>
-          </Button>
-          <Button
-            data-tour="workflows-button"
-            variant="ghost"
-            size="sm"
-            onClick={() => {
-              setPluginsInitialTab("workflows");
-              setPluginsOpen(true);
-            }}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
-            title="Workflows"
-          >
-            <Workflow className="h-4 w-4" />
-            <span className="text-xs font-medium">Workflows</span>
-          </Button>
-          <Button
-            data-tour="settings-button"
-            variant="ghost"
-            size="sm"
-            onClick={() => setSettingsOpen(true)}
-            className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
-            title="Settings"
-          >
-            <Settings className="h-4 w-4" />
-            <span className="text-xs font-medium">Settings</span>
-          </Button>
+          {/* Upgrade CTA / Plan badge — only show when user has cloud intent */}
+          {(onboardingState.inferenceMode === "cloud" ||
+            hasClickedCloud ||
+            isConnected ||
+            isConnecting) && (
+            <>
+              {!isSignedIn ? (
+                <button
+                  type="button"
+                  onClick={() => redirectToSignIn()}
+                  className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#2FBEC5] to-[#36619D] hover:brightness-110 transition-all"
+                >
+                  Upgrade
+                  <ExternalLink className="h-3 w-3" />
+                </button>
+              ) : billing.tier === "free" ? (
+                <button
+                  type="button"
+                  onClick={() => billing.openCheckout("pro")}
+                  className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#2FBEC5] to-[#36619D] hover:brightness-110 transition-all"
+                >
+                  Upgrade for more credits
+                  <ExternalLink className="h-3 w-3" />
+                </button>
+              ) : (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => {
+                    setInitialTab("billing");
+                    setSettingsOpen(true);
+                  }}
+                  className="h-8 px-2 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {billing.tier === "pro" ? "Pro" : "Max"}
+                </Button>
+              )}
+            </>
+          )}
+          {/* Billing unavailable fallback */}
+          {isConnected && billing.billingError && !billing.credits && (
+            <span
+              className="flex items-center gap-1 text-xs font-medium px-2 text-amber-400"
+              title="Unable to load billing status. Usage may not be tracked."
+            >
+              <AlertTriangle className="h-3.5 w-3.5" />
+              Billing unavailable
+            </span>
+          )}
+          {/* Menu dropdown: credits, nodes, workflows, settings */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="hover:opacity-80 transition-opacity text-muted-foreground opacity-80 h-8 gap-1.5 px-2"
+              >
+                <MenuIcon className="h-4 w-4" />
+                <span className="text-xs font-medium">Menu</span>
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              {isSignedIn && billing.credits && (
+                <>
+                  <div className="flex flex-col gap-2 px-2 py-1.5">
+                    <span className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
+                      <span className="tabular-nums">
+                        {billing.credits.balance.toFixed(2)}
+                      </span>{" "}
+                      credits remaining
+                      <TooltipProvider delayDuration={0}>
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <button
+                              type="button"
+                              className="inline-flex text-muted-foreground hover:text-foreground transition-colors"
+                              aria-label="Credit info"
+                            >
+                              <HelpCircle className="h-3.5 w-3.5" />
+                            </button>
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="bottom"
+                            className="max-w-[260px] text-xs leading-relaxed"
+                          >
+                            Daydream Cloud inference requires credit purchases.
+                            For more information, please refer to our{" "}
+                            <a
+                              href="https://daydream.live/pricing"
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="underline hover:text-primary-foreground/80"
+                              onClick={e => {
+                                e.preventDefault();
+                                openExternalUrl(
+                                  "https://daydream.live/pricing"
+                                );
+                              }}
+                            >
+                              Pricing page
+                            </a>
+                            .
+                          </TooltipContent>
+                        </Tooltip>
+                      </TooltipProvider>
+                    </span>
+                    {(billing.tier === "pro" || billing.tier === "max") && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          openExternalUrl(
+                            `${DAYDREAM_APP_BASE}/dashboard/usage`
+                          )
+                        }
+                        className="inline-flex items-center justify-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#2FBEC5] to-[#36619D] hover:brightness-110 transition-all w-full"
+                      >
+                        Top Up
+                        <ExternalLink className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                  <DropdownMenuSeparator />
+                </>
+              )}
+              <DropdownMenuItem
+                onClick={() => {
+                  setPluginsInitialTab("discover");
+                  setPluginsOpen(true);
+                }}
+              >
+                <Plug className="h-4 w-4" />
+                Nodes
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-tour="workflows-button"
+                onClick={() => {
+                  setPluginsInitialTab("workflows");
+                  setPluginsOpen(true);
+                }}
+              >
+                <Workflow className="h-4 w-4" />
+                Workflows
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                data-tour="settings-button"
+                onClick={() => setSettingsOpen(true)}
+              >
+                <Settings className="h-4 w-4" />
+                Settings
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
       </div>
 
@@ -288,6 +460,8 @@ export function Header({
         onPipelinesRefresh={onPipelinesRefresh}
         cloudDisabled={cloudDisabled}
       />
+
+      <PaywallModal />
     </header>
   );
 }
