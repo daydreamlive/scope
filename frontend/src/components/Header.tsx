@@ -26,7 +26,7 @@ import { toast } from "sonner";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 import { useBilling } from "../contexts/BillingContext";
 import { DASHBOARD_USAGE_URL } from "../lib/billing";
-import { isAuthenticated, redirectToSignIn } from "../lib/auth";
+import { isAuthenticated } from "../lib/auth";
 import { openExternalUrl } from "../lib/openExternal";
 import { useOnboarding } from "../contexts/OnboardingContext";
 import {
@@ -294,7 +294,7 @@ export function Header({
               {!isSignedIn ? (
                 <button
                   type="button"
-                  onClick={() => redirectToSignIn()}
+                  onClick={() => billing.openCheckout("pro")}
                   className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#2FBEC5] to-[#36619D] hover:brightness-110 transition-all"
                 >
                   Upgrade

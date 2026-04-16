@@ -2,8 +2,6 @@ import { ExternalLink } from "lucide-react";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Button } from "./ui/button";
 import { useBilling } from "../contexts/BillingContext";
-import { DASHBOARD_USAGE_URL } from "../lib/billing";
-import { openExternalUrl } from "../lib/openExternal";
 import { RedeemCodeSection } from "./settings/RedeemCodeSection";
 import { toast } from "sonner";
 
@@ -57,18 +55,28 @@ function getSubcopy(
 }
 
 export function PaywallModal() {
-  const { showPaywall, setShowPaywall, paywallReason, tier, refresh } =
-    useBilling();
+  const {
+    showPaywall,
+    setShowPaywall,
+    paywallReason,
+    tier,
+    refresh,
+    openCheckout,
+  } = useBilling();
 
   const isSubscribed = tier === "pro" || tier === "max";
 
-  const handleSubscribe = (_tierId: "pro" | "max") => {
-    openExternalUrl(DASHBOARD_USAGE_URL);
+  // Route through BillingContext.openCheckout so unauthenticated users are
+  // sent through the sign-in flow before landing on the billing page.
+  const handleSubscribe = (tierId: "pro" | "max") => {
+    openCheckout(tierId);
     setShowPaywall(false);
   };
 
   const handleManageSubscription = () => {
-    openExternalUrl(DASHBOARD_USAGE_URL);
+    // Subscribed users are necessarily authenticated, so openCheckout here
+    // just opens the dashboard without an auth detour.
+    openCheckout("pro");
     setShowPaywall(false);
   };
 

@@ -12,7 +12,11 @@ import {
   setOverageEnabled,
   DASHBOARD_USAGE_URL,
 } from "../lib/billing";
-import { getDaydreamAPIKey } from "../lib/auth";
+import {
+  getDaydreamAPIKey,
+  isAuthenticated,
+  redirectToSignIn,
+} from "../lib/auth";
 import { getDeviceId } from "../lib/deviceId";
 import { openExternalUrl } from "../lib/openExternal";
 import { useCloudStatus } from "../hooks/useCloudStatus";
@@ -22,6 +26,11 @@ import { toast } from "sonner";
 // one. Scope cloud streams currently default to h100, the highest tier; using
 // it keeps the displayed cost a safe upper bound.
 const DEFAULT_GPU_TYPE = "h100";
+
+// sessionStorage key for a URL to open after the user completes OAuth. Used to
+// route unauthenticated "Subscribe" / "Upgrade" clicks through sign-in and
+// then land them on the intended billing page.
+const POST_AUTH_URL_KEY = "scope_post_auth_url";
 
 export interface BillingState {
   tier: "free" | "pro" | "max";
@@ -283,7 +292,48 @@ export function BillingProvider({ children }: { children: ReactNode }) {
 
   // tier param accepted for future use (tier-specific checkout pages)
   const openCheckout = useCallback(async (_tier: "pro" | "max") => {
-    openExternalUrl(DASHBOARD_USAGE_URL);
+    // If the user is signed in, open the billing page directly. Otherwise,
+    // stash the destination in sessionStorage and route through the OAuth
+    // sign-in flow — the effect below will open the URL when auth succeeds.
+    if (isAuthenticated()) {
+      openExternalUrl(DASHBOARD_USAGE_URL);
+      return;
+    }
+    try {
+      sessionStorage.setItem(POST_AUTH_URL_KEY, DASHBOARD_USAGE_URL);
+    } catch {
+      // sessionStorage unavailable — redirect anyway so the user can sign in
+    }
+    redirectToSignIn();
+  }, []);
+
+  // After a successful sign-in (browser OAuth callback or Electron IPC),
+  // resume any pending "open billing after login" intent exactly once.
+  useEffect(() => {
+    const resumePendingUrl = () => {
+      try {
+        const pending = sessionStorage.getItem(POST_AUTH_URL_KEY);
+        if (!pending) return;
+        sessionStorage.removeItem(POST_AUTH_URL_KEY);
+        openExternalUrl(pending);
+      } catch {
+        // sessionStorage unavailable — nothing to resume
+      }
+    };
+    window.addEventListener("daydream-auth-success", resumePendingUrl);
+    // Clear any stale pending URL on sign-in errors so it doesn't fire later
+    const clearPendingUrl = () => {
+      try {
+        sessionStorage.removeItem(POST_AUTH_URL_KEY);
+      } catch {
+        // ignore
+      }
+    };
+    window.addEventListener("daydream-auth-error", clearPendingUrl);
+    return () => {
+      window.removeEventListener("daydream-auth-success", resumePendingUrl);
+      window.removeEventListener("daydream-auth-error", clearPendingUrl);
+    };
   }, []);
 
   const toggleOverage = useCallback(
