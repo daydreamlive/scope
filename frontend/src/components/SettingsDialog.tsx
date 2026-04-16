@@ -11,6 +11,7 @@ import { LoRAsTab } from "./settings/LoRAsTab";
 import { OscTab } from "./settings/OscTab";
 import { DmxTab } from "./settings/DmxTab";
 import { ShortcutsTab } from "./settings/ShortcutsTab";
+import { BillingTab } from "./settings/BillingTab";
 import { installLoRAFile, deleteLoRAFile } from "@/lib/api";
 import { useServerInfoContext } from "@/contexts/ServerInfoContext";
 import { toast } from "sonner";
@@ -21,6 +22,7 @@ interface SettingsDialogProps {
   initialTab?:
     | "general"
     | "account"
+    | "billing"
     | "api-keys"
     | "loras"
     | "osc"
@@ -147,6 +149,12 @@ export function SettingsDialog({
               Account
             </TabsTrigger>
             <TabsTrigger
+              value="billing"
+              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+            >
+              Billing
+            </TabsTrigger>
+            <TabsTrigger
               value="api-keys"
               className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
             >
@@ -195,6 +203,9 @@ export function SettingsDialog({
                 onPipelinesRefresh={onPipelinesRefresh ?? refetchPipelines}
                 cloudDisabled={cloudDisabled}
               />
+            </TabsContent>
+            <TabsContent value="billing" className="mt-0">
+              <BillingTab />
             </TabsContent>
             <TabsContent value="api-keys" className="mt-0">
               <ApiKeysTab isActive={open && activeTab === "api-keys"} />

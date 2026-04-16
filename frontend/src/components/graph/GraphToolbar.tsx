@@ -7,8 +7,6 @@ import {
   Download,
   Trash2,
   Loader2,
-  Settings,
-  Plug,
   RotateCcw,
 } from "lucide-react";
 import { NODE_TOKENS } from "./ui";
@@ -58,8 +56,6 @@ export function GraphToolbar({
   onExport,
   onClear,
   onDefaultWorkflow,
-  onOpenSettings,
-  onOpenPlugins,
   fileInputRef: externalFileInputRef,
 }: GraphToolbarProps) {
   const internalFileInputRef = useRef<HTMLInputElement>(null);
@@ -78,7 +74,7 @@ export function GraphToolbar({
           <DropdownMenuTrigger asChild>
             <button className={NODE_TOKENS.toolbarMenuButton}>
               <MoreVertical className="h-3.5 w-3.5" />
-              Menu
+              Graph
             </button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="start" sideOffset={6}>
@@ -99,15 +95,6 @@ export function GraphToolbar({
                   {exportShortcut.keys}
                 </kbd>
               )}
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={onOpenSettings}>
-              <Settings className="h-4 w-4" />
-              Settings
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onOpenPlugins}>
-              <Plug className="h-4 w-4" />
-              Nodes
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={onDefaultWorkflow}>

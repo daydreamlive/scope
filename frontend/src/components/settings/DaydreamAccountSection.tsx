@@ -220,7 +220,7 @@ export function DaydreamAccountSection({
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          Use remote inference for running pipelines.
+          Use Daydream Cloud inference for running workflows.
           {!isSignedIn &&
             !(status.connected || status.connecting) &&
             " Log in required."}
