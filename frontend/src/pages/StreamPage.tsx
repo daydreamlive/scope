@@ -3318,8 +3318,6 @@ export function StreamPage() {
             syphonOutputAvailable={syphonOutputAvailable}
             onStartRecording={handleStartRecording}
             onStopRecording={handleStopRecording}
-            onOpenSettings={() => setOpenSettingsTab("general")}
-            onOpenPlugins={() => setOpenSettingsTab("plugins")}
             tempoState={tempoState}
             tempoSources={tempoSources ?? null}
             tempoLoading={tempoLoading}
