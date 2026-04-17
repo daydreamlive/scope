@@ -13,7 +13,7 @@ export function RerouteNode({ data, selected }: NodeProps<RerouteNodeType>) {
 
   return (
     <div
-      className={`flex items-center gap-0 ${selected ? "ring-2 ring-blue-400/50 rounded-full" : ""}`}
+      className={`flex items-center gap-0 ${selected ? "ring-2 ring-blue-400/80 rounded-full" : ""}`}
       style={{
         height: 18,
         minWidth: 36,

@@ -25,7 +25,7 @@ export function CustomEdge({
   const flashing = data?.flashing === true;
   const edgeColor = flashing
     ? "#ffffff"
-    : (style?.stroke as string) || "#9ca3af";
+    : (style?.stroke as string) || "#6b7280";
 
   const edgeStyle = flashing
     ? {
@@ -63,10 +63,10 @@ export function CustomEdge({
           }}
         />
         <circle
-          r={5}
+          r={4}
           fill={edgeColor}
-          stroke="rgba(0, 0, 0, 0.4)"
-          strokeWidth={1}
+          stroke="rgba(0, 0, 0, 0.5)"
+          strokeWidth={1.5}
           style={{ pointerEvents: "none" }}
         />
       </g>

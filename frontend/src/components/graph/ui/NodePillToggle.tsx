@@ -20,7 +20,7 @@ export function NodePillToggle({
       onClick={() => onChange(!checked)}
       className={`
         relative inline-flex h-[16px] w-[30px] shrink-0 cursor-pointer items-center
-        rounded-full border border-[rgba(119,119,119,0.15)] transition-colors duration-200
+        rounded-full border border-[rgba(255,255,255,0.06)] transition-colors duration-200
         focus:outline-none focus:ring-1 focus:ring-blue-400/50
         ${checked ? "bg-blue-500/80" : "bg-[#1b1a1a]"}
         ${disabled ? "opacity-50 cursor-not-allowed" : ""}

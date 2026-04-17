@@ -108,7 +108,7 @@ export function NodeHeader({
               e.stopPropagation();
               onCollapseToggle();
             }}
-            className="shrink-0 text-[#666] hover:text-[#999] transition-colors"
+            className="shrink-0 text-[#555] hover:text-[#888] transition-colors"
           >
             {collapsed ? (
               <ChevronRight className="h-3.5 w-3.5" />
@@ -156,7 +156,7 @@ export function NodeHeader({
               className={`p-0.5 rounded transition-colors ${
                 locked
                   ? "text-amber-400 hover:text-amber-300"
-                  : "text-[#666] hover:text-[#999]"
+                  : "text-[#555] hover:text-[#888]"
               }`}
               title={locked ? "Unlock parameters" : "Lock parameters"}
             >
@@ -175,7 +175,7 @@ export function NodeHeader({
               className={`p-0.5 rounded transition-colors ${
                 pinned
                   ? "text-blue-400 hover:text-blue-300"
-                  : "text-[#666] hover:text-[#999]"
+                  : "text-[#555] hover:text-[#888]"
               }`}
               title={pinned ? "Unpin node" : "Pin node in place"}
             >

@@ -8,6 +8,7 @@ import {
 } from "../../utils/subgraphSerialization";
 import { buildEdgeStyle } from "../../constants";
 import type { Blueprint } from "../../../../data/blueprints/types";
+import { resetAutoHeightNodes } from "../../utils/nodeEnrichment";
 
 import type { EnrichNodesDeps } from "../graph/useGraphPersistence";
 import { enrichNodes } from "../graph/useGraphPersistence";
@@ -658,7 +659,8 @@ export function useNodeFactories({
       const minY = Math.min(...rawNodes.map(n => n.position.y));
       const targetPos = insertPos ?? { x: 200, y: 200 };
 
-      const newNodes: Node<FlowNodeData>[] = rawNodes.map(node => ({
+      const sizedNodes = resetAutoHeightNodes(rawNodes);
+      const newNodes: Node<FlowNodeData>[] = sizedNodes.map(node => ({
         ...node,
         id: idMap.get(node.id)!,
         position: {

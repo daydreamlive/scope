@@ -400,11 +400,7 @@ export function ControlNode({
   ]);
 
   return (
-    <NodeCard
-      selected={selected}
-      autoMinHeight={isSwitchMode && !collapsed}
-      collapsed={collapsed}
-    >
+    <NodeCard selected={selected} collapsed={collapsed}>
       <NodeHeader
         title={data.customTitle || title}
         onTitleChange={newTitle => updateNodeData({ customTitle: newTitle })}

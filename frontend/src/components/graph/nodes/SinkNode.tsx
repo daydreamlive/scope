@@ -264,7 +264,7 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   );
 
   return (
-    <NodeCard selected={selected} collapsed={collapsed}>
+    <NodeCard selected={selected} collapsed={collapsed} autoMinHeight={false}>
       <NodeHeader
         title={data.customTitle || "Sink"}
         onTitleChange={newTitle => updateData({ customTitle: newTitle })}
