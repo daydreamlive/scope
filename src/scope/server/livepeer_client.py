@@ -70,17 +70,20 @@ def _normalize_optional_string(value: str | None) -> str | None:
 
 def _resolve_livepeer_app_id(
     app_id: str | None,
+    gpu: str | None = None,
 ) -> str | None:
     normalized_app_id = _normalize_optional_string(app_id)
     if normalized_app_id is not None:
         return normalized_app_id.strip("/")
 
-    gpu = _normalize_optional_string(os.getenv(SCOPE_CLOUD_GPU_ENV))
-    if gpu not in {None, "h100", "rtx4090", "rtx5090"}:
+    resolved_gpu = _normalize_optional_string(gpu) or _normalize_optional_string(
+        os.getenv(SCOPE_CLOUD_GPU_ENV)
+    )
+    if resolved_gpu not in {None, "h100", "rtx4090", "rtx5090"}:
         raise ValueError(
-            "Invalid SCOPE_CLOUD_GPU. Expected `h100`, `rtx4090`, `rtx5090`, or unset."
+            "Invalid GPU. Expected `h100`, `rtx4090`, `rtx5090`, or unset."
         )
-    gpu_suffix = "" if gpu in {None, "h100"} else f"-{gpu}"
+    gpu_suffix = "" if resolved_gpu in {None, "h100"} else f"-{resolved_gpu}"
     return f"daydream/scope-livepeer{gpu_suffix}--prod/ws"
 
 
@@ -143,6 +146,7 @@ class LivepeerClient:
         model_id: str,
         app_id: str | None = None,
         api_key: str | None = None,
+        gpu: str | None = None,
         fps: float = 30.0,
     ):
         self._token = token
@@ -153,7 +157,7 @@ class LivepeerClient:
             os.getenv(LIVEPEER_ORCH_URL_ENV)
         )
         env_ws_url = self._normalize_ws_url(os.getenv(LIVEPEER_WS_URL_ENV))
-        ws_url = self._ws_url_from_app_id(app_id)
+        ws_url = self._ws_url_from_app_id(app_id, gpu)
         # Keep explicit ws URL support; app id support is a convenient fallback.
         self._ws_url = env_ws_url or ws_url
 
@@ -336,8 +340,8 @@ class LivepeerClient:
         return trimmed
 
     @staticmethod
-    def _ws_url_from_app_id(value: str | None) -> str | None:
-        resolved_app_id = _resolve_livepeer_app_id(value)
+    def _ws_url_from_app_id(value: str | None, gpu: str | None = None) -> str | None:
+        resolved_app_id = _resolve_livepeer_app_id(value, gpu)
         if not resolved_app_id:
             return None
         try:

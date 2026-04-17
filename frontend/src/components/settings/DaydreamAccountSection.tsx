@@ -3,13 +3,12 @@
  *
  * Displays:
  * - Not logged in: Sign in/Sign up buttons
- * - Logged in: User info, Manage/Log out buttons, Cloud Mode toggle
- * - Cloud connecting/connected states
+ * - Logged in: User info, Manage/Log out buttons, Cloud GPU selector
+ * - Cloud connecting/connected states (inside CloudGpuSelector)
  */
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { Button } from "../ui/button";
-import { Switch } from "../ui/switch";
 import { Cloud, Copy, Check } from "lucide-react";
 import {
   isAuthenticated,
@@ -18,13 +17,13 @@ import {
   getDaydreamUserDisplayName,
   refreshUserProfile,
 } from "../../lib/auth";
-import { connectToCloud } from "../../lib/cloudApi";
 import { useCloudStatus } from "../../hooks/useCloudStatus";
+import { CloudGpuSelector } from "./CloudGpuSelector";
 
 interface DaydreamAccountSectionProps {
   /** Callback to refresh pipeline list after cloud mode toggle */
   onPipelinesRefresh?: () => Promise<unknown>;
-  /** Disable the toggle (e.g., when streaming) */
+  /** Disable interactive cloud controls (e.g., when streaming) */
   disabled?: boolean;
 }
 
@@ -41,11 +40,7 @@ export function DaydreamAccountSection({
   // Use shared cloud status hook - avoids redundant polling with Header
   const { status, refresh: refreshStatus } = useCloudStatus();
 
-  // Local action state
-  const [isDisconnecting, setIsDisconnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const prevConnectedRef = useRef(false);
 
   // Keep auth state in sync with storage changes and ensure display name is populated
   useEffect(() => {
@@ -71,20 +66,6 @@ export function DaydreamAccountSection({
     };
   }, []);
 
-  // Detect connection completion (connecting → connected) to trigger pipeline refresh
-  useEffect(() => {
-    if (!prevConnectedRef.current && status.connected) {
-      // Just transitioned to connected
-      onPipelinesRefresh?.().catch(e =>
-        console.error(
-          "[DaydreamAccountSection] Failed to refresh pipelines:",
-          e
-        )
-      );
-    }
-    prevConnectedRef.current = status.connected;
-  }, [status.connected, onPipelinesRefresh]);
-
   const handleCopyConnectionId = async () => {
     if (status.connection_id) {
       try {
@@ -97,78 +78,22 @@ export function DaydreamAccountSection({
     }
   };
 
-  const handleConnect = async () => {
-    setError(null);
-
-    try {
-      const response = await connectToCloud();
-
-      if (!response || !response.ok) {
-        const data = response ? await response.json() : {};
-        throw new Error(data.detail || "Connection failed");
-      }
-
-      // Backend returns immediately with connecting=true
-      await refreshStatus();
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Connection failed";
-      setError(message);
-      console.error("[DaydreamAccountSection] Connect failed:", e);
-    }
-  };
-
-  const handleDisconnect = async () => {
-    setIsDisconnecting(true);
-    setError(null);
-
-    try {
-      const response = await fetch("/api/v1/cloud/disconnect", {
-        method: "POST",
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
-        throw new Error(data.detail || "Disconnect failed");
-      }
-
-      // Refresh status from shared hook
-      await refreshStatus();
-
-      if (onPipelinesRefresh) {
-        try {
-          await onPipelinesRefresh();
-        } catch (refreshError) {
-          console.error(
-            "[DaydreamAccountSection] Failed to refresh pipelines:",
-            refreshError
-          );
-        }
-      }
-    } catch (e) {
-      const message = e instanceof Error ? e.message : "Disconnect failed";
-      setError(message);
-      console.error("[DaydreamAccountSection] Disconnect failed:", e);
-    } finally {
-      setIsDisconnecting(false);
-    }
-  };
-
-  const handleToggle = async (checked: boolean) => {
-    if (checked) {
-      await handleConnect();
-    } else {
-      await handleDisconnect();
-    }
-  };
-
   const handleSignIn = () => {
     redirectToSignIn();
   };
 
   const handleSignOut = async () => {
     // Disconnect from cloud if connected before signing out
-    if (status.connected) {
-      await handleDisconnect();
+    if (status.connected || status.connecting) {
+      try {
+        await fetch("/api/v1/cloud/disconnect", { method: "POST" });
+        await refreshStatus();
+      } catch (e) {
+        console.error(
+          "[DaydreamAccountSection] Disconnect on sign-out failed:",
+          e
+        );
+      }
     }
     clearDaydreamAuth();
     setIsSignedIn(false);
@@ -200,23 +125,14 @@ export function DaydreamAccountSection({
       </div>
 
       <div className="space-y-3 pt-2">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2">
             <Cloud className="h-4 w-4 text-muted-foreground" />
             <span className="text-sm font-medium">Remote Inference</span>
           </div>
-          <Switch
-            data-testid="cloud-toggle"
-            aria-label="Remote Inference"
-            checked={status.connected || status.connecting}
-            onCheckedChange={handleToggle}
-            disabled={
-              disabled ||
-              isDisconnecting ||
-              // Sign-in is only required to *connect*; disconnecting is always allowed
-              (!(status.connected || status.connecting) && !isSignedIn)
-            }
-            className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
+          <CloudGpuSelector
+            disabled={disabled || !isSignedIn}
+            onPipelinesRefresh={onPipelinesRefresh}
           />
         </div>
         <p className="text-xs text-muted-foreground">
@@ -248,10 +164,6 @@ export function DaydreamAccountSection({
               )}
             </Button>
           </div>
-        )}
-
-        {(error || status.error) && (
-          <p className="text-xs text-destructive">{error || status.error}</p>
         )}
       </div>
     </div>

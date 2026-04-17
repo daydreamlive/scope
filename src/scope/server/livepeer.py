@@ -87,12 +87,14 @@ class LivepeerConnection:
         app_id: str | None = None,
         api_key: str | None = None,
         user_id: str | None = None,
+        gpu: str | None = None,
     ) -> None:
         """Create and connect a persistent Livepeer job."""
         # Keep connect signature compatible with cloud-style connect requests.
         # app_id can be used as optional runner routing config (derived into a
         # fal ws_url in the client). api_key is forwarded so Livepeer startup can
-        # include Daydream signer metadata.
+        # include Daydream signer metadata. gpu selects a GPU-specific Fal app
+        # when app_id is not explicitly set.
         self._user_id = user_id
 
         if self.is_connected:
@@ -119,6 +121,7 @@ class LivepeerConnection:
             model_id=LIVEPEER_MODEL_ID,
             app_id=app_id,
             api_key=api_key,
+            gpu=gpu,
         )
 
         try:
@@ -146,6 +149,7 @@ class LivepeerConnection:
         app_id: str | None = None,
         api_key: str | None = None,
         user_id: str | None = None,
+        gpu: str | None = None,
     ) -> None:
         """Start Livepeer connection in the background."""
         logger.info("Cloud connect requested in Livepeer mode")
@@ -161,7 +165,9 @@ class LivepeerConnection:
 
         async def _do_connect():
             try:
-                await self.connect(app_id=app_id, api_key=api_key, user_id=user_id)
+                await self.connect(
+                    app_id=app_id, api_key=api_key, user_id=user_id, gpu=gpu
+                )
             except Exception as e:
                 self._connecting = False
                 self._connect_error = str(e)
