@@ -2715,15 +2715,6 @@ export function StreamPage() {
 
       // Check video requirements based on input mode.
       const needsVideoInput = currentMode === "video";
-      const graphHasBrowserBackedSources = Boolean(
-        graphConfigForStream?.nodes?.some(
-          n =>
-            n.type === "source" &&
-            (n.source_mode || "video") !== "spout" &&
-            (n.source_mode || "video") !== "ndi" &&
-            (n.source_mode || "video") !== "syphon"
-        )
-      );
       const isSpoutMode =
         mode === "spout" && settings.inputSource?.source_type === "spout";
       const isNdiMode =
@@ -2734,7 +2725,7 @@ export function StreamPage() {
       const needsBrowserVideoTrack =
         needsVideoInput &&
         (graphMode || nonLinearGraph
-          ? graphHasBrowserBackedSources
+          ? !graphHasOnlyServerSideSources(graphConfigForStream)
           : !isServerSideInput);
 
       const streamToSend = needsBrowserVideoTrack
