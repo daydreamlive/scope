@@ -341,9 +341,15 @@ export const getInputSourceResolution = async (
 export const getInputSourceStreamUrl = (
   sourceType: string,
   identifier: string,
-  fps = 2
-): string =>
-  `/api/v1/input-sources/${sourceType}/sources/${encodeURIComponent(identifier)}/stream?fps=${fps}`;
+  fps = 2,
+  options?: { flipVertical?: boolean }
+): string => {
+  const params = new URLSearchParams({ fps: String(fps) });
+  if (options?.flipVertical) {
+    params.set("flip_vertical", "true");
+  }
+  return `/api/v1/input-sources/${sourceType}/sources/${encodeURIComponent(identifier)}/stream?${params.toString()}`;
+};
 
 export const fetchCurrentLogs = async (): Promise<string> => {
   const response = await fetch("/api/v1/logs/current", {
@@ -915,6 +921,7 @@ export interface GraphNode {
   h?: number | null;
   source_mode?: string | null;
   source_name?: string | null;
+  source_flip_vertical?: boolean;
   tempo_sync?: boolean;
   sink_mode?: string | null;
   sink_name?: string | null;

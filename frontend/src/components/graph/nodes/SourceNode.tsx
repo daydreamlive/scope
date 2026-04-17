@@ -34,6 +34,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const { collapsed, toggleCollapse } = useNodeCollapse();
   const sourceMode = data.sourceMode || "video";
   const sourceName = data.sourceName || "";
+  const sourceFlipVertical = data.sourceFlipVertical === true;
   const localStream = data.localStream as MediaStream | null | undefined;
   const onVideoFileUpload = data.onVideoFileUpload as
     | ((file: File) => Promise<boolean>)
@@ -153,6 +154,12 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     onSyphonSourceChange?.(identifier);
   };
 
+  const handleSyphonFlipVerticalChange = (
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    updateData({ sourceFlipVertical: e.target.checked });
+  };
+
   const handleFileClick = useCallback(() => {
     fileInputRef.current?.click();
   }, []);
@@ -199,7 +206,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
       {!collapsed && (
         <div className="px-2 py-1.5 flex flex-col gap-1.5 flex-1 min-h-0">
           <div className="px-2">
-            <NodeParamRow label="Source">
+            <NodeParamRow label="Source" className="justify-start gap-2">
               <NodePillSelect
                 value={sourceMode}
                 onChange={handleSourceModeChange}
@@ -266,7 +273,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
 
           {sourceMode === "syphon" && (
             <div className="px-2 flex flex-col gap-1.5">
-              <NodeParamRow label="Source">
+              <NodeParamRow label="Source" className="justify-start gap-2">
                 <div className="flex items-center gap-1">
                   <NodePillSearchableSelect
                     value={sourceName}
@@ -302,6 +309,20 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                     </svg>
                   </button>
                 </div>
+              </NodeParamRow>
+              <NodeParamRow label="Flip Y" className="justify-start gap-2">
+                <label className="flex items-center gap-2 text-[10px] text-[#fafafa]">
+                  <input
+                    type="checkbox"
+                    checked={sourceFlipVertical}
+                    onChange={handleSyphonFlipVerticalChange}
+                    className="h-3 w-3 accent-white"
+                    disabled={data.isStreaming === true}
+                  />
+                  <span className="text-left text-[#8c8c8d]">
+                    Fix flipped inputs
+                  </span>
+                </label>
               </NodeParamRow>
             </div>
           )}

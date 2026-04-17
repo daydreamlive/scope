@@ -32,6 +32,13 @@ class SyphonInputSource(InputSource):
     def __init__(self):
         self._receiver = None
         self._connected = False
+        self._flip_vertical = False
+
+    def set_flip_vertical(self, enabled: bool) -> None:
+        """Flip received frames vertically to compensate for sender orientation."""
+        self._flip_vertical = enabled
+        if self._receiver is not None:
+            self._receiver.set_flip_vertical(enabled)
 
     @classmethod
     def is_available(cls) -> bool:
@@ -84,7 +91,7 @@ class SyphonInputSource(InputSource):
 
             self.disconnect()
 
-            self._receiver = SyphonReceiver()
+            self._receiver = SyphonReceiver(flip_vertical=self._flip_vertical)
             if self._receiver.connect(identifier):
                 self._connected = True
                 logger.info(

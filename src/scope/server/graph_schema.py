@@ -57,6 +57,10 @@ class GraphNode(BaseModel):
         default=None,
         description="Source name/identifier for Spout/NDI/Syphon sources (sender name for Spout, source identifier for NDI/Syphon)",
     )
+    source_flip_vertical: bool = Field(
+        default=False,
+        description="When true for Syphon sources, flip frames vertically before routing them into the graph.",
+    )
     tempo_sync: bool = Field(
         default=False,
         description="When true, this pipeline receives beat state injection, modulation, and beat cache resets.",
