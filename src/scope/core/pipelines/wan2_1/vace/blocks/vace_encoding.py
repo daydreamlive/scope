@@ -337,6 +337,21 @@ class VaceEncodingBlock(ModularPipelineBlocks):
             * components.config.vae_temporal_downsample_factor
         )
 
+        # Validate frame count for firstlastframe mode up-front so we fail once with a
+        # clear, actionable message rather than raising deep inside _build_overlay_context
+        # on every chunk (which floods logs with hundreds of identical errors).
+        if extension_mode == "firstlastframe":
+            temporal_group_size = components.config.vae_temporal_downsample_factor
+            min_frames = 2 * temporal_group_size
+            if num_frames < min_frames:
+                raise ValueError(
+                    f"firstlastframe mode requires num_frame_per_block >= 2 "
+                    f"(need {min_frames} pixel-space frames, got {num_frames}). "
+                    f"Current num_frame_per_block={components.config.num_frame_per_block}. "
+                    f"Either increase num_frame_per_block to at least 2, or use "
+                    f"'firstframe' / 'lastframe' mode with a single reference image."
+                )
+
         # Determine ref placement
         ref_at_start = extension_mode in ("firstframe", "firstlastframe")
         ref_at_end = extension_mode in ("lastframe", "firstlastframe")
