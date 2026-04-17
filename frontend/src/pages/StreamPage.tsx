@@ -1632,11 +1632,16 @@ export function StreamPage() {
           enabled: true,
           source_type: "syphon",
           source_name: settings.inputSource?.source_name ?? "",
+          flip_vertical: settings.inputSource?.flip_vertical ?? false,
         },
       });
     } else {
       updateSettings({
-        inputSource: { enabled: false, source_type: "", source_name: "" },
+        inputSource: {
+          enabled: false,
+          source_type: "",
+          source_name: "",
+        },
       });
     }
     switchMode(newMode);
@@ -1677,6 +1682,7 @@ export function StreamPage() {
         enabled: true,
         source_type: "syphon",
         source_name: identifier,
+        flip_vertical: settings.inputSource?.flip_vertical ?? false,
       },
     });
 
@@ -1695,6 +1701,17 @@ export function StreamPage() {
     } catch (e) {
       console.warn("Could not probe Syphon source resolution:", e);
     }
+  };
+
+  const handleSyphonFlipVerticalChange = (enabled: boolean) => {
+    updateSettings({
+      inputSource: {
+        enabled: true,
+        source_type: "syphon",
+        source_name: settings.inputSource?.source_name ?? "",
+        flip_vertical: enabled,
+      },
+    });
   };
 
   const handleLivePromptSubmit = useCallback(
@@ -2243,6 +2260,7 @@ export function StreamPage() {
         enabled: boolean;
         source_type: string;
         source_name: string;
+        flip_vertical?: boolean;
       } | null = null;
       // Sink node IDs for multi-track WebRTC
       const graphSinkNodeIds: string[] = [];
@@ -2307,6 +2325,12 @@ export function StreamPage() {
                     enabled: true,
                     source_type: sm,
                     source_name: sourceNode.source_name ?? "",
+                    ...(sm === "syphon"
+                      ? {
+                          flip_vertical:
+                            sourceNode.source_flip_vertical ?? false,
+                        }
+                      : {}),
                   };
                   break;
                 }
@@ -2765,6 +2789,7 @@ export function StreamPage() {
           enabled: boolean;
           source_type: string;
           source_name: string;
+          flip_vertical?: boolean;
         };
         graph?: GraphConfig;
       } = {
@@ -3248,6 +3273,10 @@ export function StreamPage() {
                           sourceNode?.source_name ??
                           settings.inputSource?.source_name ??
                           "",
+                        flip_vertical:
+                          sourceNode?.source_flip_vertical ??
+                          settings.inputSource?.flip_vertical ??
+                          false,
                       },
                     });
                     switchMode(sourceMode);
@@ -3397,6 +3426,12 @@ export function StreamPage() {
                     : ""
                 }
                 onSyphonSourceChange={handleSyphonSourceChange}
+                syphonFlipVertical={
+                  settings.inputSource?.source_type === "syphon"
+                    ? (settings.inputSource?.flip_vertical ?? false)
+                    : false
+                }
+                onSyphonFlipVerticalChange={handleSyphonFlipVerticalChange}
                 vaceEnabled={
                   settings.vaceEnabled ??
                   (pipelines?.[settings.pipelineId]?.supportsVACE &&

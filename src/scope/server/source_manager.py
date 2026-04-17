@@ -169,7 +169,7 @@ class SourceManager:
         )
 
         if enabled and not self._source_enabled:
-            self._create_and_connect(source_type, source_name)
+            self._create_and_connect(source_type, source_name, config)
 
         elif not enabled and self._source_enabled:
             self._stop_primary_source()
@@ -179,9 +179,11 @@ class SourceManager:
             source_type != self._source_type or config.get("reconnect", False)
         ):
             self._stop_primary_source()
-            self._create_and_connect(source_type, source_name)
+            self._create_and_connect(source_type, source_name, config)
 
-    def _create_and_connect(self, source_type: str, source_name: str) -> None:
+    def _create_and_connect(
+        self, source_type: str, source_name: str, config: dict | None = None
+    ) -> None:
         """Create an input source instance and connect to the given source."""
         from scope.core.inputs import get_input_source_classes
 
@@ -203,6 +205,10 @@ class SourceManager:
 
         try:
             self._source = source_class()
+            if source_type == "syphon" and hasattr(self._source, "set_flip_vertical"):
+                self._source.set_flip_vertical(
+                    bool((config or {}).get("flip_vertical", False))
+                )
             if self._source.connect(source_name):
                 self._source_enabled = True
                 self._source_type = source_type
@@ -364,6 +370,10 @@ class SourceManager:
 
             try:
                 source = source_class()
+                if node.source_mode == "syphon" and hasattr(
+                    source, "set_flip_vertical"
+                ):
+                    source.set_flip_vertical(node.source_flip_vertical)
                 if source.connect(source_name):
                     thread = threading.Thread(
                         target=self._receiver_loop,

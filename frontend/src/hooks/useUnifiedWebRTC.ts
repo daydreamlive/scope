@@ -35,6 +35,7 @@ interface InitialParameters {
     enabled: boolean;
     source_type: string;
     source_name: string;
+    flip_vertical?: boolean;
   };
   produces_video?: boolean;
   produces_audio?: boolean;
