@@ -2713,7 +2713,7 @@ export function StreamPage() {
         return false;
       }
 
-      // Check video requirements based on input mode
+      // Check video requirements based on input mode.
       const needsVideoInput = currentMode === "video";
       const isSpoutMode =
         mode === "spout" && settings.inputSource?.source_type === "spout";
@@ -2722,21 +2722,19 @@ export function StreamPage() {
       const isSyphonMode =
         mode === "syphon" && settings.inputSource?.source_type === "syphon";
       const isServerSideInput = isSpoutMode || isNdiMode || isSyphonMode;
+      const needsBrowserVideoTrack =
+        needsVideoInput &&
+        (graphMode || nonLinearGraph
+          ? !graphHasOnlyServerSideSources(graphConfigForStream)
+          : !isServerSideInput);
 
-      // Only send video stream for pipelines that need video input (not in Spout/NDI mode)
-      const streamToSend =
-        needsVideoInput && !isServerSideInput
-          ? localStream || undefined
-          : undefined;
+      const streamToSend = needsBrowserVideoTrack
+        ? localStream || undefined
+        : undefined;
 
       const hasPerNodeStreams =
         graphMode && Object.keys(nodeLocalStreams).length > 0;
-      if (
-        needsVideoInput &&
-        !isServerSideInput &&
-        !localStream &&
-        !hasPerNodeStreams
-      ) {
+      if (needsBrowserVideoTrack && !localStream && !hasPerNodeStreams) {
         console.error("Video input required but no local stream available");
         return false;
       }
