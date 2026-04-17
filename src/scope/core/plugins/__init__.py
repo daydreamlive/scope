@@ -3,6 +3,7 @@
 from .hookspecs import hookimpl
 from .manager import (
     FailedPluginInfo,
+    PluginBundledError,
     PluginDependencyError,
     PluginInstallError,
     PluginInUseError,
@@ -32,4 +33,5 @@ __all__ = [
     "PluginNameCollisionError",
     "PluginDependencyError",
     "PluginInstallError",
+    "PluginBundledError",
 ]

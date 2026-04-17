@@ -80,6 +80,12 @@ class PluginInstallError(Exception):
     pass
 
 
+class PluginBundledError(PluginInstallError):
+    """Attempted to uninstall a bundled (built-in) plugin."""
+
+    pass
+
+
 @dataclass(frozen=True)
 class FailedPluginInfo:
     """Information about a plugin entry point that failed to load."""
@@ -1360,7 +1366,7 @@ class PluginManager:
 
         # Prevent uninstalling bundled plugins
         if plugin_info.get("bundled"):
-            raise PluginInstallError(
+            raise PluginBundledError(
                 f"Plugin '{name}' is bundled and cannot be uninstalled"
             )
 
