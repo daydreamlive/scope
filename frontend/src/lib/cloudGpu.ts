@@ -19,7 +19,7 @@ export const CLOUD_GPUS: readonly CloudGpuOption[] = [
   { id: "rtx5090", label: "RTX 5090", creditsPerMin: 1.25 },
 ];
 
-export const DEFAULT_CLOUD_GPU: CloudGpu = "h100";
+export const DEFAULT_CLOUD_GPU: CloudGpu = "rtx5090";
 export const CLOUD_GPU_STORAGE_KEY = "daydream-cloud-gpu";
 
 const VALID_IDS: ReadonlySet<string> = new Set(CLOUD_GPUS.map(g => g.id));
