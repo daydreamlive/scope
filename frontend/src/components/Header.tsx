@@ -294,7 +294,7 @@ export function Header({
               {!isSignedIn ? (
                 <button
                   type="button"
-                  onClick={() => billing.openCheckout("pro")}
+                  onClick={() => billing.openCheckout()}
                   className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#2FBEC5] to-[#36619D] hover:brightness-110 transition-all"
                 >
                   Upgrade
@@ -303,7 +303,7 @@ export function Header({
               ) : billing.tier === "free" ? (
                 <button
                   type="button"
-                  onClick={() => billing.openCheckout("pro")}
+                  onClick={() => billing.openCheckout()}
                   className="inline-flex items-center gap-1.5 h-7 px-3 rounded-md text-xs font-semibold text-white bg-gradient-to-r from-[#2FBEC5] to-[#36619D] hover:brightness-110 transition-all"
                 >
                   Upgrade for more credits

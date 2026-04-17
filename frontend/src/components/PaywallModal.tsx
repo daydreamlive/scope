@@ -6,25 +6,6 @@ import { RedeemCodeSection } from "./settings/RedeemCodeSection";
 import { setInferenceMode } from "../lib/onboardingStorage";
 import { toast } from "sonner";
 
-const TIERS = [
-  {
-    id: "pro" as const,
-    name: "Pro",
-    creditsPerMo: "500 credits/mo",
-    hours: "~6 hrs on RTX 4090",
-    description: "Great for getting started with regular creative sessions.",
-    recommended: false,
-  },
-  {
-    id: "max" as const,
-    name: "Max",
-    creditsPerMo: "1,750 credits/mo",
-    hours: "~23 hrs on RTX 4090",
-    description: "For creators who stream or iterate heavily every week.",
-    recommended: true,
-  },
-];
-
 function getHeadline(
   reason: "credits_exhausted" | "subscribe" | null,
   isSubscribed: boolean
@@ -71,15 +52,8 @@ export function PaywallModal() {
 
   // Route through BillingContext.openCheckout so unauthenticated users are
   // sent through the sign-in flow before landing on the billing page.
-  const handleSubscribe = (tierId: "pro" | "max") => {
-    openCheckout(tierId);
-    setShowPaywall(false);
-  };
-
-  const handleManageSubscription = () => {
-    // Subscribed users are necessarily authenticated, so openCheckout here
-    // just opens the dashboard without an auth detour.
-    openCheckout("pro");
+  const handleSubscribe = () => {
+    openCheckout();
     setShowPaywall(false);
   };
 
@@ -117,57 +91,15 @@ export function PaywallModal() {
             </p>
           </div>
 
-          {isSubscribed ? (
-            <div>
-              <Button
-                className="w-full inline-flex items-center justify-center gap-1.5"
-                onClick={handleManageSubscription}
-              >
-                Manage Subscription
-                <ExternalLink className="h-4 w-4" />
-              </Button>
-            </div>
-          ) : (
-            <div className="grid gap-4 sm:grid-cols-2">
-              {TIERS.map(planTier => (
-                <div
-                  key={planTier.id}
-                  className={`relative flex flex-col p-5 rounded-lg border ${
-                    planTier.recommended
-                      ? "border-primary/60 bg-primary/5"
-                      : "border-border"
-                  }`}
-                >
-                  {planTier.recommended && (
-                    <span className="absolute top-3 right-3 text-[10px] font-medium uppercase tracking-wider text-primary">
-                      Recommended
-                    </span>
-                  )}
-                  <div className="flex items-baseline justify-between gap-2">
-                    <span className="text-base font-semibold text-foreground">
-                      {planTier.name}
-                    </span>
-                    <span className="text-sm text-muted-foreground">
-                      {planTier.creditsPerMo}
-                    </span>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    {planTier.hours}
-                  </p>
-                  <p className="text-sm text-muted-foreground mt-3">
-                    {planTier.description}
-                  </p>
-                  <button
-                    onClick={() => handleSubscribe(planTier.id)}
-                    className="mt-4 inline-flex items-center justify-center gap-1.5 h-10 rounded-full bg-white text-black text-sm font-medium hover:bg-white/90 transition-colors"
-                  >
-                    Subscribe to {planTier.name}
-                    <ExternalLink className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <div>
+            <Button
+              className="w-full inline-flex items-center justify-center gap-1.5"
+              onClick={handleSubscribe}
+            >
+              {isSubscribed ? "Manage Subscription" : "Choose a plan"}
+              <ExternalLink className="h-4 w-4" />
+            </Button>
+          </div>
 
           {/* Redeem code — show when credits exhausted */}
           {paywallReason === "credits_exhausted" && (

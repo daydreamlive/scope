@@ -30,7 +30,7 @@ export function BillingTab() {
   const [showOverageConfirm, setShowOverageConfirm] = useState(false);
 
   const handleSubscribe = () => {
-    openCheckout("pro");
+    openCheckout();
   };
 
   const estimatedMinutes =
@@ -81,7 +81,6 @@ export function BillingTab() {
   }
 
   const tierLabel = tier === "pro" ? "Pro" : "Max";
-  const tierPrice = tier === "pro" ? "$10/mo" : "$30/mo";
   const renewDate = subscription?.currentPeriodEnd
     ? new Date(subscription.currentPeriodEnd).toLocaleDateString("en-US", {
         month: "short",
@@ -99,7 +98,6 @@ export function BillingTab() {
       <div className="space-y-1">
         <div className="text-sm">
           <span className="font-medium text-foreground">{tierLabel}</span>
-          <span className="text-muted-foreground"> — {tierPrice}</span>
           {subscription?.cancelAtPeriodEnd && (
             <span className="text-amber-500 ml-2 text-xs">
               Cancels {renewDate}

@@ -49,7 +49,7 @@ export interface BillingState {
 
 interface BillingContextValue extends BillingState {
   refresh: () => Promise<void>;
-  openCheckout: (tier: "pro" | "max") => Promise<void>;
+  openCheckout: () => Promise<void>;
   toggleOverage: (enabled: boolean) => Promise<void>;
   showPaywall: boolean;
   setShowPaywall: (show: boolean) => void;
@@ -295,8 +295,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
       window.removeEventListener("billing:credits-exhausted", handler);
   }, []);
 
-  // tier param accepted for future use (tier-specific checkout pages)
-  const openCheckout = useCallback(async (_tier: "pro" | "max") => {
+  const openCheckout = useCallback(async () => {
     // If the user is signed in, open the billing page directly. Otherwise,
     // stash the destination in sessionStorage and route through the OAuth
     // sign-in flow — the effect below will open the URL when auth succeeds.
