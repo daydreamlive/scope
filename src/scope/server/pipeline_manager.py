@@ -27,6 +27,22 @@ class PipelineNotAvailableException(Exception):
     pass
 
 
+class PipelineNotYetRegisteredException(ValueError):
+    """Exception raised when a pipeline ID is not in the registry yet.
+
+    This is a *transient* error — it typically occurs during cloud session
+    initialization when the frontend concurrently requests a plugin install
+    and a pipeline load.  The pipeline load may arrive before the plugin has
+    finished installing and registering itself, so the registry lookup returns
+    ``None`` even though the pipeline ID will eventually become valid.
+
+    Callers should treat this as a retriable condition rather than a hard
+    error.
+    """
+
+    pass
+
+
 class PipelineStatus(Enum):
     """Pipeline loading status enumeration."""
 
@@ -335,6 +351,29 @@ class PipelineManager:
                 metadata=metadata,
             )
             return True
+
+        except PipelineNotYetRegisteredException:
+            # Transient race condition: the pipeline plugin hasn't finished
+            # installing yet.  Log at WARN (not ERROR) and leave the status as
+            # NOT_LOADED so the frontend doesn't show an error state and the
+            # load can be retried transparently once the plugin is registered.
+            self.set_loading_stage(None)
+            logger.warning(
+                f"Pipeline '{key}' is not registered — the plugin may still be "
+                f"installing. This is likely a transient race condition and will "
+                f"resolve once the plugin is installed."
+            )
+            with self._lock:
+                self._pipeline_statuses[key] = PipelineStatus.NOT_LOADED
+                if key in self._pipelines:
+                    del self._pipelines[key]
+                if key in self._pipeline_load_params:
+                    del self._pipeline_load_params[key]
+                if key in self._pipeline_registry_ids:
+                    del self._pipeline_registry_ids[key]
+                if key in self._load_events:
+                    self._load_events[key].set()
+            return False
 
         except Exception as e:
             self.set_loading_stage(None)
@@ -1385,7 +1424,9 @@ class PipelineManager:
             logger.info("OpticalFlow pipeline initialized")
             return pipeline
         else:
-            raise ValueError(f"Invalid pipeline ID: {pipeline_id}")
+            raise PipelineNotYetRegisteredException(
+                f"Invalid pipeline ID: {pipeline_id}. Plugin may not be installed yet."
+            )
 
     def is_loaded(self) -> bool:
         """Check if pipeline is loaded and ready (thread-safe)."""
