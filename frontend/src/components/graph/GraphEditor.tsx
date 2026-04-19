@@ -1247,7 +1247,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                 variant={BackgroundVariant.Dots}
                 gap={20}
                 size={1.2}
-                color="rgba(255,255,255,0.07)"
+                color="rgba(255,255,255,0.22)"
               />
             </ReactFlow>
 
