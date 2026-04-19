@@ -273,57 +273,8 @@ def _build_runner_command() -> list[str]:
     ]
 
 
-async def _handle_first_client_text(text_data: str, metadata: dict | None) -> None:
-    """Parse the first client text message, print manifest_id, publish connected.
-
-    Best-effort — any parsing or publishing failure is logged with the
-    ``[KAFKA-DEBUG]`` prefix but never raises, so the proxy loop is unaffected.
-    """
-    import json
-
-    if metadata is None:
-        return
-
-    try:
-        parsed = json.loads(text_data)
-    except (json.JSONDecodeError, TypeError) as exc:
-        print(f"[KAFKA-DEBUG] First client text not JSON: {exc}")
-        return
-
-    manifest_id = parsed.get("manifest_id") if isinstance(parsed, dict) else None
-    params = parsed.get("params") if isinstance(parsed, dict) else None
-    user_id = params.get("daydream_user_id") if isinstance(params, dict) else None
-
-    metadata["manifest_id"] = manifest_id
-    metadata["user_id"] = user_id
-
-    print(
-        f"[KAFKA-DEBUG] First client message parsed manifest_id={manifest_id} "
-        f"user_id={user_id}"
-    )
-
-    if kafka_publisher is None or not kafka_publisher.is_running:
-        print("[KAFKA-DEBUG] Skipping websocket_connected: Kafka not running")
-        return
-
-    connection_info = metadata.get("connection_info") or {}
-    ok = await kafka_publisher.publish(
-        "websocket_connected",
-        {
-            "user_id": user_id,
-            "connection_id": manifest_id,
-            "connection_info": connection_info,
-        },
-    )
-    print(f"[KAFKA-DEBUG] websocket_connected publish result: ok={ok}")
-
-
-async def _proxy_ws(client_ws: WebSocket, metadata: dict | None = None) -> None:
+async def _proxy_ws(client_ws: WebSocket) -> None:
     """Connect to the local runner and proxy traffic bidirectionally.
-
-    If *metadata* is provided, the first client→runner text message is
-    parsed (best-effort) to extract ``manifest_id`` and ``user_id`` and a
-    ``websocket_connected`` Kafka event is published inline.
 
     Raises WebSocketDisconnect if the client disconnects.
     Returns normally if the runner connection drops.
@@ -332,22 +283,9 @@ async def _proxy_ws(client_ws: WebSocket, metadata: dict | None = None) -> None:
     import websockets
     from websockets.exceptions import ConnectionClosed
 
-    # NOTE: Previously we sniffed the two-message handshake explicitly
-    # (recv runner ready, then receive client job_info) before starting
-    # the parallel proxy loop. That is disabled here for debugging —
-    # keep the proxy transparent and sniff inline in client_to_runner.
-    #
-    # async with websockets.connect(RUNNER_LOCAL_WS_URL) as runner_ws:
-    #     ready_msg = await runner_ws.recv()
-    #     ...
-    #     job_msg = await client_ws.receive()
-    #     ...
-
     async with websockets.connect(RUNNER_LOCAL_WS_URL) as runner_ws:
-        first_client_text_seen = False
 
         async def client_to_runner() -> None:
-            nonlocal first_client_text_seen
             while True:
                 message = await client_ws.receive()
                 msg_type = message.get("type")
@@ -355,9 +293,6 @@ async def _proxy_ws(client_ws: WebSocket, metadata: dict | None = None) -> None:
                     text_data = message.get("text")
                     bytes_data = message.get("bytes")
                     if text_data is not None:
-                        if not first_client_text_seen:
-                            first_client_text_seen = True
-                            await _handle_first_client_text(text_data, metadata)
                         await runner_ws.send(text_data)
                     elif bytes_data is not None:
                         await runner_ws.send(bytes_data)
@@ -533,6 +468,14 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
 
         connection_start_time = time.time()
         metadata: dict = {}
+        manifest_id = client_ws.headers.get("manifest-id")
+        user_id = client_ws.headers.get("daydream-user-id")
+        metadata["manifest_id"] = manifest_id
+        metadata["user_id"] = user_id
+        print(
+            f"[KAFKA-DEBUG] Handshake headers manifest_id={manifest_id} "
+            f"user_id={user_id}"
+        )
 
         import json
 
@@ -551,6 +494,18 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             "fal_log_labels": fal_log_labels,
         }
         metadata["connection_info"] = connection_info
+        if kafka_publisher is None or not kafka_publisher.is_running:
+            print("[KAFKA-DEBUG] Skipping websocket_connected: Kafka not running")
+        else:
+            ok = await kafka_publisher.publish(
+                "websocket_connected",
+                {
+                    "user_id": user_id,
+                    "connection_id": manifest_id,
+                    "connection_info": connection_info,
+                },
+            )
+            print(f"[KAFKA-DEBUG] websocket_connected publish result: ok={ok}")
 
         # Ensure any previous session data is cleaned up
         event = _get_cleanup_event()
@@ -563,7 +518,7 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             while True:
                 print(f"Connecting proxy to runner websocket at {RUNNER_LOCAL_WS_URL}")
                 try:
-                    await _proxy_ws(client_ws, metadata=metadata)
+                    await _proxy_ws(client_ws)
                 except (
                     ConnectionClosed,
                     InvalidStatus,
@@ -571,10 +526,6 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
                     OSError,
                 ) as exc:
                     print(f"Livepeer fal ws runner connection failed: {exc}")
-
-                # websocket_connected is published inline from
-                # _handle_first_client_text the first time the client sends a
-                # text message through the proxy — no post-proxy publish here.
 
                 now = time.monotonic()
                 cutoff = now - RUNNER_FAILURE_WINDOW_SECONDS
