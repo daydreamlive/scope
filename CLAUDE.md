@@ -145,6 +145,27 @@ SourceManager reads video files
     reads from per-sink queues → _last_frames_by_sink
 ```
 
+## Testing the deployed Livepeer fal path
+
+For testing Scope running in Livepeer cloud mode against a **deployed**
+fal.ai app — i.e. local Scope → daydream orchestrator → deployed fal
+runner → back — use the `testing-livepeer-fal-deploy` skill at
+`.agents/skills/testing-livepeer-fal-deploy/SKILL.md`.
+
+- **Playwright e2e test** (`e2e/tests/cloud-streaming.spec.ts`) drives
+  the real Perform-mode UI with a synthetic camera and verifies the
+  full round-trip (produces every lifecycle Kafka event). This is the
+  primary test to run after touching `src/scope/cloud/livepeer_fal_app.py`,
+  `src/scope/cloud/livepeer_app.py`, or anything on the cloud-connect
+  path.
+- **`test-cloud-connect.sh`** at the repo root is a fast bash/curl
+  smoke test for `/api/v1/cloud/connect` only — useful for `git bisect
+  run` or "did the fal container come up?". Does not produce
+  pipeline/session/stream events.
+
+For a fully-local livepeer stack (prebuilt go-livepeer + local runner,
+no fal involved), use the separate `testing-livepeer` skill instead.
+
 ## MCP Server Testing
 
 When asked to test Scope via MCP tools (e.g., with a workflow JSON), follow this sequence directly — do not read source code to figure out the API. Use the HTTP API directly (not MCP tools) because restarting Scope kills the MCP server connection.
