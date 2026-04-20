@@ -441,30 +441,11 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
 
         await client_ws.accept()
 
-        # Initialize Kafka publisher (lazy, once per process)
+        # Initialize Kafka publisher (lazy, once per process).
         global kafka_publisher
         if kafka_publisher is None:
-            print("[KAFKA-DEBUG] kafka_publisher is None, initializing")
             kafka_publisher = KafkaPublisher()
-            started = await kafka_publisher.start()
-            print(f"[KAFKA-DEBUG] KafkaPublisher.start() returned: {started}")
-        else:
-            print(
-                f"[KAFKA-DEBUG] kafka_publisher already initialized "
-                f"(is_running={kafka_publisher.is_running})"
-            )
-
-        # Smoke-test publish: verify basic Kafka write path works end-to-end
-        # before any real events. Filter logs on "[KAFKA-DEBUG]" to check.
-        if kafka_publisher is not None and kafka_publisher.is_running:
-            print("[KAFKA-DEBUG] Attempting smoke-test publish (kafka_smoke_test)")
-            smoke_ok = await kafka_publisher.publish(
-                "kafka_smoke_test",
-                {"note": "livepeer_fal_app websocket_handler startup ping"},
-            )
-            print(f"[KAFKA-DEBUG] Smoke-test publish result: ok={smoke_ok}")
-        else:
-            print("[KAFKA-DEBUG] Skipping smoke-test publish: Kafka not running")
+            await kafka_publisher.start()
 
         connection_start_time = time.time()
         metadata: dict = {}
@@ -472,10 +453,6 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         user_id = client_ws.headers.get("daydream-user-id")
         metadata["manifest_id"] = manifest_id
         metadata["user_id"] = user_id
-        print(
-            f"[KAFKA-DEBUG] Handshake headers manifest_id={manifest_id} "
-            f"user_id={user_id}"
-        )
 
         import json
 
@@ -494,10 +471,8 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             "fal_log_labels": fal_log_labels,
         }
         metadata["connection_info"] = connection_info
-        if kafka_publisher is None or not kafka_publisher.is_running:
-            print("[KAFKA-DEBUG] Skipping websocket_connected: Kafka not running")
-        else:
-            ok = await kafka_publisher.publish(
+        if kafka_publisher is not None and kafka_publisher.is_running:
+            await kafka_publisher.publish(
                 "websocket_connected",
                 {
                     "user_id": user_id,
@@ -505,7 +480,6 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
                     "connection_info": connection_info,
                 },
             )
-            print(f"[KAFKA-DEBUG] websocket_connected publish result: ok={ok}")
 
         # Ensure any previous session data is cleaned up
         event = _get_cleanup_event()
@@ -548,17 +522,10 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         except Exception as exc:
             print(f"Livepeer fal ws proxy error: {type(exc).__name__}: {exc}")
         finally:
-            # Publish websocket_disconnected event
             if kafka_publisher and kafka_publisher.is_running:
                 end_time = time.time()
                 elapsed_ms = int((end_time - connection_start_time) * 1000)
-                print(
-                    "[KAFKA-DEBUG] Attempting websocket_disconnected publish "
-                    f"(manifest_id={metadata.get('manifest_id')} "
-                    f"user_id={metadata.get('user_id')} "
-                    f"duration_ms={elapsed_ms})"
-                )
-                disc_ok = await kafka_publisher.publish(
+                await kafka_publisher.publish(
                     "websocket_disconnected",
                     {
                         "user_id": metadata.get("user_id"),
@@ -568,14 +535,6 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
                         "session_start_time_ms": int(connection_start_time * 1000),
                         "session_end_time_ms": int(end_time * 1000),
                     },
-                )
-                print(
-                    f"[KAFKA-DEBUG] websocket_disconnected publish result: ok={disc_ok}"
-                )
-            else:
-                print(
-                    "[KAFKA-DEBUG] Skipping websocket_disconnected: "
-                    "Kafka publisher not running"
                 )
 
             await run_cleanup()
