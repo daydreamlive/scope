@@ -21,6 +21,53 @@ def get_device() -> torch.device:
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
+def _assert_cuda_accessible() -> None:
+    """Raise RuntimeError with a clear message if CUDA cannot actually be used.
+
+    ``torch.cuda.is_available()`` only checks that the CUDA *runtime* is
+    installed; it does **not** guarantee that a physical GPU is visible.  On
+    fal.ai GPU workers that use MIG partitions or that set
+    ``CUDA_VISIBLE_DEVICES`` to an unexpected value the check passes but any
+    subsequent attempt to allocate a CUDA tensor raises
+    "No CUDA GPUs are available".
+
+    This helper forces lazy CUDA initialisation early so that the error surface
+    is a clean, actionable exception rather than a cryptic failure buried deep
+    inside a plugin's ``__init__``.
+    """
+    import os
+
+    if not torch.cuda.is_available():
+        n_devs = torch.cuda.device_count()
+        cvd = os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")
+        raise RuntimeError(
+            f"No CUDA GPUs are available (device_count={n_devs}, "
+            f"CUDA_VISIBLE_DEVICES={cvd!r}). "
+            "Check that the worker has a visible GPU and that "
+            "CUDA_VISIBLE_DEVICES is set correctly."
+        )
+
+    # is_available() returned True — now do a real device-count check and a
+    # tiny test allocation to catch cases where CUDA context init will fail
+    # (e.g. empty CUDA_VISIBLE_DEVICES, invalid MIG UUID, driver mismatch).
+    n_devs = torch.cuda.device_count()
+    cvd = os.environ.get("CUDA_VISIBLE_DEVICES", "<not set>")
+    if n_devs == 0:
+        raise RuntimeError(
+            f"No CUDA GPUs are available (device_count=0, "
+            f"CUDA_VISIBLE_DEVICES={cvd!r}). "
+            "CUDA runtime is installed but no devices are visible."
+        )
+
+    try:
+        _ = torch.zeros(1, device="cuda")
+    except RuntimeError as exc:
+        raise RuntimeError(
+            f"CUDA device_count={n_devs} but test tensor allocation failed "
+            f"(CUDA_VISIBLE_DEVICES={cvd!r}): {exc}"
+        ) from exc
+
+
 class PipelineNotAvailableException(Exception):
     """Exception raised when pipeline is not available for processing."""
 
@@ -896,6 +943,15 @@ class PipelineManager:
             logger.info(f"Loading plugin pipeline: {pipeline_id}")
             if stage_callback:
                 stage_callback("Initializing pipeline...")
+
+            # Validate that CUDA is actually accessible before handing off to
+            # the plugin.  Plugin __init__ methods often allocate CUDA tensors
+            # immediately (model loads, warmup passes) and the generic
+            # "No CUDA GPUs are available" error they produce is hard to trace.
+            # _assert_cuda_accessible() surfaces the problem early with extra
+            # diagnostic context (device_count, CUDA_VISIBLE_DEVICES).
+            _assert_cuda_accessible()
+
             config_class = pipeline_class.get_config_class()
             # Get defaults from schema fields
             schema_defaults = {}
