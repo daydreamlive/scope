@@ -6,7 +6,7 @@ endpoints used by the MCP server and other programmatic clients.
 
 import io
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import Response, StreamingResponse
@@ -225,6 +225,8 @@ class StartStreamRequest(BaseModel):
     prompts: list[dict] | None = None
     input_source: dict | None = None
     graph: dict | None = None
+    parameters: dict[str, Any] | None = None
+    node_parameters: dict[str, dict[str, Any]] | None = None
 
     @model_validator(mode="after")
     def _require_pipeline_or_graph(self) -> "StartStreamRequest":
@@ -419,6 +421,13 @@ async def start_stream(
         initial_params["prompts"] = request.prompts
     if request.input_source is not None:
         initial_params["input_source"] = request.input_source
+    # Flat pipeline parameters (e.g. width/height, __prompt, noise_scale) merged
+    # into initial_parameters so they reach the pipeline on the first call,
+    # matching how the WebRTC frontend delivers them.
+    if request.parameters:
+        for key, value in request.parameters.items():
+            if key not in initial_params:
+                initial_params[key] = value
 
     try:
         if use_cloud:
@@ -436,6 +445,26 @@ async def start_stream(
                 initial_parameters=initial_params,
             )
         frame_processor.start()
+
+        # Per-node parameters target a specific graph node (e.g. longlive vs
+        # rife), distinct from the broadcast `parameters` above.
+        # - Local mode: FrameProcessor.update_parameters routes by node_id (and
+        #   buffers in _pending_node_params if the graph isn't wired yet).
+        # - Cloud mode: the pipelines live on the cloud instance, so forward
+        #   each batch over the WebRTC data channel.
+        if request.node_parameters:
+            for node_id, node_params in request.node_parameters.items():
+                payload = {"node_id": node_id, **node_params}
+                if use_cloud:
+                    try:
+                        cloud_manager.send_parameters(payload)
+                    except Exception as e:
+                        logger.warning(
+                            f"Failed to forward node_parameters for "
+                            f"'{node_id}' to cloud: {e}"
+                        )
+                else:
+                    frame_processor.update_parameters(payload)
 
         # In cloud graph mode, wire cloud extra output handlers to
         # FrameProcessor's sink/record queues so that HeadlessSession
