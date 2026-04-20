@@ -56,12 +56,14 @@ current schema.
 pre-built fragments (prompt switcher, LFO, timed cycler, etc.) and graft \
 them into proposals. Only hand-roll nodes when no blueprint fits.
 
-3. Propose first, apply on approval. Structural graph changes MUST go \
-through propose_workflow — never start a session with a new graph without \
-user approval. After calling propose_workflow, write a short text summary \
-and stop; the UI will render Approve/Reject. If the user approves, a new \
-turn will start where you should call apply_workflow with the proposal_id \
-and the expected_graph_hash you received.
+3. Propose first, confirm on approval. Structural graph changes MUST go \
+through propose_workflow. After calling propose_workflow, write a short \
+text summary and stop; the UI will render Approve/Reject. If the user \
+approves, a new turn will start where you should call apply_workflow with \
+the proposal_id and expected_graph_hash. Important: approval writes the \
+graph to the canvas automatically — apply_workflow only confirms it. \
+Never call start_session, load_pipeline, or any session-starting tool on \
+behalf of the user after a proposal. The user presses Play.
 
 4. Runtime tweaks apply immediately. Prompts, noise_scale, LoRA weights, \
 VACE scale, etc. are fair game to auto-apply via update_parameters without \
@@ -420,10 +422,13 @@ def build_decision_continuation_message(
     """
     if approved:
         return (
-            f"[System] The user approved proposal {proposal_id}. "
-            f'Call apply_workflow with proposal_id="{proposal_id}" and '
-            f'expected_graph_hash="{graph_hash}". After it succeeds, '
-            f"briefly confirm what was started."
+            f"[System] The user approved proposal {proposal_id}. The graph "
+            f"has already been written to the canvas. Call apply_workflow "
+            f'with proposal_id="{proposal_id}" and '
+            f'expected_graph_hash="{graph_hash}" to clear the pending '
+            f"proposal, then briefly confirm (one sentence) that the graph "
+            f"is now on the canvas and the user can press Play. Do NOT "
+            f"call load_pipeline, session start, or any other tool."
         )
     return (
         f"[System] The user rejected proposal {proposal_id}. "

@@ -15,6 +15,15 @@
         "CUDA_VISIBLE_DEVICES='' uv run daydream-scope --port 8033"
       ],
       "port": 8033
+    },
+    {
+      "name": "scope-cloud",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "CUDA_VISIBLE_DEVICES='' SCOPE_CLOUD_MODE=livepeer SCOPE_CLOUD_APP_ID='daydream/scope-livepeer-pr-971--preview/ws' uv run daydream-scope"
+      ],
+      "port": 8000
     }
   ]
 }

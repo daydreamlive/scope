@@ -36,7 +36,9 @@ export function Composer({ onSend, disabled, placeholder }: ComposerProps) {
         onChange={e => setValue(e.target.value)}
         onKeyDown={onKeyDown}
         rows={2}
-        placeholder={placeholder ?? (disabled ? "Agent is working…" : "Ask the agent…")}
+        placeholder={
+          placeholder ?? (disabled ? "Agent is working…" : "Ask the agent…")
+        }
         className="flex-1 resize-none rounded-md bg-[#141414] border border-[rgba(255,255,255,0.08)] px-3 py-2 text-sm text-[#e6e6e6] placeholder:text-[#595959] focus:outline-none focus:border-[#1f6feb] disabled:opacity-60"
         disabled={disabled}
       />

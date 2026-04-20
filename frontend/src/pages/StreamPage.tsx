@@ -21,6 +21,7 @@ import {
 } from "../lib/workflowSettings";
 import { GraphEditor } from "../components/graph/GraphEditor";
 import type { GraphEditorHandle } from "../components/graph/GraphEditor";
+import { useAgent } from "../contexts/AgentContext";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import { StatusBar } from "../components/StatusBar";
 import { LogPanel } from "../components/LogPanel";
@@ -344,6 +345,14 @@ export function StreamPage() {
   // Graph mode state
   const [graphMode, setGraphMode] = useState(true);
   const graphEditorRef = useRef<GraphEditorHandle>(null);
+
+  // Let the agent write approved workflow proposals into the canvas.
+  const { registerGraphImporter } = useAgent();
+  useEffect(() => {
+    return registerGraphImporter((graph, label) => {
+      graphEditorRef.current?.loadGraphConfig(graph, label);
+    });
+  }, [registerGraphImporter]);
 
   // When true, pipeline controls are disabled in Perform Mode
   // (set when user edits anything in Graph Mode, cleared when user clicks Clear)

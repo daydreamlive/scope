@@ -443,10 +443,18 @@ class AgentTools:
         proposal_id: str,
         expected_graph_hash: str,
     ) -> dict:
-        """Apply a previously-proposed workflow after user approval.
+        """Confirm that a previously-proposed workflow was applied.
 
-        This tool should only be invoked when the loop has been told that the
-        user approved `proposal_id`. Callers outside that path will fail.
+        The frontend writes the proposed graph into the React Flow canvas at
+        approval time (before this tool runs). This tool just validates the
+        hash, clears the pending proposal, and returns so the agent can end
+        its turn with a short confirmation message.
+
+        It intentionally does NOT start a session or load pipelines — the
+        user presses Play to start, which runs the regular flow (including
+        cloud routing when cloud mode is active). That keeps the agent out
+        of environment-specific concerns and matches the "confirm workflows,
+        user controls Play" product intent.
         """
         proposal = self._session.pending_proposal
         if proposal is None or proposal.id != proposal_id:
@@ -464,7 +472,8 @@ class AgentTools:
                 "actual": proposal.graph_hash_at_propose,
             }
 
-        # Load pipelines, then start session.
+        # Distinct pipelines that will be loaded when the user presses Play —
+        # surface them so the agent can mention what's about to warm up.
         pipelines = sorted(
             {
                 n.get("pipeline_id")
@@ -472,29 +481,18 @@ class AgentTools:
                 if n.get("type") == "pipeline" and n.get("pipeline_id")
             }
         )
-        if pipelines:
-            load_body: dict[str, Any] = {"pipeline_ids": list(pipelines)}
-            if proposal.pipeline_load_params:
-                load_body["load_params"] = proposal.pipeline_load_params
-            resp = await self._c().post("/api/v1/pipeline/load", json=load_body)
-            if resp.status_code != 200:
-                return {
-                    "ok": False,
-                    "error": "pipeline load failed",
-                    "detail": resp.text[:400],
-                }
 
-        start_body = {"input_mode": proposal.input_mode, "graph": proposal.graph}
-        resp = await self._c().post("/api/v1/session/start", json=start_body)
-        if resp.status_code != 200:
-            return {
-                "ok": False,
-                "error": "session start failed",
-                "detail": resp.text[:400],
-            }
-        # Clear proposal once applied.
+        # Clear proposal bookkeeping.
         self._session.pending_proposal = None
-        return {"ok": True, "started": resp.json()}
+        return {
+            "ok": True,
+            "applied_to_canvas": True,
+            "pipelines_in_graph": pipelines,
+            "note": (
+                "Graph has been written to the canvas. The user will press "
+                "Play to start the session; do not try to start it yourself."
+            ),
+        }
 
     async def stop_session(self) -> dict:
         resp = await self._c().post("/api/v1/session/stop")
@@ -796,8 +794,12 @@ def build_tool_specs() -> list[dict]:
         {
             "name": "apply_workflow",
             "description": (
-                "Apply a previously-proposed workflow. Only callable after "
-                "user approval (the loop will tell you)."
+                "Confirm an approved proposal. The frontend already wrote the "
+                "graph to the canvas at approval time; this tool just "
+                "validates the hash and clears the pending proposal. It does "
+                "NOT start a session or load pipelines — the user presses "
+                "Play to start. Only callable after user approval (the loop "
+                "will tell you with a [System] message)."
             ),
             "input_schema": {
                 "type": "object",

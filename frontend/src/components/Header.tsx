@@ -70,13 +70,7 @@ export function Header({
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [initialTab, setInitialTab] = useState<
-    | "general"
-    | "account"
-    | "api-keys"
-    | "agent"
-    | "loras"
-    | "osc"
-    | "billing"
+    "general" | "account" | "api-keys" | "agent" | "loras" | "osc" | "billing"
   >("general");
   const [initialPluginPath, setInitialPluginPath] = useState("");
   const [pluginsInitialTab, setPluginsInitialTab] = useState<

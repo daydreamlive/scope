@@ -50,6 +50,8 @@ export interface AgentProposal {
   decision?: "approved" | "rejected";
 }
 
+export type GraphImporter = (graph: GraphConfig, label?: string) => void;
+
 interface AgentContextValue {
   drawerOpen: boolean;
   setDrawerOpen: (open: boolean) => void;
@@ -67,6 +69,9 @@ interface AgentContextValue {
   resetSession: () => void;
   decideProposal: (approved: boolean, reason?: string) => Promise<void>;
   refreshConfig: () => Promise<void>;
+  // Registered once by StreamPage so the agent can write approved proposals
+  // into the React Flow canvas. Returns an unregister fn.
+  registerGraphImporter: (importer: GraphImporter) => () => void;
 }
 
 const AgentContext = createContext<AgentContextValue | null>(null);
@@ -93,6 +98,16 @@ export function AgentProvider({ children }: { children: ReactNode }) {
   const abortRef = useRef<AbortController | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   sessionIdRef.current = sessionId;
+  const graphImporterRef = useRef<GraphImporter | null>(null);
+
+  const registerGraphImporter = useCallback((importer: GraphImporter) => {
+    graphImporterRef.current = importer;
+    return () => {
+      if (graphImporterRef.current === importer) {
+        graphImporterRef.current = null;
+      }
+    };
+  }, []);
 
   const refreshConfig = useCallback(async () => {
     try {
@@ -294,6 +309,28 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       const sid = sessionIdRef.current;
       if (!proposal || !sid) return;
 
+      // On approval, write the proposed graph into the React Flow canvas BEFORE
+      // we tell the backend. The backend's apply_workflow tool no longer starts
+      // a session — the user presses Play. This also means an approval with no
+      // importer registered still succeeds at the API layer (graceful fallback
+      // for any surface that doesn't render the canvas).
+      if (approved) {
+        const importer = graphImporterRef.current;
+        if (importer) {
+          try {
+            importer(proposal.graph, `agent-proposal-${proposal.proposalId}`);
+          } catch (e) {
+            toast.error(
+              `Failed to apply proposal to canvas: ${e instanceof Error ? e.message : String(e)}`
+            );
+            return;
+          }
+        } else {
+          toast.warning("Graph canvas not ready; proposal not applied.");
+          return;
+        }
+      }
+
       try {
         const response = await decideAgentProposal({
           session_id: sid,
@@ -306,6 +343,9 @@ export function AgentProvider({ children }: { children: ReactNode }) {
             ? { ...prev, decision: approved ? "approved" : "rejected" }
             : prev
         );
+        if (approved) {
+          toast.success("Proposal applied to graph. Press Play to start.");
+        }
         await runStream(response.next_message, { isContinuation: true });
         // Clear after the continuation turn finishes (or immediately on reject;
         // we clear here regardless so the card disappears from the transcript).
@@ -335,6 +375,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       resetSession,
       decideProposal,
       refreshConfig,
+      registerGraphImporter,
     }),
     [
       drawerOpen,
@@ -350,6 +391,7 @@ export function AgentProvider({ children }: { children: ReactNode }) {
       resetSession,
       decideProposal,
       refreshConfig,
+      registerGraphImporter,
     ]
   );
 
