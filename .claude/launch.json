@@ -6,6 +6,15 @@
       "runtimeExecutable": "bash",
       "runtimeArgs": ["-c", "source ~/.nvm/nvm.sh && cd frontend && npm run dev"],
       "port": 5173
+    },
+    {
+      "name": "backend",
+      "runtimeExecutable": "bash",
+      "runtimeArgs": [
+        "-c",
+        "CUDA_VISIBLE_DEVICES='' uv run daydream-scope --port 8033"
+      ],
+      "port": 8033
     }
   ]
 }

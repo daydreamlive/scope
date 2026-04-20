@@ -8,8 +8,10 @@ import {
   Trash2,
   Loader2,
   RotateCcw,
+  Sparkles,
 } from "lucide-react";
 import { NODE_TOKENS } from "./ui";
+import { useAgent } from "@/contexts/AgentContext";
 import {
   DropdownMenu,
   DropdownMenuTrigger,
@@ -66,6 +68,8 @@ export function GraphToolbar({
   const streamShortcut = getShortcutById("toggle-stream", shortcuts);
   const exportShortcut = getShortcutById("export", shortcuts);
 
+  const { toggleDrawer: toggleAgent, drawerOpen: agentOpen } = useAgent();
+
   return (
     <TooltipProvider delayDuration={400}>
       <div data-tour="add-node" className={NODE_TOKENS.toolbar}>
@@ -121,6 +125,23 @@ export function GraphToolbar({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <button
+              onClick={toggleAgent}
+              aria-pressed={agentOpen}
+              className={NODE_TOKENS.toolbarMenuButton}
+              data-tour="agent-button"
+            >
+              <Sparkles className="h-3.5 w-3.5" />
+              Agent
+            </button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">
+            {agentOpen ? "Close agent" : "Open agent"}
+          </TooltipContent>
+        </Tooltip>
 
         <input
           ref={fileInputRef}

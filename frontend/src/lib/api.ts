@@ -1316,3 +1316,137 @@ export const getTempoSources = async (): Promise<TempoSourcesResponse> => {
   }
   return response.json();
 };
+
+// ---------------------------------------------------------------------------
+// Agent API
+// ---------------------------------------------------------------------------
+
+export type AgentProvider = "anthropic" | "openai_compatible" | "self_hosted";
+
+export interface AgentConfig {
+  provider: AgentProvider;
+  model: string;
+  base_url: string | null;
+}
+
+export interface AgentConfigResponse extends AgentConfig {
+  key_sources: Record<AgentProvider, "env_var" | "stored" | null>;
+}
+
+export interface AgentSessionInfo {
+  id: string;
+  created_at: number;
+  last_activity: number;
+  messages: number;
+  has_pending_proposal: boolean;
+}
+
+export interface AgentDecisionResponse {
+  ok: boolean;
+  session_id: string;
+  proposal_id: string;
+  approved: boolean;
+  next_message: string;
+}
+
+export const getAgentConfig = async (): Promise<AgentConfigResponse> => {
+  const response = await fetch("/api/v1/agent/config");
+  if (!response.ok) {
+    throw new Error(`Failed to get agent config: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const updateAgentConfig = async (
+  update: Partial<AgentConfig>
+): Promise<{ ok: boolean; config: AgentConfig }> => {
+  const response = await fetch("/api/v1/agent/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(update),
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Failed to update agent config: ${err}`);
+  }
+  return response.json();
+};
+
+export const testAgentConnection = async (): Promise<{
+  ok: boolean;
+  error?: string;
+  result?: Record<string, unknown>;
+}> => {
+  const response = await fetch("/api/v1/agent/test-connection", {
+    method: "POST",
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Failed to test agent connection: ${err}`);
+  }
+  return response.json();
+};
+
+export const listAgentSessions = async (): Promise<{
+  sessions: AgentSessionInfo[];
+}> => {
+  const response = await fetch("/api/v1/agent/sessions");
+  if (!response.ok) {
+    throw new Error(`Failed to list agent sessions: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const deleteAgentSession = async (sessionId: string): Promise<void> => {
+  const response = await fetch(
+    `/api/v1/agent/sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" }
+  );
+  if (!response.ok) {
+    throw new Error(`Failed to delete agent session: ${response.statusText}`);
+  }
+};
+
+export const decideAgentProposal = async (body: {
+  session_id: string;
+  proposal_id: string;
+  approved: boolean;
+  reason?: string;
+}): Promise<AgentDecisionResponse> => {
+  const response = await fetch("/api/v1/agent/decision", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const err = await response.text();
+    throw new Error(`Failed to record agent decision: ${err}`);
+  }
+  return response.json();
+};
+
+export interface AgentNodeCatalog {
+  version: number;
+  node_types: Array<{
+    type: string;
+    label: string;
+    category: string;
+    description?: string;
+    config?: Record<string, unknown>;
+    inputs?: Array<{
+      name: string;
+      kind: string;
+      type: string;
+      variadic?: boolean;
+    }>;
+    outputs?: Array<{ name: string; kind: string; type: string }>;
+  }>;
+}
+
+export const getAgentNodeCatalog = async (): Promise<AgentNodeCatalog> => {
+  const response = await fetch("/api/v1/agent/node-catalog");
+  if (!response.ok) {
+    throw new Error(`Failed to get agent node catalog: ${response.statusText}`);
+  }
+  return response.json();
+};
