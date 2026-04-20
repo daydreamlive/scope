@@ -292,6 +292,11 @@ class FrameProcessor:
         for processor in self.pipeline_processors:
             processor.stop()
 
+        # Remove the pre-unload hooks registered in graph_executor so the
+        # pipeline_manager doesn't retain stale closures over stopped processors.
+        for node_id in list(self._processors_by_node_id.keys()):
+            self.pipeline_manager.unregister_pre_unload_hook(node_id)
+
         # Clear pipeline processors
         self.pipeline_processors.clear()
 

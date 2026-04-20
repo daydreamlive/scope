@@ -5,6 +5,7 @@ import gc
 import logging
 import threading
 import time
+from collections.abc import Callable
 from enum import Enum
 from typing import Any
 
@@ -64,10 +65,32 @@ class PipelineManager:
         # Loading stage for frontend display (e.g., "Loading diffusion model...")
         self._loading_stage: str | None = None
 
+        # Pre-unload hooks keyed by instance_key. Invoked before a pipeline is
+        # removed so callers (e.g. PipelineProcessor workers) can release their
+        # pipeline reference and stop allocating GPU memory. Without this, a
+        # swap-while-active leaves worker threads holding live CUDA tensors and
+        # the next load OOMs.
+        self._pre_unload_hooks: dict[str, Callable[[str], None]] = {}
+
     def set_loading_stage(self, stage: str | None) -> None:
         """Set the current loading stage (thread-safe)."""
         with self._lock:
             self._loading_stage = stage
+
+    def register_pre_unload_hook(self, key: str, hook: Callable[[str], None]) -> None:
+        """Register a callback invoked before *key* is unloaded.
+
+        Used by PipelineProcessor to ensure its worker thread is stopped — and
+        therefore releases its pipeline reference and GPU tensors — before the
+        next load begins. The hook MUST block until its worker has exited.
+        """
+        with self._lock:
+            self._pre_unload_hooks[key] = hook
+
+    def unregister_pre_unload_hook(self, key: str) -> None:
+        """Remove a previously registered hook (idempotent)."""
+        with self._lock:
+            self._pre_unload_hooks.pop(key, None)
 
     @property
     def status(self) -> PipelineStatus:
@@ -823,6 +846,18 @@ class PipelineManager:
             return
 
         logger.info(f"Unloading pipeline: {pipeline_id}")
+
+        # Stop any active worker (e.g. PipelineProcessor thread) bound to this
+        # key BEFORE dropping our reference. If we skip this, the worker keeps
+        # running during the subsequent gc/empty_cache, holds the pipeline alive
+        # via its closure, and continues allocating CUDA memory — causing the
+        # next load to OOM despite our "cleanup".
+        hook = self._pre_unload_hooks.pop(pipeline_id, None)
+        if hook is not None:
+            try:
+                hook(pipeline_id)
+            except Exception as e:
+                logger.warning(f"Pre-unload hook for {pipeline_id} raised: {e}")
 
         # Remove from tracked pipelines
         if pipeline_id in self._pipelines:
