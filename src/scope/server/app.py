@@ -3432,7 +3432,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
     "--cloud-app-id",
     default="Daydream/scope-app--prod/ws",
     envvar="SCOPE_CLOUD_APP_ID",
-    help="Cloud app ID for cloud mode (e.g., 'usename/scope-app')",
+    help="Cloud app ID for cloud mode (e.g., 'username/scope-app')",
 )
 @click.option(
     "--cloud-api-key",
