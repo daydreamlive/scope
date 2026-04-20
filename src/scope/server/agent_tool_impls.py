@@ -622,8 +622,11 @@ def build_tool_specs() -> list[dict]:
         {
             "name": "get_blueprint",
             "description": (
-                "Return the full JSON of a blueprint so you can include its "
-                "nodes/edges inside a proposed workflow."
+                "Return the full JSON of a blueprint. Its nodes/edges are "
+                "UI-node types (trigger, subgraph, primitive, slider, etc.) "
+                "— when grafting into propose_workflow, place them under "
+                "ui_state.nodes / ui_state.edges, NOT top-level nodes/edges "
+                "(top-level accepts only source|pipeline|sink|record)."
             ),
             "input_schema": {
                 "type": "object",
@@ -769,9 +772,16 @@ def build_tool_specs() -> list[dict]:
                     "graph": {
                         "type": "object",
                         "description": (
-                            "GraphConfig: {nodes: [...], edges: [...]}. Node "
-                            "types: source, pipeline, sink, record. Edge kind: "
-                            "stream | parameter."
+                            "GraphConfig with two parts: top-level nodes/edges "
+                            "(backend — ONLY node types source|pipeline|sink|"
+                            "record; edge kind stream|parameter) AND an "
+                            "optional ui_state: {nodes, edges} for all UI "
+                            "nodes (trigger, subgraph, primitive, slider, "
+                            "knobs, math, LFO, MIDI, prompt_list, etc.). UI "
+                            "nodes placed in top-level nodes will fail "
+                            "pydantic validation. Blueprint nodes always go "
+                            "under ui_state. Call get_current_graph on a "
+                            "loaded workflow to see the split in practice."
                         ),
                     },
                     "rationale": {

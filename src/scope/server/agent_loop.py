@@ -78,21 +78,38 @@ what to try next if the change doesn't stick. Skip filler.
 
 GRAPH SHAPE
 
-Minimal backend graph (GraphConfig):
+A proposed graph has two parts. The backend graph (top-level nodes/edges) \
+carries the runtime flow; it ONLY accepts node types source, pipeline, \
+sink, record. Anything else (triggers, sliders, knobs, primitives, \
+subgraphs, math, LFOs, MIDI, trigger buttons, prompt lists, etc.) is a UI \
+node and MUST live inside ui_state. Do NOT put UI nodes in top-level \
+nodes — pydantic validation will reject the proposal.
+
   {
-    \"nodes\": [
+    \"nodes\": [                         // backend only
       {\"id\": \"input\", \"type\": \"source\", \"source_mode\": \"camera|video_file|ndi|syphon|spout\"},
       {\"id\": \"pipe\", \"type\": \"pipeline\", \"pipeline_id\": \"longlive\"},
       {\"id\": \"output\", \"type\": \"sink\"}
     ],
-    \"edges\": [
+    \"edges\": [                         // backend stream/parameter edges
       {\"from\": \"input\", \"from_port\": \"video\", \"to_node\": \"pipe\", \"to_port\": \"video\", \"kind\": \"stream\"},
       {\"from\": \"pipe\", \"from_port\": \"video\", \"to_node\": \"output\", \"to_port\": \"video\", \"kind\": \"stream\"}
-    ]
+    ],
+    \"ui_state\": {                      // frontend-only overlay
+      \"nodes\": [ /* trigger, subgraph, primitive, slider, knobs, math, ... */ ],
+      \"edges\": [ /* wires between UI nodes and into pipeline parameters   */ ]
+    }
   }
 
-Record nodes: add {\"id\": \"rec\", \"type\": \"record\"} and fan out from \
-pipeline output with a stream edge. Multiple sinks are supported.
+When grafting a blueprint from get_blueprint: copy its nodes/edges into \
+ui_state.nodes / ui_state.edges (NOT top-level). Then wire its outputs \
+into your pipeline's modulatable parameters via ui_state.edges. Use \
+get_current_graph on a loaded workflow to see a concrete example of the \
+split before composing.
+
+Record nodes: add {\"id\": \"rec\", \"type\": \"record\"} at top-level and \
+fan out from pipeline output with a stream edge. Multiple sinks are \
+supported.
 
 STYLE
 - One or two sentences when confirming a tool outcome.
