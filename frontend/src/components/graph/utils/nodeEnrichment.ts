@@ -1,7 +1,11 @@
 import type { Edge, Node } from "@xyflow/react";
 import { extractParameterPorts } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
-import type { GraphConfig, PipelineSchemaInfo } from "../../../lib/api";
+import type {
+  GraphConfig,
+  InputSourceType,
+  PipelineSchemaInfo,
+} from "../../../lib/api";
 import { buildEdgeStyle } from "../constants";
 
 export interface EnrichNodesDeps {
@@ -47,6 +51,8 @@ export interface EnrichNodesDeps {
   spoutAvailable: boolean;
   ndiAvailable: boolean;
   syphonAvailable: boolean;
+  /** Full input-source catalog including plugin-declared UI metadata. */
+  availableInputSources: InputSourceType[];
   spoutOutputAvailable: boolean;
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
@@ -171,6 +177,7 @@ export function enrichNodes(
           spoutAvailable: deps.spoutAvailable,
           ndiAvailable: deps.ndiAvailable,
           syphonAvailable: deps.syphonAvailable,
+          availableInputSources: deps.availableInputSources,
           onSpoutSourceChange: (name: string) =>
             deps.onSpoutSourceChangeRef.current?.(name),
           onNdiSourceChange: (identifier: string) =>

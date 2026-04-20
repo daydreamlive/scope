@@ -1,8 +1,13 @@
-import { useEffect, useRef, useCallback, useState } from "react";
+import { useEffect, useRef, useCallback, useState, useMemo } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
-import { getInputSourceSources, type DiscoveredSource } from "../../../lib/api";
+import {
+  getInputSourceSources,
+  getInputSourceResolution,
+  type DiscoveredSource,
+  type InputSourceType,
+} from "../../../lib/api";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import {
@@ -21,13 +26,36 @@ const HEADER_H = 28;
 const BODY_PAD = 6;
 const SELECT_ROW_H = 20;
 
-const SOURCE_MODE_OPTIONS = [
+// Frontend-only modes that produce a local MediaStream (not backed by an
+// InputSource). Every other value in the dropdown is a server-side
+// source_id from /api/v1/input-sources.
+const LOCAL_MODES = [
   { value: "video", label: "File" },
   { value: "camera", label: "Camera" },
-  { value: "spout", label: "Spout" },
-  { value: "ndi", label: "NDI" },
-  { value: "syphon", label: "Syphon" },
 ];
+
+// Server-side modes that already have dedicated UI blocks below. Anything
+// else (youtube and future plugin sources) falls through to the generic
+// renderer driven by the source's declared ``params``.
+const KNOWN_SERVER_MODES = new Set(["spout", "ndi", "syphon"]);
+
+// "video_file" is represented in the dropdown as the frontend-only "video"
+// mode, so we hide it to avoid a duplicate entry.
+const HIDDEN_SERVER_MODES = new Set(["video_file"]);
+
+type InputKind = "url" | "discovered" | "asset";
+
+function getSourceNameParam(src: InputSourceType | undefined) {
+  return src?.params.find(p => p.name === "source_name");
+}
+
+function getInputKind(src: InputSourceType | undefined): InputKind | null {
+  const p = getSourceNameParam(src);
+  const ui = p?.ui as Record<string, unknown> | undefined;
+  const kind = ui?.input_kind;
+  if (kind === "url" || kind === "discovered" || kind === "asset") return kind;
+  return null;
+}
 
 export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const { updateData } = useNodeData(id);
@@ -45,6 +73,13 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const spoutAvailable = data.spoutAvailable ?? false;
   const ndiAvailable = data.ndiAvailable ?? false;
   const syphonAvailable = data.syphonAvailable ?? false;
+  const availableInputSourcesRaw = data.availableInputSources as
+    | InputSourceType[]
+    | undefined;
+  const availableInputSources = useMemo<InputSourceType[]>(
+    () => availableInputSourcesRaw ?? [],
+    [availableInputSourcesRaw]
+  );
   const onSpoutSourceChange = data.onSpoutSourceChange as
     | ((name: string) => void)
     | undefined;
@@ -64,6 +99,21 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const [isDiscoveringNdi, setIsDiscoveringNdi] = useState(false);
   const [syphonSources, setSyphonSources] = useState<DiscoveredSource[]>([]);
   const [isDiscoveringSyphon, setIsDiscoveringSyphon] = useState(false);
+
+  // Generic discovery + probe state for plugin-declared sources
+  const [pluginSources, setPluginSources] = useState<DiscoveredSource[]>([]);
+  const [isDiscoveringPlugin, setIsDiscoveringPlugin] = useState(false);
+  const [probeStatus, setProbeStatus] = useState<{
+    state: "idle" | "probing" | "ok" | "error";
+    message: string;
+  }>({ state: "idle", message: "" });
+
+  const currentSourceDef = useMemo(
+    () => availableInputSources.find(s => s.source_id === sourceMode),
+    [availableInputSources, sourceMode]
+  );
+  const currentSourceNameParam = getSourceNameParam(currentSourceDef);
+  const currentInputKind = getInputKind(currentSourceDef);
 
   useEffect(() => {
     if (videoRef.current && localStream instanceof MediaStream) {
@@ -128,13 +178,90 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     }
   }, [syphonAvailable]);
 
+  // Generic discovery for plugin-declared "discovered" sources.
+  const discoverPluginSources = useCallback(async () => {
+    if (!currentSourceDef) return;
+    setIsDiscoveringPlugin(true);
+    try {
+      const result = await getInputSourceSources(currentSourceDef.source_id);
+      setPluginSources(result.sources);
+    } catch (e) {
+      console.error(
+        `Failed to discover ${currentSourceDef.source_id} sources:`,
+        e
+      );
+      setPluginSources([]);
+    } finally {
+      setIsDiscoveringPlugin(false);
+    }
+  }, [currentSourceDef]);
+
+  // Auto-discover when switching to a plugin "discovered" source.
+  useEffect(() => {
+    if (
+      currentSourceDef &&
+      !KNOWN_SERVER_MODES.has(sourceMode) &&
+      currentInputKind === "discovered"
+    ) {
+      discoverPluginSources();
+    }
+  }, [sourceMode, currentSourceDef, currentInputKind, discoverPluginSources]);
+
+  // Probe URL-based plugin sources (debounced).
+  useEffect(() => {
+    if (KNOWN_SERVER_MODES.has(sourceMode)) return;
+    if (!currentSourceDef) return;
+    const ui = currentSourceNameParam?.ui as
+      | Record<string, unknown>
+      | undefined;
+    if (!ui?.probe || currentInputKind !== "url") return;
+
+    if (!sourceName.trim()) {
+      setProbeStatus({ state: "idle", message: "" });
+      return;
+    }
+
+    setProbeStatus({ state: "probing", message: "Checking…" });
+    const handle = setTimeout(async () => {
+      try {
+        const { width, height } = await getInputSourceResolution(
+          currentSourceDef.source_id,
+          sourceName,
+          15000
+        );
+        setProbeStatus({
+          state: "ok",
+          message: `Ready (${width}×${height})`,
+        });
+      } catch (e) {
+        const msg =
+          e instanceof Error ? e.message : "Could not read this source";
+        // Map HTTP errors to friendly messages
+        let friendly = msg;
+        if (/\b400\b/.test(msg)) friendly = "Invalid URL";
+        else if (/\b404\b/.test(msg)) friendly = "Video is unavailable";
+        else if (/\b408\b/.test(msg)) friendly = "Could not read this source";
+        setProbeStatus({ state: "error", message: friendly });
+      }
+    }, 600);
+    return () => clearTimeout(handle);
+  }, [
+    sourceName,
+    sourceMode,
+    currentSourceDef,
+    currentSourceNameParam,
+    currentInputKind,
+  ]);
+
   const handleSourceModeChange = (newMode: string) => {
     updateData({
-      sourceMode: newMode as "video" | "camera" | "spout" | "ndi" | "syphon",
-      ...(newMode !== "spout" && newMode !== "ndi" && newMode !== "syphon"
+      sourceMode: newMode,
+      // Reset source_name when leaving any server-side mode that used it
+      ...(newMode === "video" || newMode === "camera"
         ? { sourceName: undefined }
         : {}),
     });
+    setProbeStatus({ state: "idle", message: "" });
     onSourceModeChange?.(newMode);
   };
 
@@ -144,12 +271,12 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     onSpoutSourceChange?.(name);
   };
 
-  const handleNdiSourceChange = (identifier: string) => {
+  const handleNdiSourceChange_ = (identifier: string) => {
     updateData({ sourceName: identifier });
     onNdiSourceChange?.(identifier);
   };
 
-  const handleSyphonSourceChange = (identifier: string) => {
+  const handleSyphonSourceChange_ = (identifier: string) => {
     updateData({ sourceName: identifier });
     onSyphonSourceChange?.(identifier);
   };
@@ -158,6 +285,10 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     e: React.ChangeEvent<HTMLInputElement>
   ) => {
     updateData({ sourceFlipVertical: e.target.checked });
+  };
+
+  const handlePluginSourceNameChange = (value: string | number) => {
+    updateData({ sourceName: String(value) });
   };
 
   const handleFileClick = useCallback(() => {
@@ -178,13 +309,29 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const showFilePicker = sourceMode === "video";
   const handleY = HEADER_H + BODY_PAD + SELECT_ROW_H / 2;
 
-  // Filter source mode options based on availability
-  const filteredSourceModeOptions = SOURCE_MODE_OPTIONS.filter(opt => {
-    if (opt.value === "spout") return spoutAvailable;
-    if (opt.value === "ndi") return ndiAvailable;
-    if (opt.value === "syphon") return syphonAvailable;
-    return true;
-  });
+  // Dropdown options: frontend-only modes + all available server-side
+  // sources (excluding hidden ones like video_file). Availability is
+  // honored for the three known server-side modes; plugin sources are
+  // included if their backend reports ``available``.
+  const sourceModeOptions = useMemo(() => {
+    const opts: { value: string; label: string }[] = [...LOCAL_MODES];
+    for (const s of availableInputSources) {
+      if (HIDDEN_SERVER_MODES.has(s.source_id)) continue;
+      if (!s.available) {
+        if (s.source_id === "spout" && !spoutAvailable) continue;
+        if (s.source_id === "ndi" && !ndiAvailable) continue;
+        if (s.source_id === "syphon" && !syphonAvailable) continue;
+        continue;
+      }
+      // Preserve the legacy capitalized labels for the three known modes
+      let label = s.source_name;
+      if (s.source_id === "spout") label = "Spout";
+      if (s.source_id === "ndi") label = "NDI";
+      if (s.source_id === "syphon") label = "Syphon";
+      opts.push({ value: s.source_id, label });
+    }
+    return opts;
+  }, [availableInputSources, spoutAvailable, ndiAvailable, syphonAvailable]);
 
   const ndiOptions = ndiSources.map(s => ({
     value: s.identifier,
@@ -194,6 +341,15 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     value: s.identifier,
     label: s.name,
   }));
+  const pluginOptions = pluginSources.map(s => ({
+    value: s.identifier,
+    label: s.name,
+  }));
+
+  const isPluginMode =
+    !showPreview &&
+    !KNOWN_SERVER_MODES.has(sourceMode) &&
+    currentSourceDef !== undefined;
 
   return (
     <NodeCard selected={selected} collapsed={collapsed} autoMinHeight={false}>
@@ -210,7 +366,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
               <NodePillSelect
                 value={sourceMode}
                 onChange={handleSourceModeChange}
-                options={filteredSourceModeOptions}
+                options={sourceModeOptions}
               />
             </NodeParamRow>
           </div>
@@ -235,7 +391,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                 <div className="flex items-center gap-1">
                   <NodePillSearchableSelect
                     value={sourceName}
-                    onChange={handleNdiSourceChange}
+                    onChange={handleNdiSourceChange_}
                     options={ndiOptions}
                     placeholder={
                       isDiscoveringNdi
@@ -277,7 +433,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                 <div className="flex items-center gap-1">
                   <NodePillSearchableSelect
                     value={sourceName}
-                    onChange={handleSyphonSourceChange}
+                    onChange={handleSyphonSourceChange_}
                     options={syphonOptions}
                     placeholder={
                       isDiscoveringSyphon
@@ -324,6 +480,84 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                   </span>
                 </label>
               </NodeParamRow>
+            </div>
+          )}
+
+          {isPluginMode && (
+            <div className="px-2 flex flex-col gap-1.5">
+              {currentInputKind === "url" && (
+                <>
+                  <NodeParamRow label="URL">
+                    <NodePillInput
+                      type="text"
+                      value={sourceName}
+                      onChange={handlePluginSourceNameChange}
+                      placeholder={
+                        (currentSourceNameParam?.ui?.[
+                          "placeholder"
+                        ] as string) || ""
+                      }
+                    />
+                  </NodeParamRow>
+                  {probeStatus.state !== "idle" && (
+                    <div
+                      className={`text-[10px] px-2 ${
+                        probeStatus.state === "error"
+                          ? "text-red-400"
+                          : probeStatus.state === "ok"
+                            ? "text-green-400"
+                            : "text-[#8c8c8d]"
+                      }`}
+                    >
+                      {probeStatus.message}
+                    </div>
+                  )}
+                </>
+              )}
+              {currentInputKind === "discovered" && (
+                <NodeParamRow label="Source">
+                  <div className="flex items-center gap-1">
+                    <NodePillSearchableSelect
+                      value={sourceName}
+                      onChange={handlePluginSourceNameChange}
+                      options={pluginOptions}
+                      placeholder={
+                        isDiscoveringPlugin
+                          ? "Discovering..."
+                          : pluginOptions.length === 0
+                            ? "No sources"
+                            : "Select source"
+                      }
+                      disabled={isDiscoveringPlugin}
+                      className="flex-1"
+                    />
+                    <button
+                      type="button"
+                      onClick={discoverPluginSources}
+                      disabled={isDiscoveringPlugin}
+                      className="w-5 h-5 flex items-center justify-center text-[#fafafa] hover:text-blue-400 transition-colors disabled:opacity-50"
+                      title={`Refresh ${currentSourceDef?.source_name ?? ""} sources`}
+                    >
+                      <svg
+                        className={`h-3 w-3 ${isDiscoveringPlugin ? "animate-spin" : ""}`}
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2" />
+                      </svg>
+                    </button>
+                  </div>
+                </NodeParamRow>
+              )}
+              {currentSourceNameParam?.ui?.["help"] ? (
+                <div className="px-2 text-[10px] text-[#8c8c8d]">
+                  {String(currentSourceNameParam.ui["help"])}
+                </div>
+              ) : null}
             </div>
           )}
 
@@ -402,7 +636,8 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
           {!showPreview &&
             sourceMode !== "spout" &&
             sourceMode !== "ndi" &&
-            sourceMode !== "syphon" && (
+            sourceMode !== "syphon" &&
+            !isPluginMode && (
               <div className="flex items-center justify-center rounded-md bg-black/30 text-[10px] text-[#8c8c8d] flex-1 min-h-[40px]">
                 Waiting for input...
               </div>

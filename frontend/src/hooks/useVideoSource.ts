@@ -1,6 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 
-export type VideoSourceMode = "video" | "camera" | "spout" | "ndi" | "syphon";
+// "video" and "camera" are browser-only modes that produce a local
+// MediaStream. Every other value is a server-side source_id (ndi,
+// syphon, spout, youtube, any plugin source) and is handled as a
+// server-side source with no local stream.
+export type VideoSourceMode = string;
+
+export const LOCAL_STREAM_MODES: readonly VideoSourceMode[] = [
+  "video",
+  "camera",
+];
+
+export function isServerSideSourceMode(mode: VideoSourceMode): boolean {
+  return !LOCAL_STREAM_MODES.includes(mode);
+}
 
 export const SAMPLE_VIDEOS = [
   "/assets/test.mp4",
@@ -200,8 +213,9 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       setMode(newMode);
       setError(null);
 
-      // Spout/NDI/Syphon mode - no local stream needed, input comes from server-side receiver
-      if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
+      // Server-side sources (spout/ndi/syphon/youtube/any plugin) don't
+      // need a local stream — frames come from the server-side receiver.
+      if (isServerSideSourceMode(newMode)) {
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop());
         }

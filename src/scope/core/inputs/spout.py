@@ -38,6 +38,23 @@ class SpoutInputSource(InputSource):
         except ImportError:
             return False
 
+    @classmethod
+    def get_source_ui_params(cls):
+        from scope.core.nodes.base import NodeParam
+
+        return [
+            NodeParam(
+                name="source_name",
+                param_type="string",
+                default="",
+                description="Spout sender",
+                ui={
+                    "input_kind": "discovered",
+                    "help": "Pick a Spout sender on this Windows machine.",
+                },
+            ),
+        ]
+
     def list_sources(self, timeout_ms: int = 5000) -> list[InputSourceInfo]:
         """List available Spout senders."""
         try:

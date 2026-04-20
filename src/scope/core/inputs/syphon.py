@@ -59,6 +59,32 @@ class SyphonInputSource(InputSource):
         except ImportError:
             return False
 
+    @classmethod
+    def get_source_ui_params(cls):
+        from scope.core.nodes.base import NodeParam
+
+        return [
+            NodeParam(
+                name="source_name",
+                param_type="string",
+                default="",
+                description="Syphon server",
+                ui={
+                    "input_kind": "discovered",
+                    "help": "Pick a Syphon server from a running macOS app.",
+                },
+            ),
+            NodeParam(
+                name="source_flip_vertical",
+                param_type="boolean",
+                default=False,
+                description="Flip vertically",
+                ui={
+                    "help": "Flip frames vertically to match the sender's orientation.",
+                },
+            ),
+        ]
+
     def list_sources(self, timeout_ms: int = 5000) -> list[InputSourceInfo]:
         """List available Syphon servers."""
         try:

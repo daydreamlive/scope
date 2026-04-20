@@ -559,7 +559,7 @@ class PluginManager:
         The ``registry`` argument is accepted for legacy callers but
         ignored — the unified storage is always used.
         """
-        from scope.core.nodes.registry import NodeRegistry
+        from scope.core.nodes.registry import NodeRegistry, _derive_node_type_id
         from scope.core.pipelines.registry import PipelineRegistry
 
         del registry  # legacy parameter, kept for callsite compat
@@ -569,9 +569,7 @@ class PluginManager:
 
             def register_callback(node_class: Any) -> None:
                 NodeRegistry.register(node_class)
-                node_id = getattr(node_class, "node_type_id", None) or (
-                    node_class.get_config_class().pipeline_id
-                )
+                node_id = _derive_node_type_id(node_class) or node_class.__name__
                 logger.info(f"Registered plugin node: {node_id}")
 
             self._pm.hook.register_nodes(register=register_callback)

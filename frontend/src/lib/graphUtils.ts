@@ -177,8 +177,10 @@ export interface FlowNodeData {
   outputSinkEnabled?: boolean;
   /** For output nodes: the sender name */
   outputSinkName?: string;
-  /** For source nodes: video source mode (video, camera, spout, ndi, syphon) */
-  sourceMode?: "video" | "camera" | "spout" | "ndi" | "syphon";
+  /** For source nodes: video source mode. "video" and "camera" are
+   * frontend-only local-stream modes; anything else is a backend
+   * ``InputSource.source_id`` (spout, ndi, syphon, youtube, plugins). */
+  sourceMode?: string;
   /** For source nodes: source name/identifier for Spout/NDI (sender name for Spout, identifier for NDI) */
   sourceName?: string;
   /** For source nodes: whether incoming Syphon frames should be flipped vertically */

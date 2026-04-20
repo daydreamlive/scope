@@ -137,6 +137,11 @@ function getVaceParams(
 }
 
 /** When every source node is Spout/NDI/Syphon, the browser must not send a WebRTC video track. */
+// Frontend-only modes produce a local MediaStream from the browser.
+// Everything else is a backend-side InputSource — matches the logic in
+// useVideoSource.ts/isServerSideSourceMode.
+const LOCAL_ONLY_SOURCE_MODES = new Set(["video", "camera"]);
+
 function graphHasOnlyServerSideSources(graph: GraphConfig | null): boolean {
   const nodes = graph?.nodes;
   if (!nodes?.length) return false;
@@ -144,7 +149,7 @@ function graphHasOnlyServerSideSources(graph: GraphConfig | null): boolean {
   if (sources.length === 0) return false;
   return sources.every(n => {
     const sm = n.source_mode || "video";
-    return sm === "spout" || sm === "ndi" || sm === "syphon";
+    return !LOCAL_ONLY_SOURCE_MODES.has(sm);
   });
 }
 
@@ -793,7 +798,7 @@ export function StreamPage() {
     (newMode: string, nodeId?: string) => {
       if (!nodeId) {
         // Fallback: global mode switch (perform mode)
-        switchMode(newMode as "video" | "camera" | "spout" | "ndi" | "syphon");
+        switchMode(newMode);
         return;
       }
       // Stop any existing stream for this node
@@ -810,10 +815,11 @@ export function StreamPage() {
         createCameraStreamForNode(nodeId);
       }
       // Import/restore calls this with (mode, nodeId). Clear the global
-      // useVideoSource stream (e.g. test.mp4) when switching to server-side
-      // capture — otherwise WebRTC still sends that track alongside Syphon/NDI/Spout.
-      if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
-        void switchMode(newMode as "spout" | "ndi" | "syphon");
+      // useVideoSource stream (e.g. test.mp4) when switching to any
+      // server-side source — otherwise WebRTC still sends that track
+      // alongside the server-side receiver.
+      if (!LOCAL_ONLY_SOURCE_MODES.has(newMode)) {
+        void switchMode(newMode);
       }
       // When switching to file mode during streaming, auto-load a sample
       // video so the WebRTC track is replaced immediately.
@@ -2320,7 +2326,7 @@ export function StreamPage() {
               // Use first server-side source for backward compat input_source param
               for (const sourceNode of sourceNodes) {
                 const sm = sourceNode.source_mode || "video";
-                if (sm === "spout" || sm === "ndi" || sm === "syphon") {
+                if (!LOCAL_ONLY_SOURCE_MODES.has(sm)) {
                   graphInputSource = {
                     enabled: true,
                     source_type: sm,
@@ -3013,9 +3019,7 @@ export function StreamPage() {
         const webrtcSourceNodes = (graphConfigForStream.nodes ?? []).filter(
           n =>
             n.type === "source" &&
-            (n.source_mode || "video") !== "spout" &&
-            (n.source_mode || "video") !== "ndi" &&
-            (n.source_mode || "video") !== "syphon"
+            LOCAL_ONLY_SOURCE_MODES.has(n.source_mode || "video")
         );
         if (webrtcSourceNodes.length > 0) {
           const streams: Record<string, MediaStream> = {};
@@ -3339,6 +3343,7 @@ export function StreamPage() {
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiAvailable}
             syphonAvailable={syphonAvailable}
+            availableInputSources={availableInputSources}
             onSpoutSourceChange={handleSpoutSourceChange}
             onNdiSourceChange={handleNdiSourceChange}
             onSyphonSourceChange={handleSyphonSourceChange}

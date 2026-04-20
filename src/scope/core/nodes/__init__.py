@@ -18,6 +18,14 @@ def register_builtin_nodes() -> None:
     NodeRegistry.register(AudioSourceNode)
     NodeRegistry.register(SchedulerNode)
 
+    # Register built-in input sources so their NodeDefinition appears in
+    # /api/v1/nodes/definitions alongside plugin-registered sources. The
+    # frontend renders source-node UI dynamically from these definitions.
+    from scope.core.inputs import get_input_source_classes
+
+    for source_cls in get_input_source_classes().values():
+        NodeRegistry.register(source_cls)
+
 
 __all__ = [
     "AudioSourceNode",

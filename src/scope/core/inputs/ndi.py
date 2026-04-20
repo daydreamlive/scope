@@ -68,6 +68,23 @@ class NDIInputSource(InputSource):
         """Check if the NDI SDK is installed on this system."""
         return ndi_is_available()
 
+    @classmethod
+    def get_source_ui_params(cls):
+        from scope.core.nodes.base import NodeParam
+
+        return [
+            NodeParam(
+                name="source_name",
+                param_type="string",
+                default="",
+                description="NDI sender",
+                ui={
+                    "input_kind": "discovered",
+                    "help": "Pick a discovered NDI sender on your network.",
+                },
+            ),
+        ]
+
     def list_sources(self, timeout_ms: int = 5000) -> list[InputSourceInfo]:
         """List available NDI sources on the network."""
         if self._find_instance is None:

@@ -48,6 +48,23 @@ class VideoFileInputSource(InputSource):
         except ImportError:
             return False
 
+    @classmethod
+    def get_source_ui_params(cls):
+        from scope.core.nodes.base import NodeParam
+
+        return [
+            NodeParam(
+                name="source_name",
+                param_type="string",
+                default="",
+                description="Video file",
+                ui={
+                    "input_kind": "asset",
+                    "help": "Pick a video asset or upload a new one.",
+                },
+            ),
+        ]
+
     def list_sources(self, timeout_ms: int = 5000) -> list[InputSourceInfo]:
         """List video files from the assets directory."""
         try:

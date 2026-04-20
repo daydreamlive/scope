@@ -250,11 +250,21 @@ export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
 
 // Input sources API
 
+export interface InputSourceParam {
+  name: string;
+  param_type: "number" | "string" | "boolean" | "select";
+  default: unknown;
+  description: string;
+  ui: Record<string, unknown> | null;
+  convertible_to_input?: boolean;
+}
+
 export interface InputSourceType {
   source_id: string;
   source_name: string;
   source_description: string;
   available: boolean;
+  params: InputSourceParam[];
 }
 
 export interface InputSourceTypesResponse {

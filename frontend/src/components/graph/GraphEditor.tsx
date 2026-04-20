@@ -191,6 +191,8 @@ interface GraphEditorProps {
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
   syphonAvailable?: boolean;
+  /** Full input-source catalog — drives the dynamic Source node dropdown. */
+  availableInputSources?: import("../../lib/api").InputSourceType[];
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
@@ -241,6 +243,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       spoutAvailable = false,
       ndiAvailable = false,
       syphonAvailable = false,
+      availableInputSources = [],
       onSpoutSourceChange,
       onNdiSourceChange,
       onSyphonSourceChange,
@@ -343,6 +346,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         spoutOutputAvailable,
         ndiOutputAvailable,
         syphonOutputAvailable,
+        availableInputSources,
       },
       {
         tempoState,

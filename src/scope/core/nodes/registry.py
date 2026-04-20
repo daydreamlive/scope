@@ -15,22 +15,32 @@ def _derive_node_type_id(node_class: type) -> str | None:
     """Return the registry key for a node class, or None if not derivable.
 
     Plain nodes carry the id as the ``node_type_id`` classvar; pipelines
-    keep it on their config class as ``pipeline_id``.
+    keep it on their config class as ``pipeline_id``; input sources
+    expose it as ``source_id``.
     """
     node_type_id = getattr(node_class, "node_type_id", None)
     if node_type_id is not None:
         return node_type_id
-    # Lazy import: nodes.registry is loaded before pipelines.interface.
-    # Narrow to ImportError so real bugs (AttributeError on a broken
-    # config class, typos in pipeline_id, etc.) surface instead of being
-    # silently swallowed.
+    # Lazy imports: the registry is loaded before pipelines.interface
+    # and inputs.interface. Narrow to ImportError so real bugs
+    # (AttributeError on a broken config class, typos in pipeline_id,
+    # etc.) surface instead of being silently swallowed.
     try:
         from scope.core.pipelines.interface import Pipeline
     except ImportError:
-        return None
+        Pipeline = None  # type: ignore[assignment]
 
-    if issubclass(node_class, Pipeline):
+    if Pipeline is not None and issubclass(node_class, Pipeline):
         return node_class.get_config_class().pipeline_id
+
+    try:
+        from scope.core.inputs.interface import InputSource
+    except ImportError:
+        InputSource = None  # type: ignore[assignment]
+
+    if InputSource is not None and issubclass(node_class, InputSource):
+        return getattr(node_class, "source_id", None)
+
     return None
 
 

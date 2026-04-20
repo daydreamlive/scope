@@ -122,6 +122,8 @@ export interface GraphEditorAvailability {
   spoutOutputAvailable: boolean;
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
+  /** Full input-source catalog including plugin-declared UI metadata. */
+  availableInputSources: import("../../../../lib/api").InputSourceType[];
 }
 
 export function useGraphState(
@@ -299,6 +301,7 @@ export function useGraphState(
     spoutOutputAvailable: availability.spoutOutputAvailable,
     ndiOutputAvailable: availability.ndiOutputAvailable,
     syphonOutputAvailable: availability.syphonOutputAvailable,
+    availableInputSources: availability.availableInputSources,
     handleEdgeDelete,
     isStreaming: streams.isStreaming,
     isLoading: streams.isLoading ?? false,
@@ -348,6 +351,7 @@ export function useGraphState(
     availability.spoutOutputAvailable,
     availability.ndiOutputAvailable,
     availability.syphonOutputAvailable,
+    availability.availableInputSources,
     tempo.tempoState,
     tempo.tempoSources,
   ]);
