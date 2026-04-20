@@ -142,11 +142,13 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
 
         For local dev testing, start two Scope instances:
           Terminal 1 (cloud):  SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
-          Terminal 2 (local):  SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022
+          Terminal 2 (local):  SCOPE_CLOUD_MODE=direct SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local/ws uv run daydream-scope --port 8022
 
         Then connect MCP to the local instance (port 8022) and call this tool.
         When env vars SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_WS_URL are set,
-        app_id and api_key can be omitted.
+        app_id and api_key can be omitted. The app id must end in `/ws` and
+        SCOPE_CLOUD_MODE=direct is required to bypass the default Livepeer
+        orchestrator discovery path.
 
         Args:
             app_id: Cloud app ID (optional if set via env var SCOPE_CLOUD_APP_ID)

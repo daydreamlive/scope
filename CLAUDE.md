@@ -95,8 +95,9 @@ Test the cloud relay flow locally by running two Scope instances — one acting 
 **Environment variables:**
 
 - `SCOPE_CLOUD_WS=1` — enables the `/ws` WebSocket endpoint on a Scope instance, making it act as a cloud relay server
+- `SCOPE_CLOUD_MODE=direct` — selects the direct WebSocket backend (`cloud_connection_manager`) instead of the default Livepeer-backed relay. Required for local cloud testing because Livepeer mode expects an orchestrator/signer
 - `SCOPE_CLOUD_WS_URL` — overrides the cloud WebSocket URL so the connecting instance points to your local "cloud" instead of fal.ai
-- `SCOPE_CLOUD_APP_ID` — any non-empty value (e.g., `local`) to satisfy the app ID requirement
+- `SCOPE_CLOUD_APP_ID` — app ID for the connection; must end in `/ws` (e.g., `local/ws`), enforced by `livepeer_client._ws_url_from_app_id`
 
 **Setup (two terminals):**
 
@@ -105,7 +106,7 @@ Test the cloud relay flow locally by running two Scope instances — one acting 
 SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
 
 # Terminal 2 — "local" instance (connects to cloud):
-SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8022
+SCOPE_CLOUD_MODE=direct SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local/ws uv run daydream-scope --port 8022
 ```
 
 Open <http://localhost:8022>, connect to cloud from the UI, load a pipeline, and start streaming. The local instance connects via WebSocket to the "cloud" instance on port 8002, which proxies WebRTC signaling and API requests back to itself.
@@ -317,7 +318,7 @@ CUDA_VISIBLE_DEVICES="" SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002 > /tm
 for i in $(seq 1 30); do curl -s http://localhost:8002/health > /dev/null 2>&1 && break; sleep 1; done
 
 # Local instance (start after cloud is healthy):
-CUDA_VISIBLE_DEVICES="" SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local uv run daydream-scope --port 8033 > /tmp/local.log 2>&1 &
+CUDA_VISIBLE_DEVICES="" SCOPE_CLOUD_MODE=direct SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local/ws uv run daydream-scope --port 8033 > /tmp/local.log 2>&1 &
 for i in $(seq 1 30); do curl -s http://localhost:8033/health > /dev/null 2>&1 && break; sleep 1; done
 ```
 
@@ -325,7 +326,7 @@ for i in $(seq 1 30); do curl -s http://localhost:8033/health > /dev/null 2>&1 &
 
 ```bash
 # Connect to cloud:
-curl -s -X POST http://localhost:8033/api/v1/cloud/connect -H 'Content-Type: application/json' -d '{"app_id": "local"}'
+curl -s -X POST http://localhost:8033/api/v1/cloud/connect -H 'Content-Type: application/json' -d '{"app_id": "local/ws"}'
 # Wait and verify:
 sleep 2 && curl -s http://localhost:8033/api/v1/cloud/status
 ```
