@@ -102,6 +102,7 @@ export interface SettingsState {
     enabled: boolean;
     source_type: string;
     source_name: string;
+    flip_vertical?: boolean;
   };
   // Beat-quantize mode for discrete parameter changes
   quantizeMode?: "none" | "beat" | "bar" | "2_bar" | "4_bar";

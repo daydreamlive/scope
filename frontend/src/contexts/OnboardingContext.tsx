@@ -66,6 +66,7 @@ type OnboardingAction =
       type: "LOADED";
       completed: boolean;
       onboardingStyle?: "teaching" | "simple" | null;
+      inferenceMode?: "local" | "cloud" | null;
     };
 
 // ---------------------------------------------------------------------------
@@ -184,6 +185,7 @@ function reducer(
           ...state,
           phase: "idle",
           onboardingStyle: action.onboardingStyle ?? null,
+          inferenceMode: action.inferenceMode ?? null,
         };
       // Check if we're resuming after an auth redirect (sessionStorage flag
       // is set right before the redirect and consumed here exactly once)
@@ -268,6 +270,8 @@ export function OnboardingProvider({ children }: { children: ReactNode }) {
         type: "LOADED",
         completed: status.completed,
         onboardingStyle: status.onboarding_style ?? null,
+        inferenceMode:
+          (status.inference_mode as "local" | "cloud" | null) ?? null,
       });
     });
   }, []);

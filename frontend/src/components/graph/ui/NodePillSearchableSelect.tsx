@@ -107,7 +107,7 @@ export function NodePillSearchableSelect({
         createPortal(
           <div
             ref={dropdownRef}
-            className="fixed z-[9999] w-[200px] bg-[#1b1a1a] border border-[rgba(119,119,119,0.15)] rounded-lg shadow-lg max-h-[240px] overflow-hidden flex flex-col nowheel"
+            className="fixed z-[9999] w-[200px] bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)] rounded-md shadow-[0_4px_16px_rgba(0,0,0,0.4)] max-h-[240px] overflow-hidden flex flex-col nowheel"
             style={{ top: dropdownPos.top, left: dropdownPos.left }}
             onMouseDown={e => e.stopPropagation()}
             onWheel={e => e.stopPropagation()}
@@ -118,7 +118,7 @@ export function NodePillSearchableSelect({
               value={searchText}
               onChange={e => setSearchText(e.target.value)}
               placeholder={placeholder}
-              className="px-2 py-1 text-[10px] bg-[#2a2a2a] border-b border-[rgba(119,119,119,0.15)] text-[#fafafa] focus:outline-none focus:ring-1 focus:ring-blue-400/50"
+              className="px-2 py-1 text-[10px] bg-[#242424] border-b border-[rgba(255,255,255,0.06)] text-[#fafafa] focus:outline-none focus:ring-1 focus:ring-blue-400/60"
               onMouseDown={e => e.stopPropagation()}
               onWheel={e => e.stopPropagation()}
             />

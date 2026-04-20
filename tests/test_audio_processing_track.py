@@ -3,6 +3,7 @@ and the full recv() integration path.
 """
 
 import asyncio
+import fractions
 import time
 from unittest.mock import MagicMock
 
@@ -17,6 +18,7 @@ from scope.server.audio_track import (
     AUDIO_PTIME,
     AudioProcessingTrack,
 )
+from scope.server.media_packets import AudioPacket, MediaTimestamp
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -36,7 +38,7 @@ def _make_track(channels: int = 2, started: bool = True) -> AudioProcessingTrack
     """
     fp = MagicMock()
     fp.paused = False
-    fp.get_audio = MagicMock(return_value=(None, None))
+    fp.get_audio_packet = MagicMock(return_value=None)
     track = AudioProcessingTrack(frame_processor=fp, channels=channels)
     if started:
         track._start = time.time()
@@ -53,16 +55,20 @@ def _run(coro):
         loop.close()
 
 
-def _once(audio_tensor, sample_rate: int):
-    """Return a side_effect callable that yields (tensor, rate) once, then (None, None)."""
+def _once(audio_tensor, sample_rate: int, timestamp: MediaTimestamp | None = None):
+    """Yield one AudioPacket, then None."""
     returned = False
 
     def _side_effect():
         nonlocal returned
         if not returned:
             returned = True
-            return (audio_tensor, sample_rate)
-        return (None, None)
+            return AudioPacket(
+                audio=audio_tensor,
+                sample_rate=sample_rate,
+                timestamp=timestamp or MediaTimestamp(),
+            )
+        return None
 
     return _side_effect
 
@@ -202,7 +208,9 @@ class TestRecv:
     def test_with_audio_tensor(self):
         track = _make_track(started=False)
         audio = torch.randn(2, SAMPLES_PER_FRAME + 100)
-        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 48000))
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=_once(audio, 48000)
+        )
 
         frame = _run(track.recv())
         assert isinstance(frame, AudioFrame)
@@ -211,7 +219,9 @@ class TestRecv:
     def test_resamples_to_48khz(self):
         track = _make_track(started=False)
         audio = torch.randn(2, SAMPLES_PER_FRAME)  # enough after 2x upsample
-        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 24000))
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=_once(audio, 24000)
+        )
 
         frame = _run(track.recv())
         assert frame.sample_rate == AUDIO_CLOCK_RATE
@@ -219,7 +229,9 @@ class TestRecv:
     def test_mono_upmixed_to_stereo(self):
         track = _make_track(started=False)
         audio = torch.randn(1, SAMPLES_PER_FRAME + 100)
-        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 48000))
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=_once(audio, 48000)
+        )
 
         frame = _run(track.recv())
         assert frame.layout.name == "stereo"
@@ -227,7 +239,9 @@ class TestRecv:
     def test_1d_tensor_treated_as_mono(self):
         track = _make_track(started=False)
         audio = torch.randn(SAMPLES_PER_FRAME + 100)  # 1D
-        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 48000))
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=_once(audio, 48000)
+        )
 
         frame = _run(track.recv())
         assert isinstance(frame, AudioFrame)
@@ -236,7 +250,9 @@ class TestRecv:
         track = _make_track(started=False)
         track.frame_processor.paused = True
         audio = torch.randn(2, SAMPLES_PER_FRAME + 100)
-        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 48000))
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=_once(audio, 48000)
+        )
 
         frame = _run(track.recv())
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
@@ -245,7 +261,9 @@ class TestRecv:
     def test_undersized_chunk_returns_silence(self):
         track = _make_track(started=False)
         audio = torch.randn(2, 100)  # too small for a 960-sample frame
-        track.frame_processor.get_audio = MagicMock(side_effect=_once(audio, 48000))
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=_once(audio, 48000)
+        )
 
         frame = _run(track.recv())
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
@@ -258,15 +276,15 @@ class TestRecv:
 
         call_count = 0
 
-        def get_audio():
+        def get_audio_packet():
             nonlocal call_count
             call_count += 1
             # Return one chunk per drain cycle (odd calls), None to end drain (even)
             if call_count % 2 == 1:
-                return (torch.randn(2, chunk_size), 48000)
-            return (None, None)
+                return AudioPacket(audio=torch.randn(2, chunk_size), sample_rate=48000)
+            return None
 
-        track.frame_processor.get_audio = MagicMock(side_effect=get_audio)
+        track.frame_processor.get_audio_packet = MagicMock(side_effect=get_audio_packet)
 
         # Call recv() repeatedly until we get a non-silence frame
         got_real_frame = False
@@ -289,14 +307,14 @@ class TestRecv:
         chunk_size = 200
         chunks_returned = 0
 
-        def get_audio():
+        def get_audio_packet():
             nonlocal chunks_returned
             if chunks_returned < 5:
                 chunks_returned += 1
-                return (torch.randn(2, chunk_size), 48000)
-            return (None, None)
+                return AudioPacket(audio=torch.randn(2, chunk_size), sample_rate=48000)
+            return None
 
-        track.frame_processor.get_audio = MagicMock(side_effect=get_audio)
+        track.frame_processor.get_audio_packet = MagicMock(side_effect=get_audio_packet)
 
         _run(track.recv())
         assert chunks_returned == 5
@@ -304,12 +322,40 @@ class TestRecv:
         # minus 960 × 2 = 1920 consumed for one frame = 80 remaining
         assert track._buffered_samples == 80
 
+    def test_preserves_valid_packet_timestamp_at_48khz(self):
+        track = _make_track(started=False)
+        audio = torch.randn(2, SAMPLES_PER_FRAME + 100)
+        timestamp = MediaTimestamp(pts=1234, time_base=fractions.Fraction(1, 48000))
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=_once(audio, 48000, timestamp=timestamp)
+        )
+
+        frame = _run(track.recv())
+
+        assert frame.pts == 1234
+        assert frame.time_base == fractions.Fraction(1, 48000)
+
+    def test_translates_preserved_timestamp_when_resampling(self):
+        track = _make_track(started=False)
+        input_samples = 600
+        audio = torch.randn(2, input_samples)
+        timestamp = MediaTimestamp(pts=2400, time_base=fractions.Fraction(1, 24000))
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=_once(audio, 24000, timestamp=timestamp)
+        )
+
+        frame = _run(track.recv())
+
+        # 2400 @ 24kHz -> 4800 @ 48kHz
+        assert frame.pts == 4800
+        assert frame.time_base == fractions.Fraction(1, 48000)
+
     def test_caps_buffer_at_max(self):
         """Oversized buffer is trimmed to the cap after recv()."""
         track = _make_track(started=False)
         max_interleaved = AUDIO_MAX_BUFFER_SAMPLES * track.channels
         oversized = np.ones(max_interleaved + 5000, dtype=np.float32)
-        track._chunks.append(oversized)
+        track._chunks.append((oversized, None))
         track._buffered_samples = len(oversized)
 
         _run(track.recv())

@@ -2522,7 +2522,10 @@ def get_input_source_resolution(
 
 @app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/stream")
 async def stream_input_source_preview(
-    source_type: str, identifier: str, fps: int = Query(2, ge=1, le=30)
+    source_type: str,
+    identifier: str,
+    fps: int = Query(2, ge=1, le=30),
+    flip_vertical: bool = Query(False),
 ):
     """MJPEG stream of an input source for live preview."""
     source_class = _resolve_input_source_class(source_type)
@@ -2538,6 +2541,8 @@ async def stream_input_source_preview(
         try:
             # Create persistent receiver
             receiver = source_class()
+            if source_type == "syphon" and hasattr(receiver, "set_flip_vertical"):
+                receiver.set_flip_vertical(flip_vertical)
             connected = await loop.run_in_executor(None, receiver.connect, identifier)
             if not connected:
                 logger.warning(f"Preview stream: could not connect to '{identifier}'")

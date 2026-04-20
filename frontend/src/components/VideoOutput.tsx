@@ -3,6 +3,8 @@ import { Volume2, VolumeX } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { PlayOverlay } from "./ui/play-overlay";
+import { useCloudStatus } from "../hooks/useCloudStatus";
+import { useBilling } from "../contexts/BillingContext";
 
 interface VideoOutputProps {
   className?: string;
@@ -48,6 +50,9 @@ export function VideoOutput({
   videoContainerRef,
   videoScaleMode = "fit",
 }: VideoOutputProps) {
+  const { isConnected: isCloudActive } = useCloudStatus();
+  const billing = useBilling();
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const internalContainerRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
@@ -296,6 +301,11 @@ export function VideoOutput({
               onClick={onStartStream}
               size="lg"
               variant="themed"
+              costLabel={
+                isCloudActive && billing.creditsPerMin > 0
+                  ? `Run for ${billing.creditsPerMin} credits/min`
+                  : undefined
+              }
               data-testid="start-stream-button"
               aria-label="Start stream"
             />

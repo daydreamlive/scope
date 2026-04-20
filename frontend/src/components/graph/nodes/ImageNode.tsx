@@ -80,6 +80,7 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
       minHeight={80}
       className="!min-w-0"
       collapsed={collapsed}
+      autoMinHeight={false}
     >
       <NodeHeader
         title={data.customTitle || "Media"}

@@ -361,11 +361,14 @@ export function PipelineNode({
             return (
               <div
                 key={`param-${param.name}`}
-                ref={setRowRef(`param:${param.name}`)}
+                className="bg-[rgba(255,255,255,0.02)] rounded-md -mx-1 px-1 py-1"
               >
                 {isConnected ? (
                   <div className="flex flex-col gap-1">
-                    <p className={`${NODE_TOKENS.labelText} text-[10px]`}>
+                    <p
+                      ref={setRowRef(`param:${param.name}`)}
+                      className={`${NODE_TOKENS.labelText} text-[10px]`}
+                    >
                       {param.label || param.name}
                     </p>
                     <NodePill className="opacity-50">
@@ -376,7 +379,10 @@ export function PipelineNode({
                   </div>
                 ) : (
                   <div className="flex flex-col gap-1">
-                    <p className={`${NODE_TOKENS.labelText} text-[10px]`}>
+                    <p
+                      ref={setRowRef(`param:${param.name}`)}
+                      className={`${NODE_TOKENS.labelText} text-[10px]`}
+                    >
                       {param.label || param.name}
                     </p>
                     {values.map((stepVal, idx) => (

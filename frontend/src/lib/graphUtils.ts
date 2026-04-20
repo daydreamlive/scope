@@ -181,6 +181,8 @@ export interface FlowNodeData {
   sourceMode?: "video" | "camera" | "spout" | "ndi" | "syphon";
   /** For source nodes: source name/identifier for Spout/NDI (sender name for Spout, identifier for NDI) */
   sourceName?: string;
+  /** For source nodes: whether incoming Syphon frames should be flipped vertically */
+  sourceFlipVertical?: boolean;
   /** For source nodes: local video preview stream (camera or file) */
   localStream?: MediaStream | null;
   /** For source nodes: callback to upload a video file */
@@ -718,6 +720,7 @@ export function graphConfigToFlow(
             | "syphon"
             | undefined) ?? "video",
         sourceName: n.source_name ?? undefined,
+        sourceFlipVertical: n.source_flip_vertical ?? false,
       },
     });
   });
@@ -1321,6 +1324,10 @@ export function flowToGraphConfig(
         n.data.nodeType === "source" ? (n.data.sourceMode ?? null) : undefined,
       source_name:
         n.data.nodeType === "source" ? (n.data.sourceName ?? null) : undefined,
+      source_flip_vertical:
+        n.data.nodeType === "source"
+          ? Boolean(n.data.sourceFlipVertical)
+          : undefined,
       tempo_sync: tempoConnectedPipelineIds.has(n.id) || undefined,
     };
   });
@@ -1526,6 +1533,7 @@ export function applyHardwareInputSourceToLinearGraph(
     enabled: boolean;
     source_type: string;
     source_name: string;
+    flip_vertical?: boolean;
   }
 ): GraphConfig {
   const t = inputSource?.source_type;
@@ -1543,6 +1551,8 @@ export function applyHardwareInputSourceToLinearGraph(
             ...n,
             source_mode: t,
             source_name: inputSource.source_name ?? "",
+            source_flip_vertical:
+              t === "syphon" ? Boolean(inputSource.flip_vertical) : false,
           }
         : n
     ),

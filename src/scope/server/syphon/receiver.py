@@ -122,10 +122,15 @@ class SyphonReceiver:
             receiver.release()
     """
 
-    def __init__(self):
+    def __init__(self, flip_vertical: bool = False):
         self._client: Any | None = None
         self._connected_server: SyphonServerInfo | None = None
         self._frame_count = 0
+        self._flip_vertical = flip_vertical
+
+    def set_flip_vertical(self, enabled: bool) -> None:
+        """Configure whether received frames should be vertically flipped."""
+        self._flip_vertical = enabled
 
     def discover(self) -> list[SyphonServerInfo]:
         """Discover all available Syphon servers on the system."""
@@ -224,15 +229,16 @@ class SyphonReceiver:
             image = copy_mtl_texture_to_image(texture)
             self._frame_count += 1
 
+            if self._flip_vertical:
+                image = np.flipud(image)
+
             # Handle BGRA pixel format (common macOS default)
-            pixel_format = texture.pixelFormat()
-            if pixel_format == Metal.MTLPixelFormatBGRA8Unorm:
+            if texture.pixelFormat() == Metal.MTLPixelFormatBGRA8Unorm:
                 image = image[:, :, [2, 1, 0, 3]]
 
             if as_rgb:
                 return np.ascontiguousarray(image[:, :, :3])
-            else:
-                return image.copy()
+            return np.ascontiguousarray(image)
 
         except Exception as e:
             logger.error(f"Error receiving Syphon frame: {e}")

@@ -11,6 +11,7 @@ import {
   COLOR_AUDIO,
   COLOR_BOOLEAN,
   COLOR_TRIGGER,
+  COLOR_LORA,
   COLOR_DEFAULT,
 } from "./nodeColors";
 
@@ -66,6 +67,9 @@ export function getEdgeColor(
     }
     if (sourceNode.data.nodeType === "vace") {
       return COLOR_VACE;
+    }
+    if (sourceNode.data.nodeType === "lora") {
+      return COLOR_LORA;
     }
     if (sourceNode.data.nodeType === "midi") {
       return COLOR_NUMBER;

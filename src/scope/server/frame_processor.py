@@ -12,7 +12,13 @@ from aiortc.mediastreams import VideoFrame
 
 from .cloud_relay import CloudRelay, compute_relay_video_mode
 from .kafka_publisher import publish_event
-from .media_packets import MediaTimestamp, VideoPacket, ensure_video_packet
+from .media_packets import (
+    AudioPacket,
+    MediaTimestamp,
+    VideoPacket,
+    ensure_audio_packet,
+    ensure_video_packet,
+)
 from .modulation import ModulationEngine
 from .parameter_scheduler import ParameterScheduler
 from .pipeline_manager import PipelineManager
@@ -578,31 +584,39 @@ class FrameProcessor:
             return None
         return packet.tensor
 
-    def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
+    def get_audio_packet(self) -> AudioPacket | None:
         """Get the next audio chunk and its sample rate.
 
         In local mode, reads from the sink processor's audio output queue.
         In cloud mode, reads from the CloudRelay audio queue.
 
         Returns:
-            Tuple of (audio_tensor, sample_rate) or (None, None) if no audio available.
-            audio_tensor shape: (channels, samples) - typically (2, N) for stereo
+            AudioPacket or None if no audio is available.
         """
         if not self.running:
-            return None, None
+            return None
 
         if self._cloud_relay is not None:
-            return self._cloud_relay.get_audio()
+            item = self._cloud_relay.get_audio()
+            if item is None:
+                return None
+            return ensure_audio_packet(item)
 
         if self._sink_processor is None:
-            return None, None
+            return None
 
         try:
-            audio, sample_rate = self._sink_processor.audio_output_queue.get_nowait()
-            # Pass through flush sentinels (audio=None, sample_rate=-1)
-            return audio, sample_rate
+            item = self._sink_processor.audio_output_queue.get_nowait()
+            return ensure_audio_packet(item)
         except queue.Empty:
+            return None
+
+    def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
+        """Backwards-compatible audio getter returning (audio, sample_rate)."""
+        packet = self.get_audio_packet()
+        if packet is None:
             return None, None
+        return packet.audio, packet.sample_rate
 
     def get_fps(self) -> float:
         """Get the playback FPS for the video track.

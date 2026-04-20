@@ -204,8 +204,6 @@ interface GraphEditorProps {
   syphonOutputAvailable?: boolean;
   onStartRecording?: (nodeId?: string) => void;
   onStopRecording?: (nodeId?: string) => void;
-  onOpenSettings?: () => void;
-  onOpenPlugins?: () => void;
   tempoState?: import("../../hooks/useTempoSync").TempoState;
   tempoSources?: import("../../lib/api").TempoSourcesResponse | null;
   tempoLoading?: boolean;
@@ -252,8 +250,6 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       syphonOutputAvailable = false,
       onStartRecording,
       onStopRecording,
-      onOpenSettings,
-      onOpenPlugins,
       tempoState,
       tempoSources,
       tempoLoading,
@@ -593,6 +589,184 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         setEdges,
         setSelectedNodeIds,
       });
+
+    const handleDebugNodes = useCallback(() => {
+      const DEBUG_NODES: Array<{
+        id: string;
+        type: string;
+        nodeType: string;
+        position: { x: number; y: number };
+        extra?: Partial<FlowNodeData>;
+      }> = [
+        {
+          id: "source",
+          type: "source",
+          nodeType: "source",
+          position: { x: 50, y: 50 },
+        },
+        {
+          id: "pipeline",
+          type: "pipeline",
+          nodeType: "pipeline",
+          position: { x: 321.74, y: 49.33 },
+        },
+        {
+          id: "sink",
+          type: "sink",
+          nodeType: "sink",
+          position: { x: 577.54, y: 42.91 },
+        },
+        {
+          id: "record",
+          type: "record",
+          nodeType: "record",
+          position: { x: 584.35, y: 274.9 },
+        },
+        {
+          id: "primitive",
+          type: "primitive",
+          nodeType: "primitive",
+          position: { x: 586.99, y: 393.92 },
+        },
+        {
+          id: "bool",
+          type: "bool",
+          nodeType: "bool",
+          position: { x: 50, y: 350 },
+        },
+        {
+          id: "slider",
+          type: "slider",
+          nodeType: "slider",
+          position: { x: 43.29, y: 773.73 },
+        },
+        {
+          id: "knobs",
+          type: "knobs",
+          nodeType: "knobs",
+          position: { x: 39.43, y: 966.33 },
+        },
+        {
+          id: "xypad",
+          type: "xypad",
+          nodeType: "xypad",
+          position: { x: 850.46, y: 46.12 },
+        },
+        {
+          id: "control",
+          type: "control",
+          nodeType: "control",
+          position: { x: 856.59, y: 334.32 },
+          extra: { controlType: "float" },
+        },
+        {
+          id: "control_1",
+          type: "control",
+          nodeType: "control",
+          position: { x: 47.15, y: 558.69 },
+          extra: { controlType: "int" },
+        },
+        {
+          id: "control_2",
+          type: "control",
+          nodeType: "control",
+          position: { x: 318.9, y: 923.97 },
+          extra: { controlType: "string" },
+        },
+        {
+          id: "math",
+          type: "math",
+          nodeType: "math",
+          position: { x: 586.16, y: 588.74 },
+        },
+        {
+          id: "tuple",
+          type: "tuple",
+          nodeType: "tuple",
+          position: { x: 857.59, y: 543.01 },
+        },
+        {
+          id: "output",
+          type: "output",
+          nodeType: "output",
+          position: { x: 860.87, y: 697.09 },
+        },
+        {
+          id: "vace",
+          type: "vace",
+          nodeType: "vace",
+          position: { x: 587.22, y: 914.44 },
+        },
+        {
+          id: "lora",
+          type: "lora",
+          nodeType: "lora",
+          position: { x: 586.18, y: 794.57 },
+        },
+        {
+          id: "midi",
+          type: "midi",
+          nodeType: "midi",
+          position: { x: 860.45, y: 860.13 },
+        },
+        {
+          id: "trigger",
+          type: "trigger",
+          nodeType: "trigger",
+          position: { x: 318.72, y: 817.36 },
+        },
+        {
+          id: "tempo",
+          type: "tempo",
+          nodeType: "tempo",
+          position: { x: 1121.76, y: 278.44 },
+        },
+        {
+          id: "prompt_list",
+          type: "prompt_list",
+          nodeType: "prompt_list",
+          position: { x: 1123.61, y: 479.6 },
+        },
+        {
+          id: "prompt_blend",
+          type: "prompt_blend",
+          nodeType: "prompt_blend",
+          position: { x: 1129.74, y: 709.3 },
+        },
+        {
+          id: "scheduler",
+          type: "scheduler",
+          nodeType: "scheduler",
+          position: { x: 1128.73, y: 883.37 },
+        },
+        {
+          id: "note",
+          type: "note",
+          nodeType: "note",
+          position: { x: 1122.5, y: 49.42 },
+        },
+        {
+          id: "reroute",
+          type: "reroute",
+          nodeType: "reroute",
+          position: { x: 971.33, y: 1063.07 },
+        },
+      ];
+
+      const debugNodes: Node<FlowNodeData>[] = DEBUG_NODES.map(def => ({
+        id: def.id,
+        type: def.type,
+        position: def.position,
+        data: {
+          label: def.id,
+          nodeType: def.nodeType,
+          ...def.extra,
+        } as FlowNodeData,
+      }));
+
+      setNodes(debugNodes);
+      setEdges([]);
+    }, [setNodes, setEdges]);
 
     const onPromptForwardRef = useRef(handlePromptChange);
     onPromptForwardRef.current = handlePromptChange;
@@ -1013,8 +1187,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             onExport={() => setShowExportDialog(true)}
             onClear={() => setShowClearConfirm(true)}
             onDefaultWorkflow={() => setShowDefaultConfirm(true)}
-            onOpenSettings={onOpenSettings}
-            onOpenPlugins={onOpenPlugins}
+            onDebugNodes={handleDebugNodes}
             fileInputRef={fileInputRef}
           />
 
@@ -1072,14 +1245,19 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               deleteKeyCode={isStreaming ? [] : ["Backspace", "Delete"]}
             >
               <Controls />
-              <Background variant={BackgroundVariant.Dots} gap={16} size={1} />
+              <Background
+                variant={BackgroundVariant.Dots}
+                gap={20}
+                size={1.2}
+                color="rgba(255,255,255,0.22)"
+              />
             </ReactFlow>
 
             {/* Add node button — upper right of canvas */}
             {!isStreaming && (
               <button
                 onClick={e => handleOpenCreateMenu(e.clientX, e.clientY)}
-                className="absolute top-4 right-4 z-30 w-12 h-12 rounded-xl border-2 border-dashed border-[rgba(119,119,119,0.4)] bg-[rgba(17,17,17,0.6)] hover:border-[rgba(119,119,119,0.7)] hover:bg-[rgba(17,17,17,0.8)] transition-colors cursor-pointer flex items-center justify-center"
+                className="absolute top-4 right-4 z-30 w-12 h-12 rounded-lg border-2 border-dashed border-[rgba(119,119,119,0.3)] bg-[rgba(17,17,17,0.6)] hover:border-[rgba(119,119,119,0.6)] hover:bg-[rgba(17,17,17,0.8)] transition-colors cursor-pointer flex items-center justify-center"
                 title="Add node"
               >
                 <Plus className="h-5 w-5 text-[#8c8c8d]" />
@@ -1093,7 +1271,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                   onClick={e => handleOpenCreateMenu(e.clientX, e.clientY)}
                   className="pointer-events-auto flex flex-col items-center gap-3 cursor-pointer group"
                 >
-                  <div className="w-28 h-28 rounded-xl border-2 border-dashed border-[rgba(119,119,119,0.3)] bg-[rgba(17,17,17,0.3)] flex items-center justify-center group-hover:border-[rgba(119,119,119,0.5)] transition-colors">
+                  <div className="w-28 h-28 rounded-lg border-2 border-dashed border-[rgba(119,119,119,0.2)] bg-[rgba(17,17,17,0.3)] flex items-center justify-center group-hover:border-[rgba(119,119,119,0.4)] transition-colors">
                     <Plus className="h-8 w-8 text-[#555]" />
                   </div>
                   <span className="text-sm text-[#555] group-hover:text-[#777] transition-colors">

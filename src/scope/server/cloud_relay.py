@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import torch
 
-from .media_packets import MediaTimestamp, VideoPacket
+from .media_packets import AudioPacket, MediaTimestamp, VideoPacket
 
 if TYPE_CHECKING:
     from aiortc.mediastreams import VideoFrame
@@ -63,7 +63,7 @@ class CloudRelay:
 
         # Output queues populated by cloud callbacks
         self._frame_queue: queue.Queue = queue.Queue(maxsize=2)
-        self._audio_queue: queue.Queue = queue.Queue(maxsize=50)
+        self._audio_queue: queue.Queue[AudioPacket] = queue.Queue(maxsize=50)
 
         # Counters
         self.frames_to_cloud = 0
@@ -197,12 +197,22 @@ class CloudRelay:
             if frame.format.name in ("s16", "s16p"):
                 audio_tensor = audio_tensor / 32768.0
 
+            packet = AudioPacket(
+                audio=audio_tensor,
+                sample_rate=frame.sample_rate,
+                timestamp=MediaTimestamp(
+                    pts=frame.pts,
+                    time_base=Fraction(frame.time_base)
+                    if frame.time_base is not None
+                    else None,
+                ),
+            )
             try:
-                self._audio_queue.put_nowait((audio_tensor, frame.sample_rate))
+                self._audio_queue.put_nowait(packet)
             except queue.Full:
                 try:
                     self._audio_queue.get_nowait()
-                    self._audio_queue.put_nowait((audio_tensor, frame.sample_rate))
+                    self._audio_queue.put_nowait(packet)
                 except queue.Empty:
                     pass
         except Exception as e:
@@ -219,12 +229,12 @@ class CloudRelay:
         except queue.Empty:
             return None
 
-    def get_audio(self) -> tuple[torch.Tensor | None, int | None]:
-        """Get the next audio chunk and sample rate, or (None, None)."""
+    def get_audio(self) -> AudioPacket | None:
+        """Get the next audio packet received from cloud, or None."""
         try:
             return self._audio_queue.get_nowait()
         except queue.Empty:
-            return None, None
+            return None
 
     # ------------------------------------------------------------------
     # Lifecycle

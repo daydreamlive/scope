@@ -14,7 +14,12 @@ import torch
 from scope.core.pipelines.controller import parse_ctrl_input
 
 from .kafka_publisher import publish_event
-from .media_packets import MediaTimestamp, VideoPacket, ensure_video_packet
+from .media_packets import (
+    AudioPacket,
+    MediaTimestamp,
+    VideoPacket,
+    ensure_video_packet,
+)
 from .pipeline_manager import PipelineNotAvailableException
 from .tempo_sync import get_beat_boundary
 
@@ -93,8 +98,8 @@ class PipelineProcessor:
         # Consumed by FrameProcessor.get_audio() on the sink processor.
         # Flushed on prompt change, so only needs enough headroom for
         # bursty production (pipeline thread outpacing real-time playback).
-        self.audio_output_queue: queue.Queue[tuple[torch.Tensor, int]] = queue.Queue(
-            maxsize=10
+        self.audio_output_queue: queue.Queue[AudioPacket | tuple[torch.Tensor, int]] = (
+            queue.Queue(maxsize=10)
         )
 
         # Current parameters used by processing thread
@@ -529,7 +534,21 @@ class PipelineProcessor:
             if audio_output is not None and audio_sample_rate is not None:
                 try:
                     audio_cpu = audio_output.detach().cpu()
-                    self.audio_output_queue.put_nowait((audio_cpu, audio_sample_rate))
+                    audio_ts = output_dict.get("audio_timestamps")
+                    timestamp = MediaTimestamp()
+                    if isinstance(audio_ts, list) and audio_ts:
+                        first = audio_ts[0]
+                        if isinstance(first, MediaTimestamp):
+                            timestamp = first
+                    elif isinstance(audio_ts, MediaTimestamp):
+                        timestamp = audio_ts
+                    self.audio_output_queue.put_nowait(
+                        AudioPacket(
+                            audio=audio_cpu,
+                            sample_rate=audio_sample_rate,
+                            timestamp=timestamp,
+                        )
+                    )
                 except queue.Full:
                     logger.warning(
                         "Audio output queue full for %s, dropping audio chunk",
