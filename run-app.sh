@@ -20,8 +20,9 @@ fi
 
 : "${SCOPE_CLOUD_APP_ID:?Set SCOPE_CLOUD_APP_ID in .env.local (see .env.example)}"
 
-SCOPE_CLOUD_MODE=livepeer \
-SCOPE_CLOUD_APP_ID="$SCOPE_CLOUD_APP_ID" \
-${SCOPE_CLOUD_API_KEY:+SCOPE_CLOUD_API_KEY="$SCOPE_CLOUD_API_KEY"} \
-${LIVEPEER_DEBUG:+LIVEPEER_DEBUG="$LIVEPEER_DEBUG"} \
-uv run daydream-scope "$@"
+# Env vars sourced from .env.local are already exported; the previous
+# attempt to inline-prefix them with ${VAR:+VAR=$VAR} broke under
+# bash's word-splitting rules ("SCOPE_CLOUD_API_KEY=sk_... command not
+# found"). Just re-export and exec.
+export SCOPE_CLOUD_MODE=livepeer
+exec uv run daydream-scope "$@"

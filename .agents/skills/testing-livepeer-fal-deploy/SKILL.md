@@ -1,144 +1,211 @@
 ---
 name: testing-livepeer-fal-deploy
-description: End-to-end test harness for Scope running in Livepeer cloud mode against a deployed fal.ai app. Orchestrates git push, GitHub Actions CI build-cloud wait, deploy-staging, local scope startup, and /cloud/connect verification. Use when the user wants to test a change to `src/scope/cloud/livepeer_fal_app.py` or diagnose cloud-connect failures ("All orchestrators failed", "ACCESS_DENIED", etc.) through the real fal + orchestrator path. For a fully-local livepeer stack (no fal), use `testing-livepeer` instead.
+description: End-to-end test harness for Scope running in Livepeer cloud mode against a deployed fal.ai app. Drives the full UI + streaming flow via Playwright (camera → local scope → orchestrator → fal runner → back), or — for a fast HTTP-only smoke — runs `test-cloud-connect.sh`. Use when testing changes to `src/scope/cloud/livepeer_fal_app.py` or `src/scope/cloud/livepeer_app.py`, or when diagnosing cloud-connect failures ("All orchestrators failed", "ACCESS_DENIED", "did not receive ready message"). For a fully-local livepeer stack (no fal), use `testing-livepeer` instead.
 ---
 
 # Testing Livepeer fal Deploy
 
 ## When to use
 
-Use when testing the **deployed** livepeer cloud path end-to-end — i.e. local
-Scope client → daydream orchestrator → deployed fal app. This exercises:
+Use when testing the **deployed** livepeer path end-to-end — local Scope
+client → daydream orchestrator → deployed fal app. This exercises:
 
-- The wrapper in `src/scope/cloud/livepeer_fal_app.py` that fal actually runs.
-- The orchestrator → fal handshake (headers, auth, cold start).
-- Kafka event publishing from the fal wrapper.
+- The wrapper in `src/scope/cloud/livepeer_fal_app.py` that fal runs
+- The runner in `src/scope/cloud/livepeer_app.py` that spawns inside the
+  fal container
+- The orchestrator → fal handshake (headers, auth, cold start)
+- Kafka event publishing across wrapper + runner (full lifecycle)
 
-Do **not** use for local-only livepeer testing — that's what `testing-livepeer`
-is for (uses a prebuilt go-livepeer binary + local runner, no fal involvement).
+**Two paths, pick the right one:**
+
+- **Playwright (primary)** — real browser drives the Perform-mode UI
+  with a synthetic camera, streams through, verifies the output video
+  comes back from the cloud. This is the only path that exercises the
+  full livepeer trickle round-trip and produces every lifecycle Kafka
+  event (`pipeline_loaded`, `session_created`, `stream_started`,
+  `stream_heartbeat`, `session_closed`). Takes 2–5 minutes.
+- **`test-cloud-connect.sh` (secondary, HTTP-only)** — bash script that
+  POSTs `/api/v1/cloud/connect` and polls `/api/v1/cloud/status`. Only
+  verifies the `websocket_connected` / `websocket_disconnected` pair at
+  the wrapper layer. Useful as a fast smoke test ("did the container
+  come up?") or in `git bisect run` against cloud-connect regressions.
+  Does not produce pipeline/session/stream events.
+
+Do **not** use this skill for local-only livepeer testing — that's
+`testing-livepeer` (prebuilt go-livepeer + local runner, no fal).
 
 ## One-time setup
 
-1. Copy `.env.example` to `.env.local` and fill in real values.
-   `.env.local` is gitignored — never commit it.
-2. Required values:
-   - `SCOPE_CLOUD_APP_ID` — your fal app. The `main` env is exposed **without**
-     a `--main` suffix in the URL; non-default envs (e.g. `--preview`) include
-     the suffix.
-   - `SCOPE_CLOUD_API_KEY` — daydream cloud API key (sk_...). Without it the
-     scope client cannot call `signer.daydream.live` and orchestrator
-     discovery fails with `discover_orchestrators requires discovery_url or
-     signer_url`.
-   - `SCOPE_USER_ID` — daydream user id. Without it the runner's
-     `validate_user_access` rejects with `ACCESS_DENIED`. Find it in
-     `~/.daydream-scope/logs/scope-logs-*.log` after a successful UI connect,
-     or in a browser devtools Network tab on `/api/v1/cloud/connect`.
-3. Optional: `LIVEPEER_DEBUG=1` to surface per-orchestrator rejection reasons
-   in the scope log (crucial for diagnosing `All orchestrators failed (N tried)`).
+1. **`.env.local`**: copy `.env.example` to `.env.local` (gitignored)
+   and fill in real values:
+   - `SCOPE_CLOUD_APP_ID` — your fal app URL. For the default `main`
+     env, the URL does **not** include a `--main` suffix (e.g.
+     `daydream/scope-livepeer-emran/ws`). Non-default envs do include
+     the suffix (e.g. `--preview/ws`).
+   - `SCOPE_CLOUD_API_KEY` — daydream cloud API key (sk_...). Without
+     this the scope client can't hit `signer.daydream.live` and fails
+     with `discover_orchestrators requires discovery_url or signer_url`.
+   - `SCOPE_USER_ID` — daydream user id. The runner's
+     `validate_user_access` rejects with `ACCESS_DENIED` when missing.
+     Find it in `~/.daydream-scope/logs/scope-logs-*.log` after a
+     successful UI connect, or in devtools Network on
+     `/api/v1/cloud/connect`.
+   - (Optional) `LIVEPEER_DEBUG=1` — surfaces per-orchestrator
+     rejection reasons in scope.log; essential for diagnosing
+     `All orchestrators failed (N tried)`.
+2. **Frontend rebuild with baked-in auth** (once per local workspace):
+   ```bash
+   source .env.local
+   cd frontend && VITE_DAYDREAM_API_KEY="$SCOPE_CLOUD_API_KEY" npm run build
+   cd ..
+   ```
+   This bakes the API key into the dist bundle so the app appears
+   signed-in (otherwise Playwright hits the login screen).
+3. **Playwright setup** (once per machine):
+   ```bash
+   cd e2e
+   npm install
+   npx playwright install chromium
+   ```
+   Then install Chromium's system deps (sudo required — one-time):
+   ```bash
+   sudo apt-get install -y libnss3 libnspr4 libasound2t64
+   # or the Playwright-managed superset:
+   sudo npx playwright install-deps chromium
+   ```
+   Without these the browser fails to launch with
+   `error while loading shared libraries: libnspr4.so`.
 
-## Running the test
+## Running the Playwright test (primary)
 
-### One-shot
+```bash
+# Terminal 1 — scope (port 8000)
+./run-app.sh
+
+# Terminal 2 — test
+cd e2e
+npx playwright test
+```
+
+Expected on success (≤5 min cold, ~20 s warm):
+
+```
+Enabling cloud mode...          ✅
+Waiting for cloud connection... ✅
+Selecting passthrough model...  ✅
+Switching input source to Camera... ✅
+Starting stream...              ✅
+Verifying output stream processing... ✅ Output frames flowing
+Stopping stream...              ✅
+1 passed
+```
+
+**What the test does in livepeer terms:**
+
+1. Navigates to `localhost:8000`, switches the UI to Perform mode.
+2. Opens settings, flips Remote Inference on, waits for Connection ID
+   (proves the fal WebSocket handshake completed and
+   `websocket_connected` fired in Kafka).
+3. Selects the `passthrough` pipeline — triggers `pipeline/load`, which
+   runs on the fal runner and emits `pipeline_load_start` +
+   `pipeline_loaded`.
+4. Switches the input source to Camera — Playwright's launch args
+   `--use-fake-device-for-media-stream` and
+   `--use-fake-ui-for-media-stream` (configured in
+   `e2e/playwright.config.ts`) give `getUserMedia()` a synthetic feed.
+   This is essential: without a real MediaStream, the browser↔local
+   scope WebRTC ICE never completes, `CloudTrack._start()` is never
+   called, and the runner never gets `start_stream`.
+5. Clicks the play overlay (`[data-testid="start-stream-button"]`).
+   Frames flow via livepeer trickle through the orchestrator to the
+   fal runner; the runner emits `session_created` and `stream_started`.
+6. Waits 15 s so at least one `stream_heartbeat` fires on the runner.
+7. Asserts the **output** `<video>` inside the "Video Output" card is
+   actively playing (`currentTime > 0`). Checking any `<video>` would
+   false-positive on the local input preview.
+8. Stops the stream. Runner emits `session_closed` and eventually
+   `websocket_disconnected` when the session is reaped.
+
+## Running the quick HTTP smoke (secondary)
 
 ```bash
 ./test-cloud-connect.sh [flags]
 ```
 
-Default flow: git push current branch → wait for GitHub Actions
-`docker-build.yml build-cloud` to succeed → run `./deploy-staging.sh` →
-start scope via `./run-app.sh` → POST `/api/v1/cloud/connect` → poll
-`/api/v1/cloud/status` until connected, errored, or timed out.
+Flags: `--skip-push`, `--skip-build-wait`, `--skip-deploy`,
+`--keep-scope`, `--port N`. Env overrides:
+`TIMEOUT_CONNECT`, `TIMEOUT_HEALTH`, `TIMEOUT_CI`, etc.
 
-### Flags
-
-- `--skip-push` — don't `git push` (useful when re-testing without code
-  changes, or testing `main`).
-- `--skip-build-wait` — don't wait for CI (assumes the `-cloud` image is
-  already built for HEAD).
-- `--skip-deploy` — don't run `deploy-staging.sh` (fast iteration when only
-  the scope client changed).
-- `--full-session` — after connect, load a pipeline, start a session, verify
-  frames flow, stop, and cloud-disconnect. **Known limitation:** in livepeer
-  mode the `/api/v1/session/start` endpoint is not livepeer-compatible
-  (see `TODO` at `src/scope/server/mcp_router.py:252`), so this flag hits a
-  "Pipeline X not loaded" error. Use a manual UI test if you need the
-  `pipeline_loaded` / `session_created` / `stream_started` / `stream_heartbeat`
-  Kafka events.
-- `--keep-scope` — leave scope running after the test (don't kill).
-- `--port N` — change the local scope port (default 8000).
-
-### Env overrides
-
-`PORT`, `TIMEOUT_CONNECT` (default 180s, bump to 300+ for cold starts),
-`TIMEOUT_HEALTH`, `TIMEOUT_CI`, `TIMEOUT_PIPELINE`, `TIMEOUT_FRAMES`,
-`PIPELINE_ID`, `TEST_VIDEO`.
-
-## Exit codes
-
-Bisect-friendly — `git bisect run ./test-cloud-connect.sh` works.
+Exit codes (bisect-friendly — `git bisect run` works):
 
 | Code | Meaning |
 |---|---|
-| 0 | Connected (and if `--full-session`, frames flowed) |
-| 1 | Cloud reported an error — see `error` field in status response |
-| 2 | Timed out waiting for connect / pipeline / frames |
-| 3 | Infra failure — push / CI / deploy / scope startup |
-| 4 | Session-level failure (pipeline load, session start, no frames) |
+| 0 | Connected to cloud |
+| 1 | Cloud reported an `error` in `/cloud/status` |
+| 2 | Timed out waiting for connect |
+| 3 | Infra failure (push / CI / deploy / scope startup) |
+
+This only hits `POST /api/v1/cloud/connect` and polls status — it does
+**not** start a stream, load a pipeline on the cloud, or produce the
+session/stream events. If those are what you're after, use Playwright.
+
+A `--full-session` flag exists but hits a known gap: `/api/v1/session/start`
+is not livepeer-compatible (TODO at `src/scope/server/mcp_router.py:252`)
+and will error with `Pipeline X not loaded` in livepeer mode. The
+Playwright path is the supported way to exercise a full session.
 
 ## Logs
 
-- `/tmp/test-cloud-connect/driver.log` — script's own progress log
-- `/tmp/test-cloud-connect/scope.log` — stdout/stderr of the local scope
-  process. If cloud connect fails, grep here for `livepeer_gateway` —
-  that's where rejection reasons land when `LIVEPEER_DEBUG=1`.
+- `/tmp/test-cloud-connect/scope.log` — local scope stdout/stderr
+  (grep for `livepeer_gateway` when `LIVEPEER_DEBUG=1`)
 - `~/.daydream-scope/logs/scope-logs-*.log` — scope's rolling app logs
-  (separate from the test-captured log; useful for historical runs).
-- fal deployment dashboard — the fal container's stdout/stderr, including
-  `[KAFKA-DEBUG]` lines, runner subprocess logs, and Kafka publisher state.
-  Not accessible via CLI; open the fal.ai dashboard for the app.
+- `e2e/test-results/` — Playwright screenshots + traces on failure
+- fal dashboard — runner stdout/stderr, including `[Kafka] Published
+  event: …` lines from `scope.server.kafka_publisher` in the runner.
+  Not accessible via CLI; open <https://fal.ai/dashboard/logs>.
 
 ## Common failure signatures
 
-- **`All orchestrators failed (N tried)`** — generic; enable `LIVEPEER_DEBUG=1`
-  and re-run to get the specific per-orchestrator reason. Typical underlying
-  causes:
-  - `did not receive ready message from websocket` → fal URL wrong (e.g.
-    extra `--main` suffix) or container still cold-starting.
+- **`All orchestrators failed (N tried)`** — set `LIVEPEER_DEBUG=1` to
+  get the per-orchestrator reason. Typical root causes:
+  - `did not receive ready message from websocket` → fal URL wrong
+    (e.g. stray `--main` suffix) or container cold-starting.
   - `serverless handshake failed (ACCESS_DENIED)` → runner's
-    `validate_user_access` rejected because `SCOPE_USER_ID` was missing
-    or the daydream API couldn't find the user.
+    `validate_user_access` rejected (missing `SCOPE_USER_ID`, or
+    daydream API couldn't find the user).
 - **`discover_orchestrators requires discovery_url or signer_url`** →
-  `SCOPE_CLOUD_API_KEY` not set, so the signer fallback isn't configured.
-- **`FrameProcessor failed to start: Pipeline <id> not loaded`** — you used
-  `--full-session` in livepeer mode. Known gap; use UI for pipeline/session
-  events.
+  `SCOPE_CLOUD_API_KEY` not set; signer fallback isn't configured.
+- **Playwright: `error while loading shared libraries: libnspr4.so`** →
+  Chromium system deps missing; run the `sudo apt-get install`
+  command from setup.
+- **Playwright: test passes but ClickHouse only has
+  `websocket_connected`** — the test probably clicked stop before ICE
+  completed. Confirm the fake-device launch args are set and the
+  Camera input was selected (not File).
+- **Playwright: `FrameProcessor failed to start: Pipeline X not
+  loaded`** — you're running the HTTP script's `--full-session` flag,
+  not the Playwright test. Switch to `npx playwright test`.
 
-## Typical workflows
+## What "round-trip verified" looks like in ClickHouse
 
-**Verify a new commit works:**
-```bash
-./test-cloud-connect.sh   # full cycle
+After a successful Playwright run, `scope_cloud_events` filtered by
+your `user_id` and the `connection_id` from the `websocket_connected`
+row should contain:
+
+```
+websocket_connected          (wrapper)
+pipeline_load_start          (runner)
+pipeline_loaded              (runner)
+session_created              (runner)
+stream_started               (runner)
+stream_heartbeat × 1..N      (runner, ~every 10 s)
+stream_stopped               (runner)
+session_closed               (runner)
+websocket_disconnected       (wrapper, on session reap)
 ```
 
-**Fast iteration (no redeploy needed):**
-```bash
-./test-cloud-connect.sh --skip-push --skip-build-wait --skip-deploy
-```
-
-**Bisect a regression:**
-```bash
-git bisect start HEAD known-good-sha
-git bisect run ./test-cloud-connect.sh --skip-push
-```
-(Each iteration triggers a full CI+deploy, so bisects are slow — budget
-~10+ min per step.)
-
-## What this skill does NOT cover
-
-- Full-session event coverage (`pipeline_loaded` / `session_created` /
-  `stream_started` / `stream_heartbeat`) — those fire from the cloud runner
-  (or via WebRTC on the local side) and require a real streaming session
-  that `/api/v1/session/start` doesn't support in livepeer mode yet. Today,
-  trigger them by running scope with the UI and pushing frames through.
-- ClickHouse verification — this skill produces Kafka events; use the
-  user's ClickHouse MCP or dashboard to verify they land downstream.
+All sharing the same `user_id` and `connection_id` (= `manifest_id`).
+If any runner-emitted row is missing, something in
+`src/scope/cloud/livepeer_app.py` regressed — check the FrameProcessor
+construction around the `start_stream` handler and the explicit
+`publish_event` calls for `session_created` / `session_closed`.
