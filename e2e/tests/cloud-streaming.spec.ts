@@ -63,13 +63,24 @@ test.describe("Cloud Streaming", () => {
     // Step 4: Select passthrough pipeline
     await selectPassthroughModel(page);
 
-    // Step 5: Start streaming
+    // Step 5: Switch input source to Camera so getUserMedia() fires.
+    // Combined with the --use-fake-device-for-media-stream launch flag
+    // (see playwright.config.ts), this gives the browser a real
+    // MediaStreamTrack, which lets the browser↔local-scope WebRTC
+    // actually deliver frames — which is what triggers CloudTrack
+    // to call start_webrtc() and send the start_stream trickle
+    // message to the runner.
+    await selectCameraInput(page);
+
+    // Step 6: Start streaming
     await startStream(page);
 
-    // Step 6: Verify frames are being processed
-    await verifyStreamProcessing(page);
+    // Step 7: Verify the OUTPUT video is actually playing (frames
+    // round-tripped through the livepeer runner). Checking only
+    // "any video is playing" would false-positive on the input.
+    await verifyOutputStreamProcessing(page);
 
-    // Step 7: Stop stream
+    // Step 8: Stop stream
     await stopStream(page);
 
     console.log("✅ Cloud streaming test passed");
@@ -203,37 +214,72 @@ async function startStream(page: Page) {
 }
 
 /**
- * Verify a playing video appears. There's always 1 input <video> on
- * the page; when the stream produces frames, a second output <video>
- * appears. Poll until at least one <video> is actively playing.
+ * Switch the input source to Camera. Combined with the
+ * --use-fake-device-for-media-stream browser flag, this gives the
+ * browser a synthetic MediaStreamTrack via getUserMedia(), which is
+ * what enables a real WebRTC peer connection between the browser and
+ * local scope — the trigger for CloudTrack.start_webrtc() and the
+ * runner's start_stream control message in Livepeer mode.
  */
-async function verifyStreamProcessing(page: Page) {
-  console.log("Verifying stream processing...");
+async function selectCameraInput(page: Page) {
+  console.log("Switching input source to Camera...");
+  const cameraToggle = page.locator('[aria-label="Camera"]');
+  await expect(cameraToggle).toBeVisible({ timeout: 10000 });
+  await cameraToggle.click();
+  // Give the app a moment to request getUserMedia and attach the
+  // resulting stream to the input video element.
+  await page.waitForTimeout(2000);
+  await page.screenshot({ path: "test-results/06b-camera-selected.png" });
+  console.log("✅ Camera input selected");
+}
 
+/**
+ * Verify the *output* video inside the "Video Output" card is actually
+ * playing — i.e., frames round-tripped through the livepeer runner and
+ * came back to the browser. Checking any <video> would false-positive
+ * on the local input preview.
+ */
+async function verifyOutputStreamProcessing(page: Page) {
+  console.log("Verifying output stream processing...");
+
+  // The Video Output card owns the output <video>. The element is
+  // only rendered when `remoteStream` is set, so waiting for it to be
+  // visible implicitly waits for the stream to come up.
+  const outputCard = page
+    .locator("text=Video Output")
+    .locator("..")
+    .locator("..");
+  const outputVideo = outputCard.locator("video");
+
+  await expect(outputVideo).toBeVisible({ timeout: 120000 });
+  await page.screenshot({ path: "test-results/08a-output-rendered.png" });
+
+  // Poll until the output video is actually playing with a non-zero
+  // currentTime (frames arriving, not just the element attached).
   const MAX_WAIT_MS = 60000;
   const POLL_MS = 2000;
   const start = Date.now();
 
   while (Date.now() - start < MAX_WAIT_MS) {
-    const playing = await page.evaluate(() => {
-      const vids = Array.from(
-        document.querySelectorAll("video")
-      ) as HTMLVideoElement[];
-      return vids.some(
-        (v) => !v.paused && v.readyState >= 2 && v.currentTime > 0
-      );
+    const playing = await outputVideo.evaluate((el) => {
+      const v = el as HTMLVideoElement;
+      return !v.paused && v.readyState >= 2 && v.currentTime > 0;
     });
     if (playing) {
-      await page.screenshot({ path: "test-results/08-frames-flowing.png" });
-      console.log("✅ Frames flowing");
+      await page.screenshot({ path: "test-results/08b-frames-flowing.png" });
+      console.log("✅ Output frames flowing");
+      // Let the stream run briefly so stream_heartbeat events fire
+      // on the runner side (frame_processor.py:707 emits roughly
+      // every ~10s while the FrameProcessor is running).
+      await page.waitForTimeout(15000);
       return;
     }
     await page.waitForTimeout(POLL_MS);
   }
 
-  await page.screenshot({ path: "test-results/08-no-frames.png" });
+  await page.screenshot({ path: "test-results/08c-no-output-frames.png" });
   throw new Error(
-    `No playing video element after ${MAX_WAIT_MS}ms — frames not flowing`
+    `Output <video> element present but not playing after ${MAX_WAIT_MS}ms — frames not round-tripping`
   );
 }
 
