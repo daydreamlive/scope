@@ -18,7 +18,7 @@ export function MessageBubble({ message }: { message: AgentMessage }) {
   return (
     <div className="flex flex-col gap-1.5 max-w-[92%]">
       {message.toolCalls.length > 0 && (
-        <div className="flex flex-col gap-1">
+        <div className="rounded-md border border-[rgba(255,255,255,0.05)] bg-[#121212]/50 px-1.5 py-1 flex flex-col">
           {message.toolCalls.map(tc => (
             <ToolCallBlock key={tc.id} call={tc} />
           ))}

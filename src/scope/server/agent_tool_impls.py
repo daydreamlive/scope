@@ -86,21 +86,27 @@ class AgentTools:
     # ------------------------------------------------------------------
 
     async def list_pipelines(self) -> dict:
-        """Return all registered pipelines with minimal metadata."""
+        """Return all registered pipelines with minimal metadata.
+
+        Includes plugin-provided pipelines (e.g. ltx2, helios) — they register
+        against the same registry and appear here with no special-casing.
+        """
         resp = await self._c().get("/api/v1/pipelines/schemas")
         resp.raise_for_status()
         data = resp.json()
 
-        schemas = data.get("schemas", {}) or {}
+        schemas = data.get("pipelines", {}) or {}
         pipelines = []
         for pipeline_id, schema in schemas.items():
             pipelines.append(
                 {
                     "id": pipeline_id,
+                    "name": schema.get("name"),
+                    "description": schema.get("description"),
                     "supports_prompts": schema.get("supports_prompts", False),
                     "supports_lora": schema.get("supports_lora", False),
                     "supports_vace": schema.get("supports_vace", False),
-                    "mode_defaults": schema.get("mode_defaults", {}),
+                    "supported_modes": schema.get("supported_modes", []),
                 }
             )
         return {"pipelines": pipelines, "count": len(pipelines)}
@@ -113,10 +119,13 @@ class AgentTools:
         """
         resp = await self._c().get("/api/v1/pipelines/schemas")
         resp.raise_for_status()
-        schemas = resp.json().get("schemas", {}) or {}
+        schemas = resp.json().get("pipelines", {}) or {}
         schema = schemas.get(pipeline_id)
         if schema is None:
-            return {"error": f"pipeline '{pipeline_id}' not found"}
+            return {
+                "error": f"pipeline '{pipeline_id}' not found",
+                "available": sorted(schemas.keys()),
+            }
         return schema
 
     async def list_loras(self) -> dict:

@@ -144,8 +144,12 @@ async def run_turn(
 
     async with AgentTools(app=app, session=session) as tools:
         # Inner loop: keep calling provider while it asks for tools.
-        # Cap iterations to avoid runaway loops.
-        MAX_TOOL_ROUNDS = 12
+        # Cap iterations to avoid runaway loops. Tuned generously:
+        # a single "build a workflow" turn can legitimately chain
+        # inspect state → list pipelines → read schema → check
+        # blueprints → propose → (apply → verify) and each of those
+        # may itself be a few tool calls.
+        MAX_TOOL_ROUNDS = 40
         for _round in range(MAX_TOOL_ROUNDS):
             # Accumulate assistant blocks (text + tool_use) so we can append
             # them to session.messages as one assistant message.
