@@ -229,7 +229,5 @@ When a fal deploy looks wrong, ask these in order:
 
 ## Practical Guidance For This Repo
 
-- Keep `livepeer_fal_app.py` untouched when testing a separate Livepeer wrapper.
-- Make the Livepeer wrapper self-contained if you want the deployed app object to belong to the Livepeer entrypoint module.
 - If you must experiment, use clearly named temporary deployments and clean them up.
 - Treat the public websocket handshake as the primary success criterion.
