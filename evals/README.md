@@ -68,6 +68,7 @@ Registered in [`grader.py`](grader.py):
 | `node_present` | `{type, count?, min_items?}` | ≥ `count` UI nodes of `type`. For `prompt_list`, `min_items` asserts list length. |
 | `no_validator_errors` | _(any)_ | `_validate_proposal()` returns zero errors on the graph. |
 | `bad_handle_prefix` | `"parameter:"` | (Forbid) No edge handle starts with the prefix. |
+| `orphan_sinks` | _(any)_ | (Forbid) Every top-level `sink` node has at least one incoming top-level `stream` edge. Catches cases where the agent tacks on an extra sink that isn't wired to anything. |
 
 `wire_present` kinds:
 

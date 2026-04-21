@@ -436,6 +436,41 @@ def bad_handle_prefix(graph: dict, arg: Any) -> CheckResult:
     return CheckResult.ok_(f"no edge handle starts with {prefix!r}")
 
 
+def orphan_sinks(graph: dict, _arg: Any) -> CheckResult:
+    """Forbid check: every top-level sink must have an incoming stream edge.
+
+    Observed failure: agent occasionally emits a second ``sink`` node not
+    wired to anything, producing a valid-but-dead canvas element. Passes
+    validation (disconnected sinks aren't illegal) but is obviously wrong.
+
+    We scan top-level ``graph.edges`` for any ``stream`` edge whose
+    ``to_node`` is each top-level sink. A sink with zero such edges is an
+    orphan.
+    """
+    sinks = [n for n in _top_level_nodes(graph) if n.get("type") == "sink"]
+    if not sinks:
+        # No sinks at all isn't what this check is about — other checks
+        # can assert presence if they need to.
+        return CheckResult.ok_("no sinks to inspect")
+
+    orphans: list[str] = []
+    for s in sinks:
+        sink_id = s.get("id")
+        has_incoming = any(
+            e.get("to_node") == sink_id and e.get("kind") == "stream"
+            for e in _top_level_edges(graph)
+        )
+        if not has_incoming:
+            orphans.append(str(sink_id))
+
+    if orphans:
+        return CheckResult.fail(
+            f"{len(orphans)}/{len(sinks)} sink(s) have no incoming stream edge: "
+            f"{orphans}"
+        )
+    return CheckResult.ok_(f"all {len(sinks)} sink(s) wired")
+
+
 # ---------------------------------------------------------------------------
 # Registry
 # ---------------------------------------------------------------------------
@@ -450,6 +485,7 @@ CHECKS: dict[str, Callable[[dict, Any], CheckResult]] = {
     "wire_present": wire_present,
     "node_present": node_present,
     "bad_handle_prefix": bad_handle_prefix,
+    "orphan_sinks": orphan_sinks,
 }
 
 

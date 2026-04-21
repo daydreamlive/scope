@@ -19,3 +19,4 @@ expect:
   - no_validator_errors: true
 forbid:
   - bad_handle_prefix: "parameter:"
+  - orphan_sinks: true
