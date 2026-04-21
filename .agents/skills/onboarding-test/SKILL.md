@@ -19,7 +19,7 @@ mkdir -p /tmp/scope-onboarding-test/data /tmp/scope-onboarding-test/models
 lsof -ti:8080 | xargs kill -9 2>/dev/null
 DAYDREAM_SCOPE_DIR=/tmp/scope-onboarding-test/data \
 DAYDREAM_SCOPE_MODELS_DIR=/tmp/scope-onboarding-test/models \
-SCOPE_CLOUD_APP_ID="daydream/scope-app/ws" \
+SCOPE_CLOUD_APP_ID="daydream/scope-livepeer/ws" \
 uv run daydream-scope --port 8080 > /tmp/scope-onboarding.log 2>&1 &
 for i in $(seq 1 30); do curl -s http://localhost:8080/health > /dev/null 2>&1 && break; sleep 1; done
 ```
