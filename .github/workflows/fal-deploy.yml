@@ -11,15 +11,6 @@ on:
           - main
           - prod
         default: 'main'
-      app:
-        description: 'Which app to deploy'
-        required: true
-        type: choice
-        options:
-          - both
-          - scope-app
-          - scope-livepeer
-        default: 'both'
   workflow_run:
     workflows: ["Build and Push Docker Image"]
     types:
@@ -51,10 +42,6 @@ jobs:
         run: pip install fal
 
       - name: Deploy Scope app to fal
-        if: >
-          github.event_name == 'workflow_run' ||
-          github.event.inputs.app == 'both' ||
-          github.event.inputs.app == 'scope-app'
         env:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
@@ -68,11 +55,7 @@ jobs:
           echo "Deploying Scope app to $ENV"
           fal deploy --env $ENV --auth public src/scope/cloud/fal_app.py
 
-      - name: Deploy Livepeer runner to fal
-        if: >
-          github.event_name == 'workflow_run' ||
-          github.event.inputs.app == 'both' ||
-          github.event.inputs.app == 'scope-livepeer'
+      - name: Deploy default Livepeer runner to fal
         env:
           FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
@@ -84,8 +67,52 @@ jobs:
           fi
 
           echo "Deploying Livepeer runner to $ENV as scope-livepeer"
+          echo "Using default deploy GPU"
+
           fal deploy \
             --app-name scope-livepeer \
+            --env $ENV \
+            --auth private \
+            src/scope/cloud/livepeer_fal_app.py
+
+      - name: Deploy RTX 4090 Livepeer runner to fal
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+          SCOPE_DEPLOY_GPU: GPU-RTX4090
+        run: |
+          # Use input environment for manual dispatch, default to main for workflow_run
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          else
+            ENV="main"
+          fi
+
+          echo "Deploying Livepeer runner to $ENV as scope-livepeer-rtx4090"
+          echo "Using deploy GPU override: ${SCOPE_DEPLOY_GPU}"
+
+          fal deploy \
+            --app-name scope-livepeer-rtx4090 \
+            --env $ENV \
+            --auth private \
+            src/scope/cloud/livepeer_fal_app.py
+
+      - name: Deploy RTX 5090 Livepeer runner to fal
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
+          SCOPE_DEPLOY_GPU: GPU-RTX5090
+        run: |
+          # Use input environment for manual dispatch, default to main for workflow_run
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            ENV="${{ github.event.inputs.environment }}"
+          else
+            ENV="main"
+          fi
+
+          echo "Deploying Livepeer runner to $ENV as scope-livepeer-rtx5090"
+          echo "Using deploy GPU override: ${SCOPE_DEPLOY_GPU}"
+
+          fal deploy \
+            --app-name scope-livepeer-rtx5090 \
             --env $ENV \
             --auth private \
             src/scope/cloud/livepeer_fal_app.py
