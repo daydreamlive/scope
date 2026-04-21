@@ -78,13 +78,71 @@ Do **not** use this skill for local-only livepeer testing — that's
 
 ## Running the Playwright test (primary)
 
+When the user says "test cloud" (or any trigger in the description),
+**always deploy their current working tree before running Playwright**.
+Otherwise the test runs against whatever stale code was last deployed
+and can false-positive on their change.
+
+### Step 0 — Ask the user where to deploy
+
+Before anything else, confirm the deploy target. Use AskUserQuestion
+(or plain text prompts) and persist answers for the session:
+
+1. **Fal app name** — required. If `SCOPE_FAL_APP_NAME` is set in
+   `.env.local`, show that value and ask the user to confirm or
+   override. Otherwise ask outright (e.g. `scope-livepeer-<name>`).
+2. **Fal env** — defaults to `main`. If `SCOPE_FAL_ENV` is set in
+   `.env.local`, show and offer to override. Non-default envs (e.g.
+   `preview`) change the URL suffix in `SCOPE_CLOUD_APP_ID` — see
+   below.
+
+Once confirmed, export both for the current shell, and derive /
+overwrite `SCOPE_CLOUD_APP_ID`:
+
+| Env | `SCOPE_CLOUD_APP_ID` |
+|---|---|
+| `main` | `daydream/<app>/ws`         (no suffix) |
+| anything else | `daydream/<app>--<env>/ws`  (with suffix) |
+
+This is a fal convention — the default `main` env is exposed without
+a suffix; all other envs include `--<env>` in the URL. Getting this
+wrong produces `did not receive ready message from websocket`.
+
+### Step 1 — Sanity-check `.env.local`
+
+- `SCOPE_CLOUD_API_KEY` must be set (otherwise:
+  `discover_orchestrators requires discovery_url or signer_url`)
+- `SCOPE_USER_ID` must be set (otherwise the runner's
+  `validate_user_access` rejects with `ACCESS_DENIED`)
+
+If either is missing, stop and ask the user before deploying.
+
+### Step 2 — Kill any scope already on :8000
+
+If another scope process is bound to the port, stop it (or ask the
+user) before continuing. The run-app.sh the script starts must be the
+one under test.
+
+### Step 3 — Deploy
+
+```bash
+SCOPE_FAL_APP_NAME=<app> SCOPE_FAL_ENV=<env> ./deploy-staging.sh
+```
+
+Abort with a clear error if this fails — don't run Playwright against
+stale deployed code. Common failure: the `{git-short-sha}-cloud`
+Docker base image isn't built yet (CI for the current commit is still
+running). If that's the case, either wait for CI or have the user
+confirm they want to deploy against an older base image.
+
+### Step 4 — Start scope and run Playwright
+
 ```bash
 # Terminal 1 — scope (port 8000)
-./run-app.sh
+SCOPE_CLOUD_APP_ID=<derived-url> ./run-app.sh
 
 # Terminal 2 — test
-cd e2e
-npx playwright test
+cd e2e && npx playwright test
 ```
 
 Expected on success (≤5 min cold, ~20 s warm):
