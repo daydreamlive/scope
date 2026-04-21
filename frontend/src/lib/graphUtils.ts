@@ -5,6 +5,8 @@ import type {
   GraphEdge,
   PipelineSchemaInfo,
   LoRAFileInfo,
+  NodePortDef,
+  NodeParamDef,
 } from "./api";
 import { inferPrimitiveFieldType } from "./schemaSettings";
 import { resolveLoRAPath } from "./workflowSettings";
@@ -104,7 +106,8 @@ export interface FlowNodeData {
     | "prompt_list"
     | "prompt_blend"
     | "scheduler"
-    | "audio";
+    | "audio"
+    | "custom_node";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -385,6 +388,22 @@ export interface FlowNodeData {
 
   /* ── Tempo beat count offset ── */
   tempoBeatCountOffset?: number;
+
+  /* ── Custom node fields ── */
+  /** For custom_node: the node_type_id from the backend registry */
+  customNodeTypeId?: string;
+  /** For custom_node: display name from node definition */
+  customNodeDisplayName?: string;
+  /** For custom_node: category from node definition */
+  customNodeCategory?: string;
+  /** For custom_node: input port definitions */
+  customNodeInputs?: NodePortDef[];
+  /** For custom_node: output port definitions */
+  customNodeOutputs?: NodePortDef[];
+  /** For custom_node: current parameter values (user-editable) */
+  customNodeParams?: Record<string, unknown>;
+  /** For custom_node: parameter definitions from API (widget metadata) */
+  customNodeParamDefs?: NodeParamDef[];
 
   /* ── Node lock / pin / collapse ── */
   /** When true, parameter inputs on this node are disabled (read-only). */
@@ -782,6 +801,66 @@ export function graphConfigToFlow(
     });
   });
 
+  // Backend custom nodes (type="node"). Port metadata is hydrated later
+  // from GET /api/v1/nodes/definitions in useGraphPersistence.
+  const customNodes = graph.nodes.filter(
+    n => n.type === "node" && !isSubgraphInnerNode(n.id)
+  );
+  customNodes.forEach((n, i) => {
+    const savedX = n.x ?? undefined;
+    const savedY = n.y ?? undefined;
+    const sizeProps =
+      n.w != null || n.h != null
+        ? {
+            width: n.w ?? undefined,
+            height: n.h ?? undefined,
+            style: { width: n.w ?? undefined, height: n.h ?? undefined },
+          }
+        : {};
+    const position = {
+      x: savedX !== undefined ? savedX : START_X + COLUMN_GAP * 1.5,
+      y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
+    };
+    // Scheduler has its own React renderer — rehydrate into its native
+    // nodeType so the bespoke widget (trigger list, transport controls)
+    // comes back after a round-trip, instead of the generic custom_node UI.
+    if (n.node_type_id === "scheduler") {
+      const params = (n.params ?? {}) as Record<string, unknown>;
+      nodes.push({
+        id: n.id,
+        type: "scheduler",
+        position,
+        ...sizeProps,
+        data: {
+          label: "Scheduler",
+          nodeType: "scheduler",
+          schedulerTriggers:
+            (params.triggers as Array<{ time: number; port_name: string }>) ??
+            [],
+          schedulerLoop: (params.loop as boolean) ?? false,
+          schedulerDuration: (params.duration as number) ?? 30,
+          schedulerElapsed: 0,
+          schedulerIsPlaying: false,
+          schedulerFireCounts: {},
+          schedulerTickCount: 0,
+        },
+      });
+      return;
+    }
+    nodes.push({
+      id: n.id,
+      type: "custom_node",
+      position,
+      ...sizeProps,
+      data: {
+        label: n.node_type_id || n.id,
+        nodeType: "custom_node",
+        customNodeTypeId: n.node_type_id ?? undefined,
+        customNodeParams: (n.params as Record<string, unknown>) ?? undefined,
+      },
+    });
+  });
+
   // Convert edges - add stream: prefix to handle IDs
   // Skip edges that reference flattened inner subgraph nodes
   const edges: Edge[] = graph.edges
@@ -926,7 +1005,6 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "tempo",
   "prompt_list",
   "prompt_blend",
-  "scheduler",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
@@ -1202,6 +1280,16 @@ export function flowToGraphConfig(
       n.height ??
       n.measured?.height ??
       (typeof n.style?.height === "number" ? n.style.height : undefined);
+    const isBackendNode =
+      n.data.nodeType === "custom_node" || n.data.nodeType === "scheduler";
+    const schedulerParams =
+      n.data.nodeType === "scheduler"
+        ? {
+            triggers: n.data.schedulerTriggers ?? [],
+            loop: n.data.schedulerLoop ?? false,
+            duration: n.data.schedulerDuration ?? 30,
+          }
+        : undefined;
     return {
       id: n.id,
       type:
@@ -1211,11 +1299,23 @@ export function flowToGraphConfig(
             ? "sink"
             : n.data.nodeType === "record"
               ? "record"
-              : "pipeline",
+              : isBackendNode
+                ? "node"
+                : "pipeline",
       pipeline_id:
         n.data.nodeType === "pipeline"
           ? (n.data.pipelineId ?? null)
           : undefined,
+      node_type_id:
+        n.data.nodeType === "custom_node"
+          ? (n.data.customNodeTypeId ?? null)
+          : n.data.nodeType === "scheduler"
+            ? "scheduler"
+            : undefined,
+      params:
+        n.data.nodeType === "custom_node" && n.data.customNodeParams
+          ? n.data.customNodeParams
+          : schedulerParams,
       x: n.position.x,
       y: n.position.y,
       w: w && !Number.isNaN(w) ? w : undefined,

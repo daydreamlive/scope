@@ -386,10 +386,11 @@ async def start_stream(
                 detail=f"Invalid graph: {'; '.join(errors)}",
             )
         pipeline_ids = graph_config.get_pipeline_node_ids()
-        if not pipeline_ids:
+        backend_node_ids = graph_config.get_backend_node_ids()
+        if not pipeline_ids and not backend_node_ids:
             raise HTTPException(
                 status_code=400,
-                detail="Graph must contain at least one pipeline node",
+                detail="Graph must contain at least one pipeline or custom node",
             )
 
         pipeline_tuples = [
@@ -399,8 +400,8 @@ async def start_stream(
         ]
         pipeline_id_list = [t[1] for t in pipeline_tuples]
 
-        if not use_cloud:
-            # Local mode: load pipelines locally
+        if not use_cloud and pipeline_tuples:
+            # Local mode: load pipelines locally (skip for node-only graphs)
             await pipeline_manager.load_pipelines(pipeline_tuples)
 
         initial_params: dict = {
@@ -478,9 +479,25 @@ async def start_stream(
                 detail="FrameProcessor failed to start (check logs for details)",
             )
 
+        # Custom (backend) nodes can produce audio too — if any audio sink /
+        # audio-emitting custom node is in the graph, expect audio output.
+        expect_audio = PipelineRegistry.chain_produces_audio(pipeline_id_list)
+        if request.graph is not None and not expect_audio:
+            from scope.core.nodes.registry import NodeRegistry as _NR
+
+            for gnode in graph_config.nodes:
+                if gnode.type == "node" and gnode.node_type_id:
+                    nc = _NR.get(gnode.node_type_id)
+                    if nc is None:
+                        continue
+                    defn = nc.get_definition()
+                    if any(p.port_type == "audio" for p in defn.outputs):
+                        expect_audio = True
+                        break
+
         session = HeadlessSession(
             frame_processor=frame_processor,
-            expect_audio=PipelineRegistry.chain_produces_audio(pipeline_id_list),
+            expect_audio=expect_audio,
         )
         session.start_frame_consumer()
         webrtc_manager.add_headless_session(session)

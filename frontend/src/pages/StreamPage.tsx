@@ -2731,10 +2731,13 @@ export function StreamPage() {
         );
       }
 
-      const loadSuccess = await loadPipeline(loadItems);
-      if (!loadSuccess) {
-        console.error("Failed to load pipeline, cannot start stream");
-        return false;
+      // Node-only graphs (no pipeline nodes) skip the pipeline load step.
+      if (loadItems.length > 0) {
+        const loadSuccess = await loadPipeline(loadItems);
+        if (!loadSuccess) {
+          console.error("Failed to load pipeline, cannot start stream");
+          return false;
+        }
       }
 
       // Check video requirements based on input mode.

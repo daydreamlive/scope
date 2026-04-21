@@ -45,7 +45,8 @@ type NodeTypeKey =
   | "tempo"
   | "prompt_list"
   | "prompt_blend"
-  | "scheduler";
+  | "scheduler"
+  | "custom_node";
 
 interface NodeDefaults {
   /** The React Flow node `type` */
@@ -471,6 +472,15 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
       ],
     },
   },
+  custom_node: {
+    type: "custom_node",
+    idPrefix: "custom",
+    defaultX: 300,
+    data: {
+      label: "Custom Node",
+      nodeType: "custom_node" as const,
+    },
+  },
 };
 
 interface UseNodeFactoriesArgs {
@@ -566,8 +576,10 @@ export function useNodeFactories({
         | "tempo"
         | "prompt_list"
         | "prompt_blend"
-        | "scheduler",
-      subType?: string
+        | "scheduler"
+        | "custom_node",
+      subType?: string,
+      extraData?: Partial<FlowNodeData>
     ) => {
       if (!pendingNodePosition) return;
 
@@ -597,6 +609,12 @@ export function useNodeFactories({
         addNode("output", pendingNodePosition, {
           outputSinkType: defaultType,
           outputSinkName: defaultNames[defaultType] || "Scope",
+        });
+      } else if (type === "custom_node") {
+        addNode("custom_node", pendingNodePosition, {
+          customNodeTypeId: subType,
+          label: subType || "Custom Node",
+          ...extraData,
         });
       } else {
         addNode(type as NodeTypeKey, pendingNodePosition);

@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useEffect } from "react";
+import { useState, useMemo, useRef, useEffect, useCallback } from "react";
 import {
   Dialog,
   DialogContent,
@@ -6,6 +6,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "../ui/dialog";
+import type { FlowNodeData } from "../../lib/graphUtils";
 
 interface AddNodeModalProps {
   open: boolean;
@@ -36,8 +37,10 @@ interface AddNodeModalProps {
       | "tempo"
       | "prompt_list"
       | "prompt_blend"
-      | "scheduler",
-    subType?: string
+      | "scheduler"
+      | "custom_node",
+    subType?: string,
+    extraData?: Partial<FlowNodeData>
   ) => void;
 }
 
@@ -67,12 +70,15 @@ interface NodeCatalogItem {
     | "tempo"
     | "prompt_list"
     | "prompt_blend"
-    | "scheduler";
+    | "scheduler"
+    | "custom_node";
   subType?: string;
   name: string;
   description: string;
   color: string;
   category: string;
+  /** Full definition for custom nodes (inputs/outputs/params). */
+  customNodeDef?: Record<string, unknown>;
 }
 
 const NODE_CATALOG: NodeCatalogItem[] = [
@@ -85,8 +91,8 @@ const NODE_CATALOG: NodeCatalogItem[] = [
   },
   {
     type: "pipeline",
-    name: "Pipeline",
-    description: "Processing pipeline node",
+    name: "Node",
+    description: "Video processing node (pick a model after dropping it)",
     color: "#60a5fa",
     category: "I/O",
   },
@@ -294,7 +300,15 @@ const NODE_CATALOG: NodeCatalogItem[] = [
   },
 ];
 
-const CATEGORIES = ["All", "I/O", "Values", "Controls", "UI", "Utility"];
+const CATEGORIES = [
+  "All",
+  "I/O",
+  "Values",
+  "Controls",
+  "UI",
+  "Utility",
+  "Plugins",
+];
 
 interface TooltipState {
   text: string;
@@ -388,10 +402,50 @@ export function AddNodeModal({
 }: AddNodeModalProps) {
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [customNodes, setCustomNodes] = useState<NodeCatalogItem[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    fetch("/api/v1/nodes/definitions")
+      .then(r => r.json())
+      .then(data => {
+        // The unified endpoint returns both pipelines (pipeline_meta != null)
+        // and plain custom nodes. Pipelines are still added via the hardcoded
+        // "Pipeline" catalog entry (placeholder + dropdown); the scheduler
+        // has its own catalog entry with a bespoke widget. Filter both out
+        // of the plugin listing to avoid duplication.
+        const items: NodeCatalogItem[] = (data.nodes ?? [])
+
+          .filter(
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            (n: any) =>
+              n.pipeline_meta == null && n.node_type_id !== "scheduler"
+          )
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          .map((n: any) => ({
+            type: "custom_node" as const,
+            subType: n.node_type_id,
+            name: n.display_name || n.node_type_id,
+            description: n.description || "",
+            color: "#9ca3af",
+            category: "Plugins",
+            customNodeDef: n,
+          }));
+        setCustomNodes(items);
+      })
+      .catch(() => {
+        /* ignore — custom nodes just won't appear */
+      });
+  }, [open]);
+
+  const fullCatalog = useMemo(
+    () => [...NODE_CATALOG, ...customNodes],
+    [customNodes]
+  );
 
   const filteredItems = useMemo(() => {
     const lowerSearch = searchText.toLowerCase();
-    return NODE_CATALOG.filter(item => {
+    return fullCatalog.filter(item => {
       const matchesSearch =
         !lowerSearch ||
         item.name.toLowerCase().includes(lowerSearch) ||
@@ -400,14 +454,37 @@ export function AddNodeModal({
         activeCategory === "All" || item.category === activeCategory;
       return matchesSearch && matchesCategory;
     });
-  }, [searchText, activeCategory]);
+  }, [searchText, activeCategory, fullCatalog]);
 
-  const handleSelect = (item: NodeCatalogItem) => {
-    onSelectNodeType(item.type, item.subType);
-    onClose();
-    setSearchText("");
-    setActiveCategory("All");
-  };
+  const handleSelect = useCallback(
+    (item: NodeCatalogItem) => {
+      if (item.type === "custom_node" && item.customNodeDef) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const def = item.customNodeDef as any;
+        onSelectNodeType("custom_node", item.subType, {
+          customNodeTypeId: def.node_type_id,
+          customNodeDisplayName: def.display_name || def.node_type_id,
+          customNodeCategory: def.category || "",
+          customNodeInputs: def.inputs || [],
+          customNodeOutputs: def.outputs || [],
+          customNodeParamDefs: def.params || [],
+          customNodeParams: Object.fromEntries(
+            (def.params || [])
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .filter((p: any) => p.default != null)
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              .map((p: any) => [p.name, p.default])
+          ),
+        });
+      } else {
+        onSelectNodeType(item.type, item.subType);
+      }
+      onClose();
+      setSearchText("");
+      setActiveCategory("All");
+    },
+    [onSelectNodeType, onClose]
+  );
 
   const handleClose = () => {
     onClose();

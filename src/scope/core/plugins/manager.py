@@ -550,30 +550,36 @@ class PluginManager:
         with self._lock:
             return list(self._failed_plugins)
 
-    def register_plugin_pipelines(self, registry: "PipelineRegistry") -> None:
-        """Call register_pipelines hook for all plugins.
+    def register_plugin_nodes(self, registry: Any = None) -> None:
+        """Fire ``register_nodes`` and ``register_pipelines`` hooks.
 
-        Args:
-            registry: PipelineRegistry to register pipelines with
+        Both hooks plant into the unified :class:`NodeRegistry` storage,
+        so existing plugins using ``register_pipelines(register)`` keep
+        working unchanged alongside new ones using ``register_nodes``.
+        The ``registry`` argument is accepted for legacy callers but
+        ignored — the unified storage is always used.
         """
+        from scope.core.nodes.registry import NodeRegistry
+        from scope.core.pipelines.registry import PipelineRegistry
+
+        del registry  # legacy parameter, kept for callsite compat
+
         with self._lock:
-            # Clear previous mappings
             self._pipeline_to_plugin.clear()
 
-            def register_callback(pipeline_class: Any) -> None:
-                """Callback function passed to plugins."""
-                config_class = pipeline_class.get_config_class()
-                pipeline_id = config_class.pipeline_id
-                registry.register(pipeline_id, pipeline_class)
+            def register_callback(node_class: Any) -> None:
+                NodeRegistry.register(node_class)
+                node_id = getattr(node_class, "node_type_id", None) or (
+                    node_class.get_config_class().pipeline_id
+                )
+                logger.info(f"Registered plugin node: {node_id}")
 
-                # Track which plugin owns this pipeline
-                # We'll update this mapping after the hook call
-                logger.info(f"Registered plugin pipeline: {pipeline_id}")
-
+            self._pm.hook.register_nodes(register=register_callback)
             self._pm.hook.register_pipelines(register=register_callback)
+            self._update_pipeline_plugin_mapping(PipelineRegistry)
 
-            # Update pipeline-to-plugin mapping by checking which plugins provide which pipelines
-            self._update_pipeline_plugin_mapping(registry)
+    # Backwards-compat alias for internal callers using the legacy name.
+    register_plugin_pipelines = register_plugin_nodes
 
     def _update_pipeline_plugin_mapping(self, registry: "PipelineRegistry") -> None:
         """Update the mapping of pipeline IDs to plugin names."""
@@ -1658,10 +1664,15 @@ def load_plugins() -> None:
     get_plugin_manager().load_plugins()
 
 
-def register_plugin_pipelines(registry: "PipelineRegistry") -> None:
-    """Call register_pipelines hook for all plugins.
+def register_plugin_nodes(registry: Any = None) -> None:
+    """Fire ``register_nodes`` + ``register_pipelines`` hooks.
 
-    Args:
-        registry: PipelineRegistry to register pipelines with
+    Both hookspecs plant into the unified :class:`NodeRegistry` storage,
+    so old and new plugins coexist. The ``registry`` argument is kept
+    for legacy callers and ignored.
     """
-    get_plugin_manager().register_plugin_pipelines(registry)
+    get_plugin_manager().register_plugin_nodes(registry)
+
+
+# Backwards-compat alias for internal callers using the legacy name.
+register_plugin_pipelines = register_plugin_nodes
