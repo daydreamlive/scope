@@ -55,7 +55,6 @@ jobs:
         run: npm run dist:win
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          SCOPE_CLOUD_APP_ID: daydream/scope-app/ws
 
       - name: Sign files with Azure Trusted Signing
         if: env.AZURE_CLIENT_ID != ''
@@ -156,7 +155,6 @@ jobs:
         run: npm run dist:mac
         env:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          SCOPE_CLOUD_APP_ID: daydream/scope-app/ws
           CSC_IDENTITY_AUTO_DISCOVERY: ${{ env.MACOS_SIGNING_CERT != '' }}
 
       - name: Clean up keychain

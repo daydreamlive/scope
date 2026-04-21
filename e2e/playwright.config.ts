@@ -5,10 +5,10 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * The app is started locally with:
  *   VITE_DAYDREAM_API_KEY=... uv run build
- *   SCOPE_CLOUD_APP_ID=scope-pr-<N> uv run daydream-scope
+ *   SCOPE_CLOUD_APP_ID=daydream/scope-livepeer-pr-<N>--preview/ws uv run daydream-scope
  *
  * This runs the app at localhost:8000 with the API key handling auth
- * and SCOPE_CLOUD_APP_ID pointing to the fal deployment.
+ * and SCOPE_CLOUD_APP_ID pointing to the Livepeer fal deployment.
  */
 export default defineConfig({
   testDir: "./tests",

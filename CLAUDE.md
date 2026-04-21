@@ -90,61 +90,7 @@ This documentation can be used to understand the architecture of the project:
 
 ## Local Cloud Testing
 
-Test the cloud relay flow locally by running two Scope instances — one acting as the "cloud" relay server.
-
-**Environment variables:**
-
-- `SCOPE_CLOUD_WS=1` — enables the `/ws` WebSocket endpoint on a Scope instance, making it act as a cloud relay server
-- `SCOPE_CLOUD_MODE=direct` — selects the direct WebSocket backend (`cloud_connection_manager`) instead of the default Livepeer-backed relay. Required for local cloud testing because Livepeer mode expects an orchestrator/signer
-- `SCOPE_CLOUD_WS_URL` — overrides the cloud WebSocket URL so the connecting instance points to your local "cloud" instead of fal.ai
-- `SCOPE_CLOUD_APP_ID` — app ID for the connection; must end in `/ws` (e.g., `local/ws`), enforced by `livepeer_client._ws_url_from_app_id`
-
-**Setup (two terminals):**
-
-```bash
-# Terminal 1 — "cloud" instance (relay server):
-SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
-
-# Terminal 2 — "local" instance (connects to cloud):
-SCOPE_CLOUD_MODE=direct SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local/ws uv run daydream-scope --port 8022
-```
-
-Open <http://localhost:8022>, connect to cloud from the UI, load a pipeline, and start streaming. The local instance connects via WebSocket to the "cloud" instance on port 8002, which proxies WebRTC signaling and API requests back to itself.
-
-**Key files:**
-
-- `cloud/dev_app.py` — development-only WebSocket handler mimicking the fal.ai cloud protocol
-- `server/cloud_connection.py` — client-side connection manager (`SCOPE_CLOUD_WS_URL` override in `_build_ws_url()`)
-- `server/mcp_router.py` — headless session endpoints and cloud output wiring (`_wire_cloud_outputs`)
-- `server/cloud_webrtc_client.py` — WebRTC client that sends frames to cloud and receives output
-- `server/cloud_relay.py` — frame relay between FrameProcessor and cloud WebRTC
-- `server/headless.py` — HeadlessSession with frame consumer and per-sink frame capture
-- `server/sink_manager.py` — per-sink queue routing and recording coordination
-- `server/graph_executor.py` — graph validation and pipeline wiring
-- `server/pipeline_manager.py` — pipeline loading and aliasing (node_id → pipeline_id mapping)
-
-**Cloud frame flow architecture (local cloud dev):**
-
-```
-Local (8022)                              Cloud (8002)
-─────────────                             ────────────
-SourceManager reads video files
-  → FrameProcessor._on_hardware_source_frame()
-  → CloudRelay.send_frame_to_source()
-  → CloudWebRTCClient.input_tracks[i]    → WebRTC track received
-     (WebRTC)                             → VideoProcessingTrack.recv()
-                                          → FrameProcessor.put_to_source()
-                                          → GraphExecutor processes pipeline(s)
-                                          → SinkOutputTrack(s) send output
-  CloudWebRTCClient receives tracks ←     ← WebRTC output tracks
-  output_handlers[0] = primary sink       (track 0: primary sink)
-  output_handlers[1..N] = extra sinks     (track 1+: extra sinks, record nodes)
-  _wire_cloud_outputs() routes to:
-    - sink_manager._sink_queues_by_node (per-sink queues)
-    - recording_coordinator queues (per-record-node)
-  HeadlessSession._consume_frames()
-    reads from per-sink queues → _last_frames_by_sink
-```
+For local Livepeer cloud testing, follow `.agents/skills/testing-livepeer/SKILL.md`.
 
 ## MCP Server Testing
 
@@ -299,45 +245,6 @@ for name, color in [('test', (0,0,255)), ('test1', (0,255,0)), ('test2', (255,0,
 - `frames_in > 0, frames_out = 0` → pipeline processing failing
 - All sinks return same frame → per-sink routing issue in HeadlessSession
 - Syphon source black/missing → check logs for `"Syphon server not found"` — verify source_name matches display name from discovery
-
-## MCP Server Testing with Local Cloud Dev
-
-**Only use this section when the user explicitly asks for local cloud / two-instance testing.**
-
-Test the cloud relay flow locally by running two Scope instances — one acting as the "cloud" relay server. This is for testing the cloud WebRTC relay path specifically.
-
-**Setup (two instances):**
-
-NOTE: Port 8022 is often used by Cursor IDE on macOS. Use port 8033 instead for the local instance.
-
-```bash
-lsof -ti:8002 -ti:8033 | xargs kill -9 2>/dev/null
-
-# Cloud instance (start first):
-CUDA_VISIBLE_DEVICES="" SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002 > /tmp/cloud.log 2>&1 &
-for i in $(seq 1 30); do curl -s http://localhost:8002/health > /dev/null 2>&1 && break; sleep 1; done
-
-# Local instance (start after cloud is healthy):
-CUDA_VISIBLE_DEVICES="" SCOPE_CLOUD_MODE=direct SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local/ws uv run daydream-scope --port 8033 > /tmp/local.log 2>&1 &
-for i in $(seq 1 30); do curl -s http://localhost:8033/health > /dev/null 2>&1 && break; sleep 1; done
-```
-
-**Additional cloud-specific steps (before resolve/load):**
-
-```bash
-# Connect to cloud:
-curl -s -X POST http://localhost:8033/api/v1/cloud/connect -H 'Content-Type: application/json' -d '{"app_id": "local/ws"}'
-# Wait and verify:
-sleep 2 && curl -s http://localhost:8033/api/v1/cloud/status
-```
-
-Then follow the same test sequence as single-instance mode above. All session/frame/recording endpoints go to port 8033 (local), not 8002 (cloud). Pipeline load is automatically proxied to cloud.
-
-**Cloud-specific debugging:**
-
-- `frames_to_cloud > 0, frames_from_cloud = 0` → cloud is not sending output back; check cloud logs
-- Both instances write separate log files to `~/.daydream-scope/logs/` — the `/api/v1/logs/tail` endpoint returns the most recent file alphabetically, which may be the wrong instance's logs. Read the actual log files with `ls -t ~/.daydream-scope/logs/scope-logs-*.log | head -2` to find both
-- Cloud status: `GET /api/v1/cloud/status` on port 8033
 
 ## Contributing Requirements
 

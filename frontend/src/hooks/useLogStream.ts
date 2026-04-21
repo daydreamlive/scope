@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useCloudContext } from "../lib/cloudContext";
 
 const MAX_LOG_LINES = 2000;
 const LOCAL_POLL_INTERVAL_MS = 2000;
@@ -27,7 +26,6 @@ export function useLogStream() {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [isOpen, setIsOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
-  const { adapter, isCloudMode } = useCloudContext();
   const offsetRef = useRef(0);
   const isOpenRef = useRef(false);
 
@@ -49,16 +47,8 @@ export function useLogStream() {
     }
   }, []);
 
-  // Direct cloud mode: receive logs via WebSocket push
+  // Poll /api/v1/logs/tail
   useEffect(() => {
-    if (!isCloudMode || !adapter) return;
-    return adapter.onLogs(addLines);
-  }, [adapter, isCloudMode, addLines]);
-
-  // Local / relay mode: poll /api/v1/logs/tail
-  useEffect(() => {
-    if (isCloudMode) return;
-
     const poll = async () => {
       try {
         const resp = await fetch(
@@ -79,7 +69,7 @@ export function useLogStream() {
     poll();
     const interval = setInterval(poll, LOCAL_POLL_INTERVAL_MS);
     return () => clearInterval(interval);
-  }, [isCloudMode, addLines]);
+  }, [addLines]);
 
   const clearLogs = useCallback(() => {
     setLogs([]);

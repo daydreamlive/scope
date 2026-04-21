@@ -1,6 +1,6 @@
 ---
 name: testing-livepeer
-description: Test Scope in Livepeer mode end to end using a prebuilt `go-livepeer` artifact from the `ja/serverless` PR, `uv run --extra livepeer livepeer-runner`, and Scope with `SCOPE_CLOUD_MODE=livepeer`. Use when the user mentions Livepeer mode, `livepeer-runner`, `SCOPE_CLOUD_MODE=livepeer`, or local serverless testing. Pair with `testing-scope-mcp` when the test path should be driven through Scope's MCP server.
+description: Test Scope locally in Livepeer mode end to end using a prebuilt `go-livepeer` artifact from the `ja/serverless` PR, `uv run --extra livepeer livepeer-runner`, and Scope. Use when the user mentions Livepeer mode, `livepeer-runner`, or local serverless testing. Pair with `testing-scope-mcp` when the test path should be driven through Scope's MCP server.
 ---
 
 # Testing Livepeer
@@ -13,7 +13,7 @@ Default assumptions:
 - Use a prebuilt `go-livepeer` binary from the `ja/serverless` PR artifacts — never build from source
 - Run the Livepeer orchestrator locally on `localhost:8935`
 - Run `livepeer-runner` with `LIVEPEER_DEV_MODE=1 SCOPE_PORT=9001 UV_NO_SYNC=1 uv run --extra livepeer livepeer-runner`
-- Launch Scope with `SCOPE_CLOUD_MODE=livepeer`
+- Launch Scope and connect to cloud via `POST /api/v1/cloud/connect`
 - Keep iterating until the end-to-end path under test actually works
 
 ## Standard Workflow
@@ -110,7 +110,6 @@ The runner has no `/health` endpoint; verify by checking logs and that port `800
 LIVEPEER_DEV_MODE=1 \
 LIVEPEER_SIGNER=off \
 LIVEPEER_ORCH_URL=localhost:8935 \
-SCOPE_CLOUD_MODE=livepeer \
 UV_NO_SYNC=1 \
 uv run daydream-scope --no-browser --port 8022
 ```
@@ -125,7 +124,7 @@ Verify in this order, and do not skip ahead:
 1. `go-livepeer` runs and accepts `serverless.json`
 2. `livepeer-runner` starts on `ws://localhost:8001/ws` and stays running
 3. Scope starts without import, config, or OSC port-collision errors
-4. Scope operates in `SCOPE_CLOUD_MODE=livepeer`
+4. Scope operates in Livepeer mode
 5. The specific user-facing behavior works end to end
 
 Do not declare success after partial recovery. The final check must cover the full Livepeer-mode scenario the user cares about. A rerun after any fix must behave consistently.

@@ -459,7 +459,7 @@ class CloudSinkOutputTrack(MediaStreamTrack):
 
 
 class CloudSourceInputHandler:
-    """Bridges a browser source track to a cloud ``FrameInputTrack``.
+    """Bridges a browser source track to a cloud input track.
 
     Reads frames from *browser_track* and pushes them into
     *cloud_input_track* which is on the relay→cloud WebRTC connection.

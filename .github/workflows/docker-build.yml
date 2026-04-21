@@ -51,8 +51,6 @@ jobs:
     runs-on: ubuntu-latest
 
     outputs:
-      fal_app_id: ${{ steps.deploy.outputs.fal_app_id }}
-      fal_ws_url: ${{ steps.deploy.outputs.fal_ws_url }}
       livepeer_fal_app_id: ${{ steps.deploy_livepeer.outputs.livepeer_fal_app_id }}
       livepeer_fal_ws_url: ${{ steps.deploy_livepeer.outputs.livepeer_fal_ws_url }}
 
@@ -69,34 +67,6 @@ jobs:
 
       - name: Install fal
         run: pip install fal
-
-      - name: Deploy to fal (PR environment)
-        id: deploy
-        env:
-          FAL_KEY: ${{ secrets.FAL_KEY }}
-        run: |
-          set -euo pipefail
-
-          PR_NUMBER="${{ needs.build-cloud.outputs.pr_number }}"
-
-          APP_NAME="scope-pr-${PR_NUMBER}"
-
-          echo "Deploying PR #${PR_NUMBER} to fal as ${APP_NAME}"
-
-          fal deploy \
-            --app-name "$APP_NAME" \
-            --env preview \
-            --auth public \
-            src/scope/cloud/fal_app.py 2>&1 | tee deploy_output.txt
-
-          FAL_APP_ID="daydream/${APP_NAME}--preview"
-          FAL_WS_URL="wss://fal.run/${FAL_APP_ID}/ws"
-
-          echo "fal_app_id=${FAL_APP_ID}" >> $GITHUB_OUTPUT
-          echo "fal_ws_url=${FAL_WS_URL}" >> $GITHUB_OUTPUT
-
-          echo "Deployed to: ${FAL_APP_ID}"
-          echo "WebSocket URL: ${FAL_WS_URL}"
 
       - name: Deploy Livepeer runner to fal (PR environment)
         id: deploy_livepeer
@@ -131,8 +101,6 @@ jobs:
         with:
           script: |
             const prNumber = ${{ github.event.pull_request.number }};
-            const falAppId = '${{ steps.deploy.outputs.fal_app_id }}';
-            const falWsUrl = '${{ steps.deploy.outputs.fal_ws_url }}';
             const livepeerFalAppId = '${{ steps.deploy_livepeer.outputs.livepeer_fal_app_id }}';
             const livepeerFalWsUrl = '${{ steps.deploy_livepeer.outputs.livepeer_fal_ws_url }}';
             const shortSha = '${{ needs.build-cloud.outputs.short_sha }}';
@@ -141,8 +109,6 @@ jobs:
 
             | | |
             |---|---|
-            | **App ID** | \`${falAppId}\` |
-            | **WebSocket** | \`${falWsUrl}\` |
             | **Commit** | \`${shortSha}\` |
 
             ### Livepeer Runner
@@ -155,7 +121,7 @@ jobs:
 
             ### Testing Livepeer Mode
             \`\`\`
-            SCOPE_CLOUD_MODE=livepeer SCOPE_CLOUD_APP_ID="${livepeerFalAppId}/ws" uv run daydream-scope
+            SCOPE_CLOUD_APP_ID="${livepeerFalAppId}/ws" uv run daydream-scope
             \`\`\`
 
             `;

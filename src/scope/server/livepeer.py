@@ -1,8 +1,4 @@
-"""LivepeerConnection for relay mode.
-
-This manager mirrors the subset of CloudConnectionManager's interface used by
-CloudTrack/FrameProcessor, but routes media and control over Livepeer.
-"""
+"""Livepeer cloud mode."""
 
 from __future__ import annotations
 
@@ -30,11 +26,6 @@ if os.getenv("LIVEPEER_DEBUG"):
     logging.getLogger("livepeer_gateway").setLevel(logging.DEBUG)
     logging.getLogger(__name__).setLevel(logging.DEBUG)
     logging.getLogger("scope.server.livepeer_client").setLevel(logging.DEBUG)
-
-
-def is_livepeer_enabled() -> bool:
-    """Check if Livepeer mode is enabled via environment variables."""
-    return os.getenv("SCOPE_CLOUD_MODE", "livepeer").lower() == "livepeer"
 
 
 class LivepeerConnection:

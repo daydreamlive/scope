@@ -1,12 +1,12 @@
 # Scope E2E Tests
 
-End-to-end tests for Scope cloud streaming via fal.ai.
+End-to-end tests for Scope onboarding and Livepeer cloud workflows.
 
 ## Overview
 
-These tests verify the full cloud streaming flow:
+These tests verify the full cloud flow:
 1. Login to Daydream web app
-2. Connect to cloud mode (fal deployment)
+2. Connect to Livepeer cloud mode
 3. Start a stream with the passthrough model
 4. Verify frames are being processed
 5. Stop stream
@@ -15,7 +15,7 @@ These tests verify the full cloud streaming flow:
 
 - Node.js 22+
 - A Daydream test account
-- A fal deployment to test against
+- A deployed Livepeer runner to test against
 
 ## Setup
 
@@ -31,7 +31,7 @@ npx playwright install --with-deps chromium
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `FAL_WS_URL` | Yes | WebSocket URL for the fal deployment (e.g., `wss://fal.run/livepeer/scope-pr-123/ws`) |
+| `SCOPE_CLOUD_APP_ID` | Yes | Livepeer fal app ID (e.g., `daydream/scope-livepeer-pr-123--preview/ws`) |
 | `DAYDREAM_TEST_EMAIL` | Yes | Test user email for Daydream login |
 | `DAYDREAM_TEST_PASSWORD` | Yes | Test user password |
 | `DAYDREAM_BASE_URL` | No | Base URL for Daydream app (default: `https://app.daydream.live`) |
@@ -40,7 +40,7 @@ npx playwright install --with-deps chromium
 
 ```bash
 # Headless mode (CI)
-FAL_WS_URL=wss://fal.run/livepeer/scope/ws \
+SCOPE_CLOUD_APP_ID=daydream/scope-livepeer--prod/ws \
 DAYDREAM_TEST_EMAIL=test@example.com \
 DAYDREAM_TEST_PASSWORD=secret \
 npm test
@@ -68,7 +68,7 @@ npm run report
 These tests run automatically on every PR via GitHub Actions:
 
 1. **Docker Build** workflow builds the image
-2. **Deploy PR to fal** workflow deploys to a PR-specific fal app
+2. **Deploy PR to fal** workflow deploys a PR-specific Livepeer runner
 3. **E2E Tests** workflow runs these tests against the deployment
 
 Results are posted as comments on the PR.
@@ -77,9 +77,6 @@ Results are posted as comments on the PR.
 
 ```
 e2e/
-├── tests/
-│   ├── auth.setup.ts       # Authentication setup (runs first)
-│   └── cloud-streaming.spec.ts  # Main cloud streaming test
 ├── playwright.config.ts    # Playwright configuration
 ├── package.json
 └── README.md

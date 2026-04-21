@@ -157,8 +157,7 @@ export function useGraphState(
     Record<string, PipelineSchemaInfo>
   >({});
 
-  const { getPipelineSchemas, getHardwareInfo, isCloudMode, isReady } =
-    useApi();
+  const { getPipelineSchemas, getHardwareInfo } = useApi();
   const { isConnected: isCloudConnected } = useCloudStatus();
   const { pipelinesVersion } = usePipelinesContext();
   const [hardwareInfo, setHardwareInfo] = useState<HardwareInfoResponse | null>(
@@ -166,7 +165,6 @@ export function useGraphState(
   );
 
   useEffect(() => {
-    if (isCloudMode && !isReady) return;
     let mounted = true;
     getPipelineSchemas()
       .then(schemas => {
@@ -191,14 +189,7 @@ export function useGraphState(
     return () => {
       mounted = false;
     };
-  }, [
-    getPipelineSchemas,
-    getHardwareInfo,
-    isCloudMode,
-    isReady,
-    isCloudConnected,
-    pipelinesVersion,
-  ]);
+  }, [getPipelineSchemas, getHardwareInfo, isCloudConnected, pipelinesVersion]);
 
   const nodesRef = useRef(nodes);
   nodesRef.current = nodes;

@@ -140,19 +140,13 @@ def create_mcp_server(base_url: str | None = None) -> FastMCP:
     ) -> str:
         """Connect to cloud for remote GPU inference.
 
-        For local dev testing, start two Scope instances:
-          Terminal 1 (cloud):  SCOPE_CLOUD_WS=1 uv run daydream-scope --port 8002
-          Terminal 2 (local):  SCOPE_CLOUD_MODE=direct SCOPE_CLOUD_WS_URL=ws://localhost:8002/ws SCOPE_CLOUD_APP_ID=local/ws uv run daydream-scope --port 8022
-
-        Then connect MCP to the local instance (port 8022) and call this tool.
-        When env vars SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_WS_URL are set,
-        app_id and api_key can be omitted. The app id must end in `/ws` and
-        SCOPE_CLOUD_MODE=direct is required to bypass the default Livepeer
-        orchestrator discovery path.
+        Connects Scope to the configured Livepeer cloud backend.
+        Then connect MCP to the local Scope instance and call this tool.
+        When env var ``SCOPE_CLOUD_APP_ID`` is set, ``app_id`` can be omitted.
 
         Args:
             app_id: Cloud app ID (optional if set via env var SCOPE_CLOUD_APP_ID)
-            api_key: Cloud API key (optional if set via env var or for local dev testing)
+            api_key: Cloud API key (optional if set via env var)
         """
         body: dict = {}
         if app_id is not None:
