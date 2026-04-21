@@ -56,6 +56,9 @@ export function ApiKeysTab({ isActive }: ApiKeysTabProps) {
           return next;
         });
         await fetchKeys();
+        // Let the agent chat drawer re-read its config so the "no key
+        // configured" banner disappears without a reload.
+        window.dispatchEvent(new CustomEvent("scope:agent-config-changed"));
       }
     } catch (error) {
       toast.error(
@@ -82,6 +85,7 @@ export function ApiKeysTab({ isActive }: ApiKeysTabProps) {
           return next;
         });
         await fetchKeys();
+        window.dispatchEvent(new CustomEvent("scope:agent-config-changed"));
       }
     } catch (error) {
       toast.error(

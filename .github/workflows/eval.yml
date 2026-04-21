@@ -1,0 +1,65 @@
+name: Agent Evals
+
+# Manual-dispatch only. These evals hit the live Anthropic API, so we do NOT
+# run them on push/pull_request — they cost money and are inherently noisy.
+on:
+  workflow_dispatch:
+    inputs:
+      case:
+        description: "Case name to run (blank = all cases)"
+        required: false
+        default: ""
+      runs:
+        description: "Samples per case"
+        required: false
+        default: "5"
+      model:
+        description: "Model id override (blank = default)"
+        required: false
+        default: ""
+      fail_threshold:
+        description: "Overall pass-rate threshold (0-100; blank = no gate)"
+        required: false
+        default: ""
+
+jobs:
+  evals:
+    runs-on: ubuntu-latest
+    name: Run Scope agent evals
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          version: "0.9.11"
+
+      - name: Install dependencies
+        run: uv sync --group dev
+
+      - name: Run evals
+        shell: bash
+        run: |
+          args=(--runs "${{ inputs.runs }}")
+          if [ -n "${{ inputs.case }}" ]; then
+            args+=(--case "${{ inputs.case }}")
+          fi
+          if [ -n "${{ inputs.model }}" ]; then
+            args+=(--model "${{ inputs.model }}")
+          fi
+          if [ -n "${{ inputs.fail_threshold }}" ]; then
+            args+=(--fail-threshold "${{ inputs.fail_threshold }}")
+          fi
+          uv run python -m evals "${args[@]}"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-artifacts
+          path: evals/outputs/
+          retention-days: 14

@@ -1,0 +1,22 @@
+name: vague-capture-moments
+description: |
+  Deliberately vague prompt — user says what they want to *do*, not which
+  pipeline or what kind of node graph. Graders only check the bits that the
+  intent clearly implies: camera/webcam source, *some* pipeline, and a way
+  to capture output. This pressure-tests the agent's ability to fill gaps.
+prompt: |
+  I want to play around with my webcam and capture anything cool that happens.
+  Set up something simple I can tweak live.
+runs: 5
+expect:
+  # Intent is clear: there must be at least one generative pipeline. We do
+  # NOT assert *which* pipeline — the agent gets to pick.
+  - pipelines_count_at_least: 1
+  # Intent is clear: a way to record / capture output.
+  - node_present: { type: record }
+  - wire_present: { kind: pipeline_to_record }
+  - no_validator_errors: true
+forbid:
+  - bad_handle_prefix: "parameter:"
+  - orphan_sinks: true
+  - overlapping_nodes: true

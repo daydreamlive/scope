@@ -1,0 +1,374 @@
+{
+  "$comment": "UI node-type catalog. Served by the agent via list_node_types. When you add a new node component, append an entry here so the agent can compose with it.",
+  "$handle_convention": {
+    "note": "Every React Flow edge handle ID has the shape '<kind>:<name>'. 'param:<name>' is an event/value port; 'stream:<name>' is a frame/audio port. Example valid handle IDs: 'param:value', 'param:noise_scale', 'param:__prompt', 'param:__vace', 'stream:video', 'stream:vace_input_frames'. Do NOT use 'parameter:<name>' — it is invalid.",
+    "aggregate_pipeline_handles": {
+      "param:__prompt": "Pipeline prompt aggregate — connect from any string-valued output (primitive value, control value, prompt_blend prompts, subgraph prompt output). One wire replaces the built-in prompt text field.",
+      "param:__vace": "Pipeline VACE aggregate — connect from a 'vace' node's 'param:__vace' output. Pipeline must have supports_vace=true (check get_pipeline_handles).",
+      "param:__loras": "Pipeline LoRA aggregate — connect from a 'lora' node's 'param:lora' output. Pipeline must have supports_lora=true."
+    },
+    "pipeline_stream_inputs": [
+      "stream:video — required frame input on every compute pipeline",
+      "stream:vace_input_frames — only on VACE-capable pipelines",
+      "stream:vace_input_masks — only on VACE-capable pipelines"
+    ],
+    "subgraph_rule": "External edges reference a subgraph via the NAMES declared in 'data.subgraphInputs[].name' / 'data.subgraphOutputs[].name'. The edge handle is 'param:<that name>'. Internal wiring lives in 'data.subgraphNodes' + 'data.subgraphEdges'.",
+    "authoritative_source": "frontend/src/lib/graphUtils.ts -> buildHandleId(). When in doubt call get_pipeline_handles(pipeline_id) for an exact list of targetable handles on a given pipeline."
+  },
+  "version": 2,
+  "node_types": [
+    {
+      "type": "source",
+      "label": "Source",
+      "category": "io",
+      "description": "External input (camera, video file, Spout, NDI, Syphon).",
+      "config": {
+        "source_mode": {
+          "type": "enum",
+          "values": ["camera", "video_file", "spout", "ndi", "syphon"]
+        },
+        "source_name": {
+          "type": "string",
+          "description": "Device/file/sender name"
+        },
+        "source_flip_vertical": { "type": "boolean", "default": false }
+      },
+      "outputs": [{ "name": "video", "kind": "stream", "type": "frame" }]
+    },
+    {
+      "type": "pipeline",
+      "label": "Pipeline",
+      "category": "compute",
+      "description": "A generative or transform pipeline. Input parameter handles depend on the pipeline schema — always call get_pipeline_handles(pipeline_id) before wiring edges to a pipeline. The answer from that tool is authoritative.",
+      "config": {
+        "pipeline_id": { "type": "string", "required": true },
+        "tempo_sync": { "type": "boolean", "default": false }
+      },
+      "dynamic_handles": true,
+      "handle_source": "get_pipeline_handles(pipeline_id)",
+      "outputs": [{ "name": "video", "kind": "stream", "type": "frame" }]
+    },
+    {
+      "type": "sink",
+      "label": "Sink",
+      "category": "io",
+      "description": "Output — WebRTC preview by default; set sink_mode for Spout/NDI/Syphon output.",
+      "config": {
+        "sink_mode": {
+          "type": "enum",
+          "optional": true,
+          "values": ["spout", "ndi", "syphon"]
+        },
+        "sink_name": { "type": "string", "optional": true }
+      },
+      "inputs": [{ "name": "video", "kind": "stream", "type": "frame" }]
+    },
+    {
+      "type": "record",
+      "label": "Record",
+      "category": "io",
+      "description": "Records the input stream to an MP4 file. Controlled via start_recording / stop_recording.",
+      "inputs": [{ "name": "video", "kind": "stream", "type": "frame" }]
+    },
+    {
+      "type": "primitive",
+      "label": "Primitive",
+      "category": "data",
+      "description": "Static value producer — strings (prompts), numbers, booleans.",
+      "config": {
+        "valueType": {
+          "type": "enum",
+          "values": ["string", "number", "boolean"]
+        },
+        "value": { "type": "any" }
+      },
+      "outputs": [{ "name": "value", "kind": "parameter", "type": "any" }]
+    },
+    {
+      "type": "slider",
+      "label": "Slider",
+      "category": "control",
+      "description": "Continuous float control with min/max.",
+      "config": {
+        "min": { "type": "number" },
+        "max": { "type": "number" },
+        "default": { "type": "number" }
+      },
+      "outputs": [{ "name": "value", "kind": "parameter", "type": "number" }]
+    },
+    {
+      "type": "knobs",
+      "label": "Knobs",
+      "category": "control",
+      "description": "Bank of rotary knobs (multi-value).",
+      "outputs": [{ "name": "values", "kind": "parameter", "type": "number[]" }]
+    },
+    {
+      "type": "xypad",
+      "label": "XY Pad",
+      "category": "control",
+      "description": "2D positional control.",
+      "outputs": [
+        { "name": "x", "kind": "parameter", "type": "number" },
+        { "name": "y", "kind": "parameter", "type": "number" }
+      ]
+    },
+    {
+      "type": "bool",
+      "label": "Bool",
+      "category": "control",
+      "description": "Toggle.",
+      "outputs": [{ "name": "value", "kind": "parameter", "type": "boolean" }]
+    },
+    {
+      "type": "trigger",
+      "label": "Trigger",
+      "category": "control",
+      "description": "Momentary button — fires a pulse. Wire its 'param:value' into a subgraph input (e.g. 'param:trigger_a') or to a control node's 'param:item_N' switch input.",
+      "outputs": [{ "name": "value", "kind": "parameter", "type": "boolean" }]
+    },
+    {
+      "type": "control",
+      "label": "Control",
+      "category": "control",
+      "description": "Generic controller. In 'switch' mode (data.controlMode = 'switch') it selects among variadic 'param:item_N' inputs (numeric triggers) and emits the corresponding 'param:str_N' string slot on its 'param:value' output. Use this to build prompt-switcher subgraphs.",
+      "dynamic_handles": true,
+      "inputs": [
+        {
+          "name": "item_N",
+          "kind": "parameter",
+          "type": "number",
+          "variadic": true,
+          "note": "Selector triggers — param:item_0, param:item_1, ..."
+        },
+        {
+          "name": "str_N",
+          "kind": "parameter",
+          "type": "string",
+          "variadic": true,
+          "note": "In switch mode only — param:str_0, param:str_1, ... paired with item_N"
+        }
+      ],
+      "outputs": [{ "name": "value", "kind": "parameter", "type": "any" }]
+    },
+    {
+      "type": "math",
+      "label": "Math",
+      "category": "compute",
+      "description": "Arithmetic ops on numeric inputs.",
+      "inputs": [
+        { "name": "a", "kind": "parameter", "type": "number" },
+        { "name": "b", "kind": "parameter", "type": "number" }
+      ],
+      "outputs": [{ "name": "result", "kind": "parameter", "type": "number" }]
+    },
+    {
+      "type": "tuple",
+      "label": "Tuple",
+      "category": "data",
+      "description": "Group several values into a structured bundle.",
+      "inputs": [
+        { "name": "in", "kind": "parameter", "type": "any", "variadic": true }
+      ],
+      "outputs": [{ "name": "out", "kind": "parameter", "type": "tuple" }]
+    },
+    {
+      "type": "reroute",
+      "label": "Reroute",
+      "category": "layout",
+      "description": "Visual re-routing point — passes value through.",
+      "inputs": [{ "name": "in", "kind": "parameter", "type": "any" }],
+      "outputs": [{ "name": "out", "kind": "parameter", "type": "any" }]
+    },
+    {
+      "type": "note",
+      "label": "Note",
+      "category": "layout",
+      "description": "Freeform annotation — not executable."
+    },
+    {
+      "type": "image",
+      "label": "Image",
+      "category": "data",
+      "description": "Static image reference (local file path). Wire 'param:value' into a 'vace' node's 'param:ref_image' (or 'param:first_frame' / 'param:last_frame').",
+      "outputs": [{ "name": "value", "kind": "parameter", "type": "string" }]
+    },
+    {
+      "type": "audio",
+      "label": "Audio",
+      "category": "io",
+      "description": "Audio input/output.",
+      "outputs": [{ "name": "audio", "kind": "stream", "type": "audio" }]
+    },
+    {
+      "type": "vace",
+      "label": "VACE",
+      "category": "conditioning",
+      "description": "VACE reference-image conditioning node. Takes up to three image paths + an optional context_scale modulator, and emits a single aggregate 'param:__vace' output that plugs into a pipeline's 'param:__vace' input (pipeline must have supports_vace=true). Typical wiring: image -> vace.ref_image, then vace.__vace -> pipeline.__vace.",
+      "inputs": [
+        {
+          "name": "ref_image",
+          "kind": "parameter",
+          "type": "string",
+          "note": "File path for reference image. Wire from an 'image' node's 'param:value'."
+        },
+        {
+          "name": "first_frame",
+          "kind": "parameter",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "last_frame",
+          "kind": "parameter",
+          "type": "string",
+          "optional": true
+        },
+        {
+          "name": "context_scale",
+          "kind": "parameter",
+          "type": "number",
+          "optional": true,
+          "note": "Modulate 0..2 via a slider if desired; defaults to the node's internal value."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "__vace",
+          "kind": "parameter",
+          "type": "vace",
+          "note": "Aggregate output — connect ONLY to a pipeline's 'param:__vace' input."
+        }
+      ]
+    },
+    {
+      "type": "lora",
+      "label": "LoRA",
+      "category": "conditioning",
+      "description": "LoRA adapter — attaches to a pipeline, sets scale. Wire 'param:lora' into a pipeline's 'param:__loras' (pipeline must have supports_lora=true).",
+      "outputs": [
+        {
+          "name": "lora",
+          "kind": "parameter",
+          "type": "lora",
+          "note": "Aggregate output — connect ONLY to a pipeline's 'param:__loras' input."
+        }
+      ]
+    },
+    {
+      "type": "midi",
+      "label": "MIDI",
+      "category": "io",
+      "description": "MIDI input (CC / note / clock).",
+      "outputs": [{ "name": "value", "kind": "parameter", "type": "number" }]
+    },
+    {
+      "type": "tempo",
+      "label": "Tempo",
+      "category": "io",
+      "description": "Ableton Link / MIDI-clock tempo source.",
+      "outputs": [
+        { "name": "bpm", "kind": "parameter", "type": "number" },
+        { "name": "phase", "kind": "parameter", "type": "number" }
+      ]
+    },
+    {
+      "type": "subgraph",
+      "label": "Subgraph",
+      "category": "layout",
+      "description": "Nested graph container. Internal nodes live in 'data.subgraphNodes' and internal edges in 'data.subgraphEdges'. The subgraph exposes external ports via 'data.subgraphInputs' and 'data.subgraphOutputs' — each entry has {name, portType: 'param'|'stream', paramType, innerNodeId, innerHandleId}. External edges from/to this subgraph use 'param:<subgraphInputs[].name>' or 'param:<subgraphOutputs[].name>' as the edge handle ID.",
+      "dynamic_handles": true,
+      "structure": {
+        "subgraphNodes": "Array of internal UI nodes (same shape as top-level ui_state.nodes).",
+        "subgraphEdges": "Array of internal edges between subgraphNodes (same shape as ui_state.edges).",
+        "subgraphInputs": "Array of exposed inputs: [{name, portType, paramType, innerNodeId, innerHandleId}].",
+        "subgraphOutputs": "Array of exposed outputs: same shape as subgraphInputs."
+      }
+    },
+    {
+      "type": "subgraph_input",
+      "label": "Subgraph Input",
+      "category": "layout",
+      "description": "Input port of the parent subgraph.",
+      "outputs": [{ "name": "value", "kind": "parameter", "type": "any" }]
+    },
+    {
+      "type": "subgraph_output",
+      "label": "Subgraph Output",
+      "category": "layout",
+      "description": "Output port of the parent subgraph.",
+      "inputs": [{ "name": "value", "kind": "parameter", "type": "any" }]
+    },
+    {
+      "type": "prompt_list",
+      "label": "Prompt List",
+      "category": "prompts",
+      "description": "Ordered list of text prompts, advanced one at a time via a trigger. Ideal for button-driven prompt switching between a fixed set of prompts. Store the prompts in 'data.promptListItems' (string[]); the node renders them in order and emits the current one on 'param:prompt'.",
+      "inputs": [
+        {
+          "name": "trigger",
+          "kind": "parameter",
+          "type": "trigger",
+          "note": "Pulse to advance to the next prompt. Wire a 'trigger' node's 'param:value' (or any value source) here."
+        },
+        {
+          "name": "cycle",
+          "kind": "parameter",
+          "type": "boolean",
+          "note": "When true, advancing past the last item wraps to the first."
+        }
+      ],
+      "outputs": [
+        {
+          "name": "prompt",
+          "kind": "parameter",
+          "type": "string",
+          "note": "Currently-selected prompt. Connect to a pipeline's 'param:__prompt' input."
+        }
+      ]
+    },
+    {
+      "type": "prompt_blend",
+      "label": "Prompt Blend",
+      "category": "prompts",
+      "description": "Blend/interpolate between multiple prompt lists over time.",
+      "dynamic_handles": true,
+      "inputs": [
+        {
+          "name": "prompt_N",
+          "kind": "parameter",
+          "type": "string",
+          "variadic": true
+        },
+        {
+          "name": "weight_N",
+          "kind": "parameter",
+          "type": "number",
+          "variadic": true
+        }
+      ],
+      "outputs": [
+        {
+          "name": "prompts",
+          "kind": "parameter",
+          "type": "string",
+          "note": "Connect to a pipeline's 'param:__prompt' input."
+        }
+      ]
+    },
+    {
+      "type": "scheduler",
+      "label": "Scheduler",
+      "category": "control",
+      "description": "Time-based scheduler — fires values at given beats / times.",
+      "outputs": [{ "name": "value", "kind": "parameter", "type": "any" }]
+    },
+    {
+      "type": "output",
+      "label": "Output",
+      "category": "io",
+      "description": "Alternate sink node used by some UI graphs — prefer 'sink'.",
+      "inputs": [{ "name": "video", "kind": "stream", "type": "frame" }]
+    }
+  ]
+}

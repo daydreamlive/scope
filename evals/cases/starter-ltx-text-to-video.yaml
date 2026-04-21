@@ -1,0 +1,19 @@
+name: starter-ltx-text-to-video
+description: |
+  Reproduces the "LTX 2.3" teaching starter: a single ltx2 pipeline running
+  in text-to-video mode driven by a prompt.
+prompt: |
+  I want a simple text-to-video workflow using the ltx2 pipeline. Just one
+  pipeline node, wired straight to an output sink. Set up the prompt input
+  so I can type what I want to generate — for now, have it read
+  "a majestic lion striding across an open savannah". No LoRAs, no VACE,
+  no camera input needed; ltx2 is generating from text.
+runs: 5
+expect:
+  - pipelines_equal: [ltx2]
+  - wire_present: { kind: prompt_to_pipeline }
+  - no_validator_errors: true
+forbid:
+  - bad_handle_prefix: "parameter:"
+  - orphan_sinks: true
+  - overlapping_nodes: true

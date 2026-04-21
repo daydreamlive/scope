@@ -1,0 +1,23 @@
+name: starter-dissolving-sunflower
+description: |
+  Reproduces the "Dissolving Sunflower" teaching starter: a camera feed runs
+  through video-depth-anything first, then into longlive with a dissolve
+  LoRA and VACE reference, then out through a passthrough pipeline.
+prompt: |
+  Build me a depth-driven dissolve effect on my camera. Chain
+  video-depth-anything into longlive into passthrough. On the longlive node,
+  load the dissolve LoRA ("daydream-scope-dissolve.safetensors") at weight
+  around 1.5, and enable VACE with the depth output used as the reference
+  video. The main prompt should describe a "dissolving sunflower in
+  abstract particles".
+runs: 5
+expect:
+  - pipelines_include: [video-depth-anything, longlive, passthrough]
+  - lora_count_at_least: 1
+  - wire_present: { kind: vace_to_pipeline }
+  - wire_present: { kind: prompt_to_pipeline }
+  - no_validator_errors: true
+forbid:
+  - bad_handle_prefix: "parameter:"
+  - orphan_sinks: true
+  - overlapping_nodes: true

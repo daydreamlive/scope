@@ -1,0 +1,19 @@
+name: runtime-tweak-no-repropose
+description: |
+  Regression guard for "I should never have to reload a workflow just to
+  change a parameter." Observed failure: after the user asks to tweak a
+  single runtime-settable param on an already-running pipeline, the agent
+  calls ``propose_workflow`` to rebuild the entire graph, forcing the user
+  to approve and reload. The right tool is ``update_parameters``, which is
+  a silent live-tweak.
+
+  We frame the prompt so the only reasonable interpretation is "change this
+  one number on the running graph" — no new nodes, no rewiring. The grader
+  then forbids ``workflow_proposal`` entirely for this case via the
+  ``forbid_proposal`` Case field.
+prompt: |
+  My longlive workflow is already loaded and streaming. I just want to
+  change noise_scale to 0.85. Don't rebuild or reload the workflow —
+  just update that parameter live.
+runs: 5
+forbid_proposal: true

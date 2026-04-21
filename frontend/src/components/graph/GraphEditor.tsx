@@ -156,6 +156,10 @@ export interface GraphEditorHandle {
   loadWorkflow: (
     workflow: import("../../lib/workflowApi").ScopeWorkflow
   ) => void;
+  loadGraphConfig: (
+    graph: import("../../lib/api").GraphConfig,
+    label?: string
+  ) => void;
   updateNodeParam: (nodeId: string, key: string, value: unknown) => void;
   applyExternalParams: (
     params: Record<string, unknown>,
@@ -375,6 +379,15 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           loadGraphFromParsed(
             workflow as unknown as Record<string, unknown>,
             workflow.metadata?.name ?? "workflow"
+          );
+        },
+        loadGraphConfig: (
+          graph: import("../../lib/api").GraphConfig,
+          label?: string
+        ) => {
+          loadGraphFromParsed(
+            graph as unknown as Record<string, unknown>,
+            label ?? "agent-proposal"
           );
         },
         updateNodeParam: handleNodeParameterChange,

@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { AccountTab } from "./settings/AccountTab";
+import { AgentProviderTab } from "./settings/AgentProviderTab";
 import { ApiKeysTab } from "./settings/ApiKeysTab";
 import { GeneralTab } from "./settings/GeneralTab";
 import { ReportBugDialog } from "./ReportBugDialog";
@@ -24,6 +25,7 @@ interface SettingsDialogProps {
     | "account"
     | "billing"
     | "api-keys"
+    | "agent"
     | "loras"
     | "osc"
     | "dmx"
@@ -161,6 +163,12 @@ export function SettingsDialog({
               API Keys
             </TabsTrigger>
             <TabsTrigger
+              value="agent"
+              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+            >
+              Agent
+            </TabsTrigger>
+            <TabsTrigger
               value="loras"
               className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
             >
@@ -209,6 +217,9 @@ export function SettingsDialog({
             </TabsContent>
             <TabsContent value="api-keys" className="mt-0">
               <ApiKeysTab isActive={open && activeTab === "api-keys"} />
+            </TabsContent>
+            <TabsContent value="agent" className="mt-0">
+              <AgentProviderTab isActive={open && activeTab === "agent"} />
             </TabsContent>
             <TabsContent value="loras" className="mt-0">
               <LoRAsTab

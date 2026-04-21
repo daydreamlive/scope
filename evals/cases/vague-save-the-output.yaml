@@ -1,0 +1,20 @@
+name: vague-save-the-output
+description: |
+  "Save" / "keep what I make" / "capture" all mean "add a record node".
+  This exercises the recording completeness-check item added to the
+  SYSTEM_PROMPT. Uses natural phrasing ("saves whatever I make") rather
+  than the literal word "record" to test intent-matching, not keyword-
+  matching.
+prompt: |
+  Set me up with a passthrough pipeline on my camera and make sure it
+  saves whatever I make.
+runs: 5
+expect:
+  - pipelines_include: [passthrough]
+  - node_present: { type: record }
+  - wire_present: { kind: pipeline_to_record }
+  - no_validator_errors: true
+forbid:
+  - bad_handle_prefix: "parameter:"
+  - orphan_sinks: true
+  - overlapping_nodes: true

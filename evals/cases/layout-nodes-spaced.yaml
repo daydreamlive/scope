@@ -1,0 +1,27 @@
+name: layout-nodes-spaced
+description: |
+  Regression guard for node positioning. Observed failure mode: the agent
+  placed trigger/subgraph/image/slider UI nodes at x=0 and x=320, which
+  collides with the frontend's top-level auto-layout strip (sources at x=50,
+  pipelines at x=350). Result: nodes visually stacked on top of each other
+  on the canvas even though edges were correct.
+
+  This case exercises the failure surface (many UI-state nodes alongside
+  multiple top-level nodes) and grades that NO two nodes overlap — relying
+  on either the agent placing them correctly OR the server-side
+  ``_reflow_ui_nodes`` safety net kicking in.
+prompt: |
+  Build me a longlive workflow where I can control three things live: a
+  noise_scale slider, a num_steps slider, and a prompt_list with at least
+  3 prompts that I can switch between with separate trigger buttons. Wire
+  them all up so I can tweak each one while it's running.
+runs: 5
+expect:
+  - pipelines_include: [longlive]
+  - node_present: { type: slider }
+  - node_present: { type: prompt_list, min_items: 3 }
+  - no_validator_errors: true
+forbid:
+  - bad_handle_prefix: "parameter:"
+  - orphan_sinks: true
+  - overlapping_nodes: true

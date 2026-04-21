@@ -324,6 +324,8 @@ tempo_sync = None
 osc_server = None
 # Global DMX server instance
 dmx_server = None
+# Global agent session store (in-memory, 1h idle TTL)
+agent_sessions = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
@@ -371,7 +373,8 @@ async def lifespan(app: FastAPI):
         livepeer, \
         tempo_sync, \
         osc_server, \
-        dmx_server
+        dmx_server, \
+        agent_sessions
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -458,6 +461,13 @@ async def lifespan(app: FastAPI):
     if dmx_server.enabled:
         await dmx_server.start()
 
+    # Initialize agent session store (in-memory, 1h idle TTL).
+    from .agent_state import AgentSessionStore
+
+    agent_sessions = AgentSessionStore()
+    agent_sessions.start_janitor()
+    logger.info("Agent session store initialized")
+
     # Syphon server discovery (macOS only): create the ObjC singleton and do
     # an initial NSRunLoop pump so servers are available when the UI first loads.
     # Subsequent refreshes pump on demand in the list_input_sources endpoint.
@@ -517,6 +527,11 @@ async def lifespan(app: FastAPI):
         await kafka_publisher.stop()
         set_kafka_publisher(None)
         logger.info("Kafka publisher shutdown complete")
+
+    if agent_sessions is not None:
+        logger.info("Shutting down agent session store...")
+        await agent_sessions.stop_janitor()
+        logger.info("Agent session store shutdown complete")
 
 
 def get_webrtc_manager() -> "WebRTCManager":
@@ -2603,6 +2618,7 @@ async def list_api_keys():
 
     from huggingface_hub import get_token
 
+    from .agent_state import get_provider_key, get_provider_key_source
     from .models_config import get_civitai_token, get_civitai_token_source
 
     # HuggingFace
@@ -2636,7 +2652,38 @@ async def list_api_keys():
         key_url="https://civitai.com/user/account",
     )
 
-    return ApiKeysListResponse(keys=[hf_key, civitai_key])
+    # Agent provider keys
+    anthropic_key = ApiKeyInfo(
+        id="anthropic",
+        name="Anthropic",
+        description="Agent provider — Claude (Sonnet, Opus)",
+        is_set=get_provider_key("anthropic") is not None,
+        source=get_provider_key_source("anthropic"),
+        env_var="ANTHROPIC_API_KEY",
+        key_url="https://console.anthropic.com/settings/keys",
+    )
+    openai_key = ApiKeyInfo(
+        id="openai",
+        name="OpenAI-compatible",
+        description="Agent provider — OpenAI, OpenRouter, Groq, together.ai, Fireworks",
+        is_set=get_provider_key("openai_compatible") is not None,
+        source=get_provider_key_source("openai_compatible"),
+        env_var="OPENAI_API_KEY",
+        key_url="https://platform.openai.com/api-keys",
+    )
+    llm_custom_key = ApiKeyInfo(
+        id="llm_custom",
+        name="Self-hosted LLM",
+        description="Agent provider — Ollama, vLLM, LM Studio (usually no key required)",
+        is_set=get_provider_key("self_hosted") is not None,
+        source=get_provider_key_source("self_hosted"),
+        env_var="LLM_API_KEY",
+        key_url=None,
+    )
+
+    return ApiKeysListResponse(
+        keys=[hf_key, civitai_key, anthropic_key, openai_key, llm_custom_key]
+    )
 
 
 @app.put("/api/v1/keys/{service_id}", response_model=ApiKeySetResponse)
@@ -2644,6 +2691,12 @@ async def set_api_key(service_id: str, request: ApiKeySetRequest):
     """Set/save an API key for a service."""
     import os
 
+    from .agent_state import (
+        ANTHROPIC_ENV,
+        LLM_CUSTOM_ENV,
+        OPENAI_ENV,
+        set_provider_key,
+    )
     from .models_config import CIVITAI_TOKEN_ENV_VAR, set_civitai_token
 
     if service_id == "huggingface":
@@ -2668,6 +2721,21 @@ async def set_api_key(service_id: str, request: ApiKeySetRequest):
         set_civitai_token(request.value)
         return ApiKeySetResponse(success=True, message="CivitAI token saved")
 
+    elif service_id in ("anthropic", "openai", "llm_custom"):
+        provider_map = {
+            "anthropic": ("anthropic", ANTHROPIC_ENV),
+            "openai": ("openai_compatible", OPENAI_ENV),
+            "llm_custom": ("self_hosted", LLM_CUSTOM_ENV),
+        }
+        provider, env_var = provider_map[service_id]
+        if os.environ.get(env_var):
+            raise HTTPException(
+                status_code=409,
+                detail=f"{env_var} environment variable is already set. Remove it to manage this key from the UI.",
+            )
+        set_provider_key(provider, request.value)
+        return ApiKeySetResponse(success=True, message=f"{service_id} key saved")
+
     else:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service_id}")
 
@@ -2677,6 +2745,13 @@ async def delete_api_key(service_id: str):
     """Remove a stored API key for a service."""
     import os
 
+    from .agent_state import (
+        ANTHROPIC_ENV,
+        LLM_CUSTOM_ENV,
+        OPENAI_ENV,
+        delete_provider_key,
+        get_provider_key_source,
+    )
     from .models_config import (
         clear_civitai_token,
         get_civitai_token_source,
@@ -2708,8 +2783,234 @@ async def delete_api_key(service_id: str):
         clear_civitai_token()
         return ApiKeyDeleteResponse(success=True, message="CivitAI token removed")
 
+    elif service_id in ("anthropic", "openai", "llm_custom"):
+        provider_map = {
+            "anthropic": ("anthropic", ANTHROPIC_ENV),
+            "openai": ("openai_compatible", OPENAI_ENV),
+            "llm_custom": ("self_hosted", LLM_CUSTOM_ENV),
+        }
+        provider, env_var = provider_map[service_id]
+        source = get_provider_key_source(provider)
+        if source == "env_var":
+            raise HTTPException(
+                status_code=409,
+                detail=f"Cannot remove token set via {env_var} environment variable. Unset the environment variable instead.",
+            )
+        if source != "stored":
+            raise HTTPException(
+                status_code=404, detail=f"No {service_id} token to remove"
+            )
+        delete_provider_key(provider)
+        return ApiKeyDeleteResponse(success=True, message=f"{service_id} key removed")
+
     else:
         raise HTTPException(status_code=404, detail=f"Unknown service: {service_id}")
+
+
+# ---------------------------------------------------------------------------
+# Agent endpoints
+# ---------------------------------------------------------------------------
+
+
+class AgentChatRequest(BaseModel):
+    """Body for POST /api/v1/agent/chat."""
+
+    message: str = Field(..., min_length=1)
+    session_id: str | None = None
+    is_continuation: bool = False
+
+
+class AgentDecisionRequest(BaseModel):
+    """Body for POST /api/v1/agent/decision."""
+
+    session_id: str
+    proposal_id: str
+    approved: bool
+    reason: str | None = None
+
+
+class AgentConfigUpdate(BaseModel):
+    """Body for PUT /api/v1/agent/config."""
+
+    provider: str | None = None  # "anthropic" | "openai_compatible" | "self_hosted"
+    model: str | None = None
+    base_url: str | None = None
+
+
+def get_agent_sessions():
+    """Dependency to get the in-memory agent session store."""
+    if agent_sessions is None:
+        raise HTTPException(status_code=503, detail="Agent session store not ready")
+    return agent_sessions
+
+
+@app.post("/api/v1/agent/chat")
+async def agent_chat(request: AgentChatRequest):
+    """Start or continue an agent turn. Returns an SSE stream."""
+    from .agent_loop import run_turn
+    from .agent_state import load_agent_config
+
+    store = get_agent_sessions()
+    config = load_agent_config()
+    session = await store.get_or_create(request.session_id, config)
+
+    async def event_generator():
+        try:
+            async for chunk in run_turn(
+                app,
+                session,
+                request.message,
+                is_system_continuation=request.is_continuation,
+            ):
+                yield chunk
+        except asyncio.CancelledError:
+            logger.info(f"Agent chat stream cancelled for session {session.id}")
+            raise
+        except Exception as e:
+            logger.exception("Agent chat stream error")
+            payload = json.dumps({"message": str(e)})
+            yield f"event: error\ndata: {payload}\n\n"
+            yield 'event: turn_end\ndata: {"stop_reason": "error"}\n\n'
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+            "X-Agent-Session-Id": session.id,
+        },
+    )
+
+
+@app.post("/api/v1/agent/decision")
+async def agent_decision(request: AgentDecisionRequest):
+    """Approve or reject a pending workflow proposal.
+
+    On approval the caller should open a fresh /agent/chat stream with the
+    continuation message returned in ``next_message`` — that drives the next
+    turn where the model calls apply_workflow.
+    """
+    from .agent_loop import build_decision_continuation_message
+
+    store = get_agent_sessions()
+    session = await store.get(request.session_id)
+    if session is None:
+        raise HTTPException(status_code=404, detail="Unknown session")
+    prop = session.pending_proposal
+    if prop is None or prop.id != request.proposal_id:
+        raise HTTPException(status_code=404, detail="Unknown proposal")
+    prop.approved = request.approved
+    prop.decision_feedback = request.reason
+    next_message = build_decision_continuation_message(
+        approved=request.approved,
+        proposal_id=prop.id,
+        graph_hash=prop.graph_hash_at_propose,
+        reason=request.reason,
+    )
+    return {
+        "ok": True,
+        "session_id": session.id,
+        "proposal_id": prop.id,
+        "approved": request.approved,
+        "next_message": next_message,
+    }
+
+
+@app.get("/api/v1/agent/sessions")
+async def agent_list_sessions():
+    """List active agent sessions (metadata only)."""
+    store = get_agent_sessions()
+    return {"sessions": await store.list()}
+
+
+@app.delete("/api/v1/agent/sessions/{session_id}")
+async def agent_delete_session(session_id: str):
+    """Delete an agent session and its in-memory history."""
+    store = get_agent_sessions()
+    removed = await store.delete(session_id)
+    if not removed:
+        raise HTTPException(status_code=404, detail="Unknown session")
+    return {"ok": True, "session_id": session_id}
+
+
+@app.get("/api/v1/agent/config")
+async def agent_get_config():
+    """Return current provider config + key availability for UI."""
+    from .agent_state import get_provider_key_source, load_agent_config
+
+    cfg = load_agent_config()
+    return {
+        "provider": cfg.provider,
+        "model": cfg.model,
+        "base_url": cfg.base_url,
+        "key_sources": {
+            "anthropic": get_provider_key_source("anthropic"),
+            "openai_compatible": get_provider_key_source("openai_compatible"),
+            "self_hosted": get_provider_key_source("self_hosted"),
+        },
+    }
+
+
+@app.put("/api/v1/agent/config")
+async def agent_put_config(update: AgentConfigUpdate):
+    """Update provider config (provider, model, base_url)."""
+    from .agent_state import load_agent_config, save_agent_config
+
+    cfg = load_agent_config()
+    if update.provider is not None:
+        if update.provider not in ("anthropic", "openai_compatible", "self_hosted"):
+            raise HTTPException(
+                status_code=400, detail=f"Unknown provider: {update.provider}"
+            )
+        cfg.provider = update.provider  # type: ignore[assignment]
+    if update.model is not None:
+        cfg.model = update.model
+    if update.base_url is not None:
+        cfg.base_url = update.base_url or None
+    save_agent_config(cfg)
+    return {"ok": True, "config": cfg.to_json()}
+
+
+@app.post("/api/v1/agent/test-connection")
+async def agent_test_connection():
+    """Dry-run: build the current provider and issue a trivial ping()."""
+    from .agent_providers import ProviderError, build_provider
+    from .agent_state import load_agent_config
+
+    cfg = load_agent_config()
+    try:
+        provider = build_provider(cfg)
+    except ProviderError as e:
+        return {"ok": False, "error": str(e)}
+    try:
+        result = await provider.ping()
+        return {"ok": True, "result": result}
+    except Exception as e:
+        logger.exception("Agent provider ping failed")
+        return {"ok": False, "error": str(e)}
+
+
+@app.get("/api/v1/agent/node-catalog")
+async def agent_node_catalog():
+    """Return the UI node-type manifest. Also exposed via list_node_types tool."""
+    manifest_path = (
+        Path(__file__).resolve().parent.parent.parent.parent
+        / "frontend"
+        / "src"
+        / "data"
+        / "nodes"
+        / "manifest.json"
+    )
+    if not manifest_path.exists():
+        raise HTTPException(status_code=404, detail="Node manifest not found")
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        return data
+    except Exception as e:
+        logger.exception("Failed to read node manifest")
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/api/v1/logs/current")
