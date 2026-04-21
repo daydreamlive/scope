@@ -175,9 +175,7 @@ def _parse_browser_graph_routes(
                 continue
             node_type = node.get("type")
             if node_type == "source":
-                source_mode = node.get("source_mode", "video")
-                if source_mode not in ("spout", "ndi", "syphon"):
-                    source_ids.append(node_id)
+                source_ids.append(node_id)
             elif node_type == "sink":
                 sink_mode = node.get("sink_mode")
                 if sink_mode not in ("spout", "ndi", "syphon"):

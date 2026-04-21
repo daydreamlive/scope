@@ -364,10 +364,8 @@ class LivepeerClient:
             node_by_id[node_id] = node
             node_type = node.get("type")
             if node_type == "source":
-                source_mode = node.get("source_mode", "video")
-                if source_mode not in ("spout", "ndi", "syphon"):
-                    source_node_to_track_index[node_id] = src_count
-                    src_count += 1
+                source_node_to_track_index[node_id] = src_count
+                src_count += 1
             elif node_type == "sink":
                 sink_mode = node.get("sink_mode")
                 if sink_mode not in ("spout", "ndi", "syphon"):
