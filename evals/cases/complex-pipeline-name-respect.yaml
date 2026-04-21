@@ -1,0 +1,14 @@
+name: complex-pipeline-name-respect
+description: |
+  User explicitly names krea. Agent must pick krea-realtime-video, not
+  substitute a different pipeline. Pressure-tests the "honor the user's
+  pipeline name" rule added to CORE PRINCIPLES.
+prompt: |
+  Give me a krea workflow for my webcam with a slider for noise_scale.
+runs: 5
+expect:
+  - pipelines_include: [krea-realtime-video]
+  - wire_present: { kind: slider_to_pipeline_param, target_handle: "param:noise_scale" }
+  - no_validator_errors: true
+forbid:
+  - bad_handle_prefix: "parameter:"

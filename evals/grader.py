@@ -75,6 +75,40 @@ def _ui_node_type(graph: dict, node_id: str) -> str | None:
     return None
 
 
+# Top-level (backend) graph helpers. The backend graph only accepts these
+# four node types; anything else lives in ui_state (see SYSTEM_PROMPT's
+# GRAPH SHAPE section).
+_TOP_LEVEL_TYPES = {"source", "pipeline", "sink", "record"}
+
+
+def _top_level_nodes(graph: dict) -> list[dict]:
+    return graph.get("nodes") or []
+
+
+def _top_level_edges(graph: dict) -> list[dict]:
+    return graph.get("edges") or []
+
+
+def _top_level_node_type(graph: dict, node_id: str) -> str | None:
+    for n in _top_level_nodes(graph):
+        if n.get("id") == node_id:
+            return n.get("type")
+    return None
+
+
+def _nodes_of_type(graph: dict, want_type: str) -> list[dict]:
+    """Return all nodes of ``want_type`` from wherever they legally live.
+
+    Top-level kinds (source/pipeline/sink/record) are searched in the
+    backend graph; everything else (slider, vace, prompt_list, ...)
+    lives in ui_state. This matches the producer-side split enforced by
+    the SYSTEM_PROMPT + backend validator.
+    """
+    if want_type in _TOP_LEVEL_TYPES:
+        return [n for n in _top_level_nodes(graph) if n.get("type") == want_type]
+    return [n for n in _ui_nodes(graph) if n.get("type") == want_type]
+
+
 # ---------------------------------------------------------------------------
 # Checks — expect / forbid semantics are both `ok=True` means "assertion
 # holds". The runner inverts for forbid.
@@ -270,21 +304,40 @@ def wire_present(graph: dict, arg: Any) -> CheckResult:
         return CheckResult.fail("no edge targets pipeline's param:__loras")
 
     if kind == "pipeline_to_record":
-        # Any edge from a pipeline's stream output into a record node.
+        # A record node is a top-level node type; the canonical wiring is a
+        # top-level stream edge `pipeline -> record`. We also accept a
+        # ui_state-shaped edge from a pipeline to a record node, since
+        # either is permissible at the schema level.
         pipe_ids = _pipeline_node_ids(graph)
+
+        # Top-level form: {"from": <pipe>, "to_node": <rec>, "kind": "stream"}.
+        for e in _top_level_edges(graph):
+            if e.get("from") not in pipe_ids:
+                continue
+            if _top_level_node_type(graph, e.get("to_node")) != "record":
+                continue
+            if e.get("kind") != "stream":
+                continue
+            return CheckResult.ok_(
+                f"pipeline({e.get('from')}) -> record({e.get('to_node')}) "
+                f"(top-level stream edge)"
+            )
+
+        # ui_state form (less common but legal for composed graphs).
         for e in _ui_edges(graph):
             if e.get("source") not in pipe_ids:
                 continue
             if _ui_node_type(graph, e.get("target")) != "record":
                 continue
-            # Source handle should be a stream (video). Accept any stream: prefix.
             sh = e.get("sourceHandle") or ""
             if isinstance(sh, str) and sh.startswith("stream:"):
                 return CheckResult.ok_(
-                    f"pipeline({e.get('source')}) -> record({e.get('target')}) via {sh}"
+                    f"pipeline({e.get('source')}) -> record({e.get('target')}) "
+                    f"via ui_state {sh}"
                 )
         return CheckResult.fail(
-            "no ui_state edge wires a pipeline stream output into a record node"
+            "no stream edge (top-level or ui_state) wires a pipeline "
+            "output into a record node"
         )
 
     if kind == "prompt_list_to_pipeline":
@@ -323,10 +376,12 @@ def wire_present(graph: dict, arg: Any) -> CheckResult:
 
 
 def node_present(graph: dict, arg: Any) -> CheckResult:
-    """Assert at least N UI nodes of a given type exist.
+    """Assert at least N nodes of a given type exist.
 
     arg: ``{type: "record", count: 1, min_items: 5}``
-    - ``type`` (required) — ui_state node type.
+    - ``type`` (required) — node type. Top-level kinds
+      (source/pipeline/sink/record) are searched in the backend graph;
+      everything else (slider, vace, prompt_list, ...) in ui_state.
     - ``count`` (default 1) — minimum number of nodes of that type.
     - ``min_items`` (optional) — if set AND type=="prompt_list", at least one
       such node must have ``data.promptListItems`` of length ≥ min_items.
@@ -337,7 +392,7 @@ def node_present(graph: dict, arg: Any) -> CheckResult:
     want_count = int(arg.get("count", 1))
     min_items = arg.get("min_items")
 
-    nodes = [n for n in _ui_nodes(graph) if n.get("type") == want_type]
+    nodes = _nodes_of_type(graph, want_type)
     if len(nodes) < want_count:
         return CheckResult.fail(
             f"need >= {want_count} node(s) of type {want_type!r}, got {len(nodes)}"

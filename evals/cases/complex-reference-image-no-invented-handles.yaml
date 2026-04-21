@@ -1,0 +1,17 @@
+name: complex-reference-image-no-invented-handles
+description: |
+  Asks for reference-image conditioning on a VACE-capable pipeline. The
+  only correct route is image → vace → pipeline.param:__vace — NOT an
+  invented param:i2v_image / param:ref handle. The backend validator
+  catches invented handles, but we assert the positive VACE path here
+  so the agent can't silently skip reference-image support either.
+prompt: |
+  Set up longlive with my webcam and a reference image I can swap out.
+runs: 5
+expect:
+  - pipelines_include: [longlive]
+  - wire_present: { kind: image_to_vace }
+  - wire_present: { kind: vace_to_pipeline }
+  - no_validator_errors: true
+forbid:
+  - bad_handle_prefix: "parameter:"

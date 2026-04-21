@@ -303,13 +303,27 @@
       "type": "prompt_list",
       "label": "Prompt List",
       "category": "prompts",
-      "description": "Ordered list of text prompts with weights.",
+      "description": "Ordered list of text prompts, advanced one at a time via a trigger. Ideal for button-driven prompt switching between a fixed set of prompts. Store the prompts in 'data.promptListItems' (string[]); the node renders them in order and emits the current one on 'param:prompt'.",
+      "inputs": [
+        {
+          "name": "trigger",
+          "kind": "parameter",
+          "type": "trigger",
+          "note": "Pulse to advance to the next prompt. Wire a 'trigger' node's 'param:value' (or any value source) here."
+        },
+        {
+          "name": "cycle",
+          "kind": "parameter",
+          "type": "boolean",
+          "note": "When true, advancing past the last item wraps to the first."
+        }
+      ],
       "outputs": [
         {
-          "name": "prompts",
+          "name": "prompt",
           "kind": "parameter",
           "type": "string",
-          "note": "Connect to a pipeline's 'param:__prompt' input."
+          "note": "Currently-selected prompt. Connect to a pipeline's 'param:__prompt' input."
         }
       ]
     },

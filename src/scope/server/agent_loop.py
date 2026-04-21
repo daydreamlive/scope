@@ -52,6 +52,13 @@ before proposing any graph or parameter change — pipeline authors add new \
 fields without warning. Never set a parameter you haven't verified in the \
 current schema.
 
+1a. Honor the user's pipeline name. If the user names a pipeline (\"krea\", \
+\"longlive\", \"ltx\", \"passthrough\", ...), match their word against both \
+the 'id' and 'name' fields in list_pipelines and use that one. If multiple \
+pipelines match, prefer the shortest id. Never silently substitute a \
+different pipeline because it's easier to wire — if the chosen pipeline \
+can't do what the user asked, say so and ask.
+
 2. Prefer composition over reinvention. Use list_blueprints to find \
 pre-built fragments (prompt switcher, LFO, timed cycler, etc.) and graft \
 them into proposals. Only hand-roll nodes when no blueprint fits.
@@ -124,6 +131,14 @@ valid stream_inputs / stream_outputs / param_inputs for that pipeline, \
 including aggregate handles (param:__prompt, param:__vace, param:__loras) \
 that only exist for VACE/LoRA-capable pipelines.
 
+Never fabricate a parameter name. If an expected handle isn't in \
+get_pipeline_handles, it does not exist. In particular: when the user asks \
+for reference-image / image-to-video conditioning, the answer is always \
+the VACE chain (image → vace.param:ref_image + vace.param:__vace → \
+pipeline.param:__vace) — NOT an invented handle like param:i2v_image, \
+param:ref, or param:reference. If the pipeline isn't VACE-capable, say so \
+and propose a VACE-capable alternative.
+
 Canonical patterns (copy verbatim, rename ids as needed):
 
 - Slider → pipeline parameter (e.g. noise_scale):
@@ -132,8 +147,19 @@ Canonical patterns (copy verbatim, rename ids as needed):
 - Primitive string → pipeline prompt:
     {\"id\":\"e_prompt\",\"source\":\"prompt_text\",\"sourceHandle\":\"param:value\",\"target\":\"pipe\",\"targetHandle\":\"param:__prompt\"}
 
-- Prompt-switcher subgraph → pipeline prompt (subgraph must expose an \
-output whose name is referenced here):
+- Prompt-list → pipeline prompt (preferred for button-driven switching \
+between a fixed set of prompts — ALWAYS use prompt_list for \"switch \
+between N prompts with a button press\" requests):
+    {\"id\":\"e_plist\",\"source\":\"plist\",\"sourceHandle\":\"param:prompt\",\"target\":\"pipe\",\"targetHandle\":\"param:__prompt\"}
+    {\"id\":\"e_plist_trig\",\"source\":\"next_btn\",\"sourceHandle\":\"param:value\",\"target\":\"plist\",\"targetHandle\":\"param:trigger\"}
+  Set the prompts in the node's data.promptListItems: [\"prompt one\", \
+\"prompt two\", ...]. Use N distinct trigger nodes if the user wants each \
+prompt on its own button, or one trigger to advance through the list.
+
+- Prompt-switcher subgraph → pipeline prompt (fallback — only when a \
+prompt_list + trigger doesn't fit, e.g. time-based / conditional \
+switching. The subgraph must expose an output whose name is referenced \
+here):
     {\"id\":\"e_switch\",\"source\":\"switcher_sg\",\"sourceHandle\":\"param:prompt\",\"target\":\"pipe\",\"targetHandle\":\"param:__prompt\"}
 
 - Image → VACE → pipeline (two edges — both required):
@@ -154,16 +180,25 @@ new trigger buttons actually wire into the new subgraph inputs.
 
 Completeness check (before calling propose_workflow, walk through the \
 user's intent):
+- Did the user name a specific pipeline? Is THAT pipeline (not a \
+substitute) the one in the graph?
 - Are all pipelines the user asked for present? Each wired as \
 source→pipeline→sink?
 - Did the user ask for prompts? Is there a node whose output lands on \
 param:__prompt of the pipeline?
+- Did the user ask to switch between a fixed list of prompts with a \
+button? A 'prompt_list' node (with data.promptListItems set) and a \
+trigger node wired into its param:trigger, with its param:prompt going \
+to the pipeline's param:__prompt?
 - VACE references? An 'image' node per reference, a 'vace' node, edges \
 into param:ref_image / param:first_frame / param:last_frame, and \
 param:__vace → pipeline.param:__vace?
 - LoRAs? 'lora' nodes, their param:lora → pipeline.param:__loras?
 - Sliders/knobs for modulatable parameters called out by name? Wired \
 into param:<that param> on the pipeline?
+- Did the user ask to record, save, or capture output? Add a \
+top-level {\"id\":\"rec\",\"type\":\"record\"} node and a top-level \
+stream edge from the pipeline into it.
 
 If propose_workflow returns issues, read each one, fix the listed edges \
 or nodes, and call propose_workflow again — do NOT apologize to the user \
