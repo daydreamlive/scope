@@ -123,6 +123,20 @@ export function AgentProvider({ children }: { children: ReactNode }) {
     void refreshConfig();
   }, [refreshConfig]);
 
+  // Pick up API key / provider changes from Settings without requiring a
+  // page reload. Settings tabs dispatch "scope:agent-config-changed" after
+  // a successful save; we re-read /agent/config and the drawer's
+  // "needsKey" banner + composer disabled-state recompute automatically.
+  useEffect(() => {
+    const handler = () => {
+      void refreshConfig();
+    };
+    window.addEventListener("scope:agent-config-changed", handler);
+    return () => {
+      window.removeEventListener("scope:agent-config-changed", handler);
+    };
+  }, [refreshConfig]);
+
   const abort = useCallback(() => {
     abortRef.current?.abort();
     abortRef.current = null;

@@ -74,17 +74,19 @@ export function AgentDrawer() {
 
   return (
     <div
-      className="fixed top-0 right-0 bottom-0 z-40 bg-[#0f0f0f] border-l border-[rgba(255,255,255,0.08)] shadow-2xl flex flex-col"
+      className="relative h-full shrink-0 bg-[#0f0f0f] border-l border-[rgba(255,255,255,0.08)] flex flex-col"
       style={{ width }}
       role="complementary"
       aria-label="Scope Agent"
     >
-      {/* Resize handle */}
+      {/* Resize handle — dragging grows the drawer toward the graph (the
+          delta is inverted because the handle sits on the LEFT edge of the
+          drawer but we track the mouse moving LEFTWARD as "wider drawer"). */}
       <div
         role="separator"
         aria-orientation="vertical"
         onMouseDown={onDragStart}
-        className="absolute top-0 left-0 bottom-0 w-1 cursor-col-resize hover:bg-[rgba(255,255,255,0.08)]"
+        className="absolute top-0 left-0 bottom-0 w-1 -ml-0.5 cursor-col-resize hover:bg-[rgba(255,255,255,0.12)]"
         title="Drag to resize"
       />
 

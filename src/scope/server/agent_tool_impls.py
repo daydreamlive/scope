@@ -56,6 +56,171 @@ def _canonical_graph_hash(graph: dict) -> str:
     return hashlib.sha256(blob.encode()).hexdigest()[:16]
 
 
+# Frontend layout constants (mirror frontend/src/lib/graphUtils.ts).
+# Top-level nodes (source/pipeline/sink/record) get auto-laid-out by the
+# frontend at START_X + COLUMN_GAP * col_index, rows at
+# START_Y + i * (NODE_HEIGHT + ROW_GAP). UI-state nodes keep whatever
+# position the agent set — that's where overlaps happen when the agent
+# picks positive x coordinates that collide with the top-level columns.
+_FE_START_X = 50
+_FE_START_Y = 50
+_FE_COLUMN_GAP = 300
+_FE_ROW_GAP = 100
+_FE_NODE_WIDTH = 200
+_FE_NODE_HEIGHT = 60
+
+# Default bounding box for UI-state nodes on the canvas. React Flow sizes
+# them dynamically, but these are the conservative sizes we use for
+# overlap detection. Tall-content nodes (image preview, vace with
+# thumbnail, subgraph with header) are taller.
+_UI_NODE_W = 240
+_UI_NODE_H_DEFAULT = 140
+_UI_NODE_H_TALL = 280
+_UI_TALL_TYPES = frozenset({"image", "vace", "subgraph"})
+
+# Where reflow drops UI nodes: three columns to the LEFT of the
+# top-level auto-layout strip so they can't collide with sources (x=50),
+# pipelines (x=350), sinks (x=650), or records (x=950).
+_REFLOW_COL_X = [-320, -620, -920]
+_REFLOW_START_Y = 50
+_REFLOW_ROW_GAP = 160
+_REFLOW_ROW_GAP_TALL = 320
+# How the three columns are populated by node type.
+_REFLOW_COL_BY_TYPE = {
+    # Column 0 (closest to the top-level strip): small value-injecting
+    # controls a user pokes during a performance.
+    "slider": 0,
+    "primitive": 0,
+    "math": 0,
+    "trigger": 0,
+    # Column 1: text / list controls.
+    "prompt_list": 1,
+    "prompt_input": 1,
+    # Column 2: bulky media nodes.
+    "image": 2,
+    "vace": 2,
+    "lora": 2,
+    "subgraph": 2,
+}
+
+
+def _ui_node_height(node_type: str | None) -> int:
+    return _UI_NODE_H_TALL if node_type in _UI_TALL_TYPES else _UI_NODE_H_DEFAULT
+
+
+def _rects_overlap(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> bool:
+    """AABB overlap (strict — touching edges don't count)."""
+    ax, ay, aw, ah = a
+    bx, by, bw, bh = b
+    return not (ax + aw <= bx or bx + bw <= ax or ay + ah <= by or by + bh <= ay)
+
+
+def _top_level_rects(
+    backend_nodes: list[dict],
+) -> list[tuple[float, float, float, float]]:
+    """Rectangles where the frontend WILL place top-level nodes.
+
+    Matches the four-column layout in ``graphConfigToFlow``: sources go in
+    column 0 (x=50), pipelines column 1 (x=350), sinks column 2 (x=650),
+    records column 3 (x=950). We don't know the exact row indices the
+    frontend will pick, but we know each column has height-padding of
+    160 per slot starting at y=50, so we model it as a tall strip
+    covering the full column.
+    """
+    type_to_col = {"source": 0, "pipeline": 1, "sink": 2, "record": 3}
+    counts: dict[int, int] = {}
+    for n in backend_nodes:
+        col = type_to_col.get(n.get("type"))
+        if col is None:
+            continue
+        counts[col] = counts.get(col, 0) + 1
+    rects: list[tuple[float, float, float, float]] = []
+    for col, count in counts.items():
+        x = _FE_START_X + col * _FE_COLUMN_GAP
+        # Model the strip as a single rectangle that covers every row the
+        # frontend will drop nodes into for this column.
+        height = max(1, count) * (_FE_NODE_HEIGHT + _FE_ROW_GAP)
+        rects.append(
+            (float(x), float(_FE_START_Y), float(_FE_NODE_WIDTH), float(height))
+        )
+    return rects
+
+
+def _has_layout_conflict(
+    ui_nodes: list[dict],
+    top_rects: list[tuple[float, float, float, float]],
+) -> bool:
+    """True if any UI node overlaps another UI node OR a top-level rect."""
+    ui_rects: list[tuple[tuple[float, float, float, float], str]] = []
+    for n in ui_nodes:
+        pos = n.get("position") or {}
+        try:
+            x = float(pos.get("x", 0))
+            y = float(pos.get("y", 0))
+        except (TypeError, ValueError):
+            # Missing/invalid position — treat as a conflict so reflow runs.
+            return True
+        h = _ui_node_height(n.get("type"))
+        ui_rects.append(((x, y, float(_UI_NODE_W), float(h)), n.get("id") or ""))
+
+    for i, (ra, _ida) in enumerate(ui_rects):
+        for rb in top_rects:
+            if _rects_overlap(ra, rb):
+                return True
+        for j in range(i + 1, len(ui_rects)):
+            rb, _idb = ui_rects[j]
+            if _rects_overlap(ra, rb):
+                return True
+    return False
+
+
+def _reflow_ui_nodes(graph: dict) -> dict:
+    """Safety net: if the agent's UI-state positions overlap each other or
+    collide with the frontend's top-level auto-layout strip, reassign all
+    UI-state node positions into three deterministic columns to the LEFT
+    of the top-level strip.
+
+    Preserves the agent's positions when nothing overlaps. Mutates the
+    graph in place and returns it.
+    """
+    ui_state = graph.get("ui_state")
+    if not isinstance(ui_state, dict):
+        return graph
+    ui_nodes = ui_state.get("nodes") or []
+    if not ui_nodes:
+        return graph
+
+    backend_nodes = graph.get("nodes") or []
+    top_rects = _top_level_rects(backend_nodes)
+
+    if not _has_layout_conflict(ui_nodes, top_rects):
+        return graph
+
+    # Conflict detected: do a fresh deterministic layout. Assign each
+    # node to a column (by type), then stack vertically within the
+    # column, giving tall types extra breathing room.
+    column_ys: dict[int, float] = {
+        i: float(_REFLOW_START_Y) for i in range(len(_REFLOW_COL_X))
+    }
+
+    # Group by column in declaration order so sibling nodes of the same
+    # type stay neighbors.
+    for node in ui_nodes:
+        t = node.get("type") or ""
+        col = _REFLOW_COL_BY_TYPE.get(t, 0)
+        col = max(0, min(col, len(_REFLOW_COL_X) - 1))
+        y = column_ys[col]
+        x = _REFLOW_COL_X[col]
+        node["position"] = {"x": float(x), "y": float(y)}
+        gap = _REFLOW_ROW_GAP_TALL if t in _UI_TALL_TYPES else _REFLOW_ROW_GAP
+        column_ys[col] = y + gap
+
+    return graph
+
+
 class AgentTools:
     """Callable bundle of tools the agent can invoke.
 
@@ -460,6 +625,13 @@ class AgentTools:
                     "pipeline inputs) and call propose_workflow again."
                 ),
             }
+
+        # Safety net: models occasionally produce UI-node positions that
+        # collide with the frontend's top-level auto-layout strip
+        # (x=50/350/650/950) or with each other. Detect that and reassign
+        # all UI-node positions into three columns to the LEFT of the
+        # strip. No-op when the agent's layout is already clean.
+        _reflow_ui_nodes(graph)
 
         # Hash the graph-at-propose-time so later apply can detect user edits.
         graph_hash = _canonical_graph_hash(graph)

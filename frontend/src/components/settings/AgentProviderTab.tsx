@@ -80,6 +80,8 @@ export function AgentProviderTab({ isActive }: AgentProviderTabProps) {
       });
       toast.success("Agent config saved");
       await fetchConfig();
+      // Keep the drawer's cached config in sync with settings changes.
+      window.dispatchEvent(new CustomEvent("scope:agent-config-changed"));
     } catch (e) {
       toast.error(e instanceof Error ? e.message : "Failed to save config");
     } finally {

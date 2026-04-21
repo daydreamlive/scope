@@ -118,8 +118,16 @@ function App() {
                   <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
                     <OnboardingProvider>
                       <AgentProvider>
-                        <StreamPage />
-                        <AgentDrawer />
+                        {/* Row: main app (StreamPage) + optional agent
+                            drawer. Drawer is a flex sibling, not a fixed
+                            overlay, so the graph/perform panels resize to
+                            fill remaining width and nothing is obscured. */}
+                        <div className="flex h-screen min-h-0 w-screen overflow-hidden">
+                          <div className="flex-1 min-w-0 h-full overflow-hidden">
+                            <StreamPage />
+                          </div>
+                          <AgentDrawer />
+                        </div>
                       </AgentProvider>
                     </OnboardingProvider>
                   </CloudProvider>
