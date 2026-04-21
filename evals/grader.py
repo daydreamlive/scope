@@ -105,6 +105,18 @@ def pipelines_include(graph: dict, arg: Any) -> CheckResult:
     return CheckResult.ok_(f"got={sorted(got)}")
 
 
+def pipelines_count_at_least(graph: dict, arg: Any) -> CheckResult:
+    """Assert at least N pipeline nodes exist, without pinning which ones.
+
+    Useful for vague prompts where the agent gets to pick the pipeline.
+    """
+    min_count = int(arg)
+    got = _pipeline_ids(graph)
+    if len(got) >= min_count:
+        return CheckResult.ok_(f"{len(got)} pipeline(s): {sorted(set(got))}")
+    return CheckResult.fail(f"need >= {min_count} pipeline(s), got {len(got)}")
+
+
 def lora_count_at_least(graph: dict, arg: Any) -> CheckResult:
     min_count = int(arg)
     # Two reasonable places: a dedicated `lora` UI node, or a `lora` node
@@ -257,7 +269,98 @@ def wire_present(graph: dict, arg: Any) -> CheckResult:
             return CheckResult.ok_(f"{len(hits)} edge(s) -> param:__loras")
         return CheckResult.fail("no edge targets pipeline's param:__loras")
 
+    if kind == "pipeline_to_record":
+        # Any edge from a pipeline's stream output into a record node.
+        pipe_ids = _pipeline_node_ids(graph)
+        for e in _ui_edges(graph):
+            if e.get("source") not in pipe_ids:
+                continue
+            if _ui_node_type(graph, e.get("target")) != "record":
+                continue
+            # Source handle should be a stream (video). Accept any stream: prefix.
+            sh = e.get("sourceHandle") or ""
+            if isinstance(sh, str) and sh.startswith("stream:"):
+                return CheckResult.ok_(
+                    f"pipeline({e.get('source')}) -> record({e.get('target')}) via {sh}"
+                )
+        return CheckResult.fail(
+            "no ui_state edge wires a pipeline stream output into a record node"
+        )
+
+    if kind == "prompt_list_to_pipeline":
+        # prompt_list node's param:prompt output → pipeline's param:__prompt.
+        hits = _edges_into_any_pipeline(graph, "param:__prompt")
+        if not hits:
+            return CheckResult.fail("no edge targets pipeline's param:__prompt")
+        for e in hits:
+            if _ui_node_type(graph, e.get("source")) == "prompt_list":
+                return CheckResult.ok_(
+                    f"prompt_list({e.get('source')}) -> param:__prompt"
+                )
+        return CheckResult.fail(
+            "param:__prompt edge exists but source is not a prompt_list node"
+        )
+
+    if kind == "trigger_to_prompt_list":
+        # Some value source → prompt_list's param:trigger (or param:cycle).
+        accepted = {"param:trigger", "param:cycle"}
+        for e in _ui_edges(graph):
+            if _ui_node_type(graph, e.get("target")) != "prompt_list":
+                continue
+            if e.get("targetHandle") not in accepted:
+                continue
+            src_t = _ui_node_type(graph, e.get("source"))
+            if src_t in _VALUE_SOURCE_TYPES:
+                return CheckResult.ok_(
+                    f"{src_t}({e.get('source')}) -> prompt_list.{e.get('targetHandle')}"
+                )
+        return CheckResult.fail(
+            "no edge from a value-producing source into a prompt_list's "
+            "param:trigger or param:cycle"
+        )
+
     return CheckResult.fail(f"unknown wire_present kind: {kind!r}")
+
+
+def node_present(graph: dict, arg: Any) -> CheckResult:
+    """Assert at least N UI nodes of a given type exist.
+
+    arg: ``{type: "record", count: 1, min_items: 5}``
+    - ``type`` (required) — ui_state node type.
+    - ``count`` (default 1) — minimum number of nodes of that type.
+    - ``min_items`` (optional) — if set AND type=="prompt_list", at least one
+      such node must have ``data.promptListItems`` of length ≥ min_items.
+    """
+    if not isinstance(arg, dict) or "type" not in arg:
+        return CheckResult.fail(f"node_present needs {{type: ...}}, got {arg!r}")
+    want_type = arg["type"]
+    want_count = int(arg.get("count", 1))
+    min_items = arg.get("min_items")
+
+    nodes = [n for n in _ui_nodes(graph) if n.get("type") == want_type]
+    if len(nodes) < want_count:
+        return CheckResult.fail(
+            f"need >= {want_count} node(s) of type {want_type!r}, got {len(nodes)}"
+        )
+
+    if min_items is not None:
+        # Look for at least one node whose item list is long enough.
+        threshold = int(min_items)
+        max_seen = 0
+        for n in nodes:
+            items = (n.get("data") or {}).get("promptListItems") or []
+            if isinstance(items, list):
+                max_seen = max(max_seen, len(items))
+        if max_seen < threshold:
+            return CheckResult.fail(
+                f"{want_type} exists but longest promptListItems is {max_seen}, "
+                f"need >= {threshold}"
+            )
+        return CheckResult.ok_(
+            f"{len(nodes)} {want_type} node(s); longest list has {max_seen} item(s)"
+        )
+
+    return CheckResult.ok_(f"{len(nodes)} {want_type} node(s)")
 
 
 # ---------------------------------------------------------------------------
@@ -286,9 +389,11 @@ def bad_handle_prefix(graph: dict, arg: Any) -> CheckResult:
 CHECKS: dict[str, Callable[[dict, Any], CheckResult]] = {
     "pipelines_equal": pipelines_equal,
     "pipelines_include": pipelines_include,
+    "pipelines_count_at_least": pipelines_count_at_least,
     "lora_count_at_least": lora_count_at_least,
     "no_validator_errors": no_validator_errors,
     "wire_present": wire_present,
+    "node_present": node_present,
     "bad_handle_prefix": bad_handle_prefix,
 }
 

@@ -62,8 +62,10 @@ Registered in [`grader.py`](grader.py):
 | ----- | -------- | ------------ |
 | `pipelines_equal` | `[ids]` | Pipeline nodes' `pipeline_id`s exactly equal the set. |
 | `pipelines_include` | `[ids]` | Pipeline nodes include every id in the list (extras ok). |
+| `pipelines_count_at_least` | `int` | At least N pipeline nodes exist (any ids). Good for vague prompts. |
 | `lora_count_at_least` | `int` | Total LoRA entries across `lora` UI nodes ≥ N. |
 | `wire_present` | `{kind, …}` | An edge of the named kind exists. See below. |
+| `node_present` | `{type, count?, min_items?}` | ≥ `count` UI nodes of `type`. For `prompt_list`, `min_items` asserts list length. |
 | `no_validator_errors` | _(any)_ | `_validate_proposal()` returns zero errors on the graph. |
 | `bad_handle_prefix` | `"parameter:"` | (Forbid) No edge handle starts with the prefix. |
 
@@ -76,9 +78,31 @@ Registered in [`grader.py`](grader.py):
 | `image_to_vace` | — | Image (or value) node → VACE node's `param:ref_image`/`first_frame`/`last_frame`. |
 | `prompt_to_pipeline` | — | Any source → pipeline's `param:__prompt`. |
 | `lora_to_pipeline` | — | LoRA node → pipeline's `param:__loras`. |
+| `prompt_list_to_pipeline` | — | `prompt_list` UI node → pipeline's `param:__prompt`. |
+| `trigger_to_prompt_list` | — | Value source → `prompt_list`'s `param:trigger`/`param:cycle`. |
+| `pipeline_to_record` | — | A pipeline's stream output → a `record` UI node. |
 
 Adding a new check type = adding a function to `grader.py` and registering
 it in `CHECKS`. The YAML format picks it up automatically.
+
+### Case tone: precise vs. vague
+
+Real users send prompts across a wide range of specificity. Cases should
+cover that range:
+
+- **Precise** (`complex-krea-prompt-switch-record`) — the prompt names the
+  pipeline, exact counts, specific behaviors. Graders assert the precise
+  structure: `pipelines_include: [krea-realtime-video]`,
+  `node_present: { type: prompt_list, min_items: 5 }`, specific wires.
+- **Vague** (`vague-capture-moments`) — the prompt says what the user
+  wants to *do*, not how. Graders assert only what the intent clearly
+  implies (`pipelines_count_at_least: 1`, `node_present: { type: record }`).
+  The agent gets latitude on everything else; the eval measures whether
+  it makes reasonable choices.
+
+Prefer more vague cases as pass-rate on precise ones improves — vague
+ones surface filling-the-gaps failures that don't show up when every
+detail is spelled out.
 
 ## Pytest integration
 

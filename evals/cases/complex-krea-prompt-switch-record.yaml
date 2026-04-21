@@ -1,0 +1,27 @@
+name: complex-krea-prompt-switch-record
+description: |
+  Multi-concept request that tests: picking a specific pipeline (krea), wiring
+  a reference image via VACE, using a prompt_list with ≥5 items driven by a
+  button/trigger, and wiring the output into a record node. Verbatim phrasing
+  of the kind a user would type.
+prompt: |
+  Make a krea workflow that allows me to supply a reference image, switch
+  between 5 prompts with a button press, and record the output.
+runs: 5
+expect:
+  - pipelines_include: [krea-realtime-video]
+  # Reference image path: krea supports VACE, so the reference image flows
+  # image -> vace -> pipeline's param:__vace aggregate.
+  - wire_present: { kind: image_to_vace }
+  - wire_present: { kind: vace_to_pipeline }
+  # Prompt switching: prompt_list node with at least 5 entries, its output
+  # feeding the pipeline's aggregate prompt input.
+  - node_present: { type: prompt_list, min_items: 5 }
+  - wire_present: { kind: prompt_list_to_pipeline }
+  - wire_present: { kind: trigger_to_prompt_list }
+  # Recording: at least one record node wired to the pipeline's stream output.
+  - node_present: { type: record }
+  - wire_present: { kind: pipeline_to_record }
+  - no_validator_errors: true
+forbid:
+  - bad_handle_prefix: "parameter:"
