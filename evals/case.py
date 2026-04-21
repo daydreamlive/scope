@@ -47,6 +47,11 @@ class Case:
     expect: list[CheckSpec] = field(default_factory=list)
     forbid: list[CheckSpec] = field(default_factory=list)
     source_path: Path | None = None
+    # When true, the case passes iff the agent did NOT emit a
+    # ``workflow_proposal`` SSE event. Used for runtime-tweak cases where
+    # the right tool is ``update_parameters`` and re-proposing the graph
+    # is the regression we want to catch.
+    forbid_proposal: bool = False
 
 
 def _parse_check_list(raw: list[Any], context: str) -> list[CheckSpec]:
@@ -87,6 +92,7 @@ def load_case(path: Path) -> Case:
         expect=_parse_check_list(data.get("expect") or [], f"{path}:expect"),
         forbid=_parse_check_list(data.get("forbid") or [], f"{path}:forbid"),
         source_path=path,
+        forbid_proposal=bool(data.get("forbid_proposal", False)),
     )
 
 

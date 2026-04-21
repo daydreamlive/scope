@@ -67,6 +67,20 @@ def _grade(case: Case, drive: DriveResult) -> tuple[bool, list[str]]:
     """Return ``(passed, failure_reasons)`` for a single run."""
     failures: list[str] = []
 
+    # Runtime-tweak cases: the agent must NOT emit workflow_proposal. If
+    # it does, that's a regression ("the user asked for a param change
+    # but we rebuilt the whole graph"). No graph-based checks are run —
+    # there shouldn't be a graph to check.
+    if case.forbid_proposal:
+        if drive.error and drive.proposal is None:
+            return False, [f"driver error: {drive.error.strip()[:200]}"]
+        if drive.proposal is not None:
+            return False, [
+                "forbid_proposal: agent emitted workflow_proposal when it "
+                "should have used update_parameters instead"
+            ]
+        return True, []
+
     if drive.error and drive.proposal is None:
         return False, [f"driver error: {drive.error.strip()[:200]}"]
 

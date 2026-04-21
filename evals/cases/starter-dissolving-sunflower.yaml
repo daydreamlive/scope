@@ -20,3 +20,4 @@ expect:
 forbid:
   - bad_handle_prefix: "parameter:"
   - orphan_sinks: true
+  - overlapping_nodes: true

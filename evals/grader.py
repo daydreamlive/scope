@@ -436,6 +436,92 @@ def bad_handle_prefix(graph: dict, arg: Any) -> CheckResult:
     return CheckResult.ok_(f"no edge handle starts with {prefix!r}")
 
 
+def overlapping_nodes(graph: dict, _arg: Any) -> CheckResult:
+    """Forbid check: no two nodes on the canvas may overlap.
+
+    Observed failure: the agent picks UI-node positions like (0,0), (0,80),
+    (320,40) that look "neat" in isolation but collide with the frontend's
+    top-level auto-layout strip (sources at x=50, pipelines at x=350, sinks
+    at x=650, records at x=950). The server-side ``_reflow_ui_nodes`` should
+    catch this and reassign, so this check is a regression detector: if it
+    ever fires in an eval, either the agent is producing new layout patterns
+    reflow doesn't cover OR reflow has a bug.
+
+    We use the same bounding-box logic as ``_reflow_ui_nodes``: UI nodes are
+    240×140 (280 tall for image/vace/subgraph), top-level nodes are the
+    200×60 that ``graphConfigToFlow`` drops at x=50/350/650/950, row-spaced
+    by 160 starting at y=50.
+    """
+    # Mirror the constants used by the server-side reflow (keeping them
+    # duplicated here is intentional — if either set drifts, the eval is
+    # exactly the place we want to catch it).
+    FE_START_X = 50
+    FE_START_Y = 50
+    FE_COLUMN_GAP = 300
+    FE_ROW_GAP = 100
+    FE_NODE_W = 200
+    FE_NODE_H = 60
+
+    UI_NODE_W = 240
+    UI_NODE_H_DEFAULT = 140
+    UI_NODE_H_TALL = 280
+    TALL_TYPES = {"image", "vace", "subgraph"}
+
+    type_to_col = {"source": 0, "pipeline": 1, "sink": 2, "record": 3}
+
+    def rects_overlap(
+        a: tuple[float, float, float, float],
+        b: tuple[float, float, float, float],
+    ) -> bool:
+        ax, ay, aw, ah = a
+        bx, by, bw, bh = b
+        return not (ax + aw <= bx or bx + bw <= ax or ay + ah <= by or by + bh <= ay)
+
+    # Predict top-level rectangles the frontend will render.
+    top_by_col: dict[int, list[str]] = {}
+    for n in _top_level_nodes(graph):
+        col = type_to_col.get(n.get("type"))
+        if col is None or not n.get("id"):
+            continue
+        top_by_col.setdefault(col, []).append(n["id"])
+
+    rects: list[tuple[tuple[float, float, float, float], str]] = []
+    for col, ids in top_by_col.items():
+        for i, nid in enumerate(ids):
+            rects.append(
+                (
+                    (
+                        float(FE_START_X + col * FE_COLUMN_GAP),
+                        float(FE_START_Y + i * (FE_NODE_H + FE_ROW_GAP)),
+                        float(FE_NODE_W),
+                        float(FE_NODE_H),
+                    ),
+                    f"top:{nid}",
+                )
+            )
+
+    # UI-state rectangles use whatever position the agent (or reflow) set.
+    for n in _ui_nodes(graph):
+        pos = n.get("position") or {}
+        try:
+            x = float(pos.get("x", 0))
+            y = float(pos.get("y", 0))
+        except (TypeError, ValueError):
+            return CheckResult.fail(
+                f"ui node {n.get('id')!r} has invalid position {pos!r}"
+            )
+        h = UI_NODE_H_TALL if n.get("type") in TALL_TYPES else UI_NODE_H_DEFAULT
+        rects.append(((x, y, float(UI_NODE_W), float(h)), f"ui:{n.get('id') or '?'}"))
+
+    for i, (ra, ida) in enumerate(rects):
+        for j in range(i + 1, len(rects)):
+            rb, idb = rects[j]
+            if rects_overlap(ra, rb):
+                return CheckResult.fail(f"{ida} overlaps {idb}")
+
+    return CheckResult.ok_(f"no overlaps among {len(rects)} node(s)")
+
+
 def orphan_sinks(graph: dict, _arg: Any) -> CheckResult:
     """Forbid check: every top-level sink must have an incoming stream edge.
 
@@ -486,6 +572,7 @@ CHECKS: dict[str, Callable[[dict, Any], CheckResult]] = {
     "node_present": node_present,
     "bad_handle_prefix": bad_handle_prefix,
     "orphan_sinks": orphan_sinks,
+    "overlapping_nodes": overlapping_nodes,
 }
 
 
