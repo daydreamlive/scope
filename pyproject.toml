@@ -140,10 +140,19 @@ dev = [
     "twine>=5.0.0",
     "pytest>=8.4.2",
     "freezegun>=1.5.5",
+    # Eval harness
+    "asgi-lifespan>=2.1",
+    "pyyaml>=6.0",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+# Exclude eval tests by default — they hit a live LLM API and cost money.
+# Run on demand with: uv run pytest -m eval
+addopts = "-m 'not eval'"
+markers = [
+    "eval: LLM-backed eval (hits live provider API; excluded from default run)",
+]
 
 [tool.ruff]
 line-length = 88

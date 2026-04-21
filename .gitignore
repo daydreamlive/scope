@@ -24,3 +24,6 @@ notes/
 .cursor/
 .specstory/
 *.local*
+
+# Eval harness artifacts
+evals/outputs/
