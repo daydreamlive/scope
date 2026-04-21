@@ -664,6 +664,14 @@ export function StreamPage() {
   // Track stream start time to measure session duration for "meaningful use".
   const streamStartedAtRef = useRef<number | null>(null);
   const prevIsStreamingRef = useRef(isStreaming);
+  // Mirror telemetry state into a ref so it can be read inside the
+  // stream-transition effect without making the effect re-run (and cancel the
+  // pending timer) when the user toggles telemetry between stream stop and
+  // the modal opening.
+  const isTelemetryEnabledRef = useRef(isTelemetryEnabled);
+  useEffect(() => {
+    isTelemetryEnabledRef.current = isTelemetryEnabled;
+  }, [isTelemetryEnabled]);
   useEffect(() => {
     const wasStreaming = prevIsStreamingRef.current;
     prevIsStreamingRef.current = isStreaming;
@@ -683,7 +691,7 @@ export function StreamPage() {
       // Evaluate eligibility against the freshly-updated timestamps. Sean Ellis
       // wins if both are eligible; we defer the NPS ask to the next stop.
       const commonInputs = {
-        telemetryEnabled: isTelemetryEnabled,
+        telemetryEnabled: isTelemetryEnabledRef.current,
         firstMeaningfulUseAt: getFirstMeaningfulUseAt(),
         lastMeaningfulUseAt: getLastMeaningfulUseAt(),
       };
@@ -698,8 +706,10 @@ export function StreamPage() {
           npsLastShownAt: getNpsLastShownAt(),
         });
 
+      // Schedule the modal open. The shown flag is committed in a separate
+      // effect when the modal actually renders — if this timer is ever
+      // cancelled (unmount, etc.) the user doesn't lose their one-shot.
       if (seanEllisEligible) {
-        markSeanEllisShown();
         const t = setTimeout(
           () => setShowSeanEllis(true),
           POST_STREAM_DELAY_MS
@@ -707,7 +717,6 @@ export function StreamPage() {
         return () => clearTimeout(t);
       }
       if (npsEligible) {
-        markNpsShown();
         const t = setTimeout(() => setShowNps(true), POST_STREAM_DELAY_MS);
         return () => clearTimeout(t);
       }
@@ -717,7 +726,16 @@ export function StreamPage() {
     if (!wasStreaming && isStreaming) {
       streamStartedAtRef.current = Date.now();
     }
-  }, [isStreaming, isTelemetryEnabled]);
+  }, [isStreaming]);
+
+  // Commit the shown flag only when the modal actually opens, so a cancelled
+  // timer (unmount or rapid re-render) doesn't permanently burn the one-shot.
+  useEffect(() => {
+    if (showSeanEllis) markSeanEllisShown();
+  }, [showSeanEllis]);
+  useEffect(() => {
+    if (showNps) markNpsShown();
+  }, [showNps]);
 
   // Whether beat-quantized output gating is active
   const isQuantizeActive =
