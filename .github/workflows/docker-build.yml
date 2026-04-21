@@ -110,16 +110,10 @@ jobs:
             | | |
             |---|---|
             | **Commit** | \`${shortSha}\` |
-
-            ### Livepeer Runner
-
-            | | |
-            |---|---|
             | **App ID** | \`${livepeerFalAppId}\` |
             | **WebSocket** | \`${livepeerFalWsUrl}\` |
-            | **Auth** | \`private\` |
 
-            ### Testing Livepeer Mode
+            ### Testing on Cloud
             \`\`\`
             SCOPE_CLOUD_APP_ID="${livepeerFalAppId}/ws" uv run daydream-scope
             \`\`\`
