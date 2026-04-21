@@ -90,6 +90,13 @@ This documentation can be used to understand the architecture of the project:
 
 ## Local Cloud Testing
 
+> **DEPRECATED.** This section describes the old direct/cloud-relay
+> mode (`SCOPE_CLOUD_MODE=direct`, `fal_app.py`,
+> `CloudConnectionManager`) which is being removed. For all new
+> cloud testing, use the `testing-livepeer-fal-deploy` skill (see the
+> "Cloud testing — use this skill" section above). This section is
+> kept only for in-flight work on the legacy path.
+
 Test the cloud relay flow locally by running two Scope instances — one acting as the "cloud" relay server.
 
 **Environment variables:**
@@ -145,26 +152,45 @@ SourceManager reads video files
     reads from per-sink queues → _last_frames_by_sink
 ```
 
-## Testing the deployed Livepeer fal path
+## Cloud testing — use this skill
 
-For testing Scope running in Livepeer cloud mode against a **deployed**
-fal.ai app — i.e. local Scope → daydream orchestrator → deployed fal
-runner → back — use the `testing-livepeer-fal-deploy` skill at
-`.agents/skills/testing-livepeer-fal-deploy/SKILL.md`.
+**Livepeer cloud mode is the only supported cloud path going forward.**
+The older direct/cloud-relay mode (`fal_app.py` +
+`CloudConnectionManager` + `SCOPE_CLOUD_MODE=direct`) is being
+deprecated.
 
-- **Playwright e2e test** (`e2e/tests/cloud-streaming.spec.ts`) drives
-  the real Perform-mode UI with a synthetic camera and verifies the
-  full round-trip (produces every lifecycle Kafka event). This is the
-  primary test to run after touching `src/scope/cloud/livepeer_fal_app.py`,
-  `src/scope/cloud/livepeer_app.py`, or anything on the cloud-connect
-  path.
-- **`test-cloud-connect.sh`** at the repo root is a fast bash/curl
-  smoke test for `/api/v1/cloud/connect` only — useful for `git bisect
-  run` or "did the fal container come up?". Does not produce
+**Whenever a user says "test cloud", "test the fal deploy", "verify
+cloud streaming", "run the e2e test", or pastes any cloud-connect
+error (`All orchestrators failed`, `ACCESS_DENIED`, `did not receive
+ready message`, `discover_orchestrators requires discovery_url`),
+route to the `testing-livepeer-fal-deploy` skill at
+`.agents/skills/testing-livepeer-fal-deploy/SKILL.md`.** Also
+route there for changes to `src/scope/cloud/livepeer_fal_app.py`,
+`src/scope/cloud/livepeer_app.py`, or the cloud-connect flow on the
+client side (`src/scope/server/livepeer.py`,
+`src/scope/server/livepeer_client.py`).
+
+The skill provides two paths:
+
+- **Playwright e2e test** (`e2e/tests/cloud-streaming.spec.ts`) —
+  primary. Drives the real Perform-mode UI with a synthetic camera
+  and verifies the full trickle round-trip. Produces every lifecycle
+  Kafka event (`websocket_connected`, `pipeline_loaded`,
+  `session_created`, `stream_started`, `stream_heartbeat`,
+  `session_closed`, `websocket_disconnected`).
+- **`test-cloud-connect.sh`** at the repo root — fast bash/curl smoke
+  test for `/api/v1/cloud/connect` only. Useful in `git bisect run`
+  or for "did the fal container come up?". Does not produce
   pipeline/session/stream events.
 
-For a fully-local livepeer stack (prebuilt go-livepeer + local runner,
-no fal involved), use the separate `testing-livepeer` skill instead.
+**Do NOT use the `Local Cloud Testing` or `MCP Server Testing with
+Local Cloud Dev` sections below for general cloud testing — those
+describe the deprecated direct-mode path and are kept only to
+unblock in-flight work on that legacy path until it's removed.**
+
+For a fully-local livepeer stack (prebuilt go-livepeer + local
+runner, no fal involved), use the separate `testing-livepeer` skill
+instead.
 
 ## MCP Server Testing
 
@@ -321,6 +347,11 @@ for name, color in [('test', (0,0,255)), ('test1', (0,255,0)), ('test2', (255,0,
 - Syphon source black/missing → check logs for `"Syphon server not found"` — verify source_name matches display name from discovery
 
 ## MCP Server Testing with Local Cloud Dev
+
+> **DEPRECATED.** Describes MCP testing against the old direct-mode
+> two-instance setup. For cloud MCP testing going forward, combine
+> the `testing-livepeer-fal-deploy` skill with the MCP patterns
+> above. Kept for in-flight work on the legacy path only.
 
 **Only use this section when the user explicitly asks for local cloud / two-instance testing.**
 
