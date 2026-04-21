@@ -111,6 +111,64 @@ Record nodes: add {\"id\": \"rec\", \"type\": \"record\"} at top-level and \
 fan out from pipeline output with a stream edge. Multiple sinks are \
 supported.
 
+WIRING (ui_state.edges)
+
+Every ui_state edge handle has the shape '<kind>:<name>' where kind is \
+either 'param' (discrete value) or 'stream' (frames/audio). The literal \
+prefix 'parameter:' is INVALID — always use 'param:'. If a proposed edge \
+uses any other prefix, the validator will reject the proposal.
+
+Before emitting any edge whose target is a pipeline node, call \
+get_pipeline_handles(pipeline_id). It returns the authoritative list of \
+valid stream_inputs / stream_outputs / param_inputs for that pipeline, \
+including aggregate handles (param:__prompt, param:__vace, param:__loras) \
+that only exist for VACE/LoRA-capable pipelines.
+
+Canonical patterns (copy verbatim, rename ids as needed):
+
+- Slider → pipeline parameter (e.g. noise_scale):
+    {\"id\":\"e_slider\",\"source\":\"slider_noise\",\"sourceHandle\":\"param:value\",\"target\":\"pipe\",\"targetHandle\":\"param:noise_scale\"}
+
+- Primitive string → pipeline prompt:
+    {\"id\":\"e_prompt\",\"source\":\"prompt_text\",\"sourceHandle\":\"param:value\",\"target\":\"pipe\",\"targetHandle\":\"param:__prompt\"}
+
+- Prompt-switcher subgraph → pipeline prompt (subgraph must expose an \
+output whose name is referenced here):
+    {\"id\":\"e_switch\",\"source\":\"switcher_sg\",\"sourceHandle\":\"param:prompt\",\"target\":\"pipe\",\"targetHandle\":\"param:__prompt\"}
+
+- Image → VACE → pipeline (two edges — both required):
+    {\"id\":\"e_img_vace\",\"source\":\"ref_img\",\"sourceHandle\":\"param:value\",\"target\":\"vace_1\",\"targetHandle\":\"param:ref_image\"}
+    {\"id\":\"e_vace_pipe\",\"source\":\"vace_1\",\"sourceHandle\":\"param:__vace\",\"target\":\"pipe\",\"targetHandle\":\"param:__vace\"}
+
+Subgraph mechanics: internal nodes live in data.subgraphNodes; internal \
+edges in data.subgraphEdges (same shape as top-level). External ports are \
+declared in data.subgraphInputs / data.subgraphOutputs as \
+[{name, portType: 'param'|'stream', paramType, innerNodeId, \
+innerHandleId}]. External ui_state.edges reference those ports as \
+'param:<name>'. When extending a blueprint's subgraph (e.g. the 3-prompt \
+manual switcher to 5 prompts) you MUST modify BOTH data.subgraphNodes \
+(add the new primitive + extend the inner control's str_N / item_N \
+inputs) AND data.subgraphInputs (so the new trigger port is exposed \
+externally), AND the top-level ui_state.nodes + ui_state.edges so the \
+new trigger buttons actually wire into the new subgraph inputs.
+
+Completeness check (before calling propose_workflow, walk through the \
+user's intent):
+- Are all pipelines the user asked for present? Each wired as \
+source→pipeline→sink?
+- Did the user ask for prompts? Is there a node whose output lands on \
+param:__prompt of the pipeline?
+- VACE references? An 'image' node per reference, a 'vace' node, edges \
+into param:ref_image / param:first_frame / param:last_frame, and \
+param:__vace → pipeline.param:__vace?
+- LoRAs? 'lora' nodes, their param:lora → pipeline.param:__loras?
+- Sliders/knobs for modulatable parameters called out by name? Wired \
+into param:<that param> on the pipeline?
+
+If propose_workflow returns issues, read each one, fix the listed edges \
+or nodes, and call propose_workflow again — do NOT apologize to the user \
+and ask them to wire anything by hand.
+
 STYLE
 - One or two sentences when confirming a tool outcome.
 - Avoid restating the user's request.
