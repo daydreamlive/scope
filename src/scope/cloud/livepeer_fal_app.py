@@ -390,6 +390,13 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             "KAFKA_TOPIC",
             "KAFKA_SASL_USERNAME",
             "KAFKA_SASL_PASSWORD",
+            # fal runtime metadata — used by the runner to build
+            # connection_info on Kafka events so they match the wrapper.
+            "NOMAD_DC",
+            "FAL_JOB_ID",
+            "FAL_RUNNER_ID",
+            "FAL_LOG_LABELS",
+            "FAL_MACHINE_TYPE",
         ]
         runner_env = {k: os.environ[k] for k in env_allowlist if k in os.environ}
         runner_env.setdefault("UV_CACHE_DIR", "/tmp/uv-cache")
