@@ -5,8 +5,10 @@ interface (input/output queues, worker thread).
 """
 
 import logging
+import os
 import queue
 import threading
+import time
 from typing import Any
 
 import torch
@@ -16,6 +18,10 @@ from .base import BaseNode
 logger = logging.getLogger(__name__)
 
 SLEEP_TIME = 0.01
+
+# Set SCOPE_NODE_TRACE=1 for per-node diagnostics: param updates,
+# route-outputs backpressure events. Off by default.
+_TRACE = os.environ.get("SCOPE_NODE_TRACE", "").lower() in ("1", "true", "yes")
 
 
 class NodeProcessor:
@@ -136,15 +142,28 @@ class NodeProcessor:
         # this guard a stream-level tweak like quantize_mode would fire
         # _needs_rerun on every custom node and cascade through the DAG.
         changed = False
+        changed_keys: list[str] = []
         for key, value in parameters.items():
             if key not in self._declared_param_names:
                 continue
             if self.parameters.get(key) != value:
                 changed = True
-                break
+                changed_keys.append(key)
         self.parameters.update(parameters)
         if changed:
             self._needs_rerun = True
+        if _TRACE:
+            accepted = {k: parameters[k] for k in changed_keys}
+            rejected = [
+                k for k in parameters.keys() if k not in self._declared_param_names
+            ]
+            if accepted or rejected:
+                logger.info(
+                    "[scope.update_parameters][%s] accepted=%s rejected_unknown=%s",
+                    self.node_id,
+                    accepted,
+                    rejected,
+                )
 
     def set_beat_cache_reset_rate(self, rate):  # PipelineProcessor compat
         pass
@@ -270,12 +289,23 @@ class NodeProcessor:
             out_queues = self.output_queues.get(port_name)
             if out_queues:
                 for oq in out_queues:
+                    block_start = time.monotonic() if _TRACE else 0.0
+                    blocks = 0
                     while not self.shutdown_event.is_set():
                         try:
                             oq.put(value, timeout=0.1)
                             break
                         except queue.Full:
+                            blocks += 1
                             continue
+                    if _TRACE and blocks > 0:
+                        logger.info(
+                            "[scope._route_outputs][%s:%s] blocked %.2fs (%d retries) on full downstream queue",
+                            self.node_id,
+                            port_name,
+                            time.monotonic() - block_start,
+                            blocks,
+                        )
 
     def _route_audio(self, value: Any) -> None:
         """Extract audio tensor and push to audio_output_queue for WebRTC."""
@@ -299,9 +329,19 @@ class NodeProcessor:
         # track hasn't finished serving the previous chunk, which is the
         # backpressure mechanism that rate-limits batch generators to
         # real-time playback instead of silently dropping audio.
+        block_start = time.monotonic() if _TRACE else 0.0
+        blocks = 0
         while not self.shutdown_event.is_set():
             try:
                 self.audio_output_queue.put((audio_tensor, audio_sr), timeout=0.1)
                 break
             except queue.Full:
+                blocks += 1
                 continue
+        if _TRACE and blocks > 0:
+            logger.info(
+                "[scope._route_audio][%s] blocked %.2fs (%d retries) on full audio_output_queue (WebRTC backpressure)",
+                self.node_id,
+                time.monotonic() - block_start,
+                blocks,
+            )

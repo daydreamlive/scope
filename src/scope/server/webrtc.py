@@ -657,6 +657,18 @@ class WebRTCManager:
                         # Parse the JSON message
                         data = json.loads(message)
                         logger.debug(f"Received parameter update: {data}")
+                        import os as _os
+
+                        if _os.environ.get("SCOPE_NODE_TRACE", "").lower() in (
+                            "1",
+                            "true",
+                            "yes",
+                        ):
+                            logger.info(
+                                "[scope.webrtc.datachannel] inbound keys=%s node_id=%s",
+                                sorted(data.keys()) if isinstance(data, dict) else None,
+                                data.get("node_id") if isinstance(data, dict) else None,
+                            )
 
                         # Always handle paused immediately (before quantized
                         # scheduling) so pause/unpause is never delayed.
