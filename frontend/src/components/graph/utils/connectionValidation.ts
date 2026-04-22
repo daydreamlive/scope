@@ -6,7 +6,10 @@
  */
 
 import type { Connection, Edge, Node } from "@xyflow/react";
-import { parseHandleId } from "../../../lib/graphUtils";
+import {
+  parseHandleId,
+  stripCustomNodeDirection,
+} from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { resolveSourceType } from "./typeResolution";
 import { BOUNDARY_INPUT_ID, BOUNDARY_OUTPUT_ID } from "./subgraphSerialization";
@@ -302,9 +305,57 @@ export function validateConnection(
     return true;
   }
 
-  // Stream ↔ stream always ok
-  if (sourceParsed.kind === "stream" && targetParsed.kind === "stream")
-    return true;
+  // Stream ↔ stream: for custom_node edges, enforce port-type matching
+  // against the node's declared inputs/outputs. For built-in source /
+  // pipeline / sink nodes, streams are untyped (video) and always ok.
+  if (sourceParsed.kind === "stream" && targetParsed.kind === "stream") {
+    const sourceNode = nodes.find(n => n.id === connection.source);
+    const targetNode = nodes.find(n => n.id === connection.target);
+    if (!sourceNode || !targetNode) return true;
+    const srcIsCustom = sourceNode.data.nodeType === "custom_node";
+    const tgtIsCustom = targetNode.data.nodeType === "custom_node";
+    if (!srcIsCustom && !tgtIsCustom) return true;
+
+    // For each custom endpoint, look up the declared port. We need to
+    // distinguish "ports not hydrated yet" (allow, optimistic) from
+    // "ports hydrated but this port is missing" (reject, stale wire
+    // or typo'd port id). `customNodeInputs`/`customNodeOutputs` is
+    // set to an array — possibly empty — exactly when the node has
+    // been hydrated from /api/v1/nodes/definitions.
+    // CustomNode handles are namespaced as stream:in:<name> / stream:out:<name>
+    // so port names in handle IDs carry an in:/out: prefix; strip it before
+    // matching against the declared port list.
+    let srcType: string | undefined;
+    if (srcIsCustom) {
+      const outputs = sourceNode.data.customNodeOutputs;
+      if (outputs === undefined) {
+        // Not hydrated yet — fall through to the compatible path.
+      } else {
+        const portName = stripCustomNodeDirection(sourceParsed.name);
+        const port = outputs.find(p => p.name === portName);
+        if (!port) return false;
+        srcType = port.port_type;
+      }
+    }
+
+    let tgtType: string | undefined;
+    if (tgtIsCustom) {
+      const inputs = targetNode.data.customNodeInputs;
+      if (inputs === undefined) {
+        // Not hydrated yet — fall through to the compatible path.
+      } else {
+        const portName = stripCustomNodeDirection(targetParsed.name);
+        const port = inputs.find(p => p.name === portName);
+        if (!port) return false;
+        tgtType = port.port_type;
+      }
+    }
+
+    // One side is a built-in (untyped stream) or not yet hydrated —
+    // we can't compare types, so allow.
+    if (!srcType || !tgtType) return true;
+    return srcType === tgtType;
+  }
 
   // Param ↔ param
   if (sourceParsed.kind === "param" && targetParsed.kind === "param") {

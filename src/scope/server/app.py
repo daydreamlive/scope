@@ -106,6 +106,7 @@ from .schema import (
     IceCandidateRequest,
     IceServerConfig,
     IceServersResponse,
+    NodeDefinitionsResponse,
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
@@ -115,16 +116,26 @@ from .schema import (
 from .scope_cloud_types import ScopeCloudBackend
 from .tempo_router import router as tempo_router
 
-# Cached responses for pipeline schemas and plugin list.
-# Invalidated by _invalidate_plugin_caches() on install/uninstall.
+# Cached responses for pipeline schemas, node definitions, and plugin list.
+# Invalidated by _invalidate_plugin_caches() on plugin install/uninstall and
+# on cloud connect/disconnect — the latter matters because cloud mode proxies
+# the schema/definition endpoints to the cloud backend, so the cached payload
+# depends on cloud-mode state and must be rebuilt when it flips.
 _pipeline_schemas_cache: PipelineSchemasResponse | None = None
+_node_definitions_cache: NodeDefinitionsResponse | None = None
 _plugins_list_cache: object | None = None
 
 
 def _invalidate_plugin_caches():
-    """Reset plugin and pipeline schema caches after install/uninstall."""
-    global _pipeline_schemas_cache, _plugins_list_cache
+    """Reset plugin, pipeline schema, and node definition caches.
+
+    Called on plugin install/uninstall and on cloud connect/disconnect so
+    that the next fetch rebuilds the payload from whichever registry is
+    authoritative for the current mode.
+    """
+    global _pipeline_schemas_cache, _node_definitions_cache, _plugins_list_cache
     _pipeline_schemas_cache = None
+    _node_definitions_cache = None
     _plugins_list_cache = None
 
     # Also clear the plugin manager's per-plugin update check TTL cache
@@ -761,44 +772,88 @@ async def get_pipeline_schemas(
     http_request: Request,
     cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
-    """Get configuration schemas and defaults for all available pipelines.
+    """Compat alias for the pipeline-rich subset of the unified node catalog.
 
-    Returns the output of each pipeline's get_schema_with_metadata() method,
-    which includes:
-    - Pipeline metadata (id, name, description, version)
-    - supported_modes: List of supported input modes ("text", "video")
-    - default_mode: Default input mode for this pipeline
-    - mode_defaults: Mode-specific default overrides (if any)
-    - config_schema: Full JSON schema with defaults
+    Derives its response from the unified :class:`NodeRegistry` —
+    every entry whose :attr:`NodeDefinition.pipeline_meta` is set is a
+    pipeline, and ``pipeline_meta`` already holds the full output of
+    ``get_schema_with_metadata()`` (config_schema, mode_defaults,
+    supports_lora, supports_vace, etc.). Kept so existing frontend
+    callers in ``usePipelines.ts`` keep working without migration; new
+    code should read from ``GET /api/v1/nodes/definitions`` instead.
 
-    The frontend should use this as the source of truth for parameter defaults.
-
-    In cloud mode (when connected to cloud), this proxies the request to the
-    cloud-hosted scope backend to get the available pipelines there.
+    In cloud mode this proxies to the cloud-hosted scope backend.
     """
     global _pipeline_schemas_cache
     if _pipeline_schemas_cache is not None:
         return _pipeline_schemas_cache
 
+    from scope.core.nodes.registry import NodeRegistry
     from scope.core.pipelines.registry import PipelineRegistry
     from scope.core.plugins import get_plugin_manager
 
     plugin_manager = get_plugin_manager()
     pipelines: dict = {}
 
-    for pipeline_id in PipelineRegistry.list_pipelines():
-        config_class = PipelineRegistry.get_config_class(pipeline_id)
-        if config_class:
-            # get_schema_with_metadata() includes supported_modes, default_mode,
-            # and mode_defaults directly from the config class
-            schema_data = config_class.get_schema_with_metadata()
-            schema_data["plugin_name"] = plugin_manager.get_plugin_for_pipeline(
-                pipeline_id
-            )
-            pipelines[pipeline_id] = schema_data
+    # Pipelines always appear — the set is ``PipelineRegistry.list_pipelines()``.
+    # ``pipeline_meta`` is either the full ``get_schema_with_metadata()`` output
+    # or a degraded identity-only stub with a ``schema_error`` field when that
+    # call failed (see ``Pipeline.get_definition``). Either way the pipeline
+    # stays visible in the UI; the legacy behaviour of 500-ing or silently
+    # disappearing on a broken plugin is gone.
+    pipeline_ids = set(PipelineRegistry.list_pipelines())
+    for definition in NodeRegistry.get_all_definitions():
+        if definition.node_type_id not in pipeline_ids:
+            continue
+        schema_data = dict(definition.pipeline_meta or {})
+        schema_data["plugin_name"] = plugin_manager.get_plugin_for_pipeline(
+            definition.node_type_id
+        )
+        pipelines[definition.node_type_id] = schema_data
 
     response = PipelineSchemasResponse(pipelines=pipelines)
     _pipeline_schemas_cache = response
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Node definitions
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/nodes/definitions", response_model=NodeDefinitionsResponse)
+@cloud_proxy()
+async def get_node_definitions(
+    http_request: Request,
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+):
+    """Return definitions for every registered node — pipelines included.
+
+    The unified discovery endpoint. Pipelines (Pipeline subclasses)
+    appear with ``pipeline_meta`` populated; plain custom nodes leave
+    ``pipeline_meta`` ``None``. Frontend consumers that only want plain
+    nodes filter on ``pipeline_meta == null`` client-side; consumers
+    that want rich pipeline data read from ``pipeline_meta`` directly.
+
+    Memoized in ``_node_definitions_cache`` and invalidated by
+    ``_invalidate_plugin_caches`` whenever a plugin is installed or
+    uninstalled, so the modal open / graph hydrate hot paths don't
+    rebuild the payload (including full ``pipeline_meta``) every call.
+
+    In cloud mode this proxies to the cloud-hosted scope backend so the
+    Add Node modal and graph hydrator see cloud-registered nodes (plain
+    and pipeline) rather than just the local set.
+    """
+    global _node_definitions_cache
+    if _node_definitions_cache is not None:
+        return _node_definitions_cache
+
+    from scope.core.nodes.registry import NodeRegistry
+
+    response = NodeDefinitionsResponse(
+        nodes=[d.model_dump() for d in NodeRegistry.get_all_definitions()]
+    )
+    _node_definitions_cache = response
     return response
 
 

@@ -1,6 +1,33 @@
 """Unit tests for PipelineRegistry unregister and is_registered methods."""
 
-from unittest.mock import MagicMock
+from typing import ClassVar
+
+# Import BasePipelineConfig from ``base_schema`` rather than the ``schema``
+# re-export. ``schema`` triggers ``longlive/__init__.py`` → ``LongLivePipeline``
+# → ``diffusers`` at module load time, which (a) trips the freezegun tests in
+# ``test_logs_config`` when freezegun walks lazy-loaded diffusers attributes
+# and (b) cascades into a pydantic v1 ``ConstrainedDate`` metaclass conflict
+# in every downstream test that imports ``scope.server.app``. Pulling from
+# ``base_schema`` keeps test collection lightweight and side-effect-free.
+from scope.core.pipelines.base_schema import BasePipelineConfig
+from scope.core.pipelines.interface import Pipeline
+
+
+def _make_pipeline_class(registration_id: str) -> type[Pipeline]:
+    """Build a minimal Pipeline subclass whose config carries the given id."""
+
+    class _TestConfig(BasePipelineConfig):
+        pipeline_id: ClassVar[str] = registration_id
+
+    class _TestPipeline(Pipeline):
+        @classmethod
+        def get_config_class(cls) -> type[BasePipelineConfig]:
+            return _TestConfig
+
+        def __call__(self, **kwargs) -> dict:
+            return {}
+
+    return _TestPipeline
 
 
 class TestPipelineRegistryUnregister:
@@ -8,23 +35,15 @@ class TestPipelineRegistryUnregister:
 
     def test_unregister_removes_pipeline(self):
         """Should remove a registered pipeline from the registry."""
-        # Import fresh to avoid state from other tests
         from scope.core.pipelines.registry import PipelineRegistry
 
-        # Create a mock pipeline class
-        mock_pipeline = MagicMock()
-        mock_config = MagicMock()
-        mock_config.pipeline_id = "test-pipeline"
-        mock_pipeline.get_config_class.return_value = mock_config
+        pipeline_cls = _make_pipeline_class("test-unregister-1")
 
-        # Register the pipeline
-        PipelineRegistry.register("test-unregister-1", mock_pipeline)
+        PipelineRegistry.register("test-unregister-1", pipeline_cls)
         assert "test-unregister-1" in PipelineRegistry.list_pipelines()
 
-        # Unregister it
         result = PipelineRegistry.unregister("test-unregister-1")
 
-        # Verify it was removed
         assert result is True
         assert "test-unregister-1" not in PipelineRegistry.list_pipelines()
 
@@ -32,10 +51,9 @@ class TestPipelineRegistryUnregister:
         """Should return True when pipeline was found and removed."""
         from scope.core.pipelines.registry import PipelineRegistry
 
-        mock_pipeline = MagicMock()
+        pipeline_cls = _make_pipeline_class("test-unregister-2")
 
-        # Register then unregister
-        PipelineRegistry.register("test-unregister-2", mock_pipeline)
+        PipelineRegistry.register("test-unregister-2", pipeline_cls)
         result = PipelineRegistry.unregister("test-unregister-2")
 
         assert result is True
@@ -56,14 +74,12 @@ class TestPipelineRegistryIsRegistered:
         """Should return True for registered pipeline."""
         from scope.core.pipelines.registry import PipelineRegistry
 
-        mock_pipeline = MagicMock()
+        pipeline_cls = _make_pipeline_class("test-is-registered-1")
 
-        # Register the pipeline
-        PipelineRegistry.register("test-is-registered-1", mock_pipeline)
+        PipelineRegistry.register("test-is-registered-1", pipeline_cls)
 
         assert PipelineRegistry.is_registered("test-is-registered-1") is True
 
-        # Cleanup
         PipelineRegistry.unregister("test-is-registered-1")
 
     def test_is_registered_returns_false(self):

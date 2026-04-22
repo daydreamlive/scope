@@ -5,6 +5,8 @@ import type {
   GraphEdge,
   PipelineSchemaInfo,
   LoRAFileInfo,
+  NodePortDef,
+  NodeParamDef,
 } from "./api";
 import { inferPrimitiveFieldType } from "./schemaSettings";
 import { resolveLoRAPath } from "./workflowSettings";
@@ -104,7 +106,8 @@ export interface FlowNodeData {
     | "prompt_list"
     | "prompt_blend"
     | "scheduler"
-    | "audio";
+    | "audio"
+    | "custom_node";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -386,6 +389,22 @@ export interface FlowNodeData {
   /* ── Tempo beat count offset ── */
   tempoBeatCountOffset?: number;
 
+  /* ── Custom node fields ── */
+  /** For custom_node: the node_type_id from the backend registry */
+  customNodeTypeId?: string;
+  /** For custom_node: display name from node definition */
+  customNodeDisplayName?: string;
+  /** For custom_node: category from node definition */
+  customNodeCategory?: string;
+  /** For custom_node: input port definitions */
+  customNodeInputs?: NodePortDef[];
+  /** For custom_node: output port definitions */
+  customNodeOutputs?: NodePortDef[];
+  /** For custom_node: current parameter values (user-editable) */
+  customNodeParams?: Record<string, unknown>;
+  /** For custom_node: parameter definitions from API (widget metadata) */
+  customNodeParamDefs?: NodeParamDef[];
+
   /* ── Node lock / pin / collapse ── */
   /** When true, parameter inputs on this node are disabled (read-only). */
   locked?: boolean;
@@ -421,6 +440,35 @@ export function parseHandleId(handleId: string | null | undefined): {
  */
 export function buildHandleId(kind: "stream" | "param", name: string): string {
   return `${kind}:${name}`;
+}
+
+/**
+ * CustomNode handles are namespaced with a direction prefix so input and
+ * output ports that share the same name (e.g. "video" passthrough) don't
+ * collide on handle id. Edges store only the bare port name on the wire
+ * format, so consumers strip the prefix before looking up the port and
+ * re-add it when rebuilding handles from saved graphs.
+ */
+const CUSTOM_NODE_IN_PREFIX = "in:";
+const CUSTOM_NODE_OUT_PREFIX = "out:";
+
+export function customNodeInputHandleId(portName: string): string {
+  return buildHandleId("stream", `${CUSTOM_NODE_IN_PREFIX}${portName}`);
+}
+
+export function customNodeOutputHandleId(portName: string): string {
+  return buildHandleId("stream", `${CUSTOM_NODE_OUT_PREFIX}${portName}`);
+}
+
+/** Strip the ``in:``/``out:`` prefix that CustomNode adds to handle names. */
+export function stripCustomNodeDirection(name: string): string {
+  if (name.startsWith(CUSTOM_NODE_IN_PREFIX)) {
+    return name.slice(CUSTOM_NODE_IN_PREFIX.length);
+  }
+  if (name.startsWith(CUSTOM_NODE_OUT_PREFIX)) {
+    return name.slice(CUSTOM_NODE_OUT_PREFIX.length);
+  }
+  return name;
 }
 
 /**
@@ -782,8 +830,54 @@ export function graphConfigToFlow(
     });
   });
 
+  // Backend custom nodes (type="node"). Port metadata is hydrated later
+  // from GET /api/v1/nodes/definitions in useGraphPersistence.
+  const customNodes = graph.nodes.filter(
+    n => n.type === "node" && !isSubgraphInnerNode(n.id)
+  );
+  customNodes.forEach((n, i) => {
+    const savedX = n.x ?? undefined;
+    const savedY = n.y ?? undefined;
+    const sizeProps =
+      n.w != null || n.h != null
+        ? {
+            width: n.w ?? undefined,
+            height: n.h ?? undefined,
+            style: { width: n.w ?? undefined, height: n.h ?? undefined },
+          }
+        : {};
+    nodes.push({
+      id: n.id,
+      type: "custom_node",
+      position: {
+        x: savedX !== undefined ? savedX : START_X + COLUMN_GAP * 1.5,
+        y:
+          savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
+      },
+      ...sizeProps,
+      data: {
+        label: n.node_type_id || n.id,
+        nodeType: "custom_node",
+        customNodeTypeId: n.node_type_id ?? undefined,
+        customNodeParams: (n.params as Record<string, unknown>) ?? undefined,
+      },
+    });
+  });
+
   // Convert edges - add stream: prefix to handle IDs
   // Skip edges that reference flattened inner subgraph nodes
+  // Custom nodes namespace their handles with in:/out: so the same port
+  // name on both sides doesn't collide; restore that prefix here when
+  // rebuilding handles for edges touching a custom_node.
+  const customNodeIds = new Set(
+    customNodes
+      .map(n => n.id)
+      .concat(
+        // Also include custom_node entries that may have been pushed via
+        // other code paths (defensive, cheap).
+        nodes.filter(n => n.type === "custom_node").map(n => n.id)
+      )
+  );
   const edges: Edge[] = graph.edges
     .filter(
       e => !isSubgraphInnerNode(e.from) && !isSubgraphInnerNode(e.to_node)
@@ -792,11 +886,15 @@ export function graphConfigToFlow(
       const sourceHandle =
         e.kind === "parameter"
           ? buildHandleId("param", e.from_port)
-          : buildHandleId("stream", e.from_port);
+          : customNodeIds.has(e.from)
+            ? customNodeOutputHandleId(e.from_port)
+            : buildHandleId("stream", e.from_port);
       const targetHandle =
         e.kind === "parameter"
           ? buildHandleId("param", e.to_port)
-          : buildHandleId("stream", e.to_port);
+          : customNodeIds.has(e.to_node)
+            ? customNodeInputHandleId(e.to_port)
+            : buildHandleId("stream", e.to_port);
       return {
         id: `e-${i}-${e.from}-${e.to_node}`,
         source: e.from,
@@ -1211,10 +1309,20 @@ export function flowToGraphConfig(
             ? "sink"
             : n.data.nodeType === "record"
               ? "record"
-              : "pipeline",
+              : n.data.nodeType === "custom_node"
+                ? "node"
+                : "pipeline",
       pipeline_id:
         n.data.nodeType === "pipeline"
           ? (n.data.pipelineId ?? null)
+          : undefined,
+      node_type_id:
+        n.data.nodeType === "custom_node"
+          ? (n.data.customNodeTypeId ?? null)
+          : undefined,
+      params:
+        n.data.nodeType === "custom_node" && n.data.customNodeParams
+          ? n.data.customNodeParams
           : undefined,
       x: n.position.x,
       y: n.position.y,
@@ -1264,6 +1372,8 @@ export function flowToGraphConfig(
   }
 
   // Filter edges to only include those where both source and target exist in graphNodes
+  // Strip the in:/out: prefix added to custom_node handles before writing
+  // the bare port name back to the wire format.
   const graphNodeIds = new Set(graphNodes.map(n => n.id));
   const graphEdges: GraphEdge[] = flatEdges
     .filter(e => graphNodeIds.has(e.source) && graphNodeIds.has(e.target))
@@ -1274,11 +1384,17 @@ export function flowToGraphConfig(
         sourceParsed?.kind === "param" && targetParsed?.kind === "param"
           ? "parameter"
           : "stream";
+      const fromName = sourceParsed?.name
+        ? stripCustomNodeDirection(sourceParsed.name)
+        : "video";
+      const toName = targetParsed?.name
+        ? stripCustomNodeDirection(targetParsed.name)
+        : "video";
       return {
         from: e.source,
-        from_port: sourceParsed?.name || "video",
+        from_port: fromName,
         to_node: e.target,
-        to_port: targetParsed?.name || "video",
+        to_port: toName,
         kind: kind as "stream" | "parameter",
       };
     });
