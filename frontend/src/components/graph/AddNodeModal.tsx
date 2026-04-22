@@ -414,10 +414,13 @@ export function AddNodeModal({
         if (controller.signal.aborted) return;
         // The unified endpoint returns both pipelines (pipeline_meta != null)
         // and plain custom nodes. Pipelines are still added via the hardcoded
-        // "Pipeline" catalog entry (placeholder + dropdown), so we filter
-        // them out of the plugin listing here to avoid duplication.
+        // "Pipeline" catalog entry (placeholder + dropdown); the scheduler
+        // has its own catalog entry with a bespoke widget. Filter both out
+        // of the plugin listing to avoid duplication.
         const items: NodeCatalogItem[] = (data.nodes ?? [])
-          .filter(n => n.pipeline_meta == null)
+          .filter(
+            n => n.pipeline_meta == null && n.node_type_id !== "scheduler"
+          )
           .map(n => ({
             type: "custom_node" as const,
             subType: n.node_type_id,

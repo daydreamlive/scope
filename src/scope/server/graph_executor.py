@@ -375,9 +375,11 @@ def _validate_edge_ports(
             node_cls = NodeRegistry.get(node.node_type_id)
             if node_cls is not None:
                 defn = node_cls.get_definition()
+                static_outputs = {p.name for p in defn.outputs}
+                dynamic_outputs = node_cls.get_dynamic_output_ports(node.params or {})
                 port_map[node.id] = (
                     {p.name for p in defn.inputs},
-                    {p.name for p in defn.outputs},
+                    static_outputs | dynamic_outputs,
                 )
 
     errors: list[str] = []

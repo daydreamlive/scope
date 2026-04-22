@@ -84,6 +84,10 @@ class NodeProcessor:
         self.shutdown_event.set()
         if self.worker_thread is not None:
             self.worker_thread.join(timeout=5.0)
+        try:
+            self.node.shutdown()
+        except Exception:
+            logger.exception("Error shutting down node %s", self.node_id)
         logger.info("NodeProcessor stopped: %s", self.node_id)
 
     def update_parameters(self, parameters: dict[str, Any]) -> None:

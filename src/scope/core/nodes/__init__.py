@@ -9,17 +9,13 @@ the frontend via ``GET /api/v1/nodes/definitions``.
 """
 
 from .base import BaseNode, NodeDefinition, NodeParam, NodePort
+from .builtins import SchedulerNode
 from .registry import NodeRegistry
 
 
 def register_builtin_nodes() -> None:
-    """Register all built-in node types.
-
-    This is a no-op on branches that do not ship any built-in nodes; the
-    specialized branches (execution-scheduler, ACEStep) override or extend
-    this list.
-    """
-    return None
+    """Register all built-in node types shipped with the foundation."""
+    NodeRegistry.register(SchedulerNode)
 
 
 __all__ = [
@@ -28,5 +24,6 @@ __all__ = [
     "NodeParam",
     "NodePort",
     "NodeRegistry",
+    "SchedulerNode",
     "register_builtin_nodes",
 ]
