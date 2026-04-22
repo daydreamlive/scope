@@ -2547,8 +2547,11 @@ export function StreamPage() {
       // mode so the backend receives the correct input_mode (e.g. "video")
       let currentMode =
         settings.inputMode || getPipelineDefaultMode(pipelineIdToUse) || "text";
-      if ((graphMode || nonLinearGraph) && graphSourceMode) {
-        currentMode = graphSourceMode as InputMode;
+      if (graphMode || nonLinearGraph) {
+        currentMode = getPipelineDefaultMode(pipelineIdToUse) || "text";
+        if (graphSourceMode) {
+          currentMode = graphSourceMode as InputMode;
+        }
       }
 
       // Use settings.resolution if available, otherwise fall back to videoResolution
