@@ -814,7 +814,11 @@ async def get_pipeline_schemas(
 
 
 @app.get("/api/v1/nodes/definitions", response_model=NodeDefinitionsResponse)
-async def get_node_definitions():
+@cloud_proxy()
+async def get_node_definitions(
+    http_request: Request,
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+):
     """Return definitions for every registered node — pipelines included.
 
     The unified discovery endpoint. Pipelines (Pipeline subclasses)
@@ -827,6 +831,10 @@ async def get_node_definitions():
     ``_invalidate_plugin_caches`` whenever a plugin is installed or
     uninstalled, so the modal open / graph hydrate hot paths don't
     rebuild the payload (including full ``pipeline_meta``) every call.
+
+    In cloud mode this proxies to the cloud-hosted scope backend so the
+    Add Node modal and graph hydrator see cloud-registered nodes (plain
+    and pipeline) rather than just the local set.
     """
     global _node_definitions_cache
     if _node_definitions_cache is not None:

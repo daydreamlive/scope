@@ -7,6 +7,8 @@ import {
   DialogDescription,
 } from "../ui/dialog";
 import type { FlowNodeData } from "../../lib/graphUtils";
+import type { NodeDefinitionDto } from "../../lib/api";
+import { fetchNodeDefinitions } from "../../lib/api";
 
 interface AddNodeModalProps {
   open: boolean;
@@ -78,7 +80,7 @@ interface NodeCatalogItem {
   color: string;
   category: string;
   /** Full definition for custom nodes (inputs/outputs/params). */
-  customNodeDef?: Record<string, unknown>;
+  customNodeDef?: NodeDefinitionDto;
 }
 
 const NODE_CATALOG: NodeCatalogItem[] = [
@@ -406,18 +408,17 @@ export function AddNodeModal({
 
   useEffect(() => {
     if (!open) return;
-    fetch("/api/v1/nodes/definitions")
-      .then(r => r.json())
+    const controller = new AbortController();
+    fetchNodeDefinitions({ signal: controller.signal })
       .then(data => {
+        if (controller.signal.aborted) return;
         // The unified endpoint returns both pipelines (pipeline_meta != null)
         // and plain custom nodes. Pipelines are still added via the hardcoded
         // "Pipeline" catalog entry (placeholder + dropdown), so we filter
         // them out of the plugin listing here to avoid duplication.
         const items: NodeCatalogItem[] = (data.nodes ?? [])
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .filter((n: any) => n.pipeline_meta == null)
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          .map((n: any) => ({
+          .filter(n => n.pipeline_meta == null)
+          .map(n => ({
             type: "custom_node" as const,
             subType: n.node_type_id,
             name: n.display_name || n.node_type_id,
@@ -428,9 +429,13 @@ export function AddNodeModal({
           }));
         setCustomNodes(items);
       })
-      .catch(() => {
-        /* ignore — custom nodes just won't appear */
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        // Custom nodes won't appear, but log so plugin-registration
+        // regressions don't disappear silently.
+        console.warn("Failed to fetch custom node definitions:", err);
       });
+    return () => controller.abort();
   }, [open]);
 
   const fullCatalog = useMemo(
@@ -454,8 +459,7 @@ export function AddNodeModal({
   const handleSelect = useCallback(
     (item: NodeCatalogItem) => {
       if (item.type === "custom_node" && item.customNodeDef) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const def = item.customNodeDef as any;
+        const def = item.customNodeDef;
         onSelectNodeType("custom_node", item.subType, {
           customNodeTypeId: def.node_type_id,
           customNodeDisplayName: def.display_name || def.node_type_id,
@@ -465,10 +469,8 @@ export function AddNodeModal({
           customNodeParamDefs: def.params || [],
           customNodeParams: Object.fromEntries(
             (def.params || [])
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              .filter((p: any) => p.default != null)
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              .map((p: any) => [p.name, p.default])
+              .filter(p => p.default != null)
+              .map(p => [p.name, p.default])
           ),
         });
       } else {
