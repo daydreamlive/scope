@@ -443,6 +443,35 @@ export function buildHandleId(kind: "stream" | "param", name: string): string {
 }
 
 /**
+ * CustomNode handles are namespaced with a direction prefix so input and
+ * output ports that share the same name (e.g. "video" passthrough) don't
+ * collide on handle id. Edges store only the bare port name on the wire
+ * format, so consumers strip the prefix before looking up the port and
+ * re-add it when rebuilding handles from saved graphs.
+ */
+const CUSTOM_NODE_IN_PREFIX = "in:";
+const CUSTOM_NODE_OUT_PREFIX = "out:";
+
+export function customNodeInputHandleId(portName: string): string {
+  return buildHandleId("stream", `${CUSTOM_NODE_IN_PREFIX}${portName}`);
+}
+
+export function customNodeOutputHandleId(portName: string): string {
+  return buildHandleId("stream", `${CUSTOM_NODE_OUT_PREFIX}${portName}`);
+}
+
+/** Strip the ``in:``/``out:`` prefix that CustomNode adds to handle names. */
+export function stripCustomNodeDirection(name: string): string {
+  if (name.startsWith(CUSTOM_NODE_IN_PREFIX)) {
+    return name.slice(CUSTOM_NODE_IN_PREFIX.length);
+  }
+  if (name.startsWith(CUSTOM_NODE_OUT_PREFIX)) {
+    return name.slice(CUSTOM_NODE_OUT_PREFIX.length);
+  }
+  return name;
+}
+
+/**
  * Build a map of pipeline_id -> { inputs, outputs } from schemas.
  */
 export function buildPipelinePortsMap(
@@ -837,6 +866,18 @@ export function graphConfigToFlow(
 
   // Convert edges - add stream: prefix to handle IDs
   // Skip edges that reference flattened inner subgraph nodes
+  // Custom nodes namespace their handles with in:/out: so the same port
+  // name on both sides doesn't collide; restore that prefix here when
+  // rebuilding handles for edges touching a custom_node.
+  const customNodeIds = new Set(
+    customNodes
+      .map(n => n.id)
+      .concat(
+        // Also include custom_node entries that may have been pushed via
+        // other code paths (defensive, cheap).
+        nodes.filter(n => n.type === "custom_node").map(n => n.id)
+      )
+  );
   const edges: Edge[] = graph.edges
     .filter(
       e => !isSubgraphInnerNode(e.from) && !isSubgraphInnerNode(e.to_node)
@@ -845,11 +886,15 @@ export function graphConfigToFlow(
       const sourceHandle =
         e.kind === "parameter"
           ? buildHandleId("param", e.from_port)
-          : buildHandleId("stream", e.from_port);
+          : customNodeIds.has(e.from)
+            ? customNodeOutputHandleId(e.from_port)
+            : buildHandleId("stream", e.from_port);
       const targetHandle =
         e.kind === "parameter"
           ? buildHandleId("param", e.to_port)
-          : buildHandleId("stream", e.to_port);
+          : customNodeIds.has(e.to_node)
+            ? customNodeInputHandleId(e.to_port)
+            : buildHandleId("stream", e.to_port);
       return {
         id: `e-${i}-${e.from}-${e.to_node}`,
         source: e.from,
@@ -1327,6 +1372,8 @@ export function flowToGraphConfig(
   }
 
   // Filter edges to only include those where both source and target exist in graphNodes
+  // Strip the in:/out: prefix added to custom_node handles before writing
+  // the bare port name back to the wire format.
   const graphNodeIds = new Set(graphNodes.map(n => n.id));
   const graphEdges: GraphEdge[] = flatEdges
     .filter(e => graphNodeIds.has(e.source) && graphNodeIds.has(e.target))
@@ -1337,11 +1384,17 @@ export function flowToGraphConfig(
         sourceParsed?.kind === "param" && targetParsed?.kind === "param"
           ? "parameter"
           : "stream";
+      const fromName = sourceParsed?.name
+        ? stripCustomNodeDirection(sourceParsed.name)
+        : "video";
+      const toName = targetParsed?.name
+        ? stripCustomNodeDirection(targetParsed.name)
+        : "video";
       return {
         from: e.source,
-        from_port: sourceParsed?.name || "video",
+        from_port: fromName,
         to_node: e.target,
-        to_port: targetParsed?.name || "video",
+        to_port: toName,
         kind: kind as "stream" | "parameter",
       };
     });

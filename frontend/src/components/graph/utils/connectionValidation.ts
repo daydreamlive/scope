@@ -6,7 +6,10 @@
  */
 
 import type { Connection, Edge, Node } from "@xyflow/react";
-import { parseHandleId } from "../../../lib/graphUtils";
+import {
+  parseHandleId,
+  stripCustomNodeDirection,
+} from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { resolveSourceType } from "./typeResolution";
 import { BOUNDARY_INPUT_ID, BOUNDARY_OUTPUT_ID } from "./subgraphSerialization";
@@ -319,13 +322,17 @@ export function validateConnection(
     // or typo'd port id). `customNodeInputs`/`customNodeOutputs` is
     // set to an array — possibly empty — exactly when the node has
     // been hydrated from /api/v1/nodes/definitions.
+    // CustomNode handles are namespaced as stream:in:<name> / stream:out:<name>
+    // so port names in handle IDs carry an in:/out: prefix; strip it before
+    // matching against the declared port list.
     let srcType: string | undefined;
     if (srcIsCustom) {
       const outputs = sourceNode.data.customNodeOutputs;
       if (outputs === undefined) {
         // Not hydrated yet — fall through to the compatible path.
       } else {
-        const port = outputs.find(p => p.name === sourceParsed.name);
+        const portName = stripCustomNodeDirection(sourceParsed.name);
+        const port = outputs.find(p => p.name === portName);
         if (!port) return false;
         srcType = port.port_type;
       }
@@ -337,7 +344,8 @@ export function validateConnection(
       if (inputs === undefined) {
         // Not hydrated yet — fall through to the compatible path.
       } else {
-        const port = inputs.find(p => p.name === targetParsed.name);
+        const portName = stripCustomNodeDirection(targetParsed.name);
+        const port = inputs.find(p => p.name === portName);
         if (!port) return false;
         tgtType = port.port_type;
       }

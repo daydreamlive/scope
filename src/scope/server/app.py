@@ -117,14 +117,22 @@ from .scope_cloud_types import ScopeCloudBackend
 from .tempo_router import router as tempo_router
 
 # Cached responses for pipeline schemas, node definitions, and plugin list.
-# Invalidated by _invalidate_plugin_caches() on install/uninstall.
+# Invalidated by _invalidate_plugin_caches() on plugin install/uninstall and
+# on cloud connect/disconnect — the latter matters because cloud mode proxies
+# the schema/definition endpoints to the cloud backend, so the cached payload
+# depends on cloud-mode state and must be rebuilt when it flips.
 _pipeline_schemas_cache: PipelineSchemasResponse | None = None
 _node_definitions_cache: NodeDefinitionsResponse | None = None
 _plugins_list_cache: object | None = None
 
 
 def _invalidate_plugin_caches():
-    """Reset plugin, pipeline schema, and node definition caches after install/uninstall."""
+    """Reset plugin, pipeline schema, and node definition caches.
+
+    Called on plugin install/uninstall and on cloud connect/disconnect so
+    that the next fetch rebuilds the payload from whichever registry is
+    authoritative for the current mode.
+    """
     global _pipeline_schemas_cache, _node_definitions_cache, _plugins_list_cache
     _pipeline_schemas_cache = None
     _node_definitions_cache = None

@@ -1,7 +1,10 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
-import { buildHandleId } from "../../../lib/graphUtils";
+import {
+  customNodeInputHandleId,
+  customNodeOutputHandleId,
+} from "../../../lib/graphUtils";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { useHandlePositions } from "../hooks/node/useHandlePositions";
@@ -219,7 +222,7 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
           key={`in-${p.name}`}
           type="target"
           position={Position.Left}
-          id={buildHandleId("stream", p.name)}
+          id={customNodeInputHandleId(p.name)}
           style={
             collapsed
               ? { ...collapsedHandleStyle("left"), width: 8, height: 8 }
@@ -239,7 +242,7 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
           key={`out-${p.name}`}
           type="source"
           position={Position.Right}
-          id={buildHandleId("stream", p.name)}
+          id={customNodeOutputHandleId(p.name)}
           style={
             collapsed
               ? { ...collapsedHandleStyle("right"), width: 8, height: 8 }
