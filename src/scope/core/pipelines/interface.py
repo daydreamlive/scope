@@ -64,13 +64,25 @@ class Pipeline(BaseNode, ABC):
         try:
             pipeline_meta = config.get_schema_with_metadata()
         except Exception as e:
-            logger.warning(
+            # Log at error level (+ traceback) so this doesn't silently
+            # hide a broken plugin, but still return a degraded stub so
+            # the pipeline stays visible in the catalog and the schemas
+            # endpoint doesn't 500 the whole registry for one bad entry.
+            logger.error(
                 "Failed to build pipeline_meta for %s: %s. "
-                "Node will be exposed without full config metadata.",
+                "Pipeline will be exposed with a degraded payload "
+                "(identity fields only, no config_schema).",
                 getattr(config, "pipeline_id", cls.__name__),
                 e,
+                exc_info=True,
             )
-            pipeline_meta = None
+            pipeline_meta = {
+                "id": getattr(config, "pipeline_id", cls.__name__),
+                "name": getattr(config, "pipeline_name", cls.__name__),
+                "description": getattr(config, "pipeline_description", "") or "",
+                "version": getattr(config, "pipeline_version", ""),
+                "schema_error": str(e),
+            }
         return NodeDefinition(
             node_type_id=config.pipeline_id,
             display_name=getattr(config, "pipeline_name", config.pipeline_id),

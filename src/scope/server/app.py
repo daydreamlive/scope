@@ -781,15 +781,23 @@ async def get_pipeline_schemas(
         return _pipeline_schemas_cache
 
     from scope.core.nodes.registry import NodeRegistry
+    from scope.core.pipelines.registry import PipelineRegistry
     from scope.core.plugins import get_plugin_manager
 
     plugin_manager = get_plugin_manager()
     pipelines: dict = {}
 
+    # Pipelines always appear — the set is ``PipelineRegistry.list_pipelines()``.
+    # ``pipeline_meta`` is either the full ``get_schema_with_metadata()`` output
+    # or a degraded identity-only stub with a ``schema_error`` field when that
+    # call failed (see ``Pipeline.get_definition``). Either way the pipeline
+    # stays visible in the UI; the legacy behaviour of 500-ing or silently
+    # disappearing on a broken plugin is gone.
+    pipeline_ids = set(PipelineRegistry.list_pipelines())
     for definition in NodeRegistry.get_all_definitions():
-        if definition.pipeline_meta is None:
+        if definition.node_type_id not in pipeline_ids:
             continue
-        schema_data = dict(definition.pipeline_meta)
+        schema_data = dict(definition.pipeline_meta or {})
         schema_data["plugin_name"] = plugin_manager.get_plugin_for_pipeline(
             definition.node_type_id
         )

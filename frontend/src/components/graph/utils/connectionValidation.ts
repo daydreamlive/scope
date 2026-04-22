@@ -313,18 +313,38 @@ export function validateConnection(
     const tgtIsCustom = targetNode.data.nodeType === "custom_node";
     if (!srcIsCustom && !tgtIsCustom) return true;
 
-    const srcType = srcIsCustom
-      ? sourceNode.data.customNodeOutputs?.find(
-          p => p.name === sourceParsed.name
-        )?.port_type
-      : undefined;
-    const tgtType = tgtIsCustom
-      ? targetNode.data.customNodeInputs?.find(
-          p => p.name === targetParsed.name
-        )?.port_type
-      : undefined;
+    // For each custom endpoint, look up the declared port. We need to
+    // distinguish "ports not hydrated yet" (allow, optimistic) from
+    // "ports hydrated but this port is missing" (reject, stale wire
+    // or typo'd port id). `customNodeInputs`/`customNodeOutputs` is
+    // set to an array — possibly empty — exactly when the node has
+    // been hydrated from /api/v1/nodes/definitions.
+    let srcType: string | undefined;
+    if (srcIsCustom) {
+      const outputs = sourceNode.data.customNodeOutputs;
+      if (outputs === undefined) {
+        // Not hydrated yet — fall through to the compatible path.
+      } else {
+        const port = outputs.find(p => p.name === sourceParsed.name);
+        if (!port) return false;
+        srcType = port.port_type;
+      }
+    }
 
-    // If we can't look up both types, allow (assume compatible).
+    let tgtType: string | undefined;
+    if (tgtIsCustom) {
+      const inputs = targetNode.data.customNodeInputs;
+      if (inputs === undefined) {
+        // Not hydrated yet — fall through to the compatible path.
+      } else {
+        const port = inputs.find(p => p.name === targetParsed.name);
+        if (!port) return false;
+        tgtType = port.port_type;
+      }
+    }
+
+    // One side is a built-in (untyped stream) or not yet hydrated —
+    // we can't compare types, so allow.
     if (!srcType || !tgtType) return true;
     return srcType === tgtType;
   }

@@ -2,8 +2,15 @@
 
 from typing import ClassVar
 
+# Import BasePipelineConfig from ``base_schema`` rather than the ``schema``
+# re-export. ``schema`` triggers ``longlive/__init__.py`` → ``LongLivePipeline``
+# → ``diffusers`` at module load time, which (a) trips the freezegun tests in
+# ``test_logs_config`` when freezegun walks lazy-loaded diffusers attributes
+# and (b) cascades into a pydantic v1 ``ConstrainedDate`` metaclass conflict
+# in every downstream test that imports ``scope.server.app``. Pulling from
+# ``base_schema`` keeps test collection lightweight and side-effect-free.
+from scope.core.pipelines.base_schema import BasePipelineConfig
 from scope.core.pipelines.interface import Pipeline
-from scope.core.pipelines.schema import BasePipelineConfig
 
 
 def _make_pipeline_class(registration_id: str) -> type[Pipeline]:
