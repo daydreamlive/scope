@@ -49,6 +49,9 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
     data.customNodeTypeId ||
     "Custom Node";
   const category = data.customNodeCategory ?? "";
+  const onParameterChange = data.onParameterChange as
+    | ((nodeId: string, key: string, value: unknown) => void)
+    | undefined;
 
   // Measure each port row so handles can be positioned from DOM offsetTop
   // rather than hard-coded pixel math. Re-measures when port lists change.
@@ -59,6 +62,16 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
     outputs.map(p => p.name).join("|"),
     params.length,
   ]);
+
+  const setParam = (name: string, value: unknown) => {
+    updateData({
+      customNodeParams: {
+        ...data.customNodeParams,
+        [name]: value,
+      },
+    });
+    onParameterChange?.(id, name, value);
+  };
 
   return (
     <NodeCard
@@ -145,14 +158,7 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
                       <select
                         className="bg-zinc-900 text-zinc-200 rounded px-1 py-0.5 text-[11px] max-w-[130px]"
                         value={String(val)}
-                        onChange={e =>
-                          updateData({
-                            customNodeParams: {
-                              ...data.customNodeParams,
-                              [p.name]: e.target.value,
-                            },
-                          })
-                        }
+                        onChange={e => setParam(p.name, e.target.value)}
                       >
                         {(p.ui?.options as string[]).map(o => (
                           <option key={o} value={o}>
@@ -164,14 +170,7 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
                       <input
                         type="checkbox"
                         checked={Boolean(val)}
-                        onChange={e =>
-                          updateData({
-                            customNodeParams: {
-                              ...data.customNodeParams,
-                              [p.name]: e.target.checked,
-                            },
-                          })
-                        }
+                        onChange={e => setParam(p.name, e.target.checked)}
                         className="accent-blue-500"
                       />
                     ) : p.param_type === "number" ? (
@@ -182,28 +181,14 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
                         min={(p.ui?.min as number | undefined) ?? undefined}
                         max={(p.ui?.max as number | undefined) ?? undefined}
                         step={(p.ui?.step as number | undefined) ?? undefined}
-                        onChange={e =>
-                          updateData({
-                            customNodeParams: {
-                              ...data.customNodeParams,
-                              [p.name]: Number(e.target.value),
-                            },
-                          })
-                        }
+                        onChange={e => setParam(p.name, Number(e.target.value))}
                       />
                     ) : (
                       <input
                         type="text"
                         className="bg-zinc-900 text-zinc-200 rounded px-1 py-0.5 text-[11px] max-w-[130px]"
                         value={String(val)}
-                        onChange={e =>
-                          updateData({
-                            customNodeParams: {
-                              ...data.customNodeParams,
-                              [p.name]: e.target.value,
-                            },
-                          })
-                        }
+                        onChange={e => setParam(p.name, e.target.value)}
                       />
                     )}
                   </div>

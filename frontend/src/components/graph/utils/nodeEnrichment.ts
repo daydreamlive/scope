@@ -155,6 +155,16 @@ export function enrichNodes(
         },
       };
     }
+    if (n.data.nodeType === "custom_node") {
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          onParameterChange: deps.handleNodeParameterChange,
+          isStreaming: deps.isStreaming,
+        },
+      };
+    }
     if (n.data.nodeType === "source") {
       // Per-node stream if available (multi-source), else fall back to global
       const nodeStream = deps.localStreams?.[n.id] ?? deps.localStream;

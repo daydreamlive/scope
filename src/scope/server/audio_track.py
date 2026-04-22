@@ -100,9 +100,15 @@ class AudioProcessingTrack(MediaStreamTrack):
         if self.frame_processor.paused:
             return self._create_silence_frame()
 
-        # Drain all available audio from the queue to minimise latency
-        # for bursty or small-chunk pipelines.
-        while True:
+        samples_needed = self._samples_per_frame * self.channels
+
+        # Lazy drain: pull chunks from the queue only until the local buffer
+        # has enough samples to serve this frame. Leaving unconsumed chunks
+        # in ``audio_output_queue`` creates natural backpressure — producers
+        # block on the (small) queue's blocking put and cascade the stall
+        # upstream through node-to-node edge queues, matching production
+        # rate to real-time consumption without silent drops.
+        while self._buffered_samples < samples_needed:
             audio_packet = self.frame_processor.get_audio_packet()
             if audio_packet is None:
                 break
@@ -182,7 +188,6 @@ class AudioProcessingTrack(MediaStreamTrack):
             logger.warning("Audio buffer overflow, dropped oldest chunks")
 
         # Serve a 20ms frame from the buffer
-        samples_needed = self._samples_per_frame * self.channels
         if self._buffered_samples >= samples_needed:
             frame_parts: list[np.ndarray] = []
             remaining = samples_needed
