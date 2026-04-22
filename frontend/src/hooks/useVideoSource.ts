@@ -155,9 +155,9 @@ export function useVideoSource(props?: UseVideoSourceProps) {
   );
 
   const createVideoFileStream = useCallback(
-    async (fps: number) => {
+    async (fps: number, overrideSource?: string | File) => {
       const result = await createVideoFileStreamFromFile(
-        selectedVideoFile,
+        overrideSource ?? selectedVideoFile,
         fps
       );
       return result.stream;
@@ -195,7 +195,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
   }, []);
 
   const switchMode = useCallback(
-    async (newMode: VideoSourceMode) => {
+    async (newMode: VideoSourceMode, file?: string | File) => {
       modeRef.current = newMode;
       setMode(newMode);
       setError(null);
@@ -216,9 +216,15 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       let newStream: MediaStream | null = null;
 
       if (newMode === "video") {
-        // Create video file stream
+        // Create video file stream. When a file is provided, seed
+        // `selectedVideoFile` so subsequent calls (reinitialize, cycle index)
+        // see the right source. Pass it explicitly to createVideoFileStream to
+        // avoid the React render race where the setter hasn't flushed yet.
+        if (file !== undefined) {
+          setSelectedVideoFile(file);
+        }
         try {
-          newStream = await createVideoFileStream(FPS);
+          newStream = await createVideoFileStream(FPS, file);
         } catch (error) {
           console.error("Failed to create video file stream:", error);
           setError("Failed to load test video");
@@ -445,6 +451,8 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     error,
     mode,
     videoResolution,
+    selectedVideoFile,
+    setSelectedVideoFile,
     switchMode,
     stopVideo,
     handleVideoFileUpload,
