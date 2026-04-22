@@ -43,6 +43,11 @@ class NodeProcessor:
 
         definition = node.get_definition()
 
+        # Consumed by FrameProcessor.get_audio_packet() on the sink feeder.
+        # Kept here (even without a routing implementation) so a NodeProcessor
+        # can stand in as the sink's feeder without crashing the audio path.
+        self.audio_output_queue: queue.Queue = queue.Queue(maxsize=10)
+
         self.worker_thread: threading.Thread | None = None
         self.shutdown_event = threading.Event()
         self.running = False
