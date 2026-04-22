@@ -223,11 +223,15 @@ class SchedulerNode(BaseNode):
                     self._pending_outputs["is_playing"] = False
 
     def _reset_state(self) -> None:
-        """Reset elapsed time and trigger state. Caller holds ``_lock``."""
+        """Reset elapsed time and trigger state. Caller holds ``_lock``.
+
+        Fire counts and tick count are kept monotonic across resets so
+        downstream edge-triggered consumers (which only fire on strict
+        counter increments) still see each subsequent firing. Same
+        rationale as the loop re-arm path in ``_check_triggers``.
+        """
         self._elapsed = 0.0
         self._fired_keys.clear()
-        self._fire_counts.clear()
-        self._tick_count = 0
 
     # ------------------------------------------------------------------
     # Node interface
