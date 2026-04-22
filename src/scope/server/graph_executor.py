@@ -12,6 +12,8 @@ import queue
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from scope.core.nodes.registry import NodeRegistry
+
 from .graph_schema import GraphConfig
 from .pipeline_processor import PipelineProcessor
 
@@ -92,7 +94,11 @@ def build_graph(
     # when multiple pipelines fan-in to the same sink.
     _sink_record_ids = {n.id for n in graph.nodes if n.type in ("sink", "record")}
 
-    # 1) Create one queue per edge (all edges are stream; frame-by-frame)
+    # 1) Create one queue per edge (all edges are stream; frame-by-frame).
+    # Node→node edges use maxsize=1 so the DAG executes one cycle at a
+    # time and large tensors don't pile up in memory; pipeline edges use
+    # the larger default so video chunks can accumulate.
+    _node_ids = {n.id for n in graph.nodes if n.type == "node"}
     stream_queues: dict[tuple[str, str], queue.Queue] = {}
     for e in graph.edges:
         if e.kind == "stream":
@@ -105,10 +111,12 @@ def build_graph(
                     f"node={e.to_node!r}, port={e.to_port!r}. "
                     f"Fan-in to a single port is not supported."
                 )
-            stream_queues[key] = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
+            both_nodes = e.from_node in _node_ids and e.to_node in _node_ids
+            size = 1 if both_nodes else DEFAULT_INPUT_QUEUE_MAXSIZE
+            stream_queues[key] = queue.Queue(maxsize=size)
 
-    # 2) Create a processor per pipeline node and wire input_queues per port
-    node_processors: dict[str, PipelineProcessor] = {}
+    # 2) Create a processor per pipeline/custom node and wire input_queues
+    node_processors: dict[str, Any] = {}  # PipelineProcessor | NodeProcessor
     pipeline_ids: list[str] = []
 
     # Per-pipeline tempo: if any node explicitly opts in via tempo_sync=True,
@@ -118,24 +126,46 @@ def build_graph(
     any_node_has_tempo = any(n.tempo_sync for n in graph.nodes if n.type == "pipeline")
 
     for node in graph.nodes:
-        if node.type != "pipeline" or node.pipeline_id is None:
+        if node.type == "pipeline" and node.pipeline_id is not None:
+            node_gets_tempo = node.tempo_sync or not any_node_has_tempo
+            pipeline = pipeline_manager.get_pipeline_by_id(node.id)
+            processor = PipelineProcessor(
+                pipeline=pipeline,
+                pipeline_id=node.pipeline_id,
+                initial_parameters=initial_parameters.copy(),
+                session_id=session_id,
+                user_id=user_id,
+                connection_id=connection_id,
+                connection_info=connection_info,
+                tempo_sync=tempo_sync if node_gets_tempo else None,
+                modulation_engine=modulation_engine if node_gets_tempo else None,
+                node_id=node.id,
+            )
+            node_processors[node.id] = processor
+            pipeline_ids.append(node.pipeline_id)
+        elif node.type == "node" and node.node_type_id is not None:
+            from scope.core.nodes.processor import NodeProcessor
+
+            node_cls = NodeRegistry.get(node.node_type_id)
+            if node_cls is None:
+                raise ValueError(
+                    f"Unknown node type '{node.node_type_id}' for node '{node.id}'"
+                )
+            node_instance = node_cls(node_id=node.id)
+            # Merge per-node params (from workflow) with global initial params.
+            # Per-node values take precedence (e.g. "steps": 8 on DiffusionConfig).
+            node_params = {**initial_parameters}
+            if node.params:
+                node_params.update(node.params)
+            processor = NodeProcessor(
+                node=node_instance,
+                node_id=node.id,
+                initial_parameters=node_params,
+            )
+            node_processors[node.id] = processor
+            pipeline_ids.append(f"node:{node.node_type_id}")
+        else:
             continue
-        node_gets_tempo = node.tempo_sync or not any_node_has_tempo
-        pipeline = pipeline_manager.get_pipeline_by_id(node.id)
-        processor = PipelineProcessor(
-            pipeline=pipeline,
-            pipeline_id=node.pipeline_id,
-            initial_parameters=initial_parameters.copy(),
-            session_id=session_id,
-            user_id=user_id,
-            connection_id=connection_id,
-            connection_info=connection_info,
-            tempo_sync=tempo_sync if node_gets_tempo else None,
-            modulation_engine=modulation_engine if node_gets_tempo else None,
-            node_id=node.id,
-        )
-        node_processors[node.id] = processor
-        pipeline_ids.append(node.pipeline_id)
 
         for e in graph.edges_to(node.id):
             if e.kind != "stream":
@@ -146,7 +176,7 @@ def build_graph(
 
     # 3) Set each producer's output_queues per port
     for node in graph.nodes:
-        if node.type != "pipeline" or node.id not in node_processors:
+        if node.type not in ("pipeline", "node") or node.id not in node_processors:
             continue
         proc = node_processors[node.id]
         out_by_port: dict[str, list[queue.Queue]] = {}
@@ -334,11 +364,21 @@ def _validate_edge_ports(
     # Build a map of node_id -> (declared_inputs, declared_outputs)
     port_map: dict[str, tuple[set[str], set[str]]] = {}
     for node in graph.nodes:
-        if node.type != "pipeline" or node.pipeline_id is None:
-            continue
-        pipeline = pipeline_manager.get_pipeline_by_id(node.id)
-        config_class = pipeline.get_config_class()
-        port_map[node.id] = (set(config_class.inputs), set(config_class.outputs))
+        if node.type == "pipeline" and node.pipeline_id is not None:
+            pipeline = pipeline_manager.get_pipeline_by_id(node.id)
+            config_class = pipeline.get_config_class()
+            port_map[node.id] = (
+                set(config_class.inputs),
+                set(config_class.outputs),
+            )
+        elif node.type == "node" and node.node_type_id is not None:
+            node_cls = NodeRegistry.get(node.node_type_id)
+            if node_cls is not None:
+                defn = node_cls.get_definition()
+                port_map[node.id] = (
+                    {p.name for p in defn.inputs},
+                    {p.name for p in defn.outputs},
+                )
 
     errors: list[str] = []
     for e in graph.edges:
