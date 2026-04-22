@@ -1179,13 +1179,35 @@ async def handle_webrtc_offer(
             logger.info("Using relay mode - video will flow through backend to cloud")
             return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
 
-        # Local mode: ensure pipeline is loaded before proceeding
-        status_info = await pipeline_manager.get_status_info_async()
-        if status_info["status"] != "loaded":
-            raise HTTPException(
-                status_code=400,
-                detail="Pipeline not loaded. Please load pipeline first.",
+        # Local mode: ensure pipeline is loaded before proceeding.
+        # Node-only graphs (no pipeline nodes) skip this check — the graph
+        # executor handles custom nodes directly without loading pipelines.
+        # Mixed graphs (pipeline + custom node) still require loaded pipelines.
+        graph_data = (
+            request.initialParameters.graph if request.initialParameters else None
+        )
+        has_pipeline_nodes = False
+        if graph_data is not None:
+            nodes = (
+                graph_data.get("nodes", [])
+                if isinstance(graph_data, dict)
+                else getattr(graph_data, "nodes", [])
             )
+            has_pipeline_nodes = any(
+                (n.get("type") if isinstance(n, dict) else getattr(n, "type", None))
+                == "pipeline"
+                for n in nodes
+            )
+        # Skip the check only for node-only graphs (graph present, no pipeline
+        # nodes). When no graph is sent at all, fall back to the legacy check.
+        is_node_only_graph = graph_data is not None and not has_pipeline_nodes
+        if not is_node_only_graph:
+            status_info = await pipeline_manager.get_status_info_async()
+            if status_info["status"] != "loaded":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Pipeline not loaded. Please load pipeline first.",
+                )
 
         return await webrtc_manager.handle_offer(
             request, pipeline_manager, tempo_sync=tempo_sync

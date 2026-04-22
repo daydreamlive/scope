@@ -261,10 +261,11 @@ async def start_stream(
                 detail=f"Invalid graph: {'; '.join(errors)}",
             )
         pipeline_ids = graph_config.get_pipeline_node_ids()
-        if not pipeline_ids:
+        backend_node_ids = graph_config.get_backend_node_ids()
+        if not pipeline_ids and not backend_node_ids:
             raise HTTPException(
                 status_code=400,
-                detail="Graph must contain at least one pipeline node",
+                detail="Graph must contain at least one pipeline or custom node",
             )
 
         pipeline_tuples = [
@@ -274,8 +275,9 @@ async def start_stream(
         ]
         pipeline_id_list = [t[1] for t in pipeline_tuples]
 
-        # Headless sessions run locally.
-        await pipeline_manager.load_pipelines(pipeline_tuples)
+        if pipeline_tuples:
+            # Skip load for node-only graphs.
+            await pipeline_manager.load_pipelines(pipeline_tuples)
 
         initial_params: dict = {
             "pipeline_ids": pipeline_id_list,
