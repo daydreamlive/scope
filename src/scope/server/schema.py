@@ -559,6 +559,18 @@ class PipelineSchemasResponse(BaseModel):
     pipelines: dict = Field(..., description="Pipeline schemas keyed by pipeline ID")
 
 
+class NodeDefinitionsResponse(BaseModel):
+    """Response containing definitions for all registered node types.
+
+    Each entry is the ``model_dump()`` of a :class:`NodeDefinition`
+    (pipelines carry rich ``pipeline_meta``; plain nodes leave it null).
+    """
+
+    nodes: list[dict[str, Any]] = Field(
+        ..., description="Flat list of node definitions"
+    )
+
+
 class AssetFileInfo(BaseModel):
     """Metadata for an available asset file on disk."""
 

@@ -1,12 +1,25 @@
-"""Base interface for all pipelines."""
+"""Base interface for all pipelines.
 
+A :class:`Pipeline` is a :class:`scope.core.nodes.BaseNode` subclass —
+the "heavy" kind that batches video frames, loads GPU models, and
+carries a rich Pydantic config class. The graph editor and user-facing
+docs call them *Nodes*; the name ``Pipeline`` survives as the
+implementation base class so existing subclasses and plugins keep
+working unchanged.
+"""
+
+import logging
 from abc import ABC, abstractmethod
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel
 
+from scope.core.nodes.base import BaseNode, NodeDefinition, NodePort
+
 if TYPE_CHECKING:
     from .schema import BasePipelineConfig
+
+logger = logging.getLogger(__name__)
 
 
 class Requirements(BaseModel):
@@ -15,49 +28,66 @@ class Requirements(BaseModel):
     input_size: int
 
 
-class Pipeline(ABC):
-    """Abstract base class for all pipelines.
+class Pipeline(BaseNode, ABC):
+    """Abstract base class for video-pipeline nodes.
 
-    Pipelines must implement get_config_class() to return their Pydantic config model.
-    This enables:
-    - Validation via model_validate() / model_validate_json()
-    - JSON Schema generation via model_json_schema()
-    - Type-safe configuration access
-    - API introspection and automatic UI generation
-
-    See schema.py for the BasePipelineConfig model and pipeline-specific configs.
-    For multi-mode pipeline support (text/video), pipelines use helper functions
-    from defaults.py (resolve_input_mode, apply_mode_defaults_to_state, etc.).
+    Subclasses implement ``__call__`` (the per-chunk processing
+    function) and ``get_config_class`` (returning a Pydantic config
+    that drives validation, JSON-schema generation, the parameter
+    panel, and parameter defaults). Everything else — registry,
+    plugin hook, graph editor — is the same as for plain nodes.
     """
 
     @classmethod
     def get_config_class(cls) -> type["BasePipelineConfig"]:
         """Return the Pydantic config class for this pipeline.
 
-        The config class should inherit from BasePipelineConfig and define:
-        - pipeline_id: Unique identifier
-        - pipeline_name: Human-readable name
-        - pipeline_description: Capabilities description
-        - pipeline_version: Version string
-        - Default parameter values for the pipeline
-
-        Returns:
-            Pydantic config model class
-
-        Note:
-            Subclasses should override this method to return their config class.
-            The default implementation returns BasePipelineConfig.
-
-        Example:
-            from .schema import LongLiveConfig
-
-            @classmethod
-            def get_config_class(cls) -> type[BasePipelineConfig]:
-                return LongLiveConfig
+        Subclasses override to return their concrete config; the
+        default returns ``BasePipelineConfig``.
         """
         from .schema import BasePipelineConfig
 
         return BasePipelineConfig
+
+    @classmethod
+    def get_definition(cls) -> NodeDefinition:
+        """Project the pipeline's config class into a :class:`NodeDefinition`.
+
+        Populates the compact node-catalog fields (id, ports, etc.)
+        and stuffs the full ``get_schema_with_metadata()`` output into
+        ``pipeline_meta``, which is the rich data ``PipelineNode.tsx``
+        renders in the parameter panel. ``params`` is left empty
+        because the Pydantic schema is too structured to flatten into
+        ``NodeParam[]`` widgets.
+        """
+        config = cls.get_config_class()
+        try:
+            pipeline_meta = config.get_schema_with_metadata()
+        except Exception as e:
+            logger.warning(
+                "Failed to build pipeline_meta for %s: %s. "
+                "Node will be exposed without full config metadata.",
+                getattr(config, "pipeline_id", cls.__name__),
+                e,
+            )
+            pipeline_meta = None
+        return NodeDefinition(
+            node_type_id=config.pipeline_id,
+            display_name=getattr(config, "pipeline_name", config.pipeline_id),
+            category="pipeline",
+            description=getattr(config, "pipeline_description", "") or "",
+            inputs=[
+                NodePort(name=name, port_type="video")
+                for name in (getattr(config, "inputs", ["video"]) or ["video"])
+            ],
+            outputs=[
+                NodePort(name=name, port_type="video")
+                for name in (getattr(config, "outputs", ["video"]) or ["video"])
+            ],
+            params=[],
+            continuous=False,
+            pipeline_meta=pipeline_meta,
+        )
 
     @abstractmethod
     def __call__(self, **kwargs) -> dict:

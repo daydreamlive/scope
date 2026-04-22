@@ -5,6 +5,8 @@ import type {
   GraphEdge,
   PipelineSchemaInfo,
   LoRAFileInfo,
+  NodePortDef,
+  NodeParamDef,
 } from "./api";
 import { inferPrimitiveFieldType } from "./schemaSettings";
 import { resolveLoRAPath } from "./workflowSettings";
@@ -104,7 +106,8 @@ export interface FlowNodeData {
     | "prompt_list"
     | "prompt_blend"
     | "scheduler"
-    | "audio";
+    | "audio"
+    | "custom_node";
   availablePipelineIds?: string[];
   /** Declared input ports for the selected pipeline */
   streamInputs?: string[];
@@ -385,6 +388,22 @@ export interface FlowNodeData {
 
   /* ── Tempo beat count offset ── */
   tempoBeatCountOffset?: number;
+
+  /* ── Custom node fields ── */
+  /** For custom_node: the node_type_id from the backend registry */
+  customNodeTypeId?: string;
+  /** For custom_node: display name from node definition */
+  customNodeDisplayName?: string;
+  /** For custom_node: category from node definition */
+  customNodeCategory?: string;
+  /** For custom_node: input port definitions */
+  customNodeInputs?: NodePortDef[];
+  /** For custom_node: output port definitions */
+  customNodeOutputs?: NodePortDef[];
+  /** For custom_node: current parameter values (user-editable) */
+  customNodeParams?: Record<string, unknown>;
+  /** For custom_node: parameter definitions from API (widget metadata) */
+  customNodeParamDefs?: NodeParamDef[];
 
   /* ── Node lock / pin / collapse ── */
   /** When true, parameter inputs on this node are disabled (read-only). */
@@ -779,6 +798,40 @@ export function graphConfigToFlow(
       height: h,
       style: { width: w, height: h },
       data: { label: n.id, nodeType: "record" },
+    });
+  });
+
+  // Backend custom nodes (type="node"). Port metadata is hydrated later
+  // from GET /api/v1/nodes/definitions in useGraphPersistence.
+  const customNodes = graph.nodes.filter(
+    n => n.type === "node" && !isSubgraphInnerNode(n.id)
+  );
+  customNodes.forEach((n, i) => {
+    const savedX = n.x ?? undefined;
+    const savedY = n.y ?? undefined;
+    const sizeProps =
+      n.w != null || n.h != null
+        ? {
+            width: n.w ?? undefined,
+            height: n.h ?? undefined,
+            style: { width: n.w ?? undefined, height: n.h ?? undefined },
+          }
+        : {};
+    nodes.push({
+      id: n.id,
+      type: "custom_node",
+      position: {
+        x: savedX !== undefined ? savedX : START_X + COLUMN_GAP * 1.5,
+        y:
+          savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
+      },
+      ...sizeProps,
+      data: {
+        label: n.node_type_id || n.id,
+        nodeType: "custom_node",
+        customNodeTypeId: n.node_type_id ?? undefined,
+        customNodeParams: (n.params as Record<string, unknown>) ?? undefined,
+      },
     });
   });
 
@@ -1211,10 +1264,20 @@ export function flowToGraphConfig(
             ? "sink"
             : n.data.nodeType === "record"
               ? "record"
-              : "pipeline",
+              : n.data.nodeType === "custom_node"
+                ? "node"
+                : "pipeline",
       pipeline_id:
         n.data.nodeType === "pipeline"
           ? (n.data.pipelineId ?? null)
+          : undefined,
+      node_type_id:
+        n.data.nodeType === "custom_node"
+          ? (n.data.customNodeTypeId ?? null)
+          : undefined,
+      params:
+        n.data.nodeType === "custom_node" && n.data.customNodeParams
+          ? n.data.customNodeParams
           : undefined,
       x: n.position.x,
       y: n.position.y,

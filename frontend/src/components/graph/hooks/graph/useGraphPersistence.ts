@@ -7,8 +7,8 @@ import {
   parseHandleId,
 } from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
-import type { PluginInfo } from "../../../../lib/api";
-import { resolveWorkflow } from "../../../../lib/api";
+import type { PluginInfo, NodeDefinitionDto } from "../../../../lib/api";
+import { resolveWorkflow, fetchNodeDefinitions } from "../../../../lib/api";
 import type {
   ScopeWorkflow,
   WorkflowResolutionPlan,
@@ -63,6 +63,72 @@ function clearGraphFromLocalStorage(): void {
   } catch {
     // ignore
   }
+}
+
+/**
+ * After loading or importing a workflow, fetch `/api/v1/nodes/definitions`
+ * and hydrate each custom_node flow node with its inputs/outputs/params/
+ * display metadata. Saved workflows only persist `node_type_id` and
+ * `params`, so the port definitions have to be re-attached before render.
+ * User-supplied param values override the defaults from the definition.
+ *
+ * Accepts an AbortSignal so rapid reloads / unmounts can cancel an
+ * in-flight fetch before its setNodes callback stomps on newer state.
+ */
+function hydrateCustomNodeDefinitions(
+  nodes: Node<FlowNodeData>[],
+  setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>,
+  signal: AbortSignal
+): void {
+  const customFlowNodes = nodes.filter(
+    n => n.data.nodeType === "custom_node" && !n.data.customNodeInputs
+  );
+  if (customFlowNodes.length === 0) return;
+  fetchNodeDefinitions({ signal })
+    .then(data => {
+      if (signal.aborted) return;
+      const defMap = new Map<string, NodeDefinitionDto>(
+        data.nodes.map(d => [d.node_type_id, d])
+      );
+      setNodes(prev => {
+        if (signal.aborted) return prev;
+        return prev.map(n => {
+          if (
+            n.data.nodeType !== "custom_node" ||
+            !n.data.customNodeTypeId ||
+            n.data.customNodeInputs
+          ) {
+            return n;
+          }
+          const def = defMap.get(n.data.customNodeTypeId);
+          if (!def) return n;
+          return {
+            ...n,
+            data: {
+              ...n.data,
+              customNodeDisplayName: def.display_name,
+              customNodeCategory: def.category,
+              customNodeInputs: def.inputs ?? [],
+              customNodeOutputs: def.outputs ?? [],
+              customNodeParamDefs: def.params ?? [],
+              customNodeParams: {
+                ...Object.fromEntries(
+                  (def.params ?? [])
+                    .filter(p => p.default != null)
+                    .map(p => [p.name, p.default] as const)
+                ),
+                // User-edited values take precedence over definition defaults
+                ...(n.data.customNodeParams || {}),
+              },
+            },
+          };
+        });
+      });
+    })
+    .catch((err: unknown) => {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      // custom nodes just won't be hydrated; render falls back to placeholders
+    });
 }
 
 interface UseGraphPersistenceArgs {
@@ -129,6 +195,25 @@ export function useGraphPersistence({
   // to localStorage so we skip the expensive save when nothing changed.
   const lastSavedJsonRef = useRef<string>("");
 
+  // AbortController for in-flight custom-node hydration fetches. Aborted
+  // before each new hydrate and on unmount so a stale /api/v1/nodes/definitions
+  // response can't overwrite newer nodes state.
+  const hydrateAbortRef = useRef<AbortController | null>(null);
+  const startHydrate = useCallback(
+    (initialNodes: Node<FlowNodeData>[]) => {
+      hydrateAbortRef.current?.abort();
+      const controller = new AbortController();
+      hydrateAbortRef.current = controller;
+      hydrateCustomNodeDefinitions(initialNodes, setNodes, controller.signal);
+    },
+    [setNodes]
+  );
+  useEffect(() => {
+    return () => {
+      hydrateAbortRef.current?.abort();
+    };
+  }, []);
+
   const loadGraph = useCallback(() => {
     if (Object.keys(portsMap).length === 0) return;
     resetNavigationRef.current?.();
@@ -182,6 +267,8 @@ export function useGraphPersistence({
           }, 0);
         }
 
+        startHydrate(enriched);
+
         // Allow async side-effects (e.g. source mode restore) to settle
         // before re-enabling change notifications.
         setTimeout(() => {
@@ -202,6 +289,7 @@ export function useGraphPersistence({
     setEdges,
     setNodeParams,
     setNodes,
+    startHydrate,
   ]);
 
   useEffect(() => {
@@ -374,6 +462,8 @@ export function useGraphPersistence({
           }
         }, 0);
       }
+
+      startHydrate(enriched);
     },
     [
       portsMap,
@@ -384,6 +474,7 @@ export function useGraphPersistence({
       setNodeParams,
       enrichDepsRef,
       resetNavigationRef,
+      startHydrate,
     ]
   );
 
