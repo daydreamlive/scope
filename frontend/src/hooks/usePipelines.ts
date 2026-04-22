@@ -1,11 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { getPipelineSchemas } from "../lib/api";
-import { useCloudContext } from "../lib/cloudContext";
 import type { InputMode, PipelineInfo } from "../types";
 
 export function usePipelines() {
-  const { adapter, isCloudMode, isReady } = useCloudContext();
-
   const [pipelines, setPipelines] = useState<Record<
     string,
     PipelineInfo
@@ -69,11 +66,7 @@ export function usePipelines() {
       setIsLoading(true);
       setError(null);
 
-      // Use adapter if in cloud mode, otherwise direct API
-      const schemas =
-        isCloudMode && adapter
-          ? await adapter.api.getPipelineSchemas()
-          : await getPipelineSchemas();
+      const schemas = await getPipelineSchemas();
 
       const transformed = transformSchemas(schemas);
       setPipelines(transformed);
@@ -87,14 +80,9 @@ export function usePipelines() {
     } finally {
       setIsLoading(false);
     }
-  }, [adapter, isCloudMode, transformSchemas]);
+  }, [transformSchemas]);
 
   useEffect(() => {
-    // In cloud mode, wait until adapter is ready
-    if (isCloudMode && !isReady) {
-      return;
-    }
-
     let mounted = true;
 
     async function fetchPipelines() {
@@ -102,11 +90,7 @@ export function usePipelines() {
         setIsLoading(true);
         setError(null);
 
-        // Use adapter if in cloud mode, otherwise direct API
-        const schemas =
-          isCloudMode && adapter
-            ? await adapter.api.getPipelineSchemas()
-            : await getPipelineSchemas();
+        const schemas = await getPipelineSchemas();
 
         if (!mounted) return;
 
@@ -130,7 +114,7 @@ export function usePipelines() {
     return () => {
       mounted = false;
     };
-  }, [adapter, isCloudMode, isReady, transformSchemas]);
+  }, [transformSchemas]);
 
   return {
     pipelines,

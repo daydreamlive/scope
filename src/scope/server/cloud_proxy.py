@@ -25,7 +25,6 @@ import aiohttp
 from fastapi import HTTPException, Request
 from fastapi.responses import Response
 
-from .cloud_connection import CloudConnectionManager
 from .models_config import get_assets_dir
 from .schema import AssetFileInfo, HardwareInfoResponse
 from .scope_cloud_types import ScopeCloudBackend
@@ -94,7 +93,7 @@ async def _proxy_to_cloud(
     return response.get("data", {})
 
 
-PathResolver = Callable[[Request, CloudConnectionManager], str]
+PathResolver = Callable[[Request, ScopeCloudBackend], str]
 
 # When path is omitted, the request URL path is used when proxying (same as route).
 CLOUD_REQUEST_FAILED = "Cloud request failed"
@@ -202,33 +201,11 @@ async def _upload_to_fal_cdn(
     token_type: str,
     base_upload_url: str,
 ) -> str:
-    """Upload file directly to fal CDN via REST API.
-
-    This bypasses the WebSocket and uploads directly to fal's storage,
-    returning a CDN URL that can be used by the cloud runner.
-
-    The CDN token must be obtained by the caller (frontend) from the Daydream
-    API at /auth/fal/cdn-token and passed through request headers.
-
-    Args:
-        content: File content as bytes
-        filename: Original filename
-        content_type: MIME type of the file
-        cdn_token: Short-lived CDN upload token from Daydream API
-        token_type: Token type (e.g. "bearer")
-        base_upload_url: Base URL for CDN uploads
-
-    Returns:
-        CDN URL of the uploaded file (https://v3.fal.media/files/...)
-
-    Raises:
-        HTTPException: If upload fails
-    """
+    """Upload file directly to fal CDN via REST API."""
     logger.info(f"upload_to_fal_cdn: Uploading {len(content)} bytes ({filename})")
 
     try:
         async with aiohttp.ClientSession() as session:
-            # Upload file to CDN
             upload_url = f"{base_upload_url}/files/upload"
             upload_auth = f"{token_type} {cdn_token}"
 
@@ -275,7 +252,7 @@ async def _upload_to_fal_cdn(
 
 
 async def upload_asset_to_cloud(
-    cloud_manager: CloudConnectionManager,
+    cloud_manager: ScopeCloudBackend,
     content: bytes,
     filename: str,
     content_type: str,
@@ -284,18 +261,11 @@ async def upload_asset_to_cloud(
     fal_cdn_token_type: str | None = None,
     fal_cdn_base_url: str | None = None,
 ) -> AssetFileInfo:
-    """Upload asset to cloud and save a local copy for thumbnails.
-
-    Uploads directly to fal CDN using a token obtained by the frontend from
-    the Daydream API, then notifies the cloud runner via the WebSocket.
-
-    Call when cloud_manager.is_connected; raises HTTPException on cloud errors.
-    """
+    """Upload asset to cloud and save a local copy for thumbnails."""
     logger.info(
         f"upload_asset: Uploading {asset_type} to cloud and locally: {filename} ({len(content)} bytes)"
     )
 
-    # Save locally for thumbnail serving
     assets_dir = get_assets_dir()
     assets_dir.mkdir(parents=True, exist_ok=True)
     local_file_path = assets_dir / filename
@@ -316,7 +286,6 @@ async def upload_asset_to_cloud(
         fal_cdn_base_url,
     )
 
-    # Tell the cloud runner to fetch from CDN URL instead of receiving base64
     response = await cloud_manager.api_request(
         method="POST",
         path=f"/api/v1/assets?filename={filename}",
@@ -340,21 +309,6 @@ async def upload_asset_to_cloud(
         type=data.get("type", asset_type),
         created_at=data.get("created_at", time.time()),
     )
-
-
-def recording_download_cloud_path(
-    _http_request: Request,
-    cloud_manager: CloudConnectionManager,
-) -> str:
-    """Resolve cloud path for recording download (uses cloud session ID)."""
-    webrtc_client = getattr(cloud_manager, "_webrtc_client", None)
-    session_id = getattr(webrtc_client, "session_id", None) if webrtc_client else None
-    if not session_id:
-        raise HTTPException(
-            status_code=404,
-            detail="No active cloud session for recording download",
-        )
-    return f"/api/v1/recordings/{session_id}"
 
 
 def cloud_proxy(

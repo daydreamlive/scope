@@ -36,7 +36,7 @@ from scope.core.pacing import (
     compute_pacing_decision,
 )
 
-from .cloud_webrtc_client import AudioOutputHandler, FrameOutputHandler
+from .cloud_relay import AudioOutputHandler, FrameOutputHandler
 
 logger = logging.getLogger(__name__)
 LIVEPEER_ORCH_URL_ENV = "LIVEPEER_ORCH_URL"
@@ -312,8 +312,7 @@ class LivepeerClient:
 
     @staticmethod
     def _ws_url_from_app_id(value: str | None) -> str | None:
-        # HACK: Ignore the default app_id to use the orchestrator's own config
-        if not value or value == "Daydream/scope-app--prod/ws":
+        if not value:
             return None
         try:
             trimmed = value.strip()
@@ -329,7 +328,7 @@ class LivepeerClient:
         except Exception:
             raise ValueError(
                 "Invalid cloud app id. Expected a non-empty app id ending in "
-                "`/ws` (for example `daydream/scope-app/ws`)."
+                "`/ws` (for example `daydream/scope-livepeer--prod/ws`)."
             ) from None
         if parsed.scheme not in {"ws", "wss"}:
             raise ValueError("Invalid ws_url. Expected a valid ws:// or wss:// URL.")
@@ -365,10 +364,8 @@ class LivepeerClient:
             node_by_id[node_id] = node
             node_type = node.get("type")
             if node_type == "source":
-                source_mode = node.get("source_mode", "video")
-                if source_mode not in ("spout", "ndi", "syphon"):
-                    source_node_to_track_index[node_id] = src_count
-                    src_count += 1
+                source_node_to_track_index[node_id] = src_count
+                src_count += 1
             elif node_type == "sink":
                 sink_mode = node.get("sink_mode")
                 if sink_mode not in ("spout", "ndi", "syphon"):

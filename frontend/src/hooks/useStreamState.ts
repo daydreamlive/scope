@@ -15,7 +15,6 @@ import {
   type PipelineSchemasResponse,
   type InputSourceType,
 } from "../lib/api";
-import { useCloudContext } from "../lib/cloudContext";
 
 // Generic fallback defaults used before schemas are loaded.
 // Resolution and denoising steps use conservative values.
@@ -45,24 +44,16 @@ function getFallbackDefaults(mode?: InputMode) {
 }
 
 export function useStreamState() {
-  const { adapter, isCloudMode, isReady } = useCloudContext();
-
-  // Helper functions that use cloud adapter when available
+  // Helper functions for backend APIs
   const getPipelineSchemas =
     useCallback(async (): Promise<PipelineSchemasResponse> => {
-      if (isCloudMode && adapter) {
-        return adapter.api.getPipelineSchemas();
-      }
       return getPipelineSchemasApi();
-    }, [adapter, isCloudMode]);
+    }, []);
 
   const getHardwareInfo =
     useCallback(async (): Promise<HardwareInfoResponse> => {
-      if (isCloudMode && adapter) {
-        return adapter.api.getHardwareInfo();
-      }
       return getHardwareInfoApi();
-    }, [adapter, isCloudMode]);
+    }, []);
 
   const getInputSources = useCallback(async () => {
     // Input sources are always fetched from the local backend
@@ -246,11 +237,6 @@ export function useStreamState() {
 
   // Fetch pipeline schemas and hardware info on mount
   useEffect(() => {
-    // In cloud mode, wait until adapter is ready
-    if (isCloudMode && !isReady) {
-      return;
-    }
-
     const fetchInitialData = async () => {
       try {
         const [schemasResult, hardwareResult, inputSourcesResult] =
@@ -311,13 +297,7 @@ export function useStreamState() {
     };
 
     fetchInitialData();
-  }, [
-    isCloudMode,
-    isReady,
-    getPipelineSchemas,
-    getHardwareInfo,
-    getInputSources,
-  ]);
+  }, [getPipelineSchemas, getHardwareInfo, getInputSources]);
 
   // Track previous pipelineId so we only reset inputMode when the pipeline actually changes
   const prevPipelineIdRef = useRef<string | null>(null);

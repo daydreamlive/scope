@@ -40,7 +40,6 @@ import { usePipeline } from "../hooks/usePipeline";
 import { useStreamState } from "../hooks/useStreamState";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { useApi } from "../hooks/useApi";
-import { useCloudContext } from "../lib/cloudContext";
 import { useCloudStatus } from "../hooks/useCloudStatus";
 import { useLogStream } from "../hooks/useLogStream";
 import { getDefaultPromptForMode } from "../data/pipelines";
@@ -179,8 +178,6 @@ export function StreamPage() {
 
   // Get API functions that work in both local and cloud modes
   const api = useApi();
-  const { isCloudMode: isDirectCloudMode, isReady: isCloudReady } =
-    useCloudContext();
 
   // Track backend cloud relay mode (local backend connected to cloud or connecting)
   const {
@@ -194,8 +191,8 @@ export function StreamPage() {
   const { plugins } = usePluginsContext();
   const { version: scopeVersion } = useServerInfoContext();
 
-  // Combined cloud mode: either frontend direct-to-cloud or backend relay to cloud
-  const isCloudMode = isDirectCloudMode || isBackendCloudConnected;
+  // Cloud-connected mode tracks backend connection status.
+  const isCloudMode = isBackendCloudConnected;
 
   // After cloud auth during onboarding, the CloudAuthStep fires
   // activateCloudRelay(). Refresh the shared cloud status so the UI
@@ -225,13 +222,6 @@ export function StreamPage() {
     clearLogs,
     unreadCount: logUnreadCount,
   } = useLogStream();
-
-  // Show loading state while connecting to cloud
-  useEffect(() => {
-    if (isDirectCloudMode) {
-      console.log("[StreamPage] Cloud mode enabled, ready:", isCloudReady);
-    }
-  }, [isDirectCloudMode, isCloudReady]);
 
   // Fetch available pipelines dynamically
   const { pipelines, refreshPipelines } = usePipelinesContext();

@@ -27,7 +27,7 @@ from .sink_manager import SinkManager
 from .source_manager import SourceManager
 
 if TYPE_CHECKING:
-    from .cloud_connection import CloudConnectionManager
+    from .scope_cloud_types import ScopeCloudBackend
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +42,7 @@ HEARTBEAT_INTERVAL_SECONDS = 10.0
 class FrameProcessor:
     """Processes video frames through pipelines or cloud relay.
 
-    Supports two modes (selected by presence of a CloudConnectionManager):
+    Supports two modes (selected by presence of a remote backend):
     1. Local mode: Frames processed through local GPU pipelines
     2. Cloud mode: Frames sent to cloud for processing
 
@@ -56,7 +56,7 @@ class FrameProcessor:
         max_parameter_queue_size: int = 8,
         initial_parameters: dict = None,
         notification_callback: callable = None,
-        cloud_manager: "CloudConnectionManager | None" = None,
+        cloud_manager: "ScopeCloudBackend | None" = None,
         session_id: str | None = None,  # Session ID for event tracking
         user_id: str | None = None,  # User ID for event tracking
         connection_id: str | None = None,  # Connection ID for event correlation

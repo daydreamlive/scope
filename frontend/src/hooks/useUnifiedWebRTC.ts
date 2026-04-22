@@ -4,7 +4,6 @@
  */
 
 import { useState, useEffect, useRef, useCallback } from "react";
-import { useCloudContext } from "../lib/cloudContext";
 import {
   sendWebRTCOffer,
   sendIceCandidates,
@@ -68,8 +67,6 @@ interface UseUnifiedWebRTCOptions {
  * In cloud mode, uses the CloudAdapter WebSocket for signaling.
  */
 export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
-  const { adapter, isCloudMode } = useCloudContext();
-
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [remoteStreams, setRemoteStreams] = useState<
     Record<string, MediaStream>
@@ -113,13 +110,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
   const fetchIceServers = useCallback(async (): Promise<RTCConfiguration> => {
     try {
       console.log("[UnifiedWebRTC] Fetching ICE servers...");
-      let iceServersResponse;
-
-      if (isCloudMode && adapter) {
-        iceServersResponse = await adapter.getIceServers();
-      } else {
-        iceServersResponse = await getIceServers();
-      }
+      const iceServersResponse = await getIceServers();
 
       console.log(
         `[UnifiedWebRTC] Using ${iceServersResponse.iceServers.length} ICE servers`
@@ -132,7 +123,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       );
       return { iceServers: [{ urls: "stun:stun.l.google.com:19302" }] };
     }
-  }, [adapter, isCloudMode]);
+  }, []);
 
   // Helper to send SDP offer
   const sendOffer = useCallback(
@@ -141,28 +132,21 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
       type: string,
       initialParameters?: InitialParameters
     ) => {
-      if (isCloudMode && adapter) {
-        return adapter.sendOffer(sdp, type, initialParameters);
-      }
       return sendWebRTCOffer({
         sdp,
         type,
         initialParameters,
       });
     },
-    [adapter, isCloudMode]
+    []
   );
 
   // Helper to send ICE candidate
   const sendIceCandidate = useCallback(
     async (sessionId: string, candidate: RTCIceCandidate) => {
-      if (isCloudMode && adapter) {
-        await adapter.sendIceCandidate(sessionId, candidate);
-      } else {
-        await sendIceCandidates(sessionId, candidate);
-      }
+      await sendIceCandidates(sessionId, candidate);
     },
-    [adapter, isCloudMode]
+    []
   );
 
   const startStream = useCallback(
@@ -187,7 +171,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
 
         // Log peer connection configuration
         console.log("[UnifiedWebRTC] Created RTCPeerConnection with config:", {
-          mode: isCloudMode ? "CLOUD (frontend direct)" : "LOCAL (backend)",
+          mode: "LOCAL (backend)",
           iceServers: config.iceServers?.map((s: RTCIceServer) => ({
             urls: s.urls,
             hasCredentials: !!(s.username && s.credential),
@@ -433,12 +417,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
             console.log(
               "[UnifiedWebRTC] ========== CONNECTION ESTABLISHED =========="
             );
-            console.log(
-              "[UnifiedWebRTC] Mode:",
-              isCloudMode
-                ? "CLOUD (frontend → cloud)"
-                : "LOCAL (frontend → backend)"
-            );
+            console.log("[UnifiedWebRTC] Mode:", "LOCAL (frontend → backend)");
             console.log("[UnifiedWebRTC] Session ID:", sessionIdRef.current);
 
             // Log negotiated codec
@@ -567,10 +546,7 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           const sessionName = sdpLines.find((l: string) => l.startsWith("s="));
           console.log("[UnifiedWebRTC] Server SDP origin:", originLine);
           console.log("[UnifiedWebRTC] Server SDP session:", sessionName);
-          console.log(
-            "[UnifiedWebRTC] Stream target:",
-            isCloudMode ? "cloud backend" : "local backend"
-          );
+          console.log("[UnifiedWebRTC] Stream target:", "local backend");
 
           // Flush queued ICE candidates
           if (queuedCandidatesRef.current.length > 0) {

@@ -7,21 +7,85 @@ cloud-specific state across its own fields.
 
 import logging
 import queue
+from collections.abc import Callable
 from fractions import Fraction
-from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+from av import AudioFrame, VideoFrame
 
 from .media_packets import AudioPacket, MediaTimestamp, VideoPacket
-
-if TYPE_CHECKING:
-    from aiortc.mediastreams import VideoFrame
-    from av import AudioFrame
-
-    from .cloud_connection import CloudConnectionManager
+from .scope_cloud_types import ScopeCloudBackend
 
 logger = logging.getLogger(__name__)
+
+
+class FrameOutputHandler:
+    """Handles frames received from cloud."""
+
+    def __init__(self):
+        self._callbacks: list[Callable[[VideoFrame], None]] = []
+        self._frame_count = 0
+        self._last_frame: VideoFrame | None = None
+
+    def add_callback(self, callback: Callable[[VideoFrame], None]) -> None:
+        """Register a callback to receive processed frames."""
+        self._callbacks.append(callback)
+
+    def remove_callback(self, callback: Callable[[VideoFrame], None]) -> None:
+        """Remove a frame callback."""
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+
+    def handle_frame(self, frame: VideoFrame) -> None:
+        """Called when a frame is received from cloud."""
+        self._frame_count += 1
+        self._last_frame = frame
+
+        for callback in self._callbacks:
+            try:
+                callback(frame)
+            except Exception as e:
+                logger.error(f"Error in frame callback: {e}")
+
+    @property
+    def frame_count(self) -> int:
+        return self._frame_count
+
+    @property
+    def last_frame(self) -> VideoFrame | None:
+        return self._last_frame
+
+
+class AudioOutputHandler:
+    """Handles audio frames received from cloud."""
+
+    def __init__(self):
+        self._callbacks: list[Callable[[AudioFrame], None]] = []
+        self._frame_count = 0
+
+    def add_callback(self, callback: Callable[[AudioFrame], None]) -> None:
+        """Register a callback to receive audio frames."""
+        self._callbacks.append(callback)
+
+    def remove_callback(self, callback: Callable[[AudioFrame], None]) -> None:
+        """Remove an audio callback."""
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+
+    def handle_frame(self, frame: AudioFrame) -> None:
+        """Called when an audio frame is received from cloud."""
+        self._frame_count += 1
+
+        for callback in self._callbacks:
+            try:
+                callback(frame)
+            except Exception as e:
+                logger.error(f"Error in audio callback: {e}")
+
+    @property
+    def frame_count(self) -> int:
+        return self._frame_count
 
 
 def compute_relay_video_mode(initial_parameters: dict | None) -> bool:
@@ -55,7 +119,7 @@ class CloudRelay:
 
     def __init__(
         self,
-        cloud_manager: "CloudConnectionManager",
+        cloud_manager: ScopeCloudBackend,
         video_mode: bool = False,
     ):
         self._cloud_manager = cloud_manager

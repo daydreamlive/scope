@@ -27,7 +27,6 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from .cloud_connection import CloudConnectionManager
     from .livepeer import LivepeerConnection
     from .pipeline_manager import PipelineManager
     from .schema import PluginInfo
@@ -52,7 +51,6 @@ from .cloud_proxy import (
     cloud_proxy,
     get_hardware_info_from_cloud,
     proxy_with_body,
-    recording_download_cloud_path,
     upload_asset_to_cloud,
 )
 from .download_models import download_models
@@ -69,17 +67,14 @@ from .kafka_publisher import (
     is_kafka_enabled,
     set_kafka_publisher,
 )
-from .livepeer import is_livepeer_enabled
 from .logs_config import (
     LOG_FORMAT,
     FalConnectionFilter,
     cleanup_old_logs,
     ensure_logs_dir,
     get_current_log_file,
-    get_fal_connection_id,
     get_logs_dir,
     get_most_recent_log_file,
-    set_fal_connection_id,
 )
 from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
 from .mcp_router import router as mcp_router
@@ -312,8 +307,6 @@ webrtc_manager = None
 pipeline_manager = None
 # Server startup timestamp for detecting restarts
 server_start_time = time.time()
-# Global cloud connection manager instance
-cloud_connection_manager = None
 # Global Livepeer manager instance
 livepeer = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
@@ -356,7 +349,6 @@ async def lifespan(app: FastAPI):
     # Lazy imports to avoid loading torch at CLI startup (fixes Windows DLL locking)
     import torch
 
-    from .cloud_connection import CloudConnectionManager
     from .livepeer import LivepeerConnection
     from .pipeline_manager import PipelineManager
     from .tempo_sync import TempoSync
@@ -366,7 +358,6 @@ async def lifespan(app: FastAPI):
     global \
         webrtc_manager, \
         pipeline_manager, \
-        cloud_connection_manager, \
         kafka_publisher, \
         livepeer, \
         tempo_sync, \
@@ -416,13 +407,9 @@ async def lifespan(app: FastAPI):
     tempo_sync = TempoSync()
     logger.info("Tempo sync manager initialized")
 
-    cloud_connection_manager = CloudConnectionManager()
-    logger.info("Cloud connection manager initialized")
-
     livepeer = LivepeerConnection()
-    if is_livepeer_enabled():
-        livepeer.configure()
-        logger.info("Livepeer configured")
+    livepeer.configure()
+    logger.info("Livepeer configured")
 
     # Initialize Kafka publisher if credentials are configured
     if is_kafka_enabled():
@@ -497,11 +484,6 @@ async def lifespan(app: FastAPI):
         pipeline_manager.unload_all_pipelines()
         logger.info("Pipeline manager shutdown complete")
 
-    if cloud_connection_manager and cloud_connection_manager.is_connected:
-        logger.info("Shutting down cloud connection...")
-        await cloud_connection_manager.disconnect()
-        logger.info("Cloud connection shutdown complete")
-
     if tempo_sync:
         logger.info("Shutting down tempo sync...")
         await tempo_sync.stop()
@@ -529,11 +511,6 @@ def get_pipeline_manager() -> "PipelineManager":
     return pipeline_manager
 
 
-def get_cloud_connection_manager() -> "CloudConnectionManager":
-    """Dependency to get cloud connection manager instance."""
-    return cloud_connection_manager
-
-
 def get_osc_server():
     """Dependency to get OSC server instance."""
 
@@ -552,9 +529,7 @@ def get_scope_cloud() -> ScopeCloudBackend:
     inspect status, including connecting/error states.  Callers that need an
     *active* connection must check cloud_manager.is_connected themselves.
     """
-    if is_livepeer_enabled():
-        return livepeer
-    return cloud_connection_manager
+    return livepeer
 
 
 def get_dmx_server():
@@ -584,16 +559,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Local cloud WebSocket endpoint — enabled by SCOPE_CLOUD_WS=1
-if os.environ.get("SCOPE_CLOUD_WS") == "1":
-    from fastapi import WebSocket as _WebSocket
-
-    from scope.cloud.dev_app import cloud_ws_handler
-
-    @app.websocket("/ws")
-    async def cloud_ws(ws: _WebSocket):
-        await cloud_ws_handler(ws)
-
 
 @app.get("/health", response_model=HealthResponse)
 @cloud_proxy()
@@ -609,33 +574,6 @@ async def health_check(
         version=version("daydream-scope"),
         git_commit=get_git_commit_hash(),
     )
-
-
-@app.put("/api/v1/internal/fal-connection-id")
-async def put_fal_connection_id(request: Request):
-    """Set the fal connection ID that is injected into every log line.
-
-    Called by the fal_app proxy when a new WebSocket connection is established.
-    This is an internal endpoint not intended for external consumers.
-    """
-    body = await request.json()
-    connection_id = body.get("connection_id")
-    set_fal_connection_id(connection_id)
-    logger.info("Fal connection ID set")
-    return {"status": "ok", "connection_id": connection_id}
-
-
-@app.delete("/api/v1/internal/fal-connection-id")
-async def delete_fal_connection_id():
-    """Clear the fal connection ID from log lines.
-
-    Called by the fal_app proxy when a WebSocket connection is closed.
-    """
-    prev = get_fal_connection_id()
-    set_fal_connection_id(None)
-    if prev:
-        logger.info("Fal connection ID cleared")
-    return {"status": "ok"}
 
 
 @app.post("/api/v1/restart")
@@ -1145,26 +1083,11 @@ async def dmx_sse_stream():
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
 async def get_ice_servers(
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Return ICE server configuration for frontend WebRTC connection.
 
-    In cloud mode, this returns the ICE servers from the cloud-hosted scope backend.
+    Returns ICE configuration from the local backend.
     """
-    # If connected to cloud, get ICE servers from cloud
-    if cloud_manager.is_connected:
-        try:
-            cloud_ice_servers = await cloud_manager.webrtc_get_ice_servers()
-            return IceServersResponse(
-                iceServers=[
-                    IceServerConfig(**server)
-                    for server in cloud_ice_servers.get("iceServers", [])
-                ]
-            )
-        except Exception as e:
-            logger.warning(f"Failed to get ICE servers from cloud, using local: {e}")
-
-    # Local mode or fallback
     ice_servers = []
     for server in webrtc_manager.rtc_config.iceServers:
         ice_servers.append(
@@ -1295,11 +1218,9 @@ def _session_has_graph_record_nodes(session) -> bool:
 
 @app.get("/api/v1/recordings/{session_id}")
 async def download_recording(
-    http_request: Request,
     session_id: str,
     background_tasks: BackgroundTasks,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
     node_id: str | None = Query(
         None,
         description="Record node id for graph mode (per-node recording file)",
@@ -1307,9 +1228,7 @@ async def download_recording(
 ):
     """Download the recording file for the specified session.
 
-    Local-first: if the session has a local recording, serve it directly.
-    Falls back to cloud proxy only when there is no local recording and
-    cloud is connected (pure cloud mode where recording happens remotely).
+    Serves local recordings for the specified session.
 
     When the graph has record nodes, pass ``node_id`` to download that node's file.
     """
@@ -1373,12 +1292,6 @@ async def download_recording(
                 download_file,
                 media_type="video/mp4",
                 filename=filename,
-            )
-
-        if cloud_manager and cloud_manager.is_connected:
-            cloud_path = recording_download_cloud_path(http_request, cloud_manager)
-            return await proxy_with_body(
-                cloud_manager, "GET", cloud_path, timeout=120.0
             )
 
         raise HTTPException(
@@ -2156,7 +2069,6 @@ async def upload_asset(
                 fal_cdn_base_url=request.headers.get("X-Fal-CDN-Base-URL"),
             )
 
-        # Local mode: save to local assets directory
         assets_dir = get_assets_dir()
         assets_dir.mkdir(parents=True, exist_ok=True)
 
@@ -3120,11 +3032,11 @@ async def connect_to_cloud(
         # Use request body credentials if provided, otherwise fall back to CLI/env
         app_id = request.app_id or os.environ.get("SCOPE_CLOUD_APP_ID")
         api_key = request.api_key or os.environ.get("SCOPE_CLOUD_API_KEY")
-        if not app_id:
+        if not app_id and not api_key:
             raise HTTPException(
                 status_code=400,
-                detail="cloud credentials not configured. Use --cloud-app-id and --cloud-api-key CLI args, "
-                "or SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_API_KEY environment variables.",
+                detail="cloud credentials not configured. Use --cloud-app-id or --cloud-api-key CLI args, "
+                "or SCOPE_CLOUD_APP_ID or SCOPE_CLOUD_API_KEY environment variables.",
             )
 
         logger.info(
@@ -3187,27 +3099,6 @@ async def get_cloud_status(
     # Check if credentials are configured via CLI/env
     credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
     return CloudStatusResponse(**status, credentials_configured=credentials_configured)
-
-
-@app.get("/api/v1/cloud/stats")
-async def get_cloud_stats(
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
-):
-    """Get detailed cloud connection statistics.
-
-    Returns connection stats including:
-    - Uptime
-    - WebRTC offers sent/successful
-    - ICE candidates sent
-    - API requests sent/successful
-
-    Also prints stats to the server log for debugging.
-    """
-    # Print stats to log
-    cloud_manager.print_stats()
-
-    # Return full status with stats
-    return cloud_manager.get_status()
 
 
 # ---------------------------------------------------------------------------
@@ -3430,9 +3321,9 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
 )
 @click.option(
     "--cloud-app-id",
-    default="Daydream/scope-app--prod/ws",
+    default=None,
     envvar="SCOPE_CLOUD_APP_ID",
-    help="Cloud app ID for cloud mode (e.g., 'username/scope-app')",
+    help="Cloud app ID for Livepeer mode (e.g., 'daydream/scope-livepeer--prod/ws')",
 )
 @click.option(
     "--cloud-api-key",

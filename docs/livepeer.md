@@ -47,7 +47,6 @@ This starts the Livepeer runner as a subprocess inside the Fal container and pro
 Set environment variables and launch the server:
 
 ```bash
-SCOPE_CLOUD_MODE=livepeer \
 LIVEPEER_TOKEN=<base64-json-token> \
 LIVEPEER_WS_URL=ws://127.0.0.1:8001/ws \
 uv run daydream-scope
@@ -56,7 +55,6 @@ uv run daydream-scope
 If the runner is deployed on Fal, use `SCOPE_CLOUD_APP_ID` instead of `LIVEPEER_WS_URL`:
 
 ```bash
-SCOPE_CLOUD_MODE=livepeer \
 LIVEPEER_TOKEN=<base64-json-token> \
 SCOPE_CLOUD_APP_ID=<app-id>/ws \
 uv run daydream-scope
@@ -65,7 +63,6 @@ uv run daydream-scope
 Or pass the Fal URL explicitly:
 
 ```bash
-SCOPE_CLOUD_MODE=livepeer \
 LIVEPEER_TOKEN=<base64-json-token> \
 LIVEPEER_WS_URL=wss://fal.run/<app-id>/ws \
 uv run daydream-scope
@@ -77,7 +74,6 @@ To switch away from explicit runner overrides, unset both `LIVEPEER_WS_URL` and 
 
 | Variable             | Required | Description |
 | -------------------- | -------- | ----------- |
-| `SCOPE_CLOUD_MODE`   | Yes      | Set to `livepeer` to enable Livepeer relay mode. |
 | `LIVEPEER_ORCH_URL`  | No       | Explicit orchestrator URL. Formats: `host[:port]` or `http(s)://host[:port]`. If unset, token discovery is used. |
 | `LIVEPEER_SIGNER`    | No       | Override signer URL used for Livepeer payments. To disable payments, set to a falsy value such as `"off"`. |
 | `LIVEPEER_WS_URL`    | No       | Explicit runner WebSocket URL (e.g. `ws://127.0.0.1:8001/ws`). |
