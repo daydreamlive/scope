@@ -846,14 +846,40 @@ export function graphConfigToFlow(
             style: { width: n.w ?? undefined, height: n.h ?? undefined },
           }
         : {};
+    const position = {
+      x: savedX !== undefined ? savedX : START_X + COLUMN_GAP * 1.5,
+      y: savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
+    };
+    // Scheduler has its own React renderer — rehydrate into its native
+    // nodeType so the bespoke widget (trigger list, transport controls)
+    // comes back after a round-trip, instead of the generic custom_node UI.
+    if (n.node_type_id === "scheduler") {
+      const params = (n.params ?? {}) as Record<string, unknown>;
+      nodes.push({
+        id: n.id,
+        type: "scheduler",
+        position,
+        ...sizeProps,
+        data: {
+          label: "Scheduler",
+          nodeType: "scheduler",
+          schedulerTriggers:
+            (params.triggers as Array<{ time: number; port_name: string }>) ??
+            [],
+          schedulerLoop: (params.loop as boolean) ?? false,
+          schedulerDuration: (params.duration as number) ?? 30,
+          schedulerElapsed: 0,
+          schedulerIsPlaying: false,
+          schedulerFireCounts: {},
+          schedulerTickCount: 0,
+        },
+      });
+      return;
+    }
     nodes.push({
       id: n.id,
       type: "custom_node",
-      position: {
-        x: savedX !== undefined ? savedX : START_X + COLUMN_GAP * 1.5,
-        y:
-          savedY !== undefined ? savedY : START_Y + i * (NODE_HEIGHT + ROW_GAP),
-      },
+      position,
       ...sizeProps,
       data: {
         label: n.node_type_id || n.id,
@@ -1024,7 +1050,6 @@ const FRONTEND_ONLY_TYPES = new Set<FlowNodeData["nodeType"]>([
   "tempo",
   "prompt_list",
   "prompt_blend",
-  "scheduler",
 ]);
 
 /** Fields in FlowNodeData that are non-serializable (functions, streams, etc.) */
@@ -1300,6 +1325,16 @@ export function flowToGraphConfig(
       n.height ??
       n.measured?.height ??
       (typeof n.style?.height === "number" ? n.style.height : undefined);
+    const isBackendNode =
+      n.data.nodeType === "custom_node" || n.data.nodeType === "scheduler";
+    const schedulerParams =
+      n.data.nodeType === "scheduler"
+        ? {
+            triggers: n.data.schedulerTriggers ?? [],
+            loop: n.data.schedulerLoop ?? false,
+            duration: n.data.schedulerDuration ?? 30,
+          }
+        : undefined;
     return {
       id: n.id,
       type:
@@ -1309,7 +1344,7 @@ export function flowToGraphConfig(
             ? "sink"
             : n.data.nodeType === "record"
               ? "record"
-              : n.data.nodeType === "custom_node"
+              : isBackendNode
                 ? "node"
                 : "pipeline",
       pipeline_id:
@@ -1319,11 +1354,13 @@ export function flowToGraphConfig(
       node_type_id:
         n.data.nodeType === "custom_node"
           ? (n.data.customNodeTypeId ?? null)
-          : undefined,
+          : n.data.nodeType === "scheduler"
+            ? "scheduler"
+            : undefined,
       params:
         n.data.nodeType === "custom_node" && n.data.customNodeParams
           ? n.data.customNodeParams
-          : undefined,
+          : schedulerParams,
       x: n.position.x,
       y: n.position.y,
       w: w && !Number.isNaN(w) ? w : undefined,
