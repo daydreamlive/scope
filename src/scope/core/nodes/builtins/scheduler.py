@@ -208,7 +208,10 @@ class SchedulerNode(BaseNode):
         # Handle loop / auto-stop
         if self._duration > 0 and self._elapsed >= self._duration:
             if self._loop:
-                self._reset_state()
+                # Re-arm triggers but keep fire counts / tick monotonic so
+                # downstream edge-triggered nodes see each new firing.
+                self._elapsed = 0.0
+                self._fired_keys.clear()
                 self._start_time = time.monotonic()
             else:
                 all_fired = all(
