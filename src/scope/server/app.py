@@ -1182,22 +1182,26 @@ async def handle_webrtc_offer(
         # Local mode: ensure pipeline is loaded before proceeding.
         # Node-only graphs (no pipeline nodes) skip this check — the graph
         # executor handles custom nodes directly without loading pipelines.
+        # Mixed graphs (pipeline + custom node) still require loaded pipelines.
         graph_data = (
             request.initialParameters.graph if request.initialParameters else None
         )
-        has_graph_nodes = False
+        has_pipeline_nodes = False
         if graph_data is not None:
             nodes = (
                 graph_data.get("nodes", [])
                 if isinstance(graph_data, dict)
                 else getattr(graph_data, "nodes", [])
             )
-            has_graph_nodes = any(
+            has_pipeline_nodes = any(
                 (n.get("type") if isinstance(n, dict) else getattr(n, "type", None))
-                == "node"
+                == "pipeline"
                 for n in nodes
             )
-        if not has_graph_nodes:
+        # Skip the check only for node-only graphs (graph present, no pipeline
+        # nodes). When no graph is sent at all, fall back to the legacy check.
+        is_node_only_graph = graph_data is not None and not has_pipeline_nodes
+        if not is_node_only_graph:
             status_info = await pipeline_manager.get_status_info_async()
             if status_info["status"] != "loaded":
                 raise HTTPException(
