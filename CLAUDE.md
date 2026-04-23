@@ -68,6 +68,26 @@ Key files:
 
 Electron main process → spawns Python backend → waits for health check → loads `http://127.0.0.1:52178` in BrowserWindow. The Electron renderer initially shows setup/loading screens, then switches to the Python-served frontend once the backend is ready.
 
+### Cloud Modes
+
+Scope supports two cloud backend modes controlled by `SCOPE_CLOUD_MODE`:
+
+- **Cloud relay** (default) — `CloudConnectionManager` connects via WebSocket + WebRTC to fal.ai
+- **Livepeer** (`SCOPE_CLOUD_MODE=livepeer`) — `LivepeerConnection` creates an LV2V job and streams frames over trickle HTTP channels through the Livepeer network
+
+Both implement the same interface behind `ScopeCloudBackend` (union type in `server/scope_cloud_types.py`), so `FrameProcessor`, `CloudTrack`, and the WebRTC handler are mode-agnostic. The active backend is selected via `get_scope_cloud()` in `app.py`.
+
+Key Livepeer files:
+- **`server/livepeer.py`**: `LivepeerConnection` — high-level connection manager
+- **`server/livepeer_client.py`**: `LivepeerClient` — transport layer managing LV2V job, trickle media/control channels
+- **`server/cloud_track.py`**: `CloudTrack` — bridges browser WebRTC and cloud backend
+- **`server/frame_processor.py`**: Routes frames to/from cloud (cloud mode detection, callbacks)
+
+Documentation:
+- Setup: `docs/livepeer.md`
+- Runner/protocol architecture: `docs/architecture/livepeer.md`
+- Client-side architecture: `docs/architecture/livepeer-client.md`
+
 ### Key Patterns
 
 - **Pipeline Registry**: Centralized registry eliminates if/elif chains for pipeline selection
