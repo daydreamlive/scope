@@ -256,6 +256,52 @@ function checkSubgraphOutputTarget(
   return srcType === port.paramType;
 }
 
+/**
+ * Run the table-driven `TARGET_RULES`. Returns `undefined` when no rule
+ * decided — callers should continue to their next fallback.
+ */
+function matchTargetRules(
+  sourceType: string,
+  targetNode: Node<FlowNodeData>,
+  targetParamName: string
+): boolean | undefined {
+  for (const rule of TARGET_RULES) {
+    const result = rule({
+      sourceType,
+      targetParsedName: targetParamName,
+      targetNode,
+    });
+    if (result !== undefined) return result;
+  }
+  return undefined;
+}
+
+/**
+ * Final fallback for param-typed targets: look up the target's declared
+ * `parameterInputs` entry. Returns `undefined` when no entry matches so
+ * callers can decide the default (param↔param: reject; stream↔param:
+ * reject).
+ */
+function matchParameterInputs(
+  sourceType: string,
+  targetNode: Node<FlowNodeData>,
+  targetParamName: string
+): boolean | undefined {
+  const targetParam = targetNode.data.parameterInputs?.find(
+    p => p.name === targetParamName
+  );
+  if (!targetParam) return undefined;
+  // Permissive coercions: number → list_number, list_number → list_number,
+  // {video,audio}_path → string.
+  if (targetParam.type === "list_number" && sourceType === "number")
+    return true;
+  if (targetParam.type === "list_number" && sourceType === "list_number")
+    return true;
+  if (targetParam.type === "string" && sourceType === "video_path") return true;
+  if (targetParam.type === "string" && sourceType === "audio_path") return true;
+  return sourceType === targetParam.type;
+}
+
 // ---------------------------------------------------------------------------
 // Main exported validator
 // ---------------------------------------------------------------------------
@@ -306,10 +352,10 @@ export function validateConnection(
   }
 
   // Stream ↔ param: a custom_node stream output (e.g. a Prompt Enhancer's
-  // `text` port) can land on a pipeline param handle such as
-  // `param:__prompt`. The edge is serialised as a stream edge on the wire
-  // (graphUtils.ts rewrites the handle id on import/export), so we only
-  // need to validate the port-type match here.
+  // `text` port) can land on a pipeline param handle. The edge is
+  // serialised as a stream edge on the wire (graphUtils.ts rewrites the
+  // handle id on import/export), so we only need to validate the port-type
+  // match here — same rules used for param↔param.
   if (sourceParsed.kind === "stream" && targetParsed.kind === "param") {
     const sourceNode = nodes.find(n => n.id === connection.source);
     const targetNode = nodes.find(n => n.id === connection.target);
@@ -317,32 +363,15 @@ export function validateConnection(
     if (sourceNode.data.nodeType !== "custom_node") return false;
     if (targetNode.data.nodeType !== "pipeline") return false;
     const outputs = sourceNode.data.customNodeOutputs;
-    let srcType: string | undefined;
-    if (outputs !== undefined) {
-      const portName = stripCustomNodeDirection(sourceParsed.name);
-      const port = outputs.find(p => p.name === portName);
-      if (!port) return false;
-      srcType = port.port_type;
-    }
-    // Same table-driven rules used for param↔param — keeps `__prompt`
-    // (string only), `__vace`, `__loras`, etc. behaving consistently
-    // regardless of whether the source is a frontend param or a
-    // backend stream port.
-    if (!srcType) return true;
-    for (const rule of TARGET_RULES) {
-      const result = rule({
-        sourceType: srcType,
-        targetParsedName: targetParsed.name,
-        targetNode,
-      });
-      if (result !== undefined) return result;
-    }
-    // Fall back to the target's declared parameterInputs.
-    const targetParam = targetNode.data.parameterInputs?.find(
-      p => p.name === targetParsed.name
+    if (outputs === undefined) return true;
+    const portName = stripCustomNodeDirection(sourceParsed.name);
+    const port = outputs.find(p => p.name === portName);
+    if (!port) return false;
+    return (
+      matchTargetRules(port.port_type, targetNode, targetParsed.name) ??
+      matchParameterInputs(port.port_type, targetNode, targetParsed.name) ??
+      false
     );
-    if (!targetParam) return false;
-    return srcType === targetParam.type;
   }
 
   // Stream ↔ stream: for custom_node edges, enforce port-type matching
@@ -441,15 +470,12 @@ export function validateConnection(
     );
     if (!sourceType) return false;
 
-    // Run table-driven target rules
-    for (const rule of TARGET_RULES) {
-      const result = rule({
-        sourceType,
-        targetParsedName: targetParsed.name,
-        targetNode,
-      });
-      if (result !== undefined) return result;
-    }
+    const ruleResult = matchTargetRules(
+      sourceType,
+      targetNode,
+      targetParsed.name
+    );
+    if (ruleResult !== undefined) return ruleResult;
 
     // Subgraph / boundary node checks
     const sgSrc = checkSubgraphSource(
@@ -486,22 +512,9 @@ export function validateConnection(
     );
     if (sgOutTgt !== undefined) return sgOutTgt;
 
-    // Default: look up the target's parameterInputs
-    const targetParam = targetNode.data.parameterInputs?.find(
-      p => p.name === targetParsed.name
+    return (
+      matchParameterInputs(sourceType, targetNode, targetParsed.name) ?? false
     );
-    if (!targetParam) return false;
-
-    if (targetParam.type === "list_number" && sourceType === "number")
-      return true;
-    if (targetParam.type === "list_number" && sourceType === "list_number")
-      return true;
-    if (targetParam.type === "string" && sourceType === "video_path")
-      return true;
-    if (targetParam.type === "string" && sourceType === "audio_path")
-      return true;
-
-    return sourceType === targetParam.type;
   }
 
   return false;

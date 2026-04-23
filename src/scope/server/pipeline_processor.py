@@ -150,21 +150,16 @@ class PipelineProcessor:
             for p in self.pipeline.get_definition().inputs
             if p.port_type != "video"
         }
-        # Broadcasts that haven't been delivered yet. Graph-driven params
-        # (e.g. a PromptEnhancer feeding a string port) often land before
-        # the WebRTC data channel is open, so the payload stays cached and
-        # is retried on each chunk until at least one session receives it.
-        self._pending_param_broadcast: dict[str, Any] = {}
 
     def _drain_non_video_inputs(self) -> None:
         """Drain scalar input queues into ``self.parameters`` and sync the UI.
 
         Non-video ports (string, number, …) deliver discrete values rather
         than frame streams; the latest value on each queue wins. Video ports
-        are left alone — those follow the chunk-gathering path below. Any
-        value drained is broadcast so widgets like the Prompt textarea
-        reflect what an upstream backend node produced; pending broadcasts
-        from prior chunks are retried here too.
+        are left alone — those follow the chunk-gathering path below. Drained
+        values are broadcast so widgets like the Prompt textarea reflect
+        what an upstream backend node produced; NotificationSender buffers
+        the payload if the WebRTC data channel isn't open yet.
         """
         if not self._non_video_input_ports:
             return
@@ -174,6 +169,7 @@ class PipelineProcessor:
                 for port, q in self.input_queues.items()
                 if port in self._non_video_input_ports
             ]
+        drained_values: dict[str, Any] = {}
         for port, q in targets:
             latest = None
             drained = False
@@ -185,24 +181,17 @@ class PipelineProcessor:
                     break
             if drained:
                 self.parameters[port] = latest
-                self._pending_param_broadcast[port] = latest
-        self._flush_param_broadcast()
-
-    def _flush_param_broadcast(self) -> None:
-        """Send any cached parameter updates; clear on successful delivery."""
-        if not self._pending_param_broadcast:
+                drained_values[port] = latest
+        if not drained_values:
             return
-        # Fetch the WebRTCManager lazily via the module so we pick up the
-        # instance bound at startup, not the ``None`` captured at import
-        # time.
         from . import app as _app
 
         manager = getattr(_app, "webrtc_manager", None)
         if manager is None:
             return
-        payload = {"node_id": self.node_id, **self._pending_param_broadcast}
+        payload = {"node_id": self.node_id, **drained_values}
         try:
-            sent = manager.broadcast_notification(
+            manager.broadcast_notification(
                 {"type": "parameters_updated", "parameters": payload}
             )
         except Exception:
@@ -211,9 +200,6 @@ class PipelineProcessor:
                 self.node_id,
                 exc_info=True,
             )
-            return
-        if sent > 0:
-            self._pending_param_broadcast.clear()
 
     def set_beat_cache_reset_rate(self, rate: str) -> None:
         """Set the beat-synced cache reset rate and reset the boundary tracker."""
@@ -527,9 +513,7 @@ class PipelineProcessor:
 
         # Drain non-video input ports (string, number, …) into parameters so
         # upstream nodes — e.g. a PromptEnhancer feeding a string port — can
-        # drive pipeline kwargs via graph edges. Also retries any param
-        # broadcasts queued but not yet delivered due to the WebRTC
-        # handshake race.
+        # drive pipeline kwargs via graph edges.
         self._drain_non_video_inputs()
 
         requirements = None
