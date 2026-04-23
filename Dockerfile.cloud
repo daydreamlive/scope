@@ -47,8 +47,8 @@ COPY src/ /app/src/
 
 # Pre-install bundled plugins (cannot be removed by users)
 ENV DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE="/app/bundled-plugins.txt"
-RUN echo "git+https://github.com/daydreamlive/scope-ltx-2.git@129e7b3ea813a92bdca28dac84c55f86002afbe3" > /app/bundled-plugins.txt
-RUN uv run daydream-scope install git+https://github.com/daydreamlive/scope-ltx-2.git@129e7b3ea813a92bdca28dac84c55f86002afbe3
+RUN echo "git+https://github.com/daydreamlive/scope-ltx-2.git@21c3656a13361ffc664126c38e8b3ee0421fc90f" > /app/bundled-plugins.txt
+RUN uv run daydream-scope install git+https://github.com/daydreamlive/scope-ltx-2.git@21c3656a13361ffc664126c38e8b3ee0421fc90f
 
 # Expose port 8000 for RunPod HTTP proxy
 EXPOSE 8000
