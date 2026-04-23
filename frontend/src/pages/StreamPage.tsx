@@ -2356,6 +2356,11 @@ export function StreamPage() {
       const graphSinkNodeIds: string[] = [];
       // Record nodes need recvonly transceivers too (same order as backend: sinks then records)
       const graphRecordNodeIds: string[] = [];
+      // Unique ``node_type_id``s of plain custom nodes in the graph. Checked
+      // alongside pipeline ids so a custom node that declares model artifacts
+      // (e.g. a Prompt Enhancer with an HF LLM) surfaces in the Download
+      // Dialog when the user clicks Run.
+      const graphCustomNodeTypeIds: string[] = [];
       // The graph config to pass via initialParameters (sent over WebRTC)
       let graphConfigForStream: ReturnType<
         NonNullable<typeof graphEditorRef.current>["getCurrentGraphConfig"]
@@ -2388,6 +2393,15 @@ export function StreamPage() {
                 );
               });
               pipelineIdToUse = mainPid ?? graphPipelineIds[0];
+            }
+
+            // Collect unique custom-node type ids for the model-download check.
+            const seen = new Set<string>();
+            for (const n of graphNodes) {
+              if (n.type !== "node" || !n.node_type_id) continue;
+              if (seen.has(n.node_type_id)) continue;
+              seen.add(n.node_type_id);
+              graphCustomNodeTypeIds.push(n.node_type_id);
             }
 
             // Extract sink node IDs for multi-track WebRTC
@@ -2502,6 +2516,23 @@ export function StreamPage() {
               );
               // Continue anyway if check fails
             }
+          }
+        }
+        // Plain custom nodes don't appear in the ``pipelines`` metadata
+        // map, so we can't gate on ``requiresModels``. The status endpoint
+        // returns ``downloaded: true`` for nodes with no declared
+        // artifacts, making the extra call cheap and harmless.
+        for (const nodeTypeId of graphCustomNodeTypeIds) {
+          try {
+            const status = await api.checkModelStatus(nodeTypeId);
+            if (!status.downloaded) {
+              missingPipelines.push(nodeTypeId);
+            }
+          } catch (error) {
+            console.error(
+              `Error checking model status for ${nodeTypeId}:`,
+              error
+            );
           }
         }
 
