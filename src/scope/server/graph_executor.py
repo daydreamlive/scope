@@ -369,10 +369,12 @@ def _validate_edge_ports(
     for node in graph.nodes:
         if node.type == "pipeline" and node.pipeline_id is not None:
             pipeline = pipeline_manager.get_pipeline_by_id(node.id)
-            config_class = pipeline.get_config_class()
+            # Use get_definition() so declared NodePort entries (with
+            # non-video port_type) are recognised alongside string names.
+            defn = pipeline.get_definition()
             port_map[node.id] = (
-                set(config_class.inputs),
-                set(config_class.outputs),
+                {p.name for p in defn.inputs},
+                {p.name for p in defn.outputs},
             )
         elif node.type == "node" and node.node_type_id is not None:
             node_cls = NodeRegistry.get(node.node_type_id)

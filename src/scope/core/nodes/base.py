@@ -319,20 +319,40 @@ def _definition_from_config(
             "version": getattr(config, "pipeline_version", ""),
             "schema_error": str(e),
         }
+    inputs = _as_ports(getattr(config, "inputs", ["video"]) or ["video"])
+    # Every prompt-capable pipeline (the BasePipelineConfig default) gets a
+    # `prompts` string input for free so a backend node — e.g. a Prompt
+    # Enhancer — can feed the same handle the UI exposes as "Enter prompt…"
+    # without the pipeline having to declare the port itself.
+    if getattr(config, "supports_prompts", False) and not any(
+        p.name == "prompts" for p in inputs
+    ):
+        inputs.append(NodePort(name="prompts", port_type="string"))
     return NodeDefinition(
         node_type_id=config.pipeline_id,
         display_name=getattr(config, "pipeline_name", config.pipeline_id),
         category="pipeline",
         description=getattr(config, "pipeline_description", "") or "",
-        inputs=[
-            NodePort(name=name, port_type="video")
-            for name in (getattr(config, "inputs", ["video"]) or ["video"])
-        ],
-        outputs=[
-            NodePort(name=name, port_type="video")
-            for name in (getattr(config, "outputs", ["video"]) or ["video"])
-        ],
+        inputs=inputs,
+        outputs=_as_ports(getattr(config, "outputs", ["video"]) or ["video"]),
         params=[],
         continuous=False,
         pipeline_meta=pipeline_meta,
     )
+
+
+def _as_ports(entries: list[Any]) -> list[NodePort]:
+    """Normalise a config ``inputs``/``outputs`` list into :class:`NodePort`.
+
+    Supports mixed lists: a plain string is treated as a ``"video"`` port
+    (matches the original per-pipeline convention), while a :class:`NodePort`
+    entry passes through unchanged so pipelines can declare non-video ports
+    the same way scheduler-style nodes do.
+    """
+    ports: list[NodePort] = []
+    for entry in entries:
+        if isinstance(entry, NodePort):
+            ports.append(entry)
+        else:
+            ports.append(NodePort(name=str(entry), port_type="video"))
+    return ports

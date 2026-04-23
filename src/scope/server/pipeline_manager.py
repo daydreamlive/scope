@@ -165,6 +165,29 @@ class PipelineManager:
             self._pipelines[key] = pipeline_instance
             self._pipeline_statuses[key] = PipelineStatus.LOADED
 
+    def register_graph_nodes(self, graph_data: dict) -> None:
+        """Instantiate and register plain custom nodes from a graph payload.
+
+        Custom nodes (``type == "node"``) aren't pre-loaded via
+        ``/pipeline/load`` the way pipelines are, but the graph executor
+        resolves every graph node through :meth:`get_pipeline_by_id`. Plain
+        nodes are cheap to construct; model weights load lazily on first
+        ``execute``. Uses :meth:`set_pipeline_instance` (additive, per-key)
+        so pipelines already loaded via ``/pipeline/load`` are untouched.
+        """
+        from scope.core.nodes.registry import NodeRegistry
+
+        for node in graph_data.get("nodes", []):
+            if not (node.get("type") == "node" and node.get("node_type_id")):
+                continue
+            node_cls = NodeRegistry.get(node["node_type_id"])
+            if node_cls is None:
+                continue
+            self.set_pipeline_instance(node["id"], node_cls())
+            logger.info(
+                f"Registered custom node {node['node_type_id']} as {node['id']}"
+            )
+
     async def _load_pipeline_by_id(
         self,
         pipeline_id: str,
