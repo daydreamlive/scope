@@ -849,10 +849,17 @@ async def get_node_definitions(
         return _node_definitions_cache
 
     from scope.core.nodes.registry import NodeRegistry
+    from scope.core.plugins import get_plugin_manager
 
-    response = NodeDefinitionsResponse(
-        nodes=[d.model_dump() for d in NodeRegistry.get_all_definitions()]
-    )
+    plugin_manager = get_plugin_manager()
+
+    definitions = []
+    for d in NodeRegistry.get_all_definitions():
+        payload = d.model_dump()
+        payload["plugin_name"] = plugin_manager.get_plugin_for_type_id(d.node_type_id)
+        definitions.append(payload)
+
+    response = NodeDefinitionsResponse(nodes=definitions)
     _node_definitions_cache = response
     return response
 

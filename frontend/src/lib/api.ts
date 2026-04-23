@@ -969,6 +969,8 @@ export interface NodeDefinitionDto {
    * underlying class is a Pipeline subclass. ``null`` for plain nodes.
    */
   pipeline_meta?: Record<string, unknown> | null;
+  /** Python package name that provides this node, or null for built-ins. */
+  plugin_name?: string | null;
 }
 
 export interface NodeDefinitionsResponse {

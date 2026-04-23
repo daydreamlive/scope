@@ -457,16 +457,16 @@ class PipelineManager:
             # The ERROR status is sufficient for the frontend
             combined_error = None
 
-            # Determine media modalities from the loaded pipeline chain.
+            # Determine media modalities from the loaded node chain.
             # Use registry IDs (not instance keys) so the lookup works in
             # graph mode where instance keys are node IDs like "pipeline_1".
-            from scope.core.pipelines.registry import PipelineRegistry
+            from scope.core.nodes.registry import NodeRegistry
 
             registry_ids = [
                 self._pipeline_registry_ids.get(key, key) for key in self._pipelines
             ]
-            produces_video = PipelineRegistry.chain_produces_video(registry_ids)
-            produces_audio = PipelineRegistry.chain_produces_audio(registry_ids)
+            produces_video = NodeRegistry.chain_produces_video(registry_ids)
+            produces_audio = NodeRegistry.chain_produces_audio(registry_ids)
 
             # Return the captured state (with error status if it was an error)
             return {
@@ -869,11 +869,24 @@ class PipelineManager:
         load_params: dict | None = None,
         stage_callback=None,
     ):
-        """Synchronous pipeline loading (runs in thread executor)."""
-        from scope.core.pipelines.registry import PipelineRegistry
+        """Synchronous node/pipeline loading (runs in thread executor)."""
+        from scope.core.nodes.registry import NodeRegistry
 
-        # Check if pipeline is in registry
-        pipeline_class = PipelineRegistry.get(pipeline_id)
+        node_class = NodeRegistry.get(pipeline_id)
+        pipeline_class = (
+            node_class
+            if node_class is not None and node_class.get_config_class() is not None
+            else None
+        )
+
+        # Plain-node path: a node with artifacts but no config class.
+        # No Pydantic schema to merge — the node's own __init__ owns
+        # weight loading.
+        if pipeline_class is None and node_class is not None:
+            logger.info(f"Loading node: {pipeline_id}")
+            if stage_callback:
+                stage_callback("Initializing node...")
+            return node_class()
 
         # List of built-in pipelines with custom initialization
         BUILTIN_PIPELINES = {

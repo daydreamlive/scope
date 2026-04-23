@@ -26,7 +26,7 @@ from .plugins_config import (
 )
 
 if TYPE_CHECKING:
-    from scope.core.pipelines.registry import PipelineRegistry
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +102,10 @@ class PluginManager:
         self._pm = pluggy.PluginManager("scope")
         self._pm.add_hookspecs(ScopeHookSpec)
 
-        # Mapping from pipeline_id to plugin package name
-        self._pipeline_to_plugin: dict[str, str] = {}
+        # Mapping from registry type id (pipeline_id or node_type_id —
+        # same namespace since the node/pipeline unification) to the
+        # plugin package name that provided it.
+        self._type_to_plugin: dict[str, str] = {}
 
         # Cache of registered plugin names (package names)
         self._registered_plugins: set[str] = set()
@@ -560,40 +562,46 @@ class PluginManager:
         ignored — the unified storage is always used.
         """
         from scope.core.nodes.registry import NodeRegistry
-        from scope.core.pipelines.registry import PipelineRegistry
 
         del registry  # legacy parameter, kept for callsite compat
 
         with self._lock:
-            self._pipeline_to_plugin.clear()
+            self._type_to_plugin.clear()
 
             def register_callback(node_class: Any) -> None:
                 NodeRegistry.register(node_class)
-                node_id = getattr(node_class, "node_type_id", None) or (
+                # NodeRegistry.register has already derived the type id
+                # (from either node_type_id or the config class); reuse
+                # the same derivation for logging rather than reimplementing.
+                node_id = getattr(node_class, "node_type_id", "") or (
                     node_class.get_config_class().pipeline_id
+                    if node_class.get_config_class() is not None
+                    else node_class.__name__
                 )
                 logger.info(f"Registered plugin node: {node_id}")
 
             self._pm.hook.register_nodes(register=register_callback)
             self._pm.hook.register_pipelines(register=register_callback)
-            self._update_pipeline_plugin_mapping(PipelineRegistry)
+            self._update_plugin_mapping()
 
     # Backwards-compat alias for internal callers using the legacy name.
     register_plugin_pipelines = register_plugin_nodes
 
-    def _update_pipeline_plugin_mapping(self, registry: "PipelineRegistry") -> None:
-        """Update the mapping of pipeline IDs to plugin names."""
+    def _update_plugin_mapping(self) -> None:
+        """Refresh the registry-type-id → plugin-package-name mapping.
+
+        After the node/pipeline unification both ``register_pipelines``
+        and ``register_nodes`` entry points feed the same
+        :class:`NodeRegistry`, so one walk handles both hooks.
+        """
         from importlib.metadata import distributions
 
-        # Get all pipeline IDs currently registered
-        all_pipeline_ids = set(registry.list_pipelines())
+        from scope.core.nodes.registry import NodeRegistry
 
-        # Skip packages whose entry points failed to load
+        all_ids = set(NodeRegistry.list_node_types())
         failed_packages = {fp.package_name for fp in self._failed_plugins}
 
-        # Find which package provides each plugin
         for dist in distributions():
-            # Check if this package has scope entry points
             try:
                 eps = dist.entry_points
                 scope_eps = [ep for ep in eps if ep.group == "scope"]
@@ -605,41 +613,46 @@ class PluginManager:
                     continue
                 self._registered_plugins.add(package_name)
 
-                # Try to get pipeline IDs from this plugin
                 for ep in scope_eps:
                     try:
                         plugin_module = ep.load()
-                        if hasattr(plugin_module, "register_pipelines"):
-                            # Call with a tracking callback
-                            # Bind package_name to default param to avoid late binding
-                            def tracking_callback(
-                                pipeline_class: Any, pkg_name: str = package_name
-                            ) -> None:
-                                config_class = pipeline_class.get_config_class()
-                                pipeline_id = config_class.pipeline_id
-                                if pipeline_id in all_pipeline_ids:
-                                    self._pipeline_to_plugin[pipeline_id] = pkg_name
 
+                        def tracking_callback(
+                            node_class: Any, pkg_name: str = package_name
+                        ) -> None:
+                            type_id = getattr(node_class, "node_type_id", "") or (
+                                node_class.get_config_class().pipeline_id
+                                if node_class.get_config_class() is not None
+                                else ""
+                            )
+                            if type_id and type_id in all_ids:
+                                self._type_to_plugin[type_id] = pkg_name
+
+                        if hasattr(plugin_module, "register_pipelines"):
                             plugin_module.register_pipelines(tracking_callback)
+                        if hasattr(plugin_module, "register_nodes"):
+                            plugin_module.register_nodes(tracking_callback)
                     except Exception as e:
-                        logger.debug(
-                            f"Could not track pipelines for {package_name}: {e}"
-                        )
+                        logger.debug(f"Could not track entries for {package_name}: {e}")
 
             except Exception as e:
                 logger.debug(f"Error checking distribution {dist}: {e}")
 
-    def get_plugin_for_pipeline(self, pipeline_id: str) -> str | None:
-        """Get the plugin package name that provides a pipeline.
-
-        Args:
-            pipeline_id: Pipeline ID to look up
-
-        Returns:
-            Plugin package name or None if not found
-        """
+    def get_plugin_for_type_id(self, type_id: str) -> str | None:
+        """Return the plugin package that registered *type_id*, or None."""
         with self._lock:
-            return self._pipeline_to_plugin.get(pipeline_id)
+            return self._type_to_plugin.get(type_id)
+
+    # Backwards-compat aliases. ``pipeline_id`` and ``node_type_id`` are
+    # the same namespace now; external callers that still use the old
+    # names keep working.
+    def get_plugin_for_pipeline(self, pipeline_id: str) -> str | None:
+        """Alias of :meth:`get_plugin_for_type_id`."""
+        return self.get_plugin_for_type_id(pipeline_id)
+
+    def get_plugin_for_node(self, node_type_id: str) -> str | None:
+        """Alias of :meth:`get_plugin_for_type_id`."""
+        return self.get_plugin_for_type_id(node_type_id)
 
     def _get_plugin_source(self, dist: Any) -> tuple[str, bool, str | None, str | None]:
         """Determine the source of a plugin installation.
@@ -718,23 +731,23 @@ class PluginManager:
                         dist
                     )
 
-                    # Get pipelines provided by this plugin
+                    # Get pipelines provided by this plugin. Plain plugin
+                    # nodes (no config class) are excluded from this list
+                    # since the response field is named "pipelines".
                     pipelines = []
-                    for pipeline_id, plugin_name in self._pipeline_to_plugin.items():
-                        if plugin_name == package_name:
-                            # Get pipeline metadata
-                            from scope.core.pipelines.registry import PipelineRegistry
+                    for type_id, plugin_name in self._type_to_plugin.items():
+                        if plugin_name != package_name:
+                            continue
+                        from scope.core.pipelines.registry import PipelineRegistry
 
-                            config_class = PipelineRegistry.get_config_class(
-                                pipeline_id
+                        config_class = PipelineRegistry.get_config_class(type_id)
+                        if config_class:
+                            pipelines.append(
+                                {
+                                    "pipeline_id": type_id,
+                                    "pipeline_name": config_class.pipeline_name,
+                                }
                             )
-                            if config_class:
-                                pipelines.append(
-                                    {
-                                        "pipeline_id": pipeline_id,
-                                        "pipeline_name": config_class.pipeline_name,
-                                    }
-                                )
 
                     # For git packages, use the git URL; for PyPI, use package name
                     # Strip .git suffix - not needed for pip/uv and causes issues
@@ -1392,8 +1405,7 @@ class PluginManager:
         with self._lock:
             for pipeline_id in plugin_pipelines:
                 PipelineRegistry.unregister(pipeline_id)
-                if pipeline_id in self._pipeline_to_plugin:
-                    del self._pipeline_to_plugin[pipeline_id]
+                self._type_to_plugin.pop(pipeline_id, None)
                 logger.info(f"Unregistered pipeline from registry: {pipeline_id}")
 
         # Remove from plugins.txt
@@ -1535,8 +1547,7 @@ class PluginManager:
         with self._lock:
             for pipeline_id in old_pipeline_ids:
                 PipelineRegistry.unregister(pipeline_id)
-                if pipeline_id in self._pipeline_to_plugin:
-                    del self._pipeline_to_plugin[pipeline_id]
+                self._type_to_plugin.pop(pipeline_id, None)
 
         # Get the plugin module from pluggy and unregister it
         plugin_to_unregister = None

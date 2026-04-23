@@ -268,11 +268,17 @@ async def start_stream(
                 detail="Graph must contain at least one pipeline or custom node",
             )
 
-        pipeline_tuples = [
-            (node.id, node.pipeline_id, None)
-            for node in graph_config.nodes
-            if node.type == "pipeline" and node.pipeline_id
-        ]
+        # Every graph node — pipelines and plain custom nodes alike —
+        # flows through the PipelineManager so lifecycle, dedup, and
+        # multi-instance keying work the same everywhere. Stateless
+        # utility nodes cost only a few dict insertions; the manager's
+        # plain-node branch instantiates them with ``node_class()``.
+        pipeline_tuples: list[tuple[str, str, dict | None]] = []
+        for node in graph_config.nodes:
+            if node.type == "pipeline" and node.pipeline_id:
+                pipeline_tuples.append((node.id, node.pipeline_id, None))
+            elif node.type == "node" and node.node_type_id:
+                pipeline_tuples.append((node.id, node.node_type_id, None))
         pipeline_id_list = [t[1] for t in pipeline_tuples]
 
         if pipeline_tuples:
