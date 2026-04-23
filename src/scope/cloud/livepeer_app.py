@@ -49,6 +49,8 @@ from scope.server.media_packets import ensure_video_packet
 
 logger = logging.getLogger(__name__)
 scope_client: httpx.AsyncClient | None = None
+_connection_active = False
+_connection_count = 0
 
 STREAM_TASK_SHUTDOWN_GRACE_S = 1.0
 STREAM_TASK_CANCEL_TIMEOUT_S = 1.0
@@ -1199,7 +1201,12 @@ async def _subscribe_control(
     logs_task = asyncio.create_task(_forward_logs_to_events(log_queue))
 
     try:
-        await events_writer.write({"type": "runner_ready"})
+        await events_writer.write(
+            {
+                "type": "runner_ready",
+                "runner_job_id": os.getenv("FAL_JOB_ID") or os.getenv("FAL_RUNNER_ID"),
+            }
+        )
         async for message in JSONLReader(control_url)():
             if stop_event.is_set():
                 break
@@ -1320,10 +1327,24 @@ async def cleanup_session() -> dict[str, Any]:
     }
 
 
+@app.get("/internal/status")
+async def internal_status() -> dict[str, Any]:
+    return {
+        "listener_ready": scope_client is not None,
+        "connection_active": _connection_active,
+        "connection_count": _connection_count,
+    }
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
     """Accept a WebSocket connection, read job info, then subscribe to the control channel."""
+    global _connection_active
+    global _connection_count
+
     await ws.accept()
+    _connection_active = True
+    _connection_count += 1
     logger.info("WebSocket client connected")
 
     stop_event = asyncio.Event()
@@ -1440,6 +1461,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         await _stop_stream(session)
         if control_task is not None:
             await _shutdown_task(control_task, task_name="control_channel")
+        _connection_active = False
 
 
 def get_daydream_api_base() -> str:
