@@ -341,3 +341,130 @@ class TestHelperMethods:
             "node_a", "longlive", {}, claimed_keys=set(), reserved_keys={"node_a"}
         )
         assert result == "node_a"
+
+
+# ---------------------------------------------------------------------------
+# Tests for _sanitize_asset_path and _sanitize_initial_params
+# ---------------------------------------------------------------------------
+
+
+class TestSanitizeAssetPath:
+    """Tests for PipelineManager._sanitize_asset_path and _sanitize_initial_params."""
+
+    def _mock_assets_dir(self, tmp_path, monkeypatch):
+        """Patch get_assets_dir to return tmp_path/assets."""
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir(parents=True, exist_ok=True)
+        monkeypatch.setattr(
+            "scope.server.pipeline_manager.PipelineManager._sanitize_asset_path.__func__",
+            None,
+            raising=False,
+        )
+        return assets_dir
+
+    def test_windows_backslash_path_is_rewritten(self, tmp_path, monkeypatch):
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        monkeypatch.setattr(
+            "scope.server.models_config.get_assets_dir", lambda: assets_dir
+        )
+        result = PipelineManager._sanitize_asset_path(
+            r"C:\Users\Joshu\.daydream-scope\assets\ShinraFireForce.webp"
+        )
+        assert result == (assets_dir / "ShinraFireForce.webp").as_posix()
+
+    def test_windows_forward_slash_drive_path_is_rewritten(self, tmp_path, monkeypatch):
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        monkeypatch.setattr(
+            "scope.server.models_config.get_assets_dir", lambda: assets_dir
+        )
+        result = PipelineManager._sanitize_asset_path(
+            "C:/Users/Joshu/.daydream-scope/assets/ShinraFireForce.webp"
+        )
+        assert result == (assets_dir / "ShinraFireForce.webp").as_posix()
+
+    def test_foreign_linux_tmp_path_is_rewritten(self, tmp_path, monkeypatch):
+        """A /tmp/.daydream-scope/assets/… path from a different Linux machine is rewritten."""
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        monkeypatch.setattr(
+            "scope.server.models_config.get_assets_dir", lambda: assets_dir
+        )
+        result = PipelineManager._sanitize_asset_path(
+            "/tmp/.daydream-scope/assets/hakoniwa_abc.png"
+        )
+        assert result == (assets_dir / "hakoniwa_abc.png").as_posix()
+
+    def test_relative_path_unchanged(self, tmp_path, monkeypatch):
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        monkeypatch.setattr(
+            "scope.server.models_config.get_assets_dir", lambda: assets_dir
+        )
+        result = PipelineManager._sanitize_asset_path("image.png")
+        assert result == "image.png"
+
+    def test_sanitize_initial_params_none_value(self, tmp_path, monkeypatch):
+        """_sanitize_initial_params should leave None values as None."""
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        monkeypatch.setattr(
+            "scope.server.models_config.get_assets_dir", lambda: assets_dir
+        )
+        result = PipelineManager._sanitize_initial_params({"i2v_image": None})
+        assert result["i2v_image"] is None
+
+    def test_sanitize_initial_params_i2v_image_windows_path(self, tmp_path, monkeypatch):
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        monkeypatch.setattr(
+            "scope.server.models_config.get_assets_dir", lambda: assets_dir
+        )
+        params = {
+            "prompts": [{"text": "test"}],
+            "i2v_image": r"C:\Users\Joshu\.daydream-scope\assets\ShinraFireForce.webp",
+        }
+        result = PipelineManager._sanitize_initial_params(params)
+        assert result["i2v_image"] == (assets_dir / "ShinraFireForce.webp").as_posix()
+
+    def test_sanitize_initial_params_i2v_image_linux_tmp_path(self, tmp_path, monkeypatch):
+        """Linux /tmp path from a different machine is rewritten (issue #916)."""
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        monkeypatch.setattr(
+            "scope.server.models_config.get_assets_dir", lambda: assets_dir
+        )
+        params = {
+            "i2v_image": "/tmp/.daydream-scope/assets/hakoniwa_abc.png",
+        }
+        result = PipelineManager._sanitize_initial_params(params)
+        assert result["i2v_image"] == (assets_dir / "hakoniwa_abc.png").as_posix()
+
+    def test_sanitize_initial_params_images_list(self, tmp_path, monkeypatch):
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        monkeypatch.setattr(
+            "scope.server.models_config.get_assets_dir", lambda: assets_dir
+        )
+        params = {
+            "images": [
+                r"C:\Users\Joshu\.daydream-scope\assets\foo.webp",
+                r"C:\Users\Joshu\.daydream-scope\assets\bar.png",
+            ]
+        }
+        result = PipelineManager._sanitize_initial_params(params)
+        assert result["images"] == [
+            (assets_dir / "foo.webp").as_posix(),
+            (assets_dir / "bar.png").as_posix(),
+        ]
+
+    def test_sanitize_initial_params_no_asset_params_unchanged(self, tmp_path, monkeypatch):
+        assets_dir = tmp_path / "assets"
+        assets_dir.mkdir()
+        monkeypatch.setattr(
+            "scope.server.models_config.get_assets_dir", lambda: assets_dir
+        )
+        params = {"prompts": [{"text": "test"}], "seed": 42}
+        result = PipelineManager._sanitize_initial_params(params)
+        assert result == params
