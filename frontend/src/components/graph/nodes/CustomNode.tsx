@@ -58,13 +58,11 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
     data.customNodeDisplayName ||
     data.customNodeTypeId ||
     "Custom Node";
-  const category = data.customNodeCategory ?? "";
 
   // Measure each port row so handles can be positioned from DOM offsetTop
   // rather than hard-coded pixel math. Re-measures when port lists change.
   const { setRowRef, rowPositions } = useHandlePositions([
     collapsed,
-    category,
     inputs.map(p => p.name).join("|"),
     outputs.map(p => p.name).join("|"),
     params.length,
@@ -84,14 +82,6 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
       />
       {!collapsed && (
         <NodeBody>
-          {/* Show category badge */}
-          {category && (
-            <div className="px-2 pb-1">
-              <span className="text-[10px] text-zinc-500 uppercase tracking-wider">
-                {category}
-              </span>
-            </div>
-          )}
           {/* Show input ports */}
           {inputs.length > 0 && (
             <div className="flex flex-col gap-0.5 px-2 py-1">
@@ -101,14 +91,7 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
                   ref={setRowRef(`in_${p.name}`)}
                   className="text-[11px] text-zinc-400 flex items-center gap-1"
                 >
-                  <span
-                    className="w-2 h-2 rounded-full inline-block"
-                    style={{ backgroundColor: portColor(p.port_type) }}
-                  />
                   {p.name}
-                  <span className="text-zinc-600 text-[9px]">
-                    {p.port_type}
-                  </span>
                 </div>
               ))}
             </div>
@@ -122,14 +105,7 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
                   ref={setRowRef(`out_${p.name}`)}
                   className="text-[11px] text-zinc-400 flex items-center gap-1 justify-end"
                 >
-                  <span className="text-zinc-600 text-[9px]">
-                    {p.port_type}
-                  </span>
                   {p.name}
-                  <span
-                    className="w-2 h-2 rounded-full inline-block"
-                    style={{ backgroundColor: portColor(p.port_type) }}
-                  />
                 </div>
               ))}
             </div>
@@ -205,14 +181,14 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
           type="target"
           position={Position.Left}
           id={customNodeInputHandleId(p.name)}
+          className="!w-2.5 !h-2.5 !border-0"
           style={
             collapsed
-              ? { ...collapsedHandleStyle("left"), width: 8, height: 8 }
+              ? collapsedHandleStyle("left")
               : {
-                  background: portColor(p.port_type),
+                  backgroundColor: portColor(p.port_type),
                   top: rowPositions[`in_${p.name}`] ?? 0,
-                  width: 8,
-                  height: 8,
+                  left: 0,
                 }
           }
         />
@@ -225,14 +201,14 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
           type="source"
           position={Position.Right}
           id={customNodeOutputHandleId(p.name)}
+          className="!w-2.5 !h-2.5 !border-0"
           style={
             collapsed
-              ? { ...collapsedHandleStyle("right"), width: 8, height: 8 }
+              ? collapsedHandleStyle("right")
               : {
-                  background: portColor(p.port_type),
+                  backgroundColor: portColor(p.port_type),
                   top: rowPositions[`out_${p.name}`] ?? 0,
-                  width: 8,
-                  height: 8,
+                  right: 0,
                 }
           }
         />
