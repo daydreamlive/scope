@@ -8,6 +8,7 @@ as a subprocess and provides:
 """
 
 import asyncio
+import json
 import os
 import subprocess as _subprocess
 import time
@@ -26,6 +27,8 @@ RUNNER_STARTUP_TIMEOUT_SECONDS = 90
 RUNNER_RETRY_DELAY_SECONDS = 2.5
 RUNNER_MAX_FAILURES_PER_WINDOW = 20
 RUNNER_FAILURE_WINDOW_SECONDS = 60.0
+RUNNER_STATUS_RETRY_ATTEMPTS = 10
+RUNNER_STATUS_RETRY_DELAY_SECONDS = 1.0
 ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
 
 
@@ -187,6 +190,46 @@ async def run_cleanup() -> None:
         await cleanup_runner_session()
     finally:
         event.set()
+
+
+async def check_runner_readiness() -> bool:
+    """Wait until the inner runner listener is ready and has no active connection."""
+    import httpx
+
+    status_url = f"{RUNNER_LOCAL_HTTP_URL}/internal/status"
+    async with httpx.AsyncClient() as client:
+        for attempt in range(1, RUNNER_STATUS_RETRY_ATTEMPTS + 1):
+            try:
+                response = await client.get(status_url, timeout=2.0)
+                if response.status_code == 200:
+                    status = response.json()
+                    if (
+                        status.get("listener_ready") is True
+                        and status.get("connection_active") is False
+                    ):
+                        return True
+                    print(
+                        "Runner status not ready for new websocket "
+                        f"(attempt={attempt}/{RUNNER_STATUS_RETRY_ATTEMPTS}): "
+                        f"{json.dumps(status)}"
+                    )
+                else:
+                    print(
+                        "Runner status endpoint returned "
+                        f"{response.status_code} "
+                        f"(attempt={attempt}/{RUNNER_STATUS_RETRY_ATTEMPTS}): "
+                        f"{response.text[:500]}"
+                    )
+            except Exception as exc:
+                print(
+                    "Runner status check failed "
+                    f"(attempt={attempt}/{RUNNER_STATUS_RETRY_ATTEMPTS}): {exc}"
+                )
+
+            if attempt < RUNNER_STATUS_RETRY_ATTEMPTS:
+                await asyncio.sleep(RUNNER_STATUS_RETRY_DELAY_SECONDS)
+
+    return False
 
 
 def _get_git_sha() -> str:
@@ -446,6 +489,11 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
             InvalidStatus,
         )
 
+        if not await check_runner_readiness():
+            print("Livepeer fal ws rejected: inner runner not ready for connection")
+            await client_ws.close(code=1013, reason="Runner not ready")
+            return
+
         await client_ws.accept()
 
         # Initialize Kafka publisher (lazy, once per process).
@@ -460,8 +508,6 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
         user_id = client_ws.headers.get("daydream-user-id")
         metadata["manifest_id"] = manifest_id
         metadata["user_id"] = user_id
-
-        import json
 
         fal_log_labels_raw = os.getenv("FAL_LOG_LABELS", "unknown")
         try:
