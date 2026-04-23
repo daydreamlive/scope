@@ -248,12 +248,10 @@ def _initialize_registry():
     # plugins are picked up in one call.
     try:
         from scope.core.plugins import (
-            ensure_plugins_installed,
             load_plugins,
             register_plugin_nodes,
         )
 
-        ensure_plugins_installed()
         load_plugins()
         register_plugin_nodes()
     except Exception as e:

@@ -17,3 +17,15 @@ if sys.platform == "win32":
     except Exception:
         # Never crash Python startup - fail silently
         pass
+
+# Sync bundled/user plugins before any server module (uvicorn, fastapi,
+# starlette) is imported. If this ran later, `uv pip install` could replace
+# packages already cached in sys.modules, producing cross-version splits
+# where a class loaded pre-sync is used by a lazily-imported module loaded
+# post-sync.
+try:
+    from scope.core.plugins import ensure_plugins_installed
+
+    ensure_plugins_installed()
+except Exception:
+    pass
