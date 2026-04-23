@@ -71,12 +71,14 @@ export function TelemetryDisclosure({
 
         <div className="flex items-center gap-2">
           <button
+            data-testid="telemetry-decline"
             onClick={handleDecline}
             className="flex-1 px-4 py-2 text-sm font-medium rounded-lg border border-border hover:bg-muted/50 transition-colors text-foreground"
           >
             No thanks
           </button>
           <button
+            data-testid="telemetry-accept"
             onClick={handleAccept}
             className="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-foreground text-background hover:bg-foreground/90 transition-colors"
           >

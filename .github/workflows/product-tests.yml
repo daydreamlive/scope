@@ -1,0 +1,197 @@
+name: Product Tests
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+    branches: [main, dev]
+  schedule:
+    # Nightly GPU ring — 09:00 UTC every day
+    - cron: '0 9 * * *'
+
+concurrency:
+  group: product-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # PR gate: CPU-only, passthrough pipeline, <25 min budget
+  # ---------------------------------------------------------------------------
+  pr-gate:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    name: Product Tests (PR gate, CPU)
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          version: "0.9.11"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install product-tests deps
+        run: uv sync --group product-tests
+
+      - name: Install Playwright browser
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run PR-gate scenarios (local mode)
+        env:
+          SCOPE_TEST_INSTRUMENTATION: "1"
+          CUDA_VISIBLE_DEVICES: ""
+          SCOPE_CLOUD_RING: "pr"
+        run: |
+          uv run pytest product-tests/scenarios/ \
+            -v --tb=short -m "not cloud"
+
+      - name: Run PR-gate chaos (local mode, fast subset)
+        env:
+          SCOPE_TEST_INSTRUMENTATION: "1"
+          CUDA_VISIBLE_DEVICES: ""
+        run: |
+          uv run pytest product-tests/chaos/ \
+            -v --tb=short -m "not slow" --chaos-seed="${{ github.sha }}"
+
+      - name: Run PR-gate cloud smoke
+        # The test fixture pytest.skips when SCOPE_CLOUD_APP_ID is empty,
+        # so forks / PRs without cloud-app secret access pass by skipping.
+        env:
+          SCOPE_TEST_INSTRUMENTATION: "1"
+          CUDA_VISIBLE_DEVICES: ""
+          SCOPE_CLOUD_RING: "pr"
+          SCOPE_CLOUD_APP_ID: ${{ secrets.SCOPE_PR_FAL_APP_ID }}
+        run: |
+          uv run pytest product-tests/scenarios/test_onboarding_cloud.py \
+            -v --tb=short -m cloud
+
+      - name: Aggregate summary
+        if: always()
+        id: summary
+        run: |
+          summary=$(find product-tests/reports -name summary.md | head -1)
+          if [ -n "$summary" ]; then
+            echo "SUMMARY_PATH=$summary" >> "$GITHUB_ENV"
+            {
+              echo "summary<<SUMMARY_EOF"
+              cat "$summary"
+              echo "SUMMARY_EOF"
+            } >> "$GITHUB_OUTPUT"
+            cat "$summary"
+          else
+            echo "No summary.md emitted" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Post summary as PR comment
+        if: always() && github.event_name == 'pull_request' && steps.summary.outputs.summary != ''
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          header: product-tests-summary
+          message: |
+            ### Product Tests — ${{ job.status }}
+
+            ${{ steps.summary.outputs.summary }}
+
+            <sub>Run: [#${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})</sub>
+
+      - name: Upload reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-tests-reports-${{ github.run_id }}
+          path: product-tests/reports/
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Nightly ring: GPU, full model pipelines, <60 min budget
+  # ---------------------------------------------------------------------------
+  nightly:
+    if: github.event_name == 'schedule'
+    runs-on: [self-hosted, gpu]
+    name: Product Tests (Nightly, GPU)
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          version: "0.9.11"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install product-tests deps
+        run: uv sync --group product-tests
+
+      - name: Install Playwright browser
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run scenarios + chaos (GPU)
+        env:
+          SCOPE_TEST_INSTRUMENTATION: "1"
+          SCOPE_CLOUD_APP_ID: ${{ secrets.SCOPE_NIGHTLY_FAL_APP_ID }}
+          SCOPE_CLOUD_RING: "nightly"
+          SCOPE_CHURN_DURATION_SEC: "180"
+        run: |
+          uv run pytest product-tests/scenarios/ product-tests/chaos/ \
+            -v --tb=short --chaos-seed="${{ github.run_id }}"
+
+      - name: Run release full-matrix (cloud, all starter workflows)
+        env:
+          SCOPE_TEST_INSTRUMENTATION: "1"
+          SCOPE_CLOUD_APP_ID: ${{ secrets.SCOPE_NIGHTLY_FAL_APP_ID }}
+          SCOPE_CLOUD_RING: "nightly"
+        run: |
+          uv run pytest product-tests/release/ -v --tb=short -m cloud
+
+      - name: Run regression suite
+        env:
+          SCOPE_TEST_INSTRUMENTATION: "1"
+          SCOPE_CLOUD_APP_ID: ${{ secrets.SCOPE_NIGHTLY_FAL_APP_ID }}
+          SCOPE_CLOUD_RING: "nightly"
+        run: |
+          if [ -d product-tests/regression ] && ls product-tests/regression/test_*.py >/dev/null 2>&1; then
+            uv run pytest product-tests/regression/ -v --tb=short
+          else
+            echo "No regression tests yet — skipping."
+          fi
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-tests-nightly-${{ github.run_id }}
+          path: product-tests/reports/
+          retention-days: 30
