@@ -275,6 +275,16 @@ async def start_stream(
         ]
         pipeline_id_list = [t[1] for t in pipeline_tuples]
 
+        unknown = [p for p in pipeline_id_list if not PipelineRegistry.is_registered(p)]
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unknown pipeline_id(s): {unknown}. "
+                    f"Known: {PipelineRegistry.list_pipelines()}"
+                ),
+            )
+
         if pipeline_tuples:
             # Skip load for node-only graphs.
             await pipeline_manager.load_pipelines(pipeline_tuples)
