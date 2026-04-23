@@ -1,73 +1,51 @@
 ---
 name: onboarding-test
-description: Pre-release onboarding test via Chrome browser automation. Tests the full new-user flow — provider selection, workflow picker, and streaming all three starter workflows. Use when asked to test onboarding, first-run experience, or starter workflows.
+description: RETIRED — superseded by product-tests/. Use those scenarios instead of Claude-in-Chrome automation.
 ---
 
-# Onboarding Browser Test
+# Onboarding Test — Retired
 
-## Prerequisites
+This Claude-in-Chrome-driven onboarding test has been replaced by the
+self-contained Python/Playwright product-tests system.
 
-- Chrome browser automation tools (claude-in-chrome MCP)
-- Build frontend first: `cd frontend && npm run build`
+## Where to go instead
 
-## Server Setup
+- **Run the local onboarding scenario locally:**
 
-Use port **8080** (not 8000 — the OSC server binds to the same port as the HTTP server and port 8000 is commonly in use).
+  ```bash
+  uv sync --group product-tests
+  uv run playwright install chromium
+  cd product-tests && uv run pytest scenarios/test_onboarding_local.py
+  ```
 
-```bash
-mkdir -p /tmp/scope-onboarding-test/data /tmp/scope-onboarding-test/models
-lsof -ti:8080 | xargs kill -9 2>/dev/null
-DAYDREAM_SCOPE_DIR=/tmp/scope-onboarding-test/data \
-DAYDREAM_SCOPE_MODELS_DIR=/tmp/scope-onboarding-test/models \
-SCOPE_CLOUD_APP_ID="daydream/scope-livepeer/ws" \
-uv run daydream-scope --port 8080 > /tmp/scope-onboarding.log 2>&1 &
-for i in $(seq 1 30); do curl -s http://localhost:8080/health > /dev/null 2>&1 && break; sleep 1; done
-```
+- **Run the cloud onboarding scenario:**
 
-## Onboarding UI Flow (exact sequence)
+  ```bash
+  SCOPE_CLOUD_APP_ID=daydream/scope-livepeer/ws \
+    uv run pytest product-tests/scenarios/test_onboarding_cloud.py
+  ```
 
-Navigate to `http://localhost:8080`. The onboarding screens appear in this order:
+- **CI coverage:** `.github/workflows/product-tests.yml` runs the PR gate
+  on every push and a nightly with GPU + full models.
 
-1. **Provider selection** — "Welcome to Daydream Scope" with "Use Daydream Cloud" and "Run Locally" cards. Select Cloud, click **Continue**.
-2. **Usage Analytics dialog** — appears as a modal overlay. Click **No thanks** (privacy-preserving default).
-3. **Onboarding style** — "Teaching Mode" vs "Simple". Pick either, click **Continue**.
-4. **Workflow picker** — "Pick a workflow to get started" showing 3 starter workflows:
-   - **Mythical Creature** (Style LoRA)
-   - **Dissolving Sunflower** (Depth Map)
-   - **LTX 2.3** (Text to Video)
-   
-   Select one, click **Get Started**.
+## Why it was retired
 
-5. **Graph editor with onboarding tooltips** — Two tooltip popups appear sequentially over the Sink/Run area:
-   - Tooltip 1: "Click Play to start generation" (1 of 2) — click **Next**
-   - Tooltip 2: "Explore Workflows" (2 of 2) — click **Done**
-   
-   **IMPORTANT:** These tooltips intercept clicks on the Run button. You MUST dismiss both tooltips (using `read_page` to find the Next/Done button refs) BEFORE clicking Run.
+The old skill drove a real Chrome browser through Claude's MCP tools and
+had no way to:
 
-6. **Click Run** — use `read_page(filter="interactive")` to find the Run button ref and click it. Do NOT click by coordinates near the tooltip area.
+1. Count retries as hard failures (flaky/"eventually worked" runs passed).
+2. Detect unexpected session closes that happen silently in logs.
+3. Simulate chaotic user behavior with reproducible seeds.
+4. Gate PRs — it ran only when Claude was asked to run it.
 
-## Streaming Each Workflow
+The new system (see `product-tests/README.md`) treats the onboarding
+workflows on both local and cloud mode as the #1 gate and runs them on
+every PR.
 
-- After clicking Run, the status bar shows "Loading diffusion model..." / "Starting..."
-- Cloud model loading takes **30-60 seconds** on first run. Wait in 10s increments, then screenshot.
-- When ready, the Sink node shows video output with FPS/bitrate overlay.
-- Click **Stop** to end the stream.
+## Source of truth for the old flow
 
-### Switching workflows
-
-Click **Workflows** in the top nav bar to reopen the workflow panel. The "Getting Started" section shows all three starter workflows. Click a different one to load it, then click Run.
-
-## Expected Results
-
-| Workflow | Nodes | Notes |
-|----------|-------|-------|
-| Mythical Creature | Source, VACE, LoRA, longlive, rife, Sink | Style LoRA, video input |
-| Dissolving Sunflower | Source, video-depth-anything, VACE, LoRA, longlive, rife, Sink | Depth map, video input |
-| LTX 2.3 | Primitive (String), ltx2, Sink | Text-to-video, no Source node |
-
-## Cleanup
-
-```bash
-lsof -ti:8080 | xargs kill -9 2>/dev/null
-rm -rf /tmp/scope-onboarding-test
-```
+The old skill's step-by-step click map lives in git history; the
+product-tests equivalent is in
+[product-tests/harness/flows.py](../../../product-tests/harness/flows.py)
+in the `complete_onboarding_local` and `complete_onboarding_cloud`
+helpers.

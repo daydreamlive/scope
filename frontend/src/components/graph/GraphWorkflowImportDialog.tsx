@@ -291,6 +291,7 @@ export function GraphWorkflowImportDialog({
           </Button>
           {!resolving && plan && (
             <Button
+              data-testid="workflow-import-load"
               onClick={handleLoad}
               disabled={
                 loras.someDownloading ||

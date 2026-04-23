@@ -84,6 +84,10 @@ class LivepeerConnection:
         # app_id can be used as optional runner routing config (derived into a
         # fal ws_url in the client). api_key is forwarded so Livepeer startup can
         # include Daydream signer metadata.
+        from .retry_counter import retry_counter
+
+        retry_counter.incr("cloud_connect_attempts", app_id=app_id)
+
         self._user_id = user_id
 
         if self.is_connected:
@@ -121,6 +125,9 @@ class LivepeerConnection:
             self._stats["connected_at"] = time.time()
             logger.info("Livepeer connected")
         except Exception as e:
+            from .retry_counter import retry_counter
+
+            retry_counter.incr("cloud_connect_failures", error=str(e))
             self._connect_error = str(e)
             self._last_close_reason = str(e)
             logger.error(f"Failed to connect job: {e}")
@@ -144,6 +151,9 @@ class LivepeerConnection:
             self.configure()
 
         if self._connect_task is not None and not self._connect_task.done():
+            from .retry_counter import retry_counter
+
+            retry_counter.incr("cloud_reconnects")
             self._connect_task.cancel()
             try:
                 await self._connect_task

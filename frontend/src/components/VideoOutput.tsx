@@ -213,6 +213,7 @@ export function VideoOutput({
                 For audio-only streams it acts as an invisible audio sink. */}
             <video
               ref={videoRef}
+              data-testid="sink-video"
               className={
                 hasVideoTrack
                   ? videoScaleMode === "fit"

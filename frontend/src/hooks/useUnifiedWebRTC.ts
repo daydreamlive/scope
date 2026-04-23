@@ -14,6 +14,21 @@ import {
 } from "../lib/api";
 import { toast } from "sonner";
 
+/**
+ * Product-test instrumentation: report a retry/failure event to the server.
+ * The endpoint 404s unless SCOPE_TEST_INSTRUMENTATION=1, so this is a
+ * fire-and-forget in production (errors swallowed).
+ */
+function reportRetry(name: string, context?: Record<string, unknown>): void {
+  void fetch("/api/v1/_debug/retry_stats/incr", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, by: 1, context }),
+  }).catch(() => {
+    /* endpoint disabled in production — no-op */
+  });
+}
+
 interface InitialParameters {
   input_mode?: "text" | "video";
   prompts?: string[] | PromptItem[];
@@ -486,6 +501,9 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
             pc.connectionState === "disconnected" ||
             pc.connectionState === "failed"
           ) {
+            if (pc.connectionState === "failed") {
+              reportRetry("frontend_pc_failed");
+            }
             setIsConnecting(false);
             setIsStreaming(false);
           }
@@ -571,11 +589,17 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
             type: answer.type as RTCSdpType,
           });
         } catch (error) {
+          reportRetry("frontend_offer_failed", {
+            message: error instanceof Error ? error.message : String(error),
+          });
           console.error("[UnifiedWebRTC] Offer/answer exchange failed:", error);
           resetConnectionState();
           setIsConnecting(false);
         }
       } catch (error) {
+        reportRetry("frontend_start_stream_failed", {
+          message: error instanceof Error ? error.message : String(error),
+        });
         console.error("[UnifiedWebRTC] Failed to start stream:", error);
         resetConnectionState();
         setIsConnecting(false);
