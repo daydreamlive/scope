@@ -786,7 +786,28 @@ class PipelineProcessor:
 
     @staticmethod
     def _is_recoverable(error: Exception) -> bool:
-        """Check if an error is recoverable."""
+        """Check if an error is recoverable.
+
+        Returns False for errors that make further processing impossible:
+        - CUDA OOM (GPU state is unreliable)
+        - InductorError / SubprocException (torch.compile subprocess pool failed;
+          retrying without fallback would loop indefinitely — the compile_with_inductor_fallback
+          wrapper in causal_model.py handles graceful degradation at the call site, but if an
+          InductorError still reaches here it means there is no fallback path available)
+        """
         if isinstance(error, torch.cuda.OutOfMemoryError):
+            return False
+        # Detect InductorError / SubprocException by class name to avoid a hard
+        # import of torch._inductor.exc which may not be available in all builds.
+        exc_type = type(error).__name__
+        inner_exc = getattr(error, "inner_exception", None)
+        if exc_type == "InductorError" or (
+            inner_exc is not None and "SubprocException" in type(inner_exc).__name__
+        ):
+            # Log the inner exception so the actual cause is visible in logs.
+            inner_msg = str(inner_exc) if inner_exc is not None else str(error)
+            logger.error(
+                "torch.inductor SubprocException — inner exception: %s", inner_msg
+            )
             return False
         return True
