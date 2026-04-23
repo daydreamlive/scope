@@ -398,6 +398,27 @@ class WebRTCManager:
                             logger.info(
                                 f"Re-keyed pipeline {pid} as {node['id']} for graph"
                             )
+                # Plain custom nodes aren't pre-loaded via the /pipeline/load
+                # endpoint the way pipelines are, but the unified graph
+                # executor resolves them through the PipelineManager all the
+                # same (``build_graph`` calls ``get_pipeline_by_id(node.id)``
+                # for every graph node). Instantiate and register them
+                # directly here — we avoid ``load_pipelines`` because that
+                # does a bulk replace and would unload the pipeline loaded
+                # via /pipeline/load. Plain nodes are cheap to construct;
+                # model weights are loaded lazily on first ``execute``.
+                from scope.core.nodes.registry import NodeRegistry
+
+                for node in graph_data.get("nodes", []):
+                    if not (node.get("type") == "node" and node.get("node_type_id")):
+                        continue
+                    node_cls = NodeRegistry.get(node["node_type_id"])
+                    if node_cls is None:
+                        continue
+                    pipeline_manager.set_pipeline_instance(node["id"], node_cls())
+                    logger.info(
+                        f"Registered custom node {node['node_type_id']} as {node['id']}"
+                    )
 
             # Create FrameProcessor (owned by session, shared between tracks)
             frame_processor = FrameProcessor(
@@ -1295,19 +1316,26 @@ class WebRTCManager:
         if self.headless_session and self.headless_session.frame_processor:
             self.headless_session.frame_processor.update_parameters(parameters)
 
-    def broadcast_notification(self, message: dict) -> None:
-        """Send a notification message to all active sessions via their data channels."""
-        message_str = json.dumps(message)
+    def broadcast_notification(self, message: dict) -> int:
+        """Send a notification to active sessions via their data channels.
+
+        Safe to call from worker threads: sends are marshalled onto the
+        aiortc event loop through each session's :class:`NotificationSender`.
+        Returns the number of sessions the message was dispatched to so
+        callers can decide whether to retry (e.g. when a pipeline-side
+        parameter change races ahead of the WebRTC handshake).
+        """
+        sent = 0
         for session in self.sessions.values():
             if session.pc.connectionState in ("closed", "failed"):
                 continue
-            if session.data_channel and session.data_channel.readyState == "open":
-                try:
-                    session.data_channel.send(message_str)
-                except Exception as e:
-                    logger.error(
-                        f"Failed to send notification to session {session.id}: {e}"
-                    )
+            sender = session.notification_sender
+            if sender is None:
+                continue
+            if sender.data_channel and sender.data_channel.readyState == "open":
+                sender.call(message)
+                sent += 1
+        return sent
 
     async def stop(self):
         """Close and cleanup all sessions (WebRTC and headless)."""

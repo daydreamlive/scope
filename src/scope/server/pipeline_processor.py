@@ -142,6 +142,79 @@ class PipelineProcessor:
         # giving the video track a stable playback speed for A/V sync.
         self.native_fps: float | None = None
 
+        # Names of input ports whose declared type isn't "video". Values
+        # arriving on these ports are drained into ``self.parameters`` each
+        # chunk instead of being treated as chunked video streams.
+        self._non_video_input_ports: set[str] = {
+            p.name
+            for p in self.pipeline.get_definition().inputs
+            if p.port_type != "video"
+        }
+        # Broadcasts that haven't been delivered yet. Graph-driven params
+        # (e.g. a PromptEnhancer feeding a string port) often land before
+        # the WebRTC data channel is open, so the payload stays cached and
+        # is retried on each chunk until at least one session receives it.
+        self._pending_param_broadcast: dict[str, Any] = {}
+
+    def _drain_non_video_inputs(self) -> None:
+        """Drain scalar input queues into ``self.parameters`` and sync the UI.
+
+        Non-video ports (string, number, …) deliver discrete values rather
+        than frame streams; the latest value on each queue wins. Video ports
+        are left alone — those follow the chunk-gathering path below. Any
+        value drained is broadcast so widgets like the Prompt textarea
+        reflect what an upstream backend node produced; pending broadcasts
+        from prior chunks are retried here too.
+        """
+        if not self._non_video_input_ports:
+            return
+        with self.input_queue_lock:
+            targets = [
+                (port, q)
+                for port, q in self.input_queues.items()
+                if port in self._non_video_input_ports
+            ]
+        for port, q in targets:
+            latest = None
+            drained = False
+            while True:
+                try:
+                    latest = q.get_nowait()
+                    drained = True
+                except queue.Empty:
+                    break
+            if drained:
+                self.parameters[port] = latest
+                self._pending_param_broadcast[port] = latest
+        self._flush_param_broadcast()
+
+    def _flush_param_broadcast(self) -> None:
+        """Send any cached parameter updates; clear on successful delivery."""
+        if not self._pending_param_broadcast:
+            return
+        # Fetch the WebRTCManager lazily via the module so we pick up the
+        # instance bound at startup, not the ``None`` captured at import
+        # time.
+        from . import app as _app
+
+        manager = getattr(_app, "webrtc_manager", None)
+        if manager is None:
+            return
+        payload = {"node_id": self.node_id, **self._pending_param_broadcast}
+        try:
+            sent = manager.broadcast_notification(
+                {"type": "parameters_updated", "parameters": payload}
+            )
+        except Exception:
+            logger.debug(
+                "Failed to broadcast parameters_updated for %s",
+                self.node_id,
+                exc_info=True,
+            )
+            return
+        if sent > 0:
+            self._pending_param_broadcast.clear()
+
     def set_beat_cache_reset_rate(self, rate: str) -> None:
         """Set the beat-synced cache reset rate and reset the boundary tracker."""
         self._beat_cache_reset_rate = rate
@@ -452,6 +525,13 @@ class PipelineProcessor:
                             break
             self._pending_cache_init = True
 
+        # Drain non-video input ports (string, number, …) into parameters so
+        # upstream nodes — e.g. a PromptEnhancer feeding a string port — can
+        # drive pipeline kwargs via graph edges. Also retries any param
+        # broadcasts queued but not yet delivered due to the WebRTC
+        # handshake race.
+        self._drain_non_video_inputs()
+
         requirements = None
         if hasattr(self.pipeline, "prepare"):
             prepare_params = dict(self.parameters.items())
@@ -464,8 +544,12 @@ class PipelineProcessor:
         if requirements is not None:
             current_chunk_size = requirements.input_size
             with self.input_queue_lock:
-                input_queues_ref = dict(self.input_queues)
-            # Wait until ALL wired input queues have enough frames
+                input_queues_ref = {
+                    port: q
+                    for port, q in self.input_queues.items()
+                    if port not in self._non_video_input_ports
+                }
+            # Wait until ALL wired video input queues have enough frames
             if not input_queues_ref or not all(
                 q.qsize() >= current_chunk_size for q in input_queues_ref.values()
             ):

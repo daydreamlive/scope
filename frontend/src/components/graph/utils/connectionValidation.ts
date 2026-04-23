@@ -305,6 +305,46 @@ export function validateConnection(
     return true;
   }
 
+  // Stream ↔ param: a custom_node stream output (e.g. a Prompt Enhancer's
+  // `text` port) can land on a pipeline param handle such as
+  // `param:__prompt`. The edge is serialised as a stream edge on the wire
+  // (graphUtils.ts rewrites the handle id on import/export), so we only
+  // need to validate the port-type match here.
+  if (sourceParsed.kind === "stream" && targetParsed.kind === "param") {
+    const sourceNode = nodes.find(n => n.id === connection.source);
+    const targetNode = nodes.find(n => n.id === connection.target);
+    if (!sourceNode || !targetNode) return true;
+    if (sourceNode.data.nodeType !== "custom_node") return false;
+    if (targetNode.data.nodeType !== "pipeline") return false;
+    const outputs = sourceNode.data.customNodeOutputs;
+    let srcType: string | undefined;
+    if (outputs !== undefined) {
+      const portName = stripCustomNodeDirection(sourceParsed.name);
+      const port = outputs.find(p => p.name === portName);
+      if (!port) return false;
+      srcType = port.port_type;
+    }
+    // Same table-driven rules used for param↔param — keeps `__prompt`
+    // (string only), `__vace`, `__loras`, etc. behaving consistently
+    // regardless of whether the source is a frontend param or a
+    // backend stream port.
+    if (!srcType) return true;
+    for (const rule of TARGET_RULES) {
+      const result = rule({
+        sourceType: srcType,
+        targetParsedName: targetParsed.name,
+        targetNode,
+      });
+      if (result !== undefined) return result;
+    }
+    // Fall back to the target's declared parameterInputs.
+    const targetParam = targetNode.data.parameterInputs?.find(
+      p => p.name === targetParsed.name
+    );
+    if (!targetParam) return false;
+    return srcType === targetParam.type;
+  }
+
   // Stream ↔ stream: for custom_node edges, enforce port-type matching
   // against the node's declared inputs/outputs. For built-in source /
   // pipeline / sink nodes, streams are untyped (video) and always ok.

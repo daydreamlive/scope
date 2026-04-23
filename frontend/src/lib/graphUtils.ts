@@ -404,6 +404,9 @@ export interface FlowNodeData {
   customNodeParams?: Record<string, unknown>;
   /** For custom_node: parameter definitions from API (widget metadata) */
   customNodeParamDefs?: NodeParamDef[];
+  /** For custom_node: push a param change through to the backend so the
+   *  running node picks up the new value without a session restart. */
+  onCustomNodeParamChange?: (key: string, value: unknown) => void;
 
   /* ── Node lock / pin / collapse ── */
   /** When true, parameter inputs on this node are disabled (read-only). */
@@ -904,19 +907,28 @@ export function graphConfigToFlow(
         nodes.filter(n => n.type === "custom_node").map(n => n.id)
       )
   );
+  const pipelineNodeIds = new Set(pipelines.map(n => n.id));
   const edges: Edge[] = graph.edges
     .filter(
       e => !isSubgraphInnerNode(e.from) && !isSubgraphInnerNode(e.to_node)
     )
     .map((e, i) => {
+      // The UI renders the "Enter prompt…" textarea under the widget
+      // handle `param:__prompt`. Pipelines expose the matching backend
+      // port as `prompts` (its kwarg name), so an incoming edge targeting
+      // that port is routed to the widget handle instead of a non-
+      // existent `stream:prompts` handle.
+      const isPromptPortTarget =
+        pipelineNodeIds.has(e.to_node) && e.to_port === "prompts";
       const sourceHandle =
         e.kind === "parameter"
           ? buildHandleId("param", e.from_port)
           : customNodeIds.has(e.from)
             ? customNodeOutputHandleId(e.from_port)
             : buildHandleId("stream", e.from_port);
-      const targetHandle =
-        e.kind === "parameter"
+      const targetHandle = isPromptPortTarget
+        ? buildHandleId("param", "__prompt")
+        : e.kind === "parameter"
           ? buildHandleId("param", e.to_port)
           : customNodeIds.has(e.to_node)
             ? customNodeInputHandleId(e.to_port)
@@ -1412,6 +1424,9 @@ export function flowToGraphConfig(
   // Strip the in:/out: prefix added to custom_node handles before writing
   // the bare port name back to the wire format.
   const graphNodeIds = new Set(graphNodes.map(n => n.id));
+  const pipelineTargetIds = new Set(
+    graphNodes.filter(n => n.type === "pipeline").map(n => n.id)
+  );
   const graphEdges: GraphEdge[] = flatEdges
     .filter(e => graphNodeIds.has(e.source) && graphNodeIds.has(e.target))
     .map(e => {
@@ -1424,9 +1439,20 @@ export function flowToGraphConfig(
       const fromName = sourceParsed?.name
         ? stripCustomNodeDirection(sourceParsed.name)
         : "video";
-      const toName = targetParsed?.name
+      let toName = targetParsed?.name
         ? stripCustomNodeDirection(targetParsed.name)
         : "video";
+      // The UI's "Enter prompt" textarea lives under the widget handle
+      // `param:__prompt`; pipelines declare the matching backend port as
+      // `prompts` to match the runtime kwarg. Translate on export so the
+      // serialised edge lands on the right port name.
+      if (
+        kind === "stream" &&
+        toName === "__prompt" &&
+        pipelineTargetIds.has(e.target)
+      ) {
+        toName = "prompts";
+      }
       return {
         from: e.source,
         from_port: fromName,
