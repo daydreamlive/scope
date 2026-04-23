@@ -3,9 +3,11 @@
 import asyncio
 import gc
 import logging
+import re
 import threading
 import time
 from enum import Enum
+from pathlib import Path, PureWindowsPath
 from typing import Any
 
 import torch
@@ -775,9 +777,167 @@ class PipelineManager:
         config["base_seed"] = base_seed
         config["vae_type"] = vae_type
         if loras:
-            config["loras"] = loras
+            config["loras"] = self._resolve_lora_paths(loras)
         # Pass merge_mode directly to mixin, not via config
         config["_lora_merge_mode"] = lora_merge_mode
+
+    def _resolve_lora_paths(self, loras: list[dict]) -> list[dict]:
+        """Resolve LoRA file paths against the LoRA directory.
+
+        Relative paths and bare filenames are resolved against get_lora_dir()
+        and get_shared_lora_dir() so that user-configured LoRAs specified by
+        filename alone (e.g. "hydravj_000000750.safetensors") are found correctly.
+        Absolute paths are passed through unchanged.
+
+        Pre-validates that each resolved path exists and raises a clear
+        RuntimeError before pipeline initialization begins.
+
+        Args:
+            loras: List of LoRA config dicts with at least a 'path' key.
+
+        Returns:
+            Copy of loras list with 'path' values resolved to absolute paths.
+
+        Raises:
+            RuntimeError: If a LoRA file cannot be found in any search location.
+        """
+        from .models_config import get_lora_dir, get_shared_lora_dir
+
+        lora_dir = get_lora_dir()
+        shared_dir = get_shared_lora_dir()
+
+        resolved = []
+        for lora in loras:
+            lora_path = lora.get("path")
+            if not lora_path:
+                resolved.append(lora)
+                continue
+
+            p = Path(lora_path)
+            if p.is_absolute():
+                # Already absolute — validate existence directly.
+                if not p.exists():
+                    raise RuntimeError(
+                        f"LoRA file not found: {lora_path}. "
+                        f"Ensure the file exists in your remote model directory."
+                    )
+                resolved.append({**lora, "path": str(p)})
+                continue
+
+            # Search: lora_dir, then shared_dir (if configured).
+            candidates = [lora_dir / p]
+            if shared_dir:
+                candidates.append(shared_dir / p)
+
+            found = next((c for c in candidates if c.exists()), None)
+            if found is None:
+                search_dirs = [str(lora_dir)]
+                if shared_dir:
+                    search_dirs.append(str(shared_dir))
+                raise RuntimeError(
+                    f"LoRA file '{lora_path}' not found. "
+                    f"Searched: {', '.join(search_dirs)}. "
+                    f"Ensure the file is available in your remote model directory."
+                )
+
+            logger.debug("Resolved LoRA path '%s' -> '%s'", lora_path, found)
+            resolved.append({**lora, "path": str(found)})
+
+        return resolved
+
+    @staticmethod
+    def _sanitize_asset_path(path: str) -> str:
+        """Normalize a single asset path so it is resolvable on the current system.
+
+        When a Windows client sends ``i2v_image`` (or similar params) to a
+        Linux cloud worker, the path may be a Windows absolute path such as::
+
+            C:\\Users\\Joshu\\.daydream-scope\\assets\\ShinraFireForce.webp
+
+        These paths are meaningless on Linux. This method:
+
+        1. Detects platform-foreign absolute paths (Windows ``X:\\...`` /
+           ``X:/...`` / UNC ``\\\\server\\...``) or Unix absolute paths that
+           fall outside the configured assets directory.
+        2. Extracts the bare filename (e.g. ``ShinraFireForce.webp``).
+        3. Rebuilds the path relative to ``get_assets_dir()`` so the cloud
+           worker can locate the file.
+
+        Relative paths and already-valid absolute paths are left unchanged.
+
+        Args:
+            path: Asset path string to normalise.
+
+        Returns:
+            Normalised path string, or the original if no rewrite was needed.
+        """
+        from .models_config import get_assets_dir
+
+        assets_dir = get_assets_dir()
+        _windows_abs_re = re.compile(r"^(?:[A-Za-z]:[/\\]|\\\\)", re.ASCII)
+
+        needs_rewrite = False
+
+        if _windows_abs_re.match(path):
+            needs_rewrite = True
+            filename = PureWindowsPath(path).name
+        elif path.startswith("/"):
+            try:
+                abs_path = Path(path).resolve()
+                if not abs_path.is_relative_to(assets_dir.resolve()):
+                    needs_rewrite = True
+                    filename = Path(path).name
+            except Exception:
+                needs_rewrite = True
+                filename = Path(path).name
+
+        if needs_rewrite:
+            new_path = str(assets_dir / filename)
+            logger.warning(
+                "_sanitize_asset_path: asset path %r appears to be a local "
+                "absolute path from a different OS or filesystem. "
+                "Rewriting to %r.",
+                path,
+                new_path,
+            )
+            return new_path
+        return path
+
+    @staticmethod
+    def _sanitize_initial_params(params: dict) -> dict:
+        """Sanitize known asset path parameters in *params*.
+
+        Rewrites Windows / foreign-OS absolute paths for these keys so the
+        Linux cloud worker can locate the assets that were already uploaded to
+        ``get_assets_dir()``:
+
+        * ``i2v_image``        – str or None
+        * ``first_frame_image`` – str or None
+        * ``last_frame_image``  – str or None
+        * ``images``            – list[str] or None (each item sanitized)
+        * ``vace_ref_images``   – list[str] or None (each item sanitized)
+
+        Args:
+            params: Pipeline parameter dict (will not be mutated).
+
+        Returns:
+            A shallow copy of *params* with the above keys sanitized.
+        """
+        result = dict(params)
+
+        _str_keys = ("i2v_image", "first_frame_image", "last_frame_image")
+        for key in _str_keys:
+            if key in result and result[key] is not None:
+                result[key] = PipelineManager._sanitize_asset_path(result[key])
+
+        _list_keys = ("images", "vace_ref_images")
+        for key in _list_keys:
+            if key in result and result[key] is not None:
+                result[key] = [
+                    PipelineManager._sanitize_asset_path(p) for p in result[key]
+                ]
+
+        return result
 
     def unload_pipeline_by_id(
         self,
@@ -902,8 +1062,10 @@ class PipelineManager:
             for name, field in config_class.model_fields.items():
                 if field.default is not None:
                     schema_defaults[name] = field.default
+            # Sanitize foreign OS asset paths before passing to the pipeline.
+            load_params = self._sanitize_initial_params(load_params or {})
             # Merge: load_params override schema defaults
-            merged_params = {**schema_defaults, **(load_params or {})}
+            merged_params = {**schema_defaults, **load_params}
             return pipeline_class(**merged_params)
 
         # Fall through to built-in pipeline initialization
