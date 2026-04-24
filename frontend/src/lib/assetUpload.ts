@@ -31,14 +31,14 @@ function getBasename(assetPath: string): string {
   return parts[parts.length - 1] || assetPath;
 }
 
-function isFilesystemAssetPath(assetPath: string): boolean {
+function isBlobOrDataAssetPath(assetPath: string): boolean {
+  return assetPath.startsWith("blob:") || assetPath.startsWith("data:");
+}
+
+function isUploadableAssetPath(assetPath: string): boolean {
   if (!assetPath) return false;
-  if (
-    assetPath.startsWith("blob:") ||
-    assetPath.startsWith("data:") ||
-    assetPath.startsWith("http://") ||
-    assetPath.startsWith("https://")
-  ) {
+  if (isBlobOrDataAssetPath(assetPath)) return true;
+  if (assetPath.startsWith("http://") || assetPath.startsWith("https://")) {
     return false;
   }
   if (WINDOWS_ABSOLUTE_PATH_RE.test(assetPath)) return true;
@@ -78,12 +78,38 @@ function guessMimeType(assetPath: string, kind: AssetKind): string {
   return "video/mp4";
 }
 
+function extensionForMimeType(mimeType: string, kind: AssetKind): string {
+  if (mimeType === "image/png") return "png";
+  if (mimeType === "image/webp") return "webp";
+  if (mimeType === "image/bmp") return "bmp";
+  if (mimeType === "image/jpeg") return "jpg";
+  if (mimeType === "audio/wav") return "wav";
+  if (mimeType === "audio/flac") return "flac";
+  if (mimeType === "audio/ogg") return "ogg";
+  if (mimeType === "audio/mpeg") return "mp3";
+  if (mimeType === "video/webm") return "webm";
+  if (mimeType === "video/quicktime") return "mov";
+  return kind === "image" ? "jpg" : kind === "audio" ? "mp3" : "mp4";
+}
+
+function getUploadFilename(
+  assetPath: string,
+  mimeType: string,
+  kind: AssetKind
+): string {
+  if (!isBlobOrDataAssetPath(assetPath)) {
+    return getBasename(assetPath);
+  }
+  const extension = extensionForMimeType(mimeType, kind);
+  return `upload-${crypto.randomUUID()}.${extension}`;
+}
+
 export async function assetPath(
   path: string,
   kind: AssetKind,
   cache: UploadCache
 ): Promise<string> {
-  if (!path || !isFilesystemAssetPath(path)) {
+  if (!path || !isUploadableAssetPath(path)) {
     return path;
   }
 
@@ -102,14 +128,13 @@ export async function assetPath(
   const uploadPromise = (async () => {
     const response = await fetch(getAssetUrl(path));
     if (!response.ok) {
-      throw new Error(
-        `Could not read local asset '${path}' (${response.status})`
-      );
+      throw new Error(`Could not read asset '${path}' (${response.status})`);
     }
 
     const blob = await response.blob();
-    const file = new File([blob], getBasename(path), {
-      type: blob.type || guessMimeType(path, kind),
+    const mimeType = blob.type || guessMimeType(path, kind);
+    const file = new File([blob], getUploadFilename(path, mimeType, kind), {
+      type: mimeType,
     });
     const uploaded = await uploadAssetFile(file);
 
