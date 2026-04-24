@@ -525,10 +525,11 @@ export function useNodeFactories({
     (
       key: NodeTypeKey,
       position?: { x: number; y: number },
-      extraData?: Partial<FlowNodeData>
-    ) => {
+      extraData?: Partial<FlowNodeData>,
+      idPrefixOverride?: string
+    ): string => {
       const def = NODE_DEFAULTS[key];
-      const id = generateNodeId(def.idPrefix, existingIds);
+      const id = generateNodeId(idPrefixOverride ?? def.idPrefix, existingIds);
       const newNode: Node<FlowNodeData> = {
         id,
         type: def.type,
@@ -544,6 +545,7 @@ export function useNodeFactories({
         } as FlowNodeData,
       };
       setNodes(nds => enrichNodes([...nds, newNode], enrichDepsRef.current));
+      return id;
     },
     [existingIds, nodes.length, setNodes, enrichDepsRef]
   );
@@ -588,11 +590,25 @@ export function useNodeFactories({
           addNode(`control_${subType}` as NodeTypeKey, pendingNodePosition);
         }
       } else if (type === "pipeline") {
-        addNode("pipeline", pendingNodePosition, {
-          availablePipelineIds,
-          pipelinePortsMap: portsMap,
-          onPipelineSelect: handlePipelineSelect,
-        });
+        const id = addNode(
+          "pipeline",
+          pendingNodePosition,
+          {
+            availablePipelineIds,
+            pipelinePortsMap: portsMap,
+            onPipelineSelect: handlePipelineSelect,
+          },
+          subType
+        );
+        if (subType) {
+          handlePipelineSelect(id, subType);
+        }
+      } else if (type === "source") {
+        addNode(
+          "source",
+          pendingNodePosition,
+          subType ? { sourceMode: subType } : undefined
+        );
       } else if (type === "output") {
         const defaultType = spoutOutputAvailable
           ? "spout"
