@@ -398,9 +398,12 @@ export function useStreamState() {
   }, []);
 
   // Derive output sink availability from hardware info
-  const spoutAvailable = hardwareInfo?.spout_available ?? false;
-  const ndiOutputAvailable = hardwareInfo?.ndi_available ?? false;
-  const syphonOutputAvailable = hardwareInfo?.syphon_available ?? false;
+  const spoutAvailable = hardwareInfo?.spout?.available ?? false;
+  const ndiOutputAvailable = hardwareInfo?.ndi?.available ?? false;
+  const syphonOutputAvailable = hardwareInfo?.syphon?.available ?? false;
+  const spoutReason = hardwareInfo?.spout?.install_hint ?? null;
+  const ndiReason = hardwareInfo?.ndi?.install_hint ?? null;
+  const syphonReason = hardwareInfo?.syphon?.install_hint ?? null;
 
   return {
     systemMetrics,
@@ -418,6 +421,9 @@ export function useStreamState() {
     spoutAvailable,
     ndiOutputAvailable,
     syphonOutputAvailable,
+    spoutReason,
+    ndiReason,
+    syphonReason,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,

@@ -1,0 +1,234 @@
+import { useState } from "react";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from "../ui/dialog";
+import { getShortcutsByCategory } from "../../lib/shortcuts";
+import { getEffectiveShortcuts } from "../../lib/shortcutOverrides";
+
+type Tab = "basics" | "integrations" | "shortcuts";
+
+interface CheatSheetDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialTab?: Tab;
+}
+
+interface HowToItem {
+  title: string;
+  body: React.ReactNode;
+}
+
+const BASICS: HowToItem[] = [
+  {
+    title: "Add a node",
+    body: (
+      <>
+        Press <kbd className="cheatsheet-kbd">Tab</kbd> on the canvas, click the{" "}
+        <span className="font-mono">+</span> button in the upper-right, or
+        right-click empty canvas to open the create menu.
+      </>
+    ),
+  },
+  {
+    title: "Import a workflow",
+    body: (
+      <>
+        Open the workflow import dialog from the top toolbar, or drop a{" "}
+        <span className="font-mono">.json</span> file directly onto the canvas.
+      </>
+    ),
+  },
+  {
+    title: "Install a pipeline / plugin",
+    body: (
+      <>
+        Pipelines are registered via the Python package. Add them to the
+        project&apos;s <span className="font-mono">pyproject.toml</span> or
+        install a plugin package, then restart Scope. They&apos;ll appear in the
+        pipeline picker.
+      </>
+    ),
+  },
+  {
+    title: "Install a LoRA",
+    body: (
+      <>
+        Drop LoRA weights into{" "}
+        <span className="font-mono">~/.daydream-scope/models</span> (or your
+        configured <span className="font-mono">DAYDREAM_SCOPE_MODELS_DIR</span>
+        ), then pick them from the LoRA picker on pipelines that support them.
+      </>
+    ),
+  },
+];
+
+interface IntegrationRow {
+  name: string;
+  location: string;
+  install: string;
+}
+
+const INTEGRATIONS: IntegrationRow[] = [
+  {
+    name: "Spout",
+    location: "Source / Output node → type dropdown",
+    install: "Windows only; bundled with Scope",
+  },
+  {
+    name: "Syphon",
+    location: "Source / Output node → type dropdown",
+    install: "macOS only; bundled with Scope",
+  },
+  {
+    name: "NDI",
+    location: "Source / Output node → type dropdown",
+    install: "All platforms. Install NDI SDK: https://ndi.video/tools",
+  },
+  {
+    name: "OSC",
+    location: "Settings → OSC tab",
+    install: "Always available",
+  },
+  {
+    name: "DMX (Art-Net)",
+    location: "Settings → DMX tab",
+    install: "Always available (binds ports 6454–6457)",
+  },
+  {
+    name: "Ableton Link",
+    location: "Settings → Tempo Sync",
+    install: "uv sync --extra link",
+  },
+  {
+    name: "MIDI Clock",
+    location: "Settings → Tempo Sync, MIDI node in graph",
+    install: "uv sync --extra midi",
+  },
+];
+
+export function CheatSheetDialog({
+  open,
+  onOpenChange,
+  initialTab = "basics",
+}: CheatSheetDialogProps) {
+  const [tab, setTab] = useState<Tab>(initialTab);
+  const shortcuts = getEffectiveShortcuts();
+  const categories = getShortcutsByCategory(shortcuts);
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={next => {
+        if (next) setTab(initialTab);
+        onOpenChange(next);
+      }}
+    >
+      <DialogContent className="sm:max-w-[560px] max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>Scope cheat sheet</DialogTitle>
+          <DialogDescription>
+            Basics, integrations, and keyboard shortcuts in one place.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div
+          role="tablist"
+          aria-label="Cheat sheet sections"
+          className="flex items-center gap-1 border-b border-border mt-3"
+        >
+          {(
+            [
+              { id: "basics", label: "Basics" },
+              { id: "integrations", label: "Integrations" },
+              { id: "shortcuts", label: "Shortcuts" },
+            ] as const
+          ).map(t => (
+            <button
+              key={t.id}
+              role="tab"
+              aria-selected={tab === t.id}
+              type="button"
+              onClick={() => setTab(t.id)}
+              className={`px-3 py-1.5 text-xs font-medium rounded-t-md border-b-2 -mb-px transition-colors ${
+                tab === t.id
+                  ? "border-foreground text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="mt-4">
+          {tab === "basics" && (
+            <div className="space-y-3">
+              {BASICS.map(item => (
+                <div key={item.title}>
+                  <h3 className="text-sm font-semibold text-foreground mb-1">
+                    {item.title}
+                  </h3>
+                  <p className="text-xs text-muted-foreground leading-relaxed">
+                    {item.body}
+                  </p>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === "integrations" && (
+            <div className="space-y-3">
+              {INTEGRATIONS.map(row => (
+                <div
+                  key={row.name}
+                  className="grid grid-cols-[1fr_2fr] gap-3 items-baseline border-b border-border pb-2 last:border-0"
+                >
+                  <div className="text-sm font-semibold text-foreground">
+                    {row.name}
+                  </div>
+                  <div className="text-xs text-muted-foreground leading-relaxed">
+                    <div>{row.location}</div>
+                    <div className="mt-0.5 font-mono text-[10.5px] opacity-80">
+                      {row.install}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {tab === "shortcuts" && (
+            <div className="space-y-5">
+              {categories.map(({ category, label, items }) => (
+                <div key={category}>
+                  <h3 className="text-[11px] font-semibold tracking-widest text-muted-foreground uppercase mb-2">
+                    {label}
+                  </h3>
+                  <div className="space-y-0.5">
+                    {items.map(shortcut => (
+                      <div
+                        key={shortcut.id}
+                        className="flex items-center justify-between py-1.5 px-1 rounded-md"
+                      >
+                        <span className="text-sm text-foreground">
+                          {shortcut.label}
+                        </span>
+                        <kbd className="inline-flex items-center gap-1 rounded border border-border bg-muted px-2 py-0.5 font-mono text-[11px] text-muted-foreground">
+                          {shortcut.keys}
+                        </kbd>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}

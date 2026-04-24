@@ -50,6 +50,9 @@ export interface EnrichNodesDeps {
   spoutOutputAvailable: boolean;
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
+  spoutReason?: string | null;
+  ndiReason?: string | null;
+  syphonReason?: string | null;
   handleEdgeDelete: (edgeId: string) => void;
   isStreaming: boolean;
   isLoading: boolean;
@@ -171,6 +174,9 @@ export function enrichNodes(
           spoutAvailable: deps.spoutAvailable,
           ndiAvailable: deps.ndiAvailable,
           syphonAvailable: deps.syphonAvailable,
+          spoutReason: deps.spoutReason ?? null,
+          ndiReason: deps.ndiReason ?? null,
+          syphonReason: deps.syphonReason ?? null,
           onSpoutSourceChange: (name: string) =>
             deps.onSpoutSourceChangeRef.current?.(name),
           onNdiSourceChange: (identifier: string) =>
@@ -220,6 +226,9 @@ export function enrichNodes(
           spoutAvailable: deps.spoutOutputAvailable,
           ndiAvailable: deps.ndiOutputAvailable,
           syphonAvailable: deps.syphonOutputAvailable,
+          spoutReason: deps.spoutReason ?? null,
+          ndiReason: deps.ndiReason ?? null,
+          syphonReason: deps.syphonReason ?? null,
         },
       };
     }
