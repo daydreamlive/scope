@@ -220,7 +220,10 @@ jobs:
       - name: Run scenarios + chaos (GPU)
         env:
           SCOPE_TEST_INSTRUMENTATION: "1"
-          SCOPE_CLOUD_APP_ID: ${{ secrets.SCOPE_NIGHTLY_FAL_APP_ID }}
+          # The main-pinned app deployed by fal-deploy.yml on every push to
+          # main. Stable, known, no secret needed. Tests append "/ws" in
+          # the fixture when they open a connection.
+          SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer--main/ws"
           SCOPE_CLOUD_RING: "nightly"
           SCOPE_CHURN_DURATION_SEC: "180"
           # Multimodal enabled in the nightly ring only — daily budget cap
@@ -236,7 +239,10 @@ jobs:
       - name: Run release full-matrix (cloud, all starter workflows)
         env:
           SCOPE_TEST_INSTRUMENTATION: "1"
-          SCOPE_CLOUD_APP_ID: ${{ secrets.SCOPE_NIGHTLY_FAL_APP_ID }}
+          # The main-pinned app deployed by fal-deploy.yml on every push to
+          # main. Stable, known, no secret needed. Tests append "/ws" in
+          # the fixture when they open a connection.
+          SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer--main/ws"
           SCOPE_CLOUD_RING: "nightly"
         run: |
           uv run pytest product-tests/release/ -v --tb=short -m cloud
@@ -244,7 +250,10 @@ jobs:
       - name: Run regression suite
         env:
           SCOPE_TEST_INSTRUMENTATION: "1"
-          SCOPE_CLOUD_APP_ID: ${{ secrets.SCOPE_NIGHTLY_FAL_APP_ID }}
+          # The main-pinned app deployed by fal-deploy.yml on every push to
+          # main. Stable, known, no secret needed. Tests append "/ws" in
+          # the fixture when they open a connection.
+          SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer--main/ws"
           SCOPE_CLOUD_RING: "nightly"
           SCOPE_MULTIMODAL_EVAL: "1"
           SCOPE_MULTIMODAL_TRIAGE: "1"
