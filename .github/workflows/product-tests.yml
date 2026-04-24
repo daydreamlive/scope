@@ -175,12 +175,15 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------------------
-  # Nightly ring: GPU, full model pipelines, <60 min budget
+  # Nightly ring: cloud-backed (models on fal), <60 min budget.
+  # No GPU needed on the runner — every nightly step uses SCOPE_CLOUD_APP_ID
+  # and `-m cloud`, so the runner just drives Scope + Playwright and talks
+  # to fal over WebRTC.
   # ---------------------------------------------------------------------------
   nightly:
     if: github.event_name == 'schedule'
-    runs-on: [self-hosted, gpu]
-    name: Product Tests (Nightly, GPU)
+    runs-on: ubuntu-latest
+    name: Product Tests (Nightly, Cloud)
     timeout-minutes: 60
 
     steps:
@@ -217,7 +220,7 @@ jobs:
         working-directory: product-tests
         run: uv run python -m harness.testids --check
 
-      - name: Run scenarios + chaos (GPU)
+      - name: Run scenarios + chaos (cloud)
         env:
           SCOPE_TEST_INSTRUMENTATION: "1"
           # The main-pinned app deployed by fal-deploy.yml on every push to
