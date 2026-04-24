@@ -102,6 +102,7 @@ import { useSubgraphEval } from "./hooks/subgraph/useSubgraphEval";
 import { useSubgraphCallbackSync } from "./hooks/subgraph/useSubgraphCallbackSync";
 import { useSubgraphOperations } from "./hooks/subgraph/useSubgraphOperations";
 import { useNodeDefinitions } from "../../hooks/useNodeDefinitions";
+import { usePipelinesContext } from "../../contexts/PipelinesContext";
 
 const nodeTypes = {
   source: SourceNode,
@@ -595,6 +596,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       });
 
     const { customNodes: availableCustomNodes } = useNodeDefinitions();
+    const { pipelines } = usePipelinesContext();
 
     const handleDebugNodes = useCallback(() => {
       const DEBUG_NODES: Array<{
@@ -1303,6 +1305,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                         createSubgraphFromSelection,
                         onOpenBlueprints: () => setShowBlueprintModal(true),
                         availablePipelineIds,
+                        pipelines,
                         availableInputSources,
                         customNodes: availableCustomNodes,
                       })
