@@ -165,6 +165,8 @@ export function BillingProvider({ children }: { children: ReactNode }) {
   }, [refresh]);
 
   // Poll balance every 15s while cloud-connected (live credit drain updates).
+  // Also refresh once on disconnect so the final post-stream balance shows up
+  // immediately instead of waiting for the 30s background tick.
   useEffect(() => {
     if (isConnected) {
       refresh();
@@ -172,6 +174,7 @@ export function BillingProvider({ children }: { children: ReactNode }) {
     } else {
       if (pollRef.current) clearInterval(pollRef.current);
       pollRef.current = null;
+      refresh();
     }
     return () => {
       if (pollRef.current) clearInterval(pollRef.current);

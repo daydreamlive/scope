@@ -824,6 +824,7 @@ export function StreamPage() {
     switchMode,
     handleVideoFileUpload,
     cycleSampleVideo,
+    selectedVideoFile,
   } = useVideoSource({
     onStreamUpdate: updateVideoTrack,
     onStopStream: stopStream,
@@ -849,6 +850,11 @@ export function StreamPage() {
   >({});
   const nodeLocalStreamsRef = useRef(nodeLocalStreams);
   nodeLocalStreamsRef.current = nodeLocalStreams;
+
+  // Per-source-node selected video file (File for uploads, URL string for
+  // sample videos). Used to carry the user's choice across Graph ↔ Perform
+  // toggles so the stock test.mp4 doesn't silently replace it.
+  const nodeVideoSourcesRef = useRef<Record<string, string | File>>({});
 
   // Shared camera stream ref so multiple source nodes (or repeated mode
   // switches) reuse the same getUserMedia stream instead of prompting again.
@@ -969,6 +975,9 @@ export function StreamPage() {
           oldStream.getTracks().forEach(t => t.stop());
         }
         setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+        // Remember the user's upload so Graph → Perform can replay it instead
+        // of resetting to the default sample.
+        nodeVideoSourcesRef.current[nodeId] = file;
         return true;
       } catch (e) {
         console.error(`Failed to create video stream for node ${nodeId}:`, e);
@@ -1020,6 +1029,7 @@ export function StreamPage() {
           video as HTMLVideoElement & { captureStream(): MediaStream }
         ).captureStream();
         setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+        nodeVideoSourcesRef.current[nodeId] = nextUrl;
       } catch (e) {
         console.error(`Failed to cycle sample video for node ${nodeId}:`, e);
       }
@@ -1058,6 +1068,7 @@ export function StreamPage() {
         video as HTMLVideoElement & { captureStream(): MediaStream }
       ).captureStream();
       setNodeLocalStreams(prev => ({ ...prev, [nodeId]: stream }));
+      nodeVideoSourcesRef.current[nodeId] = url;
     } catch (e) {
       console.error(`Failed to init sample video for node ${nodeId}:`, e);
     } finally {
@@ -3341,6 +3352,17 @@ export function StreamPage() {
                   /* ignore */
                 }
               }
+              // Carry the perform-mode video choice into the graph's source
+              // node (linear graphs use id "input"). Without this, the graph's
+              // SourceNode calls onInitSampleVideo and resets to test.mp4.
+              if (settings.inputMode === "video") {
+                nodeVideoSourcesRef.current["input"] = selectedVideoFile;
+                if (localStream) {
+                  setNodeLocalStreams(prev =>
+                    prev["input"] ? prev : { ...prev, input: localStream }
+                  );
+                }
+              }
               // Refresh the graph editor so it picks up the current graph
               graphEditorRef.current?.refreshGraph();
             } else {
@@ -3411,6 +3433,15 @@ export function StreamPage() {
                       },
                     });
                     switchMode(sourceMode);
+                  } else if (sourceMode === "video") {
+                    // Carry the user's chosen video (upload or cycled sample)
+                    // from the graph's source node into perform mode. Without
+                    // this, switchMode("video") falls back to selectedVideoFile
+                    // (defaults to /assets/test.mp4) and silently replaces it.
+                    const carriedFile = sourceNode
+                      ? nodeVideoSourcesRef.current[sourceNode.id]
+                      : undefined;
+                    switchMode(sourceMode, carriedFile);
                   } else {
                     switchMode(sourceMode);
                   }
