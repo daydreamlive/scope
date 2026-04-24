@@ -12,6 +12,7 @@ import {
   NodePillToggle,
   collapsedHandleStyle,
 } from "../ui";
+import type { NodePillSelectOption } from "../ui/NodePillSelect";
 
 type OutputNodeType = Node<FlowNodeData, "output">;
 
@@ -44,14 +45,23 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
   const spoutAvailable = data.spoutAvailable ?? false;
   const ndiAvailable = data.ndiAvailable ?? false;
   const syphonAvailable = data.syphonAvailable ?? false;
+  const spoutReason = data.spoutReason ?? "Spout is unavailable";
+  const ndiReason = data.ndiReason ?? "NDI is unavailable";
+  const syphonReason = data.syphonReason ?? "Syphon is unavailable";
 
-  // Filter output type options based on availability
-  const filteredOptions = OUTPUT_TYPE_OPTIONS.filter(opt => {
-    if (opt.value === "spout") return spoutAvailable;
-    if (opt.value === "ndi") return ndiAvailable;
-    if (opt.value === "syphon") return syphonAvailable;
-    return true;
-  });
+  // Annotate options with per-integration availability so unavailable ones
+  // stay visible but render disabled (with an install hint via `reason`).
+  const annotatedOptions: NodePillSelectOption[] = OUTPUT_TYPE_OPTIONS.map(
+    opt => {
+      if (opt.value === "spout" && !spoutAvailable)
+        return { ...opt, disabled: true, reason: spoutReason };
+      if (opt.value === "ndi" && !ndiAvailable)
+        return { ...opt, disabled: true, reason: ndiReason };
+      if (opt.value === "syphon" && !syphonAvailable)
+        return { ...opt, disabled: true, reason: syphonReason };
+      return opt;
+    }
+  );
 
   const handleTypeChange = (newType: string) => {
     updateData({
@@ -88,13 +98,17 @@ export function OutputNode({ id, data, selected }: NodeProps<OutputNodeType>) {
               <NodePillSelect
                 value={sinkType}
                 onChange={handleTypeChange}
-                options={
-                  filteredOptions.length > 0
-                    ? filteredOptions
-                    : OUTPUT_TYPE_OPTIONS
-                }
+                options={annotatedOptions}
               />
             </NodeParamRow>
+            {(() => {
+              const current = annotatedOptions.find(o => o.value === sinkType);
+              return current?.disabled && current.reason ? (
+                <div className="mt-1 text-[10px] text-amber-400/80 italic">
+                  {current.reason}
+                </div>
+              ) : null;
+            })()}
           </div>
           <div className="px-2">
             <NodeParamRow label="Enabled">

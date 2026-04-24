@@ -250,23 +250,39 @@ class ErrorResponse(BaseModel):
     detail: str = Field(None, description="Additional error details")
 
 
+class IntegrationAvailability(BaseModel):
+    """Availability + install guidance for an optional integration (SDK/library)."""
+
+    available: bool = Field(
+        default=False, description="Whether the integration is ready to use"
+    )
+    reason: str | None = Field(
+        default=None,
+        description="Short reason shown when unavailable (e.g. 'Spout is Windows-only')",
+    )
+    install_hint: str | None = Field(
+        default=None,
+        description="User-facing hint for how to make this integration available",
+    )
+
+
 class HardwareInfoResponse(BaseModel):
     """Hardware information response schema."""
 
     vram_gb: float | None = Field(
         default=None, description="Total VRAM in GB (None if CUDA not available)"
     )
-    spout_available: bool = Field(
-        default=False,
-        description="Whether Spout is available (Windows only, not WSL)",
+    spout: IntegrationAvailability = Field(
+        default_factory=IntegrationAvailability,
+        description="Spout video I/O (Windows only)",
     )
-    ndi_available: bool = Field(
-        default=False,
-        description="Whether NDI SDK is available for output",
+    ndi: IntegrationAvailability = Field(
+        default_factory=IntegrationAvailability,
+        description="NDI video I/O (all platforms, requires NDI SDK)",
     )
-    syphon_available: bool = Field(
-        default=False,
-        description="Whether Syphon is available for output (macOS only)",
+    syphon: IntegrationAvailability = Field(
+        default_factory=IntegrationAvailability,
+        description="Syphon video I/O (macOS only)",
     )
 
 

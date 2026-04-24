@@ -15,6 +15,7 @@ import {
   NodePillSearchableSelect,
   collapsedHandleStyle,
 } from "../ui";
+import type { NodePillSelectOption } from "../ui/NodePillSelect";
 
 type SourceNodeType = Node<FlowNodeData, "source">;
 
@@ -56,6 +57,9 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const currentSourceInfo = availableInputSources.find(
     s => s.source_id === sourceMode
   );
+  const spoutReason = data.spoutReason ?? "Spout is unavailable";
+  const ndiReason = data.ndiReason ?? "NDI is unavailable";
+  const syphonReason = data.syphonReason ?? "Syphon is unavailable";
   const onSpoutSourceChange = data.onSpoutSourceChange as
     | ((name: string) => void)
     | undefined;
@@ -190,17 +194,38 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const showFilePicker = sourceMode === "video";
   const handleY = HEADER_H + BODY_PAD + SELECT_ROW_H / 2;
 
-  // Browser-driven options + every available backend source. Plugin-
-  // registered sources appear automatically. If the graph was saved with
-  // a mode that isn't currently available on this machine (e.g. NDI graph
-  // opened on a host without NDI), keep it in the list as "(unavailable)"
-  // so the user can see what's set instead of the dropdown silently
-  // collapsing to a different selection.
-  const filteredSourceModeOptions = [
+  // Browser-driven options + every backend source. Plugin-registered
+  // sources appear automatically. Sources reported as unavailable
+  // (e.g. NDI without the SDK installed) stay in the list but render
+  // disabled with the backend-supplied install hint, so the user sees
+  // the option exists and learns how to enable it instead of the
+  // dropdown silently hiding it.
+  //
+  // If the graph was saved with a mode that isn't even known to the
+  // backend on this machine, keep it as a "(unavailable)" placeholder
+  // so the saved selection is visible.
+  const REASON_BY_SOURCE_ID: Record<string, string | null | undefined> = {
+    spout: spoutReason,
+    ndi: ndiReason,
+    syphon: syphonReason,
+  };
+  const filteredSourceModeOptions: NodePillSelectOption[] = [
     ...BROWSER_SOURCE_OPTIONS,
     ...availableInputSources
-      .filter(s => s.available && !HIDDEN_BACKEND_SOURCES.has(s.source_id))
-      .map(s => ({ value: s.source_id, label: s.source_name })),
+      .filter(s => !HIDDEN_BACKEND_SOURCES.has(s.source_id))
+      .map(s => {
+        if (s.available) {
+          return { value: s.source_id, label: s.source_name };
+        }
+        const reason =
+          REASON_BY_SOURCE_ID[s.source_id] ?? `${s.source_name} is unavailable`;
+        return {
+          value: s.source_id,
+          label: s.source_name,
+          disabled: true,
+          reason,
+        };
+      }),
   ];
   if (
     sourceMode &&
@@ -210,6 +235,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     filteredSourceModeOptions.push({
       value: sourceMode,
       label: `${label} (unavailable)`,
+      disabled: true,
     });
   }
 
@@ -244,6 +270,16 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
                 options={filteredSourceModeOptions}
               />
             </NodeParamRow>
+            {(() => {
+              const current = filteredSourceModeOptions.find(
+                o => o.value === sourceMode
+              );
+              return current?.disabled && current.reason ? (
+                <div className="mt-1 text-[10px] text-amber-400/80 italic">
+                  {current.reason}
+                </div>
+              ) : null;
+            })()}
           </div>
 
           {sourceMode === "spout" && (

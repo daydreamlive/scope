@@ -106,6 +106,7 @@ from .schema import (
     IceCandidateRequest,
     IceServerConfig,
     IceServersResponse,
+    IntegrationAvailability,
     NodeDefinitionsResponse,
     PipelineLoadRequest,
     PipelineSchemasResponse,
@@ -2449,6 +2450,48 @@ def is_syphon_output_available() -> bool:
         return False
 
 
+def get_spout_availability() -> IntegrationAvailability:
+    if is_spout_available():
+        return IntegrationAvailability(available=True)
+    if sys.platform != "win32":
+        return IntegrationAvailability(
+            available=False,
+            reason="Spout is Windows-only",
+            install_hint="Run Scope on Windows to use Spout sources and sinks.",
+        )
+    return IntegrationAvailability(
+        available=False,
+        reason="Spout runtime not detected",
+        install_hint="Install Spout2 from https://spout.zeal.co and restart Scope.",
+    )
+
+
+def get_ndi_availability() -> IntegrationAvailability:
+    if is_ndi_output_available():
+        return IntegrationAvailability(available=True)
+    return IntegrationAvailability(
+        available=False,
+        reason="NDI SDK not found",
+        install_hint="Install the NDI SDK from https://ndi.video/tools and restart Scope.",
+    )
+
+
+def get_syphon_availability() -> IntegrationAvailability:
+    if is_syphon_output_available():
+        return IntegrationAvailability(available=True)
+    if sys.platform != "darwin":
+        return IntegrationAvailability(
+            available=False,
+            reason="Syphon is macOS-only",
+            install_hint="Run Scope on macOS to use Syphon sources and sinks.",
+        )
+    return IntegrationAvailability(
+        available=False,
+        reason="Syphon package not installed",
+        install_hint="Reinstall Scope dependencies with `uv sync` to enable Syphon.",
+    )
+
+
 _source_discovery_cache: dict[str, tuple[float, list]] = {}
 _SOURCE_DISCOVERY_TTL = 10  # seconds
 
@@ -2653,9 +2696,9 @@ async def get_hardware_info(
         if cloud_manager.is_connected:
             return await get_hardware_info_from_cloud(
                 cloud_manager,
-                is_spout_available(),
-                is_ndi_output_available(),
-                is_syphon_output_available(),
+                get_spout_availability(),
+                get_ndi_availability(),
+                get_syphon_availability(),
             )
 
         # Local mode: get local hardware info
@@ -2670,9 +2713,9 @@ async def get_hardware_info(
 
         return HardwareInfoResponse(
             vram_gb=vram_gb,
-            spout_available=is_spout_available(),
-            ndi_available=is_ndi_output_available(),
-            syphon_available=is_syphon_output_available(),
+            spout=get_spout_availability(),
+            ndi=get_ndi_availability(),
+            syphon=get_syphon_availability(),
         )
     except HTTPException:
         raise

@@ -255,6 +255,12 @@ export interface FlowNodeData {
    *  (including plugin-registered ones). Used to build the Source
    *  dropdown dynamically. */
   availableInputSources?: import("./api").InputSourceType[];
+  /** For source/output nodes: install hint shown when Spout is unavailable */
+  spoutReason?: string | null;
+  /** For source/output nodes: install hint shown when NDI is unavailable */
+  ndiReason?: string | null;
+  /** For source/output nodes: install hint shown when Syphon is unavailable */
+  syphonReason?: string | null;
   /** For source nodes: callback when Spout receiver name changes */
   onSpoutSourceChange?: (name: string) => void;
   /** For source nodes: callback when NDI source changes */
