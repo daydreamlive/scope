@@ -48,6 +48,7 @@ import {
   fitResolutionToPixelBudget,
   getResolutionScaleFactor,
 } from "../lib/utils";
+import { createUploadCache, rewriteAssetFields } from "../lib/assetUpload";
 import type {
   ExtensionMode,
   InputMode,
@@ -193,6 +194,11 @@ export function StreamPage() {
 
   // Cloud-connected mode tracks backend connection status.
   const isCloudMode = isBackendCloudConnected;
+  const uploadCacheRef = useRef(createUploadCache());
+
+  useEffect(() => {
+    uploadCacheRef.current = createUploadCache();
+  }, [isBackendCloudConnected]);
 
   // After cloud auth during onboarding, the CloudAuthStep fires
   // activateCloudRelay(). Refresh the shared cloud status so the UI
@@ -3133,8 +3139,37 @@ export function StreamPage() {
         graphSinkNodeIds.length > 0 || graphRecordNodeIds.length > 0
           ? [...graphSinkNodeIds, ...graphRecordNodeIds]
           : undefined;
+      let params = initialParameters;
+      if (isCloudMode) {
+        try {
+          params = await rewriteAssetFields(
+            initialParameters,
+            [
+              // Only rewrite preview-page initial parameter fields here; other
+              // graph node media types like audio are forwarded separately and
+              // are not part of this initialParameters payload.
+              { key: "images", kind: "image" },
+              { key: "vace_ref_images", kind: "image" },
+              { key: "first_frame_image", kind: "image" },
+              { key: "last_frame_image", kind: "image" },
+            ],
+            uploadCacheRef.current
+          );
+        } catch (error) {
+          console.error("Error uploading cloud assets:", error);
+          toast.error("Could not upload cloud assets", {
+            description:
+              error instanceof Error
+                ? error.message
+                : "An error occurred while uploading assets for cloud streaming",
+            duration: 5000,
+          });
+          return false;
+        }
+      }
+
       startStream(
-        initialParameters,
+        params,
         sourceNodeStreamsForWebRTC ? undefined : streamToSend,
         webrtcMultiOutputNodeIds,
         sourceNodeStreamsForWebRTC

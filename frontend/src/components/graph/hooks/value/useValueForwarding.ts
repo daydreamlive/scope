@@ -1,5 +1,12 @@
 import { useEffect, useRef, useMemo } from "react";
 import type { Edge, Node } from "@xyflow/react";
+import { toast } from "sonner";
+import { useCloudStatus } from "../../../../hooks/useCloudStatus";
+import {
+  createUploadCache,
+  assetPath,
+  type AssetKind,
+} from "../../../../lib/assetUpload";
 import type { FlowNodeData, SubgraphPort } from "../../../../lib/graphUtils";
 import { parseHandleId } from "../../../../lib/graphUtils";
 import { getAnyValueFromNode } from "../../utils/getValueFromNode";
@@ -29,6 +36,17 @@ function valuesEqual(a: unknown, b: unknown): boolean {
     return true;
   }
   return false;
+}
+
+function getNodeMediaType(node: Node<FlowNodeData>): AssetKind | null {
+  if (node.data.nodeType === "image") {
+    return node.data.mediaType === "video" ? "video" : "image";
+  }
+  if (node.data.nodeType === "audio") {
+    return "audio";
+  }
+  // not a node with a recognized media type
+  return null;
 }
 
 const PRODUCER_TYPES = new Set<FlowNodeData["nodeType"]>([
@@ -142,7 +160,10 @@ export function useValueForwarding(
     ((nodeId: string, text: string) => void) | undefined
   >
 ) {
+  const { isConnected: isCloudConnected } = useCloudStatus();
   const lastForwardTimeRef = useRef<Record<string, number>>({});
+  const uploadCacheRef = useRef(createUploadCache());
+  const lastUploadErrorRef = useRef<string>("");
 
   // Track previous node data to skip backend sends when only positions changed
   const prevNodeDataRef = useRef<Map<string, FlowNodeData>>(new Map());
@@ -167,6 +188,11 @@ export function useValueForwarding(
       ref.clear();
     };
   }, []);
+
+  useEffect(() => {
+    uploadCacheRef.current = createUploadCache();
+    lastUploadErrorRef.current = "";
+  }, [isCloudConnected]);
 
   // Detect streaming session start (false→true) and clear dedup state so the
   // new backend session receives all parameter values, even if they haven't
@@ -203,6 +229,18 @@ export function useValueForwarding(
       if (valuesEqual(lastSentRef.current.get(dedupKey), value)) return;
       lastSentRef.current.set(dedupKey, value);
       onNodeParamChangeRef.current!(backendId, paramName, value);
+    };
+
+    const getMediaPath = async (
+      sourceNode: Node<FlowNodeData>,
+      value: unknown
+    ): Promise<unknown> => {
+      const kind = getNodeMediaType(sourceNode);
+      if (!kind || typeof value !== "string" || !isCloudConnected) {
+        return value;
+      }
+
+      return assetPath(value, kind, uploadCacheRef.current);
     };
 
     // Check if any producer node data actually changed (not just positions)
@@ -486,7 +524,28 @@ export function useValueForwarding(
             sendPrompt();
           }
         } else {
-          sendParam(resolvedBackendId, resolvedParamName, entry.value);
+          void getMediaPath(node, entry.value)
+            .then(resolvedMediaPath => {
+              sendParam(
+                resolvedBackendId,
+                resolvedParamName,
+                resolvedMediaPath
+              );
+            })
+            .catch((error: unknown) => {
+              const message =
+                error instanceof Error
+                  ? error.message
+                  : "Could not upload cloud asset";
+              console.error("Error uploading graph cloud asset:", error);
+              if (lastUploadErrorRef.current === message) {
+                return;
+              }
+              lastUploadErrorRef.current = message;
+              toast.error("Could not upload cloud asset", {
+                description: message,
+              });
+            });
         }
 
         // Auto-forward tempo meta-settings to connected pipelines
@@ -521,6 +580,8 @@ export function useValueForwarding(
     isStreaming,
     sessionTick,
     onNodeParamChangeRef,
+    onPromptForwardRef,
+    isCloudConnected,
   ]);
 
   const nodesRef = useRef(nodes);
