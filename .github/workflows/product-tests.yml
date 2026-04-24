@@ -105,17 +105,10 @@ jobs:
           uv run pytest product-tests/chaos/ \
             -v --tb=short -m "not slow" --chaos-seed="${{ github.sha }}"
 
-      - name: Run PR-gate cloud smoke
-        # The test fixture pytest.skips when SCOPE_CLOUD_APP_ID is empty,
-        # so forks / PRs without cloud-app secret access pass by skipping.
-        env:
-          SCOPE_TEST_INSTRUMENTATION: "1"
-          CUDA_VISIBLE_DEVICES: ""
-          SCOPE_CLOUD_RING: "pr"
-          SCOPE_CLOUD_APP_ID: ${{ secrets.SCOPE_PR_FAL_APP_ID }}
-        run: |
-          uv run pytest product-tests/scenarios/test_onboarding_cloud.py \
-            -v --tb=short -m cloud
+      # NOTE: cloud-smoke step lives in docker-build.yml's `product-tests-cloud-smoke`
+      # job, which `needs: deploy-pr` so it runs only after the per-PR fal app
+      # is deployed. That consumes `needs.deploy-pr.outputs.livepeer_fal_app_id`
+      # directly, so no `SCOPE_PR_FAL_APP_ID` secret is required.
 
       # Only the UI multimodal subset gets opted into the PR gate, and only
       # when the touched paths suggest it's relevant. Keeps the common-case
@@ -145,9 +138,15 @@ jobs:
           summary=$(find product-tests/reports -name summary.md | head -1)
           if [ -n "$summary" ]; then
             echo "SUMMARY_PATH=$summary" >> "$GITHUB_ENV"
+            # The closing heredoc delimiter MUST be on its own line. If the
+            # summary file ends without a trailing newline, our closing
+            # SUMMARY_EOF gets concatenated onto the last content line and
+            # GitHub errors with "Matching delimiter not found 'SUMMARY_EOF'",
+            # which silently breaks the PR-comment post step. Force a newline.
             {
               echo "summary<<SUMMARY_EOF"
               cat "$summary"
+              printf '\n'
               echo "SUMMARY_EOF"
             } >> "$GITHUB_OUTPUT"
             cat "$summary"

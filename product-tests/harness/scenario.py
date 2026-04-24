@@ -591,8 +591,25 @@ def scenario(
             body_raised = False
             try:
                 user_fn(ctx)
-            except Exception:
+            except BaseException as exc:  # noqa: BLE001 — we re-raise
                 body_raised = True
+                # Record the unhandled exception as a hard fail BEFORE
+                # teardown writes the report. Without this, a test body
+                # that crashed (e.g. Playwright TimeoutError, assertion
+                # outside ``report.fail``) would leave ``report.hard_fails``
+                # empty, and the aggregated summary.md would show ✅ next
+                # to a test that actually crashed. Pytest still exits
+                # non-zero, but the PR-comment summary is what humans
+                # read.
+                import traceback
+
+                exc_type = type(exc).__name__
+                exc_msg = str(exc).splitlines()[0] if str(exc) else ""
+                tb = "".join(traceback.format_exception(exc)).strip()
+                # Truncate the traceback so hard_fails entries stay
+                # summary-table-friendly; full tb is in pytest output.
+                tb_tail = "\n".join(tb.splitlines()[-6:])
+                report.fail(f"test body raised {exc_type}: {exc_msg}\n{tb_tail}")
                 raise
             finally:
                 ctx._teardown(body_raised=body_raised)
