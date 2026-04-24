@@ -63,6 +63,7 @@ def _swap_pipeline(base_url: str, pipeline_id: str) -> None:
 
 
 @pytest.mark.chaos
+@pytest.mark.graph
 def test_workflow_switching_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

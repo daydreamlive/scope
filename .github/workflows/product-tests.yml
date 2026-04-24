@@ -21,8 +21,28 @@ jobs:
   # ---------------------------------------------------------------------------
   # PR gate: CPU-only, passthrough pipeline, <25 min budget
   # ---------------------------------------------------------------------------
+  # Detect touched paths so we can opt a small UI-multimodal subset into the
+  # PR gate when onboarding/graph components changed, without paying the API
+  # cost on every PR.
+  path-filter:
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    name: Detect touched paths
+    outputs:
+      ui: ${{ steps.filter.outputs.ui }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            ui:
+              - 'frontend/src/components/onboarding/**'
+              - 'frontend/src/components/graph/**'
+
   pr-gate:
     if: github.event_name != 'schedule'
+    needs: path-filter
     runs-on: ubuntu-latest
     name: Product Tests (PR gate, CPU)
     timeout-minutes: 25
@@ -30,6 +50,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Set up Node.js
         uses: actions/setup-node@v4
@@ -55,6 +78,15 @@ jobs:
 
       - name: Install Playwright browser
         run: uv run playwright install --with-deps chromium
+
+      - name: Check harness/testids.py is in sync with frontend
+        working-directory: product-tests
+        run: |
+          uv run python -m harness.testids --check || {
+            echo "::error::harness/testids.py is out of sync with frontend data-testid values."
+            echo "::error::Run \`uv run python -m harness.testids --sync\` and commit the result."
+            exit 1
+          }
 
       - name: Run PR-gate scenarios (local mode)
         env:
@@ -84,6 +116,27 @@ jobs:
         run: |
           uv run pytest product-tests/scenarios/test_onboarding_cloud.py \
             -v --tb=short -m cloud
+
+      # Only the UI multimodal subset gets opted into the PR gate, and only
+      # when the touched paths suggest it's relevant. Keeps the common-case
+      # PR ring machine-only (fast, free) without punting visual coverage
+      # entirely when the risky areas change.
+      - name: Run UI multimodal (path-triggered, advisory)
+        # NOTE: secrets cannot be referenced directly in `if:` — the step
+        # always runs when the path filter matched, and the Python side
+        # skips cleanly when ANTHROPIC_API_KEY is unset (verdict "uncertain"
+        # instead of "fail"). Trailing `|| true` keeps this advisory during
+        # the Slice 5 stabilization window.
+        if: needs.path-filter.outputs.ui == 'true'
+        env:
+          SCOPE_TEST_INSTRUMENTATION: "1"
+          CUDA_VISIBLE_DEVICES: ""
+          SCOPE_MULTIMODAL_EVAL: "1"
+          SCOPE_MULTIMODAL_BUDGET_USD: "0.50"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          uv run pytest product-tests/scenarios/ \
+            -v --tb=short -m "multimodal and ui and not cloud" || true
 
       - name: Aggregate summary
         if: always()
@@ -135,6 +188,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
       - name: Install uv
         uses: astral-sh/setup-uv@v3
         with:
@@ -158,12 +214,22 @@ jobs:
       - name: Install Playwright browser
         run: uv run playwright install --with-deps chromium
 
+      - name: Check harness/testids.py is in sync with frontend
+        working-directory: product-tests
+        run: uv run python -m harness.testids --check
+
       - name: Run scenarios + chaos (GPU)
         env:
           SCOPE_TEST_INSTRUMENTATION: "1"
           SCOPE_CLOUD_APP_ID: ${{ secrets.SCOPE_NIGHTLY_FAL_APP_ID }}
           SCOPE_CLOUD_RING: "nightly"
           SCOPE_CHURN_DURATION_SEC: "180"
+          # Multimodal enabled in the nightly ring only — daily budget cap
+          # prevents a runaway suite from burning unlimited API credit.
+          SCOPE_MULTIMODAL_EVAL: "1"
+          SCOPE_MULTIMODAL_TRIAGE: "1"
+          SCOPE_MULTIMODAL_BUDGET_USD: "10.00"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           uv run pytest product-tests/scenarios/ product-tests/chaos/ \
             -v --tb=short --chaos-seed="${{ github.run_id }}"
@@ -181,6 +247,10 @@ jobs:
           SCOPE_TEST_INSTRUMENTATION: "1"
           SCOPE_CLOUD_APP_ID: ${{ secrets.SCOPE_NIGHTLY_FAL_APP_ID }}
           SCOPE_CLOUD_RING: "nightly"
+          SCOPE_MULTIMODAL_EVAL: "1"
+          SCOPE_MULTIMODAL_TRIAGE: "1"
+          SCOPE_MULTIMODAL_BUDGET_USD: "10.00"
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           if [ -d product-tests/regression ] && ls product-tests/regression/test_*.py >/dev/null 2>&1; then
             uv run pytest product-tests/regression/ -v --tb=short

@@ -59,6 +59,7 @@ _END_ALL_TRACKS = """() => {
 
 
 @pytest.mark.chaos
+@pytest.mark.input
 def test_device_lost_mid_stream_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

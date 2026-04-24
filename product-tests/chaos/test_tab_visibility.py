@@ -39,6 +39,7 @@ _SET_HIDDEN = """(hidden) => {
 
 
 @pytest.mark.chaos
+@pytest.mark.lifecycle
 def test_tab_visibility_churn_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

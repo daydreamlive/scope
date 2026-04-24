@@ -26,6 +26,8 @@ from harness.scope_process import ScopeHarness
 
 
 @pytest.mark.chaos
+@pytest.mark.input
+@pytest.mark.lifecycle
 def test_reload_mid_stream_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

@@ -8,6 +8,7 @@ Livepeer side reports an orphan. The scenario proves the happy cycle works.
 
 from __future__ import annotations
 
+import pytest
 from harness import baselines, flows, gates
 from harness.driver import PlaywrightDriver
 from harness.failure_watcher import FailureWatcher
@@ -16,6 +17,7 @@ from harness.retry_probe import RetryProbe
 from harness.scope_process import ScopeHarness
 
 
+@pytest.mark.lifecycle
 def test_stop_restart_local_passthrough(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

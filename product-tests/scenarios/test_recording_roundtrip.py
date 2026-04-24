@@ -15,7 +15,6 @@ programmatic decoder.
 
 from __future__ import annotations
 
-import tempfile
 import time
 from pathlib import Path
 
@@ -32,9 +31,7 @@ def _make_test_video(path: Path, seconds: int = 10) -> None:
     """Make a 30fps solid-color MP4 so we have a deterministic input."""
     import numpy as np
 
-    w = cv2.VideoWriter(
-        str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30, (320, 240)
-    )
+    w = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), 30, (320, 240))
     frame = np.zeros((240, 320, 3), dtype=np.uint8)
     frame[:] = (0, 255, 0)
     for _ in range(30 * seconds):
@@ -42,6 +39,7 @@ def _make_test_video(path: Path, seconds: int = 10) -> None:
     w.release()
 
 
+@pytest.mark.recording
 def test_recording_roundtrip_local_passthrough(
     scope_harness: ScopeHarness,
     retry_probe: RetryProbe,
@@ -85,9 +83,7 @@ def test_recording_roundtrip_local_passthrough(
     report.measure("recording_duration_sec", round(record_duration, 2))
 
     # 4. Download the MP4.
-    r = requests.get(
-        f"{base}/api/v1/recordings/headless", timeout=30.0, stream=True
-    )
+    r = requests.get(f"{base}/api/v1/recordings/headless", timeout=30.0, stream=True)
     assert r.status_code == 200, f"recordings get: {r.status_code} {r.text[:200]}"
     assert r.headers.get("content-type", "").startswith("video/mp4"), (
         f"unexpected content-type: {r.headers.get('content-type')}"
@@ -98,7 +94,9 @@ def test_recording_roundtrip_local_passthrough(
     size_bytes = out.stat().st_size
     report.measure("recording_size_bytes", size_bytes)
     if size_bytes < 1024:
-        report.fail(f"recording too small ({size_bytes} bytes) — likely empty container")
+        report.fail(
+            f"recording too small ({size_bytes} bytes) — likely empty container"
+        )
 
     # 5. Decode with cv2.
     cap = cv2.VideoCapture(str(out))
@@ -135,6 +133,7 @@ def test_recording_roundtrip_local_passthrough(
 
     # 7. Hard gates (we skip enforce_zero_ui_errors since there's no driver).
     from harness import gates
+
     gates.enforce_zero_retries(report, retry_probe)
     gates.enforce_zero_unexpected_closes(report, failure_watcher)
 

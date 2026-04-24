@@ -50,6 +50,8 @@ def _safe_get(url: str) -> tuple[int, str]:
 
 
 @pytest.mark.chaos
+@pytest.mark.lifecycle
+@pytest.mark.params
 def test_concurrent_api_hammer_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

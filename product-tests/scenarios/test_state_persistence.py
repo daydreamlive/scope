@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from harness import flows
 from harness.driver import PlaywrightDriver
 from harness.report import TestReport
@@ -27,6 +28,8 @@ from harness.scope_process import ScopeHarness
 from playwright.sync_api import TimeoutError as PwTimeout
 
 
+@pytest.mark.onboarding
+@pytest.mark.lifecycle
 def test_onboarding_state_persists_across_restart(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,
@@ -44,15 +47,13 @@ def test_onboarding_state_persists_across_restart(
     assert scope_dir is not None
     onboarding_file = scope_dir / "onboarding.json"
     report.metadata["scope_dir"] = str(scope_dir)
-    report.measure(
-        "onboarding_file_exists_pre_restart", int(onboarding_file.exists())
-    )
+    report.measure("onboarding_file_exists_pre_restart", int(onboarding_file.exists()))
     if not onboarding_file.exists():
         report.fail(
             f"onboarding.json never materialized at {onboarding_file} — "
             "state isn't being written"
         )
-        assert False, "onboarding state not persisted to disk"
+        raise AssertionError("onboarding state not persisted to disk")
 
     before_size = onboarding_file.stat().st_size
     report.measure("onboarding_file_size_pre", before_size)

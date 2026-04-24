@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import time
 
+import pytest
 import requests
 from harness import baselines, flows, gates
 from harness.driver import PlaywrightDriver
@@ -37,6 +38,7 @@ def _apply_and_readback(base_url: str, params: dict) -> tuple[dict, int]:
     return g.json().get("parameters", {}), rt
 
 
+@pytest.mark.params
 def test_parameter_apply_local_passthrough(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

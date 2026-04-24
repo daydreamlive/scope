@@ -47,6 +47,7 @@ ADVERSARIAL_PAYLOADS: list[tuple[str, object]] = [
 
 
 @pytest.mark.chaos
+@pytest.mark.params
 def test_adversarial_parameters_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

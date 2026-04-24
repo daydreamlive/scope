@@ -25,6 +25,7 @@ from harness.scope_process import ScopeHarness
 
 
 @pytest.mark.chaos
+@pytest.mark.params
 def test_parameter_spam_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

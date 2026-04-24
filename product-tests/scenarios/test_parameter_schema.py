@@ -87,6 +87,7 @@ def _post_param(base_url: str, payload: dict[str, Any]) -> int:
     return r.status_code
 
 
+@pytest.mark.params
 def test_parameter_schema_roundtrip_passthrough(
     scope_harness: ScopeHarness,
     retry_probe: RetryProbe,
@@ -160,14 +161,14 @@ def test_parameter_schema_roundtrip_passthrough(
         report.fail(f"enum values rejected: {enum_failures[:5]}")
     if out_of_range_5xx:
         report.fail(
-            f"out-of-range params produced 5xx (should be 4xx): "
-            f"{out_of_range_5xx[:5]}"
+            f"out-of-range params produced 5xx (should be 4xx): {out_of_range_5xx[:5]}"
         )
 
     failure_watcher.mark_initiated_stop()
     requests.post(f"{base}/api/v1/session/stop", timeout=10.0)
 
     from harness import gates
+
     gates.enforce_zero_retries(report, retry_probe)
     gates.enforce_zero_unexpected_closes(report, failure_watcher)
 

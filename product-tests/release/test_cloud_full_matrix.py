@@ -28,6 +28,7 @@ STARTER_WORKFLOWS = [
 ]
 
 
+@pytest.mark.onboarding
 @pytest.mark.cloud
 @pytest.mark.slow
 @pytest.mark.parametrize("workflow_id", STARTER_WORKFLOWS)

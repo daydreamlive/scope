@@ -21,7 +21,12 @@ import pytest
 from harness.scenario import scenario
 
 
-@scenario(mode="local", workflow="local-passthrough", marks=(pytest.mark.chaos,))
+@scenario(
+    mode="local",
+    workflow="local-passthrough",
+    feature="lifecycle",
+    marks=(pytest.mark.chaos,),
+)
 def test_rapid_stop_start_local(ctx):
     """Onboard, Run, hammer Stop/Run for 30s; every Run must land a frame."""
     ctx.metadata("chaos_seed", ctx.chaos_seed)
