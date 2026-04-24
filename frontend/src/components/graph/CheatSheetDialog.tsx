@@ -27,9 +27,9 @@ const BASICS: HowToItem[] = [
     title: "Add a node",
     body: (
       <>
-        Press <kbd className="cheatsheet-kbd">Tab</kbd> on the canvas, click the{" "}
-        <span className="font-mono">+</span> button in the upper-right, or
-        right-click empty canvas to open the create menu.
+        Click the <span className="font-mono">+</span> button in the upper-right
+        of the canvas to open the node registry, press{" "}
+        <kbd className="cheatsheet-kbd">Tab</kbd>, or right-click empty canvas.
       </>
     ),
   },
@@ -37,8 +37,9 @@ const BASICS: HowToItem[] = [
     title: "Import a workflow",
     body: (
       <>
-        Open the workflow import dialog from the top toolbar, or drop a{" "}
-        <span className="font-mono">.json</span> file directly onto the canvas.
+        Open the <span className="font-mono">Graph</span> menu in the upper-left
+        of the canvas, then choose{" "}
+        <span className="font-mono">Import Workflow</span>.
       </>
     ),
   },
@@ -49,7 +50,7 @@ const BASICS: HowToItem[] = [
         Pipelines are registered via the Python package. Add them to the
         project&apos;s <span className="font-mono">pyproject.toml</span> or
         install a plugin package, then restart Scope. They&apos;ll appear in the
-        pipeline picker.
+        node registry.
       </>
     ),
   },
@@ -57,10 +58,10 @@ const BASICS: HowToItem[] = [
     title: "Install a LoRA",
     body: (
       <>
-        Drop LoRA weights into{" "}
-        <span className="font-mono">~/.daydream-scope/models</span> (or your
-        configured <span className="font-mono">DAYDREAM_SCOPE_MODELS_DIR</span>
-        ), then pick them from the LoRA picker on pipelines that support them.
+        Open <span className="font-mono">Settings</span> (top-right gear) →{" "}
+        <span className="font-mono">LoRAs</span> tab and paste a URL to install.
+        Installed LoRAs appear in the LoRA picker on pipelines that support
+        them.
       </>
     ),
   },
@@ -127,7 +128,7 @@ export function CheatSheetDialog({
         onOpenChange(next);
       }}
     >
-      <DialogContent className="sm:max-w-[560px] max-h-[80vh] overflow-y-auto">
+      <DialogContent className="sm:max-w-[560px] h-[80vh] max-h-[600px] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>Scope cheat sheet</DialogTitle>
           <DialogDescription>
@@ -164,7 +165,7 @@ export function CheatSheetDialog({
           ))}
         </div>
 
-        <div className="mt-4">
+        <div className="mt-4 flex-1 min-h-0 overflow-y-auto pr-1">
           {tab === "basics" && (
             <div className="space-y-3">
               {BASICS.map(item => (

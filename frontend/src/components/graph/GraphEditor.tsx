@@ -842,7 +842,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         "toggle-stream": () =>
           isStreaming ? onStopStream?.() : onStartStream?.(),
         "show-shortcuts": () => {
-          setCheatSheetInitialTab("shortcuts");
+          setCheatSheetInitialTab("basics");
           setShowShortcutsDialog(true);
         },
         "select-all": () =>
@@ -1268,14 +1268,16 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               />
             </ReactFlow>
 
-            {/* Help / cheat sheet button — bottom-left, above React Flow controls */}
+            {/* Help / cheat sheet button — sits directly above the React Flow
+                zoom controls (26×26 buttons at bottom-left: 15px margin × 4
+                buttons = 104px tall, so top of controls is at 119px). */}
             <button
               type="button"
               onClick={() => {
                 setCheatSheetInitialTab("basics");
                 setShowShortcutsDialog(true);
               }}
-              className="absolute bottom-[168px] left-[14px] z-30 w-6 h-6 rounded border border-[rgba(119,119,119,0.35)] bg-[rgba(17,17,17,0.8)] hover:border-[rgba(119,119,119,0.7)] hover:bg-[rgba(17,17,17,0.95)] transition-colors flex items-center justify-center text-[#b8b8b9] hover:text-white text-xs font-semibold"
+              className="absolute bottom-[127px] left-[15px] z-30 w-[26px] h-[26px] rounded border border-[rgba(119,119,119,0.35)] bg-[rgba(17,17,17,0.8)] hover:border-[rgba(119,119,119,0.7)] hover:bg-[rgba(17,17,17,0.95)] transition-colors flex items-center justify-center text-[#b8b8b9] hover:text-white text-xs font-semibold"
               title="Help & shortcuts"
               aria-label="Open help cheat sheet"
             >
