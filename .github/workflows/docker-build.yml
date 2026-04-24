@@ -147,3 +147,70 @@ jobs:
               });
             }
 
+  # ---------------------------------------------------------------------------
+  # Product-tests cloud smoke — runs AFTER deploy-pr so it can target the
+  # PR's own freshly-deployed fal app. The rest of the product-tests suite
+  # (machine-only scenarios, chaos, UI multimodal) lives in its own workflow
+  # and runs in parallel; only the cloud-marked onboarding smoke needs the
+  # deploy output, so only that step lives here.
+  # ---------------------------------------------------------------------------
+  product-tests-cloud-smoke:
+    needs: deploy-pr
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    name: Product Tests — cloud smoke
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22.19.0'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+          version: "0.9.11"
+
+      - name: Build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install product-tests deps
+        run: uv sync --group product-tests
+
+      - name: Install Playwright browser
+        run: uv run playwright install --with-deps chromium
+
+      - name: Run cloud smoke against PR-deployed fal app
+        env:
+          SCOPE_TEST_INSTRUMENTATION: "1"
+          CUDA_VISIBLE_DEVICES: ""
+          SCOPE_CLOUD_RING: "pr"
+          # deploy-pr outputs `daydream/scope-livepeer-pr-<N>--preview`.
+          # The runner expects the app_id with the `/ws` suffix appended.
+          SCOPE_CLOUD_APP_ID: ${{ needs.deploy-pr.outputs.livepeer_fal_app_id }}/ws
+        run: |
+          uv run pytest product-tests/scenarios/test_onboarding_cloud.py \
+            -v --tb=short -m cloud
+
+      - name: Upload reports on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: product-tests-cloud-smoke-${{ github.run_id }}
+          path: product-tests/reports/
+          retention-days: 14
