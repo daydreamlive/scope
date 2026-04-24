@@ -9,39 +9,26 @@ against a real Scope subprocess and asserts:
 
 This scenario uses the `local-passthrough` starter workflow so it runs
 CPU-only and fits within the PR gate's 25-minute budget.
+
+Note for future test authors: this file is deliberately minimal as a
+reference implementation for the `@scenario` decorator. See
+`product-tests/WRITING_TESTS.md` for the cookbook.
 """
 
 from __future__ import annotations
 
-from harness import baselines, flows, gates
-from harness.driver import PlaywrightDriver
-from harness.failure_watcher import FailureWatcher
-from harness.report import TestReport
-from harness.retry_probe import RetryProbe
-from harness.scope_process import ScopeHarness
+from harness import baselines
+from harness.scenario import scenario
 
 
-def test_onboarding_local_passthrough(
-    scope_harness: ScopeHarness,
-    driver: PlaywrightDriver,
-    retry_probe: RetryProbe,
-    failure_watcher: FailureWatcher,
-    report: TestReport,
-):
+@scenario(mode="local", workflow="local-passthrough")
+def test_onboarding_local_passthrough(ctx):
     """Cold-start → pick local → decline telemetry → pick Camera Preview → Run → first frame."""
-    report.metadata["workflow"] = "local-passthrough"
+    ctx.complete_onboarding()
 
-    flows.complete_onboarding_local(driver, workflow_id="local-passthrough")
-
-    first_ms = flows.start_stream_and_wait_first_frame(driver, timeout_ms=90_000)
+    first_ms = ctx.run_and_wait_first_frame(timeout_ms=90_000)
     baselines.check(
-        report, "local", "passthrough", "first_frame_time_ms", int(first_ms)
+        ctx.report, "local", "passthrough", "first_frame_time_ms", int(first_ms)
     )
-
-    gates.enforce_all_gates(report, retry_probe, failure_watcher, driver)
-
-    # Clean stop so the autouse watcher doesn't see a stray close.
-    failure_watcher.mark_initiated_stop()
-    flows.stop_stream(driver)
-
-    assert report.passed, f"Hard fails: {report.hard_fails}"
+    # Default gates (zero retries, zero unexpected closes, zero UI errors) and
+    # the clean stop are all applied by the @scenario teardown.

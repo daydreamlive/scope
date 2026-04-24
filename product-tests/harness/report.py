@@ -64,6 +64,26 @@ class TestReport:
         return path
 
 
+def _format_drift(meta: dict) -> str:
+    """Render the baseline-drift signal for the summary table.
+
+    ``baselines.check`` stashes per-dimension drift as
+    ``baseline_<dim>_drift_pct`` metadata. We surface the
+    ``first_frame_time_ms`` drift in the summary because that's the
+    dimension every scenario measures; a negative number = faster than
+    baseline (good), positive = slower (drift to investigate).
+    """
+    raw = meta.get("baseline_first_frame_time_ms_drift_pct")
+    if raw is None:
+        return "—"
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return str(raw)
+    sign = "+" if v > 0 else ""
+    return f"{sign}{v:.1f}%"
+
+
 def aggregate_summary(reports_root: Path) -> Path:
     """Walk reports_root and emit a summary.md suitable for PR comments."""
     rows: list[dict] = []
@@ -79,17 +99,19 @@ def aggregate_summary(reports_root: Path) -> Path:
     lines.append(f"**{passed}/{total} passed**")
     lines.append("")
     lines.append(
-        "| test | mode | pass | first_frame_ms | retries | unexpected_closes |"
+        "| test | mode | pass | first_frame_ms | drift | retries | unexpected_closes |"
     )
-    lines.append("|---|---|---|---|---|---|")
+    lines.append("|---|---|---|---|---|---|---|")
     for r in rows:
         d = r.get("dimensions", {})
+        meta = r.get("metadata", {})
         lines.append(
-            "| {test} | {mode} | {p} | {ff} | {rc} | {uc} |".format(
+            "| {test} | {mode} | {p} | {ff} | {dr} | {rc} | {uc} |".format(
                 test=r.get("test", "?"),
                 mode=r.get("mode", "?"),
                 p="✅" if r.get("pass") else "❌",
                 ff=d.get("first_frame_time_ms", "—"),
+                dr=_format_drift(meta),
                 rc=d.get("retry_count", "—"),
                 uc=d.get("unexpected_close_count", "—"),
             )
