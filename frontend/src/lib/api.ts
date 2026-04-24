@@ -521,6 +521,10 @@ export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
 };
 
 export const getAssetUrl = (assetPath: string): string => {
+  if (assetPath.startsWith("blob:") || assetPath.startsWith("data:")) {
+    return assetPath;
+  }
+
   // The backend returns full absolute paths, but we need to extract the relative path
   // from the assets directory for the serving endpoint
   // Example: C:\Users\...\assets\myimage.png -> myimage.png
