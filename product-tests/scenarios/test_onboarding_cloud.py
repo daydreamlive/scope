@@ -41,6 +41,7 @@ def _cloud_workflows() -> list[str]:
     return ["starter-mythical-creature"]  # one workflow only on the PR gate
 
 
+@pytest.mark.onboarding
 @pytest.mark.cloud
 @pytest.mark.parametrize("workflow_id", _cloud_workflows())
 def test_onboarding_cloud(

@@ -21,7 +21,7 @@ from harness import baselines
 from harness.scenario import scenario
 
 
-@scenario(mode="local", workflow="local-passthrough")
+@scenario(mode="local", workflow="local-passthrough", feature="onboarding")
 def test_onboarding_local_passthrough(ctx):
     """Cold-start → pick local → decline telemetry → pick Camera Preview → Run → first frame."""
     ctx.complete_onboarding()

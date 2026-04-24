@@ -36,6 +36,7 @@ from harness.scope_process import ScopeHarness
 
 @pytest.mark.chaos
 @pytest.mark.slow
+@pytest.mark.lifecycle
 def test_session_churn_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

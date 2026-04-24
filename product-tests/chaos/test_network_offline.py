@@ -25,6 +25,7 @@ from harness.scope_process import ScopeHarness
 
 
 @pytest.mark.chaos
+@pytest.mark.networking
 def test_network_offline_cycle_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

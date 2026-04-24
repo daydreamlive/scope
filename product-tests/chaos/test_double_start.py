@@ -30,6 +30,7 @@ from harness.scope_process import ScopeHarness
 
 
 @pytest.mark.chaos
+@pytest.mark.lifecycle
 def test_double_start_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

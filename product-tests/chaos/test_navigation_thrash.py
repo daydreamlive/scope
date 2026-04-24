@@ -27,6 +27,7 @@ pytestmark = pytest.mark.slow  # budget: ~3min; nightly-only
 
 
 @pytest.mark.chaos
+@pytest.mark.lifecycle
 def test_navigation_thrash_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

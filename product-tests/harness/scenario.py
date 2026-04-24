@@ -37,6 +37,7 @@ not a cage.
 
 from __future__ import annotations
 
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -200,6 +201,193 @@ class ScenarioContext:
         self.driver.page.wait_for_timeout(ms)
 
     # ------------------------------------------------------------------
+    # Recording + frame capture (Slice 5 — media quality).
+    #
+    # These helpers target the class of bug where the output is
+    # statistically broken: wrong framerate, synthesized-looking
+    # timestamps, black / frozen / all-one-color frames. The harness
+    # saves every captured artifact into ``self.test_report_dir`` so it
+    # auto-uploads on CI failure.
+    # ------------------------------------------------------------------
+
+    def start_recording(self, node_id: str = "record") -> None:
+        """Start the headless recorder for a record node in the graph.
+
+        Headless sessions have session_id ``"headless"``, so we POST to
+        ``/api/v1/recordings/headless/start?node_id=<id>``. For graphs
+        without a named record node, pass ``node_id=""``.
+        """
+        url = f"{self.base_url}/api/v1/recordings/headless/start"
+        params = {"node_id": node_id} if node_id else {}
+        r = requests.post(url, params=params, timeout=10.0)
+        r.raise_for_status()
+
+    def stop_and_download_recording(
+        self,
+        node_id: str = "record",
+        *,
+        filename: str | None = None,
+    ) -> Path:
+        """Stop the recorder and download the MP4 into the report dir.
+
+        Returns the local ``Path`` to the downloaded file. Raises if the
+        download returns non-2xx or a zero-byte response.
+        """
+        base = self.base_url
+        stop_url = f"{base}/api/v1/recordings/headless/stop"
+        dl_url = f"{base}/api/v1/recordings/headless"
+        params = {"node_id": node_id} if node_id else {}
+        r = requests.post(stop_url, params=params, timeout=15.0)
+        r.raise_for_status()
+        r = requests.get(dl_url, params=params, timeout=60.0)
+        r.raise_for_status()
+        if not r.content:
+            raise RuntimeError(f"empty recording download from {dl_url}")
+        out = self.test_report_dir / (
+            filename or f"recording_{node_id or 'default'}.mp4"
+        )
+        out.write_bytes(r.content)
+        return out
+
+    def capture_live_frame(
+        self,
+        *,
+        sink_node_id: str | None = None,
+        filename: str | None = None,
+    ) -> Path:
+        """Snapshot the current frame from the live session as a JPEG.
+
+        Saved into ``self.test_report_dir`` so it's an auto-uploaded
+        artifact. ``sink_node_id`` targets a specific sink in a
+        multi-sink graph; omit it for single-sink workflows.
+        """
+        url = f"{self.base_url}/api/v1/session/frame"
+        params = {"sink_node_id": sink_node_id} if sink_node_id else {}
+        r = requests.get(url, params=params, timeout=10.0)
+        r.raise_for_status()
+        if not r.content:
+            raise RuntimeError(f"empty frame response from {url}")
+        ts = int(time.time() * 1000)
+        name = filename or f"frame_{sink_node_id or 'default'}_{ts}.jpg"
+        out = self.test_report_dir / name
+        out.write_bytes(r.content)
+        return out
+
+    # ------------------------------------------------------------------
+    # Screenshot + multimodal verification (Slice 5 — visual quality).
+    #
+    # ``screenshot`` and ``screenshot_testid`` capture browser pixels
+    # into the report dir so they're available both as failure artifacts
+    # and as inputs to multimodal_check(). ``multimodal_check`` routes
+    # any mix of sink frames, screenshots, and recorded-MP4 samples
+    # through the Anthropic vision API when SCOPE_MULTIMODAL_EVAL=1.
+    # ------------------------------------------------------------------
+
+    def screenshot(self, name: str | None = None) -> Path:
+        """Full-page browser screenshot into the report dir.
+
+        ``name`` is an optional filename (``.png`` appended if missing).
+        Returns the saved path.
+        """
+        ts = int(time.time() * 1000)
+        fname = name or f"screenshot_{ts}.png"
+        if not fname.endswith((".png", ".jpg", ".jpeg")):
+            fname = f"{fname}.png"
+        out = self.test_report_dir / fname
+        self.driver.page.screenshot(path=str(out), full_page=True)
+        return out
+
+    def screenshot_testid(self, testid: str, name: str | None = None) -> Path:
+        """Screenshot scoped to a single testid element.
+
+        Critical for tooltip/modal/button-state checks where a
+        full-page shot is too noisy for either a human reviewer or a
+        multimodal eval to focus on. The element must already be visible
+        — we don't auto-wait on testid here; call ``ctx.wait(testid)``
+        first if needed.
+        """
+        ts = int(time.time() * 1000)
+        fname = name or f"{testid}_{ts}.png"
+        if not fname.endswith((".png", ".jpg", ".jpeg")):
+            fname = f"{fname}.png"
+        out = self.test_report_dir / fname
+        locator = self.driver.page.locator(f'[data-testid="{testid}"]').first
+        locator.screenshot(path=str(out))
+        return out
+
+    def multimodal_check(
+        self,
+        images: Path | list[Path],
+        question: str,
+        *,
+        must_contain: list[str] | None = None,
+    ):
+        """Route images + question through the multimodal eval.
+
+        Gated by ``SCOPE_MULTIMODAL_EVAL=1``. When disabled, returns a
+        ``Verdict`` with ``status="uncertain"`` and a "disabled" reason,
+        so tests marked ``@pytest.mark.multimodal`` still collect without
+        burning API credit locally.
+
+        The images argument can be any mix of:
+          - sink frames from ``ctx.capture_live_frame()``
+          - browser screenshots from ``ctx.screenshot()`` / ``screenshot_testid()``
+          - recorded-MP4 sample frames from ``harness.media.sample_frames()``
+
+        Returns the ``Verdict`` without auto-asserting. Callers decide
+        whether an ``uncertain`` verdict is a skip, a warning, or a fail.
+        """
+        from . import visual_eval
+
+        paths = [images] if isinstance(images, Path) else list(images)
+        return visual_eval.eval_images(paths, question, must_contain=must_contain)
+
+    def capture_sink_video_slice(
+        self,
+        seconds: float = 3.0,
+        *,
+        filename: str | None = None,
+    ) -> Path:
+        """Grab a short MP4 slice from the live MPEG-TS output.
+
+        Uses ``ffmpeg`` to pull from ``/api/v1/session/output.ts`` for
+        ``seconds`` seconds, remux to MP4, and save into the report dir.
+        Useful when a single-frame capture wouldn't show the bug (e.g.
+        stutter, intermittent artifacts).
+        """
+        import shutil
+        import subprocess
+
+        ffmpeg = shutil.which("ffmpeg")
+        if ffmpeg is None:
+            raise RuntimeError(
+                "ffmpeg not found on PATH. "
+                "Install with `brew install ffmpeg` / `apt-get install ffmpeg`."
+            )
+        ts_url = f"{self.base_url}/api/v1/session/output.ts"
+        ts = int(time.time() * 1000)
+        out = self.test_report_dir / (filename or f"slice_{ts}.mp4")
+        subprocess.check_call(
+            [
+                ffmpeg,
+                "-loglevel",
+                "error",
+                "-y",
+                "-t",
+                f"{seconds:.3f}",
+                "-i",
+                ts_url,
+                "-c",
+                "copy",
+                "-movflags",
+                "+faststart",
+                str(out),
+            ],
+            timeout=seconds + 30.0,
+        )
+        return out
+
+    # ------------------------------------------------------------------
     # Internal — teardown contract.
     # ------------------------------------------------------------------
 
@@ -236,9 +424,80 @@ class ScenarioContext:
             # Never let a gate-check-crash mask the real test failure.
             pass
 
+        # Opt-in triage pass on failure: point a multimodal reviewer at
+        # whatever we captured during the test and write a plain-English
+        # summary into the report dir. This turns "here's trace.zip, good
+        # luck" into "the workflow picker rendered 2 cards instead of 3".
+        failing = body_raised or not self.report.passed
+        if failing and os.environ.get("SCOPE_MULTIMODAL_TRIAGE") == "1":
+            try:
+                self._write_triage_report()
+            except Exception:
+                # Never let triage mask the real failure.
+                pass
+
         if body_raised:
             return
         assert self.report.passed, f"Hard fails: {self.report.hard_fails}"
+
+    def _write_triage_report(self) -> None:
+        """Collect captured images and ask the multimodal eval to describe
+        the failure in plain English. Writes ``triage.md`` into the
+        report dir. Gated upstream by ``SCOPE_MULTIMODAL_TRIAGE=1``.
+        """
+        from . import visual_eval
+
+        if not visual_eval.is_enabled():
+            # TRIAGE is on but EVAL isn't — skip gracefully.
+            return
+
+        exts = {".png", ".jpg", ".jpeg"}
+        candidates = sorted(
+            p
+            for p in self.test_report_dir.rglob("*")
+            if p.is_file() and p.suffix.lower() in exts
+        )
+        if not candidates:
+            return
+        # Keep the payload bounded: take up to 8 images, evenly sampled.
+        if len(candidates) > 8:
+            step = max(1, len(candidates) // 8)
+            candidates = candidates[::step][:8]
+
+        context = (
+            f"Test report dir: {self.test_report_dir.name}. "
+            f"Hard fails: {self.report.hard_fails}."
+        )
+        verdict = visual_eval.triage(candidates, context=context)
+
+        lines = [
+            "# Triage — multimodal failure summary",
+            "",
+            f"- status: `{verdict.status}`",
+            f"- hard_fails: {self.report.hard_fails}",
+            "- images reviewed:",
+            *[f"  - `{p.name}`" for p in candidates],
+            "",
+            "## Reasoning",
+            "",
+            verdict.reasoning or "(no reasoning returned)",
+            "",
+        ]
+        if verdict.observations:
+            lines += [
+                "## Observations",
+                "",
+                *[f"- {o}" for o in verdict.observations],
+                "",
+            ]
+        if verdict.missing_required:
+            lines += [
+                "## Missing required",
+                "",
+                *[f"- {m}" for m in verdict.missing_required],
+                "",
+            ]
+        (self.test_report_dir / "triage.md").write_text("\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
@@ -246,10 +505,29 @@ class ScenarioContext:
 # ---------------------------------------------------------------------------
 
 
+# Canonical feature axis. Must match the marker list in pytest.ini so
+# `pytest -m <feature>` works without the --strict-markers check firing.
+# Tests can pass a single feature or a tuple; unknown features raise early
+# rather than silently producing unregistered markers.
+_CANONICAL_FEATURES = frozenset(
+    {
+        "onboarding",
+        "recording",
+        "params",
+        "lifecycle",
+        "networking",
+        "input",
+        "graph",
+        "ui",
+    }
+)
+
+
 def scenario(
     *,
     mode: str = "local",
     workflow: str | None = None,
+    feature: str | tuple[str, ...] | None = None,
     marks: tuple = (),
 ) -> Callable:
     """Turn a ``def test_foo(ctx)`` function into a full-gated pytest test.
@@ -260,6 +538,12 @@ def scenario(
             auth bypass in the browser.
         workflow: default workflow id for ``ctx.complete_onboarding()``.
             Override per-call if a single test switches workflows.
+        feature: one or more feature-axis tags (e.g. ``"recording"`` or
+            ``("ui", "onboarding")``). Applied as pytest markers so that
+            ``pytest -m recording`` selects every recording-related test
+            regardless of which folder it lives in. Canonical set:
+            ``onboarding, recording, params, lifecycle, networking, input,
+            graph, ui``.
         marks: additional pytest marks to apply (e.g. ``(pytest.mark.slow,)``).
 
     The decorated function MUST be named ``test_*`` per pytest's
@@ -268,6 +552,19 @@ def scenario(
     """
     if mode not in {"local", "cloud"}:
         raise ValueError(f"mode must be 'local' or 'cloud', got {mode!r}")
+
+    # Normalize feature to a tuple of validated strings.
+    if feature is None:
+        features: tuple[str, ...] = ()
+    elif isinstance(feature, str):
+        features = (feature,)
+    else:
+        features = tuple(feature)
+    for f in features:
+        if f not in _CANONICAL_FEATURES:
+            raise ValueError(
+                f"unknown feature {f!r}; canonical set: {sorted(_CANONICAL_FEATURES)}"
+            )
 
     def decorator(user_fn: Callable) -> Callable:
         # The wrapper's parameters MUST match fixture names exactly so
@@ -312,15 +609,22 @@ def scenario(
         _impl.__module__ = user_fn.__module__
 
         # Apply marks. The ``cloud`` mark is read by the scope_harness
-        # fixture to enable cloud mode.
+        # fixture to enable cloud mode. Feature markers let
+        # ``pytest -m <feature>`` slice across folders.
         wrapped: Callable = _impl
         if mode == "cloud":
             wrapped = pytest.mark.cloud(wrapped)
+        for f in features:
+            wrapped = getattr(pytest.mark, f)(wrapped)
         for m in marks:
             wrapped = m(wrapped)
         # Retain a back-reference so introspection tools / error messages
         # can surface the decorator's config.
-        wrapped.__scenario_config__ = {"mode": mode, "workflow": workflow}  # type: ignore[attr-defined]
+        wrapped.__scenario_config__ = {  # type: ignore[attr-defined]
+            "mode": mode,
+            "workflow": workflow,
+            "features": features,
+        }
         return wrapped
 
     return decorator

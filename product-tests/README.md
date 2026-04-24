@@ -67,3 +67,40 @@ Any one of those failing = red. A successful first-frame after a retry is **not*
 | Nightly | Cron + pre-release tag | <60 min | full models (longlive, ltx2) | GPU runner |
 
 Both rings use **real** fal — PR gate via `deploy-PR-to-fal`, nightly against a pinned "latest main" fal app.
+
+## Tests by feature
+
+Every test is tagged with one or more feature markers. Use `pytest -m "<feature>"`
+to run just the tests that cover a given surface — handy when you're working on
+one area and want fast feedback, or when asking "do we have recording coverage?"
+
+Canonical feature set (registered in `pytest.ini`): `onboarding`, `recording`,
+`params`, `lifecycle`, `networking`, `input`, `graph`, `ui`.
+
+| Feature | Tests |
+|---|---|
+| **onboarding** — provider pick, telemetry, workflow, tour | `scenarios/test_onboarding_local.py`, `scenarios/test_onboarding_cloud.py`, `scenarios/test_state_persistence.py`, `release/test_cloud_full_matrix.py` |
+| **recording** — record node start/stop/download, timestamps | `scenarios/test_recording_roundtrip.py`, `regression/test_recording_timestamp_drift.py` (Slice 5) |
+| **params** — parameter updates, HTTP API, schema round-trip | `scenarios/test_parameter_apply.py`, `scenarios/test_parameter_schema.py`, `chaos/test_parameter_spam.py`, `chaos/test_adversarial_parameters.py`, `chaos/test_concurrent_api_hammer.py` |
+| **lifecycle** — stream start/stop/restart, session teardown | `scenarios/test_stop_restart.py`, `scenarios/test_state_persistence.py`, `chaos/test_rapid_stop_start.py`, `chaos/test_double_start.py`, `chaos/test_session_churn.py`, `chaos/test_navigation_thrash.py`, `chaos/test_tab_visibility.py`, `chaos/test_input_switching.py`, `chaos/test_concurrent_api_hammer.py` |
+| **networking** — cloud connectivity, offline cycles, retries | `chaos/test_network_offline.py` |
+| **input** — input sources (camera/video/NDI switching) | `chaos/test_input_switching.py`, `chaos/test_device_lost.py` |
+| **graph** — graph editor, node mutation, workflow switching | `chaos/test_graph_mutation.py`, `chaos/test_workflow_switching.py` |
+| **ui** — UI chrome (toolbars, modals, tooltips, error toasts) | `scenarios/test_ui_workflow_picker_visual.py` (Slice 5), `scenarios/test_ui_tooltip_placement.py` (Slice 5) |
+
+Examples:
+
+```bash
+# Just the recording tests
+uv run pytest product-tests/ -m "recording"
+
+# Everything that touches lifecycle, on local only
+uv run pytest product-tests/ -m "lifecycle and not cloud"
+
+# All params tests that aren't chaos
+uv run pytest product-tests/ -m "params and not chaos"
+```
+
+Cross-cutting markers (`chaos`, `cloud`, `slow`, `regression`, `multimodal`) combine
+with the feature axis via boolean expressions above. See `pytest.ini` for the
+full marker list.

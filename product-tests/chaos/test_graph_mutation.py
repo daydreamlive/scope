@@ -122,6 +122,7 @@ MUTATIONS: list[tuple[str, dict]] = [
 
 
 @pytest.mark.chaos
+@pytest.mark.graph
 def test_graph_mutation_local(
     scope_harness: ScopeHarness,
     driver: PlaywrightDriver,

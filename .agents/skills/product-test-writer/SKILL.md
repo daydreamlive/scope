@@ -31,6 +31,25 @@ If the bug needs a different mode, different workflow, or a non-default timeout,
 | Does it need chaotic timing to trigger? | Add `pytest.mark.chaos` and use `ctx.chaos()` | Linear reproduction in the body |
 | Was the symptom a 5xx / crash? | Default gates catch it | Default gates catch it |
 | Was the symptom silently-wrong output (no crash)? | Add an explicit assertion (e.g. compare `ctx.metrics()` or read a frame) | — |
+| Is the symptom about **how it looks** — UI layout, cut-off element, tooltip mispositioned, error toast copy, workflow card missing, stream output showing black/frozen/pixelated frames, recorded MP4 showing visible artifacts? | Add `@pytest.mark.multimodal` **and** `feature="ui"` (or `"recording"`), capture artifacts via `ctx.screenshot_testid()` / `ctx.capture_live_frame()` / `harness.media.sample_frames()`, then assert with `ctx.multimodal_check(imgs, question=...)`. See the **Multimodal patterns** section below. | Regular testid / metric asserts are enough |
+
+### Pick the right feature tag
+
+Every `@scenario` test should carry a `feature=` kwarg so `pytest -m <feature>`
+slices the right tests in the feature index. Canonical set:
+
+| Feature | When to use |
+|---|---|
+| `onboarding` | Provider pick, telemetry, workflow picker, tour, state persistence |
+| `recording` | Record-node start/stop, download, timestamp/FPS correctness |
+| `params` | Parameter updates — HTTP API, schema, round-trip, spam |
+| `lifecycle` | Stream start/stop/restart, session teardown, cycle tests |
+| `networking` | Cloud connectivity, offline cycles, retry-counter behavior |
+| `input` | Camera / video-file / NDI source switching, device-lost |
+| `graph` | Graph editor, node mutation, workflow switching |
+| `ui` | UI chrome — toolbars, modals, tooltips, error toasts, visuals |
+
+Pass multiple when applicable: `feature=("ui", "onboarding")`.
 
 ## The template (copy this, then fill in)
 
@@ -75,6 +94,13 @@ def test_pr_<PR>_<short_slug>(ctx):
 | Browser sleep (avoid unless you must) | `ctx.sleep(ms)` |
 | Seeded chaos driver | `ctx.chaos()` |
 | Record a dimension | `ctx.measure("name", value)` |
+| **Start headless recording** | `ctx.start_recording(node_id="record")` |
+| **Stop + download recording** (returns `Path`) | `ctx.stop_and_download_recording(node_id="record")` |
+| **Snapshot live sink frame** (returns `Path`) | `ctx.capture_live_frame(sink_node_id=None)` |
+| **Grab short MP4 slice of live output** | `ctx.capture_sink_video_slice(seconds=3)` |
+| **Full-page browser screenshot** | `ctx.screenshot("name.png")` |
+| **Element-scoped screenshot** | `ctx.screenshot_testid("stream-run-stop")` |
+| **Multimodal visual assertion** | `ctx.multimodal_check(imgs, question=..., must_contain=[...])` |
 | Raw access when you must | `ctx.driver`, `ctx.page`, `ctx.base_url`, `ctx.retry_probe`, `ctx.failure_watcher`, `ctx.report` |
 
 ## Testid anchors (stable set; if you need one not listed, grep `frontend/src` for `data-testid`)
@@ -150,6 +176,84 @@ Notice what's NOT there: no fixture imports, no `failure_watcher.mark_initiated_
 2. If the bug was not yet fixed on the current branch, expect it to **red**. That's correct — it proves the test actually reproduces the bug. Mention this to the user; they may want to gate the merge on this test.
 3. If the test greens on an unfixed branch, the repro isn't tight enough — tighten it before landing.
 4. Do NOT run `gh pr create` unless the user explicitly asks you to ship it.
+
+## Multimodal patterns (use when the bug is about "how it looks")
+
+The multimodal pathway is the bridge between the Chrome-MCP `onboarding-test`
+skill (a human / Claude looking at the UI) and automated CI coverage. Use it
+when a testid assertion can't capture the symptom:
+
+- "the third workflow card is clipped on a 1440px viewport"
+- "the tour popover is pointing at empty space instead of the Run button"
+- "the recorded MP4 shows visible pixelation"
+- "the sink is rendering all-black frames"
+
+Four reference tests ship in the repo — **copy from the closest match**, don't
+reinvent:
+
+| Pattern | Reference |
+|---|---|
+| UI element absent/clipped/mislaid | `scenarios/test_ui_workflow_picker_visual.py` |
+| UI tooltip/modal/button-state positioning | `scenarios/test_ui_tooltip_placement.py` |
+| Stream output frames look wrong (black / frozen / artifacted) | `scenarios/test_stream_output_looks_right.py` |
+| Recorded MP4 timestamps/visual quality | `regression/test_recording_timestamp_drift.py` |
+
+### The multimodal test shape
+
+```python
+@scenario(
+    mode="local",
+    workflow="local-passthrough",
+    feature="ui",
+    marks=(pytest.mark.multimodal,),
+)
+def test_pr_NNN_workflow_card_clipped(ctx):
+    # 1. Drive the UI to the state where the bug is visible.
+    ctx.complete_onboarding()
+    # (or: ctx.wait(testids.WORKFLOW_GET_STARTED) if you need to stop mid-flow)
+
+    # 2. Capture evidence. Prefer element-scoped over full-page when a single
+    # component is the subject — it gives the reviewer more signal per token.
+    shot = ctx.screenshot_testid(testids.workflow_card("local-passthrough"))
+    full = ctx.screenshot(name="workflow_picker_full.png")
+
+    # 3. Ask. Phrase the question with a clear pass bar and must_contain items.
+    verdict = ctx.multimodal_check(
+        [full, shot],
+        question="Are all three workflow cards fully visible and un-clipped?",
+        must_contain=[
+            "three workflow cards in a row",
+            "no card is clipped at the viewport edge",
+        ],
+    )
+
+    # 4. Branch on the three-valued verdict.
+    if verdict.status == "fail":
+        ctx.report.fail(
+            f"multimodal UI check failed: {verdict.reasoning}"
+        )
+    # "uncertain" is silent — usually means SCOPE_MULTIMODAL_EVAL=0 locally.
+    # "pass" falls through; the auto-teardown gates still run.
+```
+
+### Gates + gotchas for multimodal
+
+- **Always add `pytest.mark.multimodal`** via the decorator's `marks=` kwarg.
+  That's what makes CI's nightly ring pick it up and PR ring skip it by default.
+- **Assets go into `ctx.test_report_dir`** automatically when you use the ctx
+  helpers. Don't write to `tmp_path` for images you want a human to see after
+  a failure — the report dir is what CI uploads.
+- **Prefer element-scoped over full-page** for layout/positioning questions —
+  less noise for the model, more signal.
+- **Combine with cheap machine checks when you can.** `harness.media.looks_black`
+  and `looks_monochrome` catch the obvious cases for free; only reach for the
+  API when the signal isn't in the pixels alone.
+- **Write a `must_contain` list when possible.** It forces the model into a
+  structured `missing_required` list on failure, which produces actionable
+  triage output.
+- **Never block on multimodal in the PR ring.** If the bug CAN be caught by a
+  testid assertion or a cheap pixel stat, use that path for the PR ring and
+  reserve multimodal for nightly.
 
 ## If the bug cannot be expressed in `ctx`
 

@@ -231,16 +231,77 @@ Cloud smoke on the PR ring points at a PR-specific fal deployment (via the exist
 | **Chaos seed** | The seed string that makes a chaos test byte-reproducible. Defaults to the git SHA; override with `--chaos-seed=`. |
 | **`ctx`** | The high-level test API. A `ScenarioContext` instance that bundles driver + harness + report. |
 
-## 12. Further reading
+## 12. The Chrome-MCP → regression-test loop
+
+This is the *end-to-end* bug-to-test flow that makes the system "as capable as a
+human QA pass." It stitches three skills together:
+
+1. **A human (or Claude) finds a UI/visual bug** — either during development,
+   a PR review walkthrough, or a pre-release sanity check — by using
+   [`.agents/skills/onboarding-test`](../.agents/skills/onboarding-test/SKILL.md).
+   That skill drives Chrome via MCP and the user sees the problem directly.
+2. **The reviewer describes the bug in plain English** — "the third workflow
+   card is clipped on a 1440px viewport", "the tour popover is pointing at
+   empty space", "the recorded MP4 stutters".
+3. **`/product-test-writer` converts the description into a running test** —
+   writes a file under `product-tests/regression/` that uses
+   `ctx.screenshot_testid(...)` + `ctx.multimodal_check(...)` (or a cheaper
+   pixel-stat assertion when applicable), runs it, shows it red on `main`,
+   you fix the bug, it goes green. That's the round-trip.
+4. **If a later CI run fails unexpectedly** — point
+   [`.agents/skills/visual-qa`](../.agents/skills/visual-qa/SKILL.md) at the
+   reports directory. It reads the captured frames, screenshots, Playwright
+   video, and `scope.log`, and writes a plain-English triage summary. Pairs
+   well with an `SCOPE_MULTIMODAL_TRIAGE=1` in-CI pass that already left a
+   `triage.md` in the report dir.
+
+### Opting into multimodal locally
+
+```bash
+# One-time — add ANTHROPIC_API_KEY to your env.
+export ANTHROPIC_API_KEY="sk-ant-..."
+
+# Run just the multimodal tests locally.
+SCOPE_MULTIMODAL_EVAL=1 \
+  uv run pytest product-tests/ -m multimodal -v
+
+# Run everything with on-failure triage writing a triage.md for any red test.
+SCOPE_MULTIMODAL_EVAL=1 SCOPE_MULTIMODAL_TRIAGE=1 \
+  uv run pytest product-tests/scenarios/ -v
+
+# Cap the daily spend (calls past the cap return "uncertain", don't red).
+export SCOPE_MULTIMODAL_BUDGET_USD=5.00
+```
+
+Multimodal is opt-in, default-off. Without `SCOPE_MULTIMODAL_EVAL=1`, the
+`@pytest.mark.multimodal` tests still run and capture artifacts — they just
+return an "uncertain" verdict and skip the assertion, so local dev doesn't
+accidentally burn API credit. The nightly CI ring runs multimodal with the
+team's shared key; the PR ring runs them only when a PR touches
+`frontend/src/components/onboarding/**` or `frontend/src/components/graph/**`.
+
+### Where the three skills fit
+
+| Skill | When | What it does |
+|---|---|---|
+| `onboarding-test` | Human wants to feel the product; pre-release sanity | Drives Chrome via MCP, plain-English walkthrough, visual verification |
+| `product-test-writer` | You found a bug you want to prevent recurring | Turns the description into a `@scenario` regression test |
+| `visual-qa` | A CI run failed and you want to know what a human would see | Reads the reports bundle; writes a triage summary |
+
+## 13. Further reading
 
 - [`WRITING_TESTS.md`](./WRITING_TESTS.md) — the cookbook. Templates, ctx surface, testid map, gotchas.
 - [`README.md`](./README.md) — one-screen summary and pass criteria.
 - [`_templates/`](./_templates/) — fillable starting points for scenario / regression / chaos tests.
 - [`.agents/skills/product-test-writer/SKILL.md`](../.agents/skills/product-test-writer/SKILL.md) — Claude skill that writes regressions from plain-English bug descriptions.
 - [`.agents/skills/onboarding-test/SKILL.md`](../.agents/skills/onboarding-test/SKILL.md) — Claude-in-Chrome skill for the human eyeballs-on walkthrough.
+- [`.agents/skills/visual-qa/SKILL.md`](../.agents/skills/visual-qa/SKILL.md) — Claude skill for triaging a failure bundle into a plain-English summary.
+- `harness/media.py` — ffprobe + SSIM + perceptual hashing helpers for media-quality assertions.
+- `harness/visual_eval.py` — Anthropic vision wrapper with budget + caching.
+- `harness/testids.py` — generated constants for every frontend `data-testid`. Regenerate with `uv run python -m harness.testids --sync`.
 - `.github/workflows/product-tests.yml` — CI wiring.
 
-## 13. FAQ
+## 14. FAQ
 
 **"Why Python tests on a TypeScript frontend?"**
 Because the harness needs to spawn + supervise a Scope subprocess, subscribe to the `/api/v1/events` WebSocket, tail logs, and call HTTP APIs. That work lives next to the Python server it's testing. Playwright's sync Python API drives Chromium just fine.
