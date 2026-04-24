@@ -10,12 +10,13 @@ import logging
 import queue
 import threading
 import time
+from fractions import Fraction
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
 
-from .media_packets import VideoPacket, ensure_video_packet
+from .media_packets import MediaTimestamp, VideoPacket, ensure_video_packet
 from .recording_coordinator import RecordingCoordinator
 
 if TYPE_CHECKING:
@@ -442,20 +443,28 @@ class SinkManager:
 
     def put_to_record(self, node_id: str, frame) -> None:
         """Convert a VideoFrame to tensor and put it into a record node's queue."""
-        import torch
-
         rec_q = self._recording._record_queues.get(node_id)
         if rec_q is None:
             return
         try:
             frame_np = frame.to_ndarray(format="rgb24")
             t = torch.as_tensor(frame_np, dtype=torch.uint8).unsqueeze(0)
+            timestamp = MediaTimestamp()
+            if (
+                getattr(frame, "pts", None) is not None
+                and getattr(frame, "time_base", None) is not None
+            ):
+                timestamp = MediaTimestamp(
+                    pts=frame.pts,
+                    time_base=Fraction(frame.time_base),
+                )
+            packet = VideoPacket(tensor=t, timestamp=timestamp)
             try:
-                rec_q.put_nowait(t)
+                rec_q.put_nowait(packet)
             except queue.Full:
                 try:
                     rec_q.get_nowait()
-                    rec_q.put_nowait(t)
+                    rec_q.put_nowait(packet)
                 except queue.Empty:
                     pass
         except Exception as e:
