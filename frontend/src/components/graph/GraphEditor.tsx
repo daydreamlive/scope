@@ -101,6 +101,7 @@ import { useParentValueBridge } from "./hooks/value/useParentValueBridge";
 import { useSubgraphEval } from "./hooks/subgraph/useSubgraphEval";
 import { useSubgraphCallbackSync } from "./hooks/subgraph/useSubgraphCallbackSync";
 import { useSubgraphOperations } from "./hooks/subgraph/useSubgraphOperations";
+import { useNodeDefinitions } from "../../hooks/useNodeDefinitions";
 
 const nodeTypes = {
   source: SourceNode,
@@ -592,6 +593,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         setEdges,
         setSelectedNodeIds,
       });
+
+    const { customNodes: availableCustomNodes } = useNodeDefinitions();
 
     const handleDebugNodes = useCallback(() => {
       const DEBUG_NODES: Array<{
@@ -1299,6 +1302,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                         edges,
                         createSubgraphFromSelection,
                         onOpenBlueprints: () => setShowBlueprintModal(true),
+                        availablePipelineIds,
+                        availableInputSources,
+                        customNodes: availableCustomNodes,
                       })
                     : buildNodeMenuItems({
                         contextNodeId: contextMenu.nodeId!,
@@ -1322,6 +1328,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                 setPendingNodePosition(null);
               }}
               onSelectNodeType={handleNodeTypeSelect}
+              availableInputSources={availableInputSources}
             />
 
             <BlueprintBrowserModal

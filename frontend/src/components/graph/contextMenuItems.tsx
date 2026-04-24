@@ -29,10 +29,17 @@ import {
   Circle,
   Layers,
   Clock,
+  Puzzle,
+  Component,
 } from "lucide-react";
 import type { Node, Edge } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import type { ContextMenuItem } from "./ContextMenu";
+import type { InputSourceType, NodeDefinitionDto } from "../../lib/api";
+import {
+  BROWSER_SOURCE_MODES,
+  getVisibleBackendSources,
+} from "../../lib/sourceModes";
 
 /* ── Pane (canvas) context menu ──────────────────────────────────────────── */
 
@@ -63,8 +70,10 @@ type NodeTypeSelectFn = (
     | "tempo"
     | "prompt_list"
     | "prompt_blend"
-    | "scheduler",
-  subType?: string
+    | "scheduler"
+    | "custom_node",
+  subType?: string,
+  extraData?: Partial<FlowNodeData>
 ) => void;
 
 export function buildPaneMenuItems(deps: {
@@ -78,6 +87,9 @@ export function buildPaneMenuItems(deps: {
     selectedIds: string[]
   ) => void;
   onOpenBlueprints: () => void;
+  availablePipelineIds: string[];
+  availableInputSources: InputSourceType[];
+  customNodes: NodeDefinitionDto[];
 }): ContextMenuItem[] {
   const {
     handleNodeTypeSelect,
@@ -86,21 +98,96 @@ export function buildPaneMenuItems(deps: {
     edges,
     createSubgraphFromSelection,
     onOpenBlueprints,
+    availablePipelineIds,
+    availableInputSources,
+    customNodes,
   } = deps;
 
-  return [
-    {
-      label: "Source",
+  const sourceChildren: ContextMenuItem[] = [
+    ...BROWSER_SOURCE_MODES.map(s => ({
+      label: s.label,
       icon: <Camera />,
-      onClick: () => handleNodeTypeSelect("source"),
-      keywords: ["input", "camera", "video"],
-    },
-    {
-      label: "Pipeline",
-      icon: <Workflow />,
-      onClick: () => handleNodeTypeSelect("pipeline"),
-      keywords: ["process", "effect", "filter"],
-    },
+      onClick: () => handleNodeTypeSelect("source", s.id),
+      keywords: ["source", ...s.keywords],
+    })),
+    ...getVisibleBackendSources(availableInputSources).map(s => ({
+      label: s.source_name,
+      icon: <Camera />,
+      onClick: () => handleNodeTypeSelect("source", s.source_id),
+      keywords: ["source", s.source_id, s.source_description],
+    })),
+  ];
+
+  const pipelineChildren: ContextMenuItem[] = availablePipelineIds.map(id => ({
+    label: id,
+    icon: <Workflow />,
+    onClick: () => handleNodeTypeSelect("pipeline", id),
+    keywords: ["pipeline", id],
+  }));
+
+  const pluginChildren: ContextMenuItem[] = customNodes.map(n => ({
+    label: n.display_name || n.node_type_id,
+    icon: <Component />,
+    onClick: () =>
+      handleNodeTypeSelect("custom_node", n.node_type_id, {
+        customNodeTypeId: n.node_type_id,
+        customNodeDisplayName: n.display_name || n.node_type_id,
+        customNodeCategory: n.category || "",
+        customNodeInputs: n.inputs || [],
+        customNodeOutputs: n.outputs || [],
+        customNodeParamDefs: n.params || [],
+        customNodeParams: Object.fromEntries(
+          (n.params || [])
+            .filter(p => p.default != null)
+            .map(p => [p.name, p.default])
+        ),
+      }),
+    keywords: [
+      "plugin",
+      "custom",
+      n.node_type_id,
+      n.plugin_name || "",
+      n.description || "",
+    ],
+  }));
+
+  return [
+    sourceChildren.length > 0
+      ? {
+          label: "Source",
+          icon: <Camera />,
+          children: sourceChildren,
+          keywords: ["input", "camera", "video", "spout", "ndi", "syphon"],
+        }
+      : {
+          label: "Source",
+          icon: <Camera />,
+          onClick: () => handleNodeTypeSelect("source"),
+          keywords: ["input", "camera", "video"],
+        },
+    pipelineChildren.length > 0
+      ? {
+          label: "Pipeline",
+          icon: <Workflow />,
+          children: pipelineChildren,
+          keywords: ["process", "effect", "filter", "ltx", "streamdiffusion"],
+        }
+      : {
+          label: "Pipeline",
+          icon: <Workflow />,
+          onClick: () => handleNodeTypeSelect("pipeline"),
+          keywords: ["process", "effect", "filter"],
+        },
+    ...(pluginChildren.length > 0
+      ? [
+          {
+            label: "Plugins",
+            icon: <Puzzle />,
+            children: pluginChildren,
+            keywords: ["plugin", "custom", "node"],
+          },
+        ]
+      : []),
     {
       label: "Sink",
       icon: <Monitor />,
