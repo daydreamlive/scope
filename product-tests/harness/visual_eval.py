@@ -101,8 +101,17 @@ class Verdict:
 
 
 def is_enabled() -> bool:
-    """True iff the caller explicitly opted into multimodal evaluation."""
-    return os.environ.get("SCOPE_MULTIMODAL_EVAL") == "1"
+    """True iff the caller explicitly opted into multimodal evaluation AND a
+    usable API key is present. Either missing → graceful disable. This is
+    what lets CI "run the multimodal step always, skip when no secret" work:
+    steps whose ``if:`` can't reference secrets rely on this function to
+    fail-safe silently when the secret isn't plumbed through (forks, local
+    runs without a key)."""
+    if os.environ.get("SCOPE_MULTIMODAL_EVAL") != "1":
+        return False
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return False
+    return True
 
 
 def _disabled_verdict(reason: str) -> Verdict:
@@ -355,16 +364,21 @@ def eval_images(
     an ``uncertain`` verdict with the error reason so tests can decide.
     """
     imgs = [Path(p) for p in images]
+    must = list(must_contain or [])
+
+    # Graceful-disable must come BEFORE any input validation — a test that
+    # captured zero frames for whatever reason should still skip cleanly
+    # when multimodal is off, not crash with a ValueError.
+    if not is_enabled():
+        if os.environ.get("SCOPE_MULTIMODAL_EVAL") != "1":
+            return _disabled_verdict("SCOPE_MULTIMODAL_EVAL is not set to 1")
+        return _disabled_verdict("ANTHROPIC_API_KEY is not set")
+
     if not imgs:
         raise ValueError("eval_images requires at least one image")
     for p in imgs:
         if not p.exists():
             raise FileNotFoundError(f"image does not exist: {p}")
-
-    must = list(must_contain or [])
-
-    if not is_enabled():
-        return _disabled_verdict("SCOPE_MULTIMODAL_EVAL is not set to 1")
 
     key = _cache_key(imgs, question, must)
     cached = _cache_read(key)
