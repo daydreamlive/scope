@@ -107,6 +107,9 @@ class PluginManager:
         # plugin package name that provided it.
         self._type_to_plugin: dict[str, str] = {}
 
+        # Plugin-registered input source classes: source_id -> class
+        self._plugin_input_sources: dict[str, type] = {}
+
         # Cache of registered plugin names (package names)
         self._registered_plugins: set[str] = set()
 
@@ -555,22 +558,30 @@ class PluginManager:
     def register_plugin_nodes(self, registry: Any = None) -> None:
         """Fire ``register_nodes`` and ``register_pipelines`` hooks.
 
-        Both hooks plant into the unified :class:`NodeRegistry` storage,
-        so existing plugins using ``register_pipelines(register)`` keep
-        working unchanged alongside new ones using ``register_nodes``.
+        Both hooks plant into the unified :class:`NodeRegistry` storage.
+        :class:`InputSource` subclasses go into :attr:`_plugin_input_sources`
+        keyed by ``source_id`` instead — they're registered through the
+        same hook as a convenience since a plugin-provided input source is
+        conceptually just a node that feeds the graph.
         The ``registry`` argument is accepted for legacy callers but
         ignored — the unified storage is always used.
         """
+        from scope.core.inputs import InputSource
         from scope.core.nodes.registry import NodeRegistry, _derive_node_type_id
 
         del registry  # legacy parameter, kept for callsite compat
 
         with self._lock:
             self._type_to_plugin.clear()
+            self._plugin_input_sources.clear()
 
-            def register_callback(node_class: Any) -> None:
-                NodeRegistry.register(node_class)
-                node_id = _derive_node_type_id(node_class) or node_class.__name__
+            def register_callback(cls: Any) -> None:
+                if isinstance(cls, type) and issubclass(cls, InputSource):
+                    self._plugin_input_sources[cls.source_id] = cls
+                    logger.info(f"Registered plugin input source: {cls.source_id}")
+                    return
+                NodeRegistry.register(cls)
+                node_id = _derive_node_type_id(cls) or cls.__name__
                 logger.info(f"Registered plugin node: {node_id}")
 
             self._pm.hook.register_nodes(register=register_callback)
@@ -579,6 +590,11 @@ class PluginManager:
 
     # Backwards-compat alias for internal callers using the legacy name.
     register_plugin_pipelines = register_plugin_nodes
+
+    def get_plugin_input_sources(self) -> dict[str, type]:
+        """Return a snapshot of plugin-registered input source classes."""
+        with self._lock:
+            return dict(self._plugin_input_sources)
 
     def _update_plugin_mapping(self) -> None:
         """Refresh the registry-type-id → plugin-package-name mapping.
@@ -1676,3 +1692,8 @@ def register_plugin_nodes(registry: Any = None) -> None:
 
 # Backwards-compat alias for internal callers using the legacy name.
 register_plugin_pipelines = register_plugin_nodes
+
+
+def get_plugin_input_sources() -> dict[str, type]:
+    """Return ``source_id -> InputSource class`` for plugin-registered sources."""
+    return get_plugin_manager().get_plugin_input_sources()
