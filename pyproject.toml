@@ -147,6 +147,7 @@ product-tests = [
     "playwright>=1.48.0",
     "requests>=2.32.0",
     "websockets>=13.1",
+    "opencv-python-headless>=4.10.0",
 ]
 
 [tool.pytest.ini_options]
