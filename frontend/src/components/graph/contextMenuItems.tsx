@@ -36,6 +36,7 @@ import type { Node, Edge } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import type { ContextMenuItem } from "./ContextMenu";
 import type { InputSourceType, NodeDefinitionDto } from "../../lib/api";
+import type { PipelineInfo } from "../../types";
 import {
   BROWSER_SOURCE_MODES,
   getVisibleBackendSources,
@@ -88,6 +89,7 @@ export function buildPaneMenuItems(deps: {
   ) => void;
   onOpenBlueprints: () => void;
   availablePipelineIds: string[];
+  pipelines: Record<string, PipelineInfo> | null;
   availableInputSources: InputSourceType[];
   customNodes: NodeDefinitionDto[];
 }): ContextMenuItem[] {
@@ -99,6 +101,7 @@ export function buildPaneMenuItems(deps: {
     createSubgraphFromSelection,
     onOpenBlueprints,
     availablePipelineIds,
+    pipelines,
     availableInputSources,
     customNodes,
   } = deps;
@@ -118,12 +121,15 @@ export function buildPaneMenuItems(deps: {
     })),
   ];
 
-  const pipelineChildren: ContextMenuItem[] = availablePipelineIds.map(id => ({
-    label: id,
-    icon: <Workflow />,
-    onClick: () => handleNodeTypeSelect("pipeline", id),
-    keywords: ["pipeline", id],
-  }));
+  const pipelineChildren: ContextMenuItem[] = availablePipelineIds.map(id => {
+    const info = pipelines?.[id];
+    return {
+      label: info?.name || id,
+      icon: <Workflow />,
+      onClick: () => handleNodeTypeSelect("pipeline", id),
+      keywords: ["pipeline", id, info?.name ?? "", info?.about ?? ""],
+    };
+  });
 
   const pluginChildren: ContextMenuItem[] = customNodes.map(n => ({
     label: n.display_name || n.node_type_id,
