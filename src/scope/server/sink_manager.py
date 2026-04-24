@@ -437,10 +437,6 @@ class SinkManager:
     # Recording
     # ------------------------------------------------------------------
 
-    def get_from_record(self, record_node_id: str):
-        """Read a frame from a record node's output queue."""
-        return self._recording.get(record_node_id)
-
     def put_to_record(self, node_id: str, frame) -> None:
         """Convert a VideoFrame to tensor and put it into a record node's queue."""
         rec_q = self._recording._record_queues.get(node_id)

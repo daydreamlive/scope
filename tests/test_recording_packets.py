@@ -57,7 +57,7 @@ def test_recording_coordinator_get_packet_preserves_timestamp():
         tensor=frame,
         timestamp=MediaTimestamp(pts=9, time_base=Fraction(1, 30)),
     )
-    coordinator.put("record", packet)
+    coordinator._record_queues["record"].put_nowait(packet)
 
     result = coordinator.get_packet("record")
 

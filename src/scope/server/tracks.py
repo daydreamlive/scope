@@ -219,7 +219,7 @@ def RecordOutputTrack(
     """Create a NodeOutputTrack that reads from a record node's output queue."""
     return NodeOutputTrack(
         frame_processor=frame_processor,
-        frame_getter=lambda fp: fp.sink_manager.recording.get(record_node_id),
+        frame_getter=lambda fp: fp.sink_manager.recording.get_packet(record_node_id),
     )
 
 

@@ -493,12 +493,8 @@ class WebRTCManager:
                 )
 
             # Recording setup (works for video-only, audio-only, or both)
-            from .recording import RECORDING_ENABLED
-
             recording_param = initial_parameters.get("recording")
-            recording_enabled = (
-                recording_param if recording_param is not None else RECORDING_ENABLED
-            )
+            recording_enabled = bool(recording_param)
             if recording_enabled and (
                 video_track is not None or audio_track is not None
             ):
@@ -872,12 +868,8 @@ class WebRTCManager:
                 session.audio_track = audio_track
 
             # Recording setup (local recording from relayed cloud frames)
-            from .recording import RECORDING_ENABLED
-
             recording_param = initial_parameters.get("recording")
-            recording_enabled = (
-                recording_param if recording_param is not None else RECORDING_ENABLED
-            )
+            recording_enabled = bool(recording_param)
             if recording_enabled and (
                 cloud_track is not None or audio_track is not None
             ):

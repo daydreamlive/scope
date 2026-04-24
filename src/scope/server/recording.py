@@ -19,12 +19,6 @@ TEMP_FILE_PREFIXES = {
     "download": "scope_download_",
 }
 
-# Environment variables
-RECORDING_ENABLED = os.getenv("RECORDING_ENABLED", "false").lower() == "true"
-RECORDING_STARTUP_CLEANUP_ENABLED = (
-    os.getenv("RECORDING_STARTUP_CLEANUP_ENABLED", "true").lower() == "true"
-)
-
 RECORDING_MAX_FPS = 30.0  # Must match MediaRecorder's hardcoded rate=30
 
 
@@ -350,12 +344,6 @@ def cleanup_recording_files():
     Clean up all recording files from previous sessions.
     This handles cases where the process crashed and files weren't cleaned up.
     """
-    if not RECORDING_STARTUP_CLEANUP_ENABLED:
-        logger.info(
-            "Recording startup cleanup disabled via RECORDING_STARTUP_CLEANUP_ENABLED"
-        )
-        return
-
     temp_dir = Path(tempfile.gettempdir())
     if not temp_dir.exists():
         return

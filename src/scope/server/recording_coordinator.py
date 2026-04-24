@@ -9,8 +9,6 @@ import queue
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-import torch
-
 from .media_packets import VideoPacket, ensure_video_packet
 
 if TYPE_CHECKING:
@@ -108,28 +106,6 @@ class RecordingCoordinator:
             return VideoPacket(tensor=frame, timestamp=packet.timestamp)
         except queue.Empty:
             return None
-
-    def get(self, record_node_id: str) -> torch.Tensor | None:
-        """Backwards-compatible tensor getter for record output."""
-        packet = self.get_packet(record_node_id)
-        if packet is None:
-            return None
-        return packet.tensor
-
-    def put(self, record_node_id: str, frame: torch.Tensor | VideoPacket) -> bool:
-        """Write a frame into a record node's queue (cloud mode).
-
-        Returns True if the frame was enqueued, False if the queue is
-        missing or full.
-        """
-        rec_q = self._record_queues.get(record_node_id)
-        if rec_q is None:
-            return False
-        try:
-            rec_q.put_nowait(frame)
-            return True
-        except queue.Full:
-            return False
 
     # ------------------------------------------------------------------
     # Recording lifecycle
