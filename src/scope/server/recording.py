@@ -112,6 +112,12 @@ class RecordingManager:
         return MediaRecorder(
             file_path,
             format="mp4",
+            options={
+                # force timestamps to start at zero
+                "use_editlist": "0",
+                # allows playback before file is fully loaded, eg over http
+                "movflags": "+faststart",
+            }
         )
 
     async def start_recording(self):
