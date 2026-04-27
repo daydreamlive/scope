@@ -1,7 +1,10 @@
 import { useEffect, useRef, useMemo } from "react";
 import type { Edge, Node } from "@xyflow/react";
 import type { FlowNodeData, SubgraphPort } from "../../../../lib/graphUtils";
-import { parseHandleId } from "../../../../lib/graphUtils";
+import {
+  parseHandleId,
+  stripCustomNodeDirection,
+} from "../../../../lib/graphUtils";
 import { getAnyValueFromNode } from "../../utils/getValueFromNode";
 
 function valuesEqual(a: unknown, b: unknown): boolean {
@@ -381,7 +384,7 @@ export function useValueForwarding(
         const sourceParsed = parseHandleId(edge.sourceHandle);
         const targetParsed = parseHandleId(edge.targetHandle);
         if (!sourceParsed || sourceParsed.kind !== "param") continue;
-        if (!targetParsed || targetParsed.kind !== "param") continue;
+        if (!targetParsed) continue;
 
         const targetNode = nodes.find(n => n.id === edge.target);
         if (!targetNode) continue;
@@ -390,6 +393,7 @@ export function useValueForwarding(
         let resolvedParamName: string | null = null;
 
         if (targetNode.data.nodeType === "subgraph") {
+          if (targetParsed.kind !== "param") continue;
           const result = resolveSubgraphTarget(
             targetNode,
             targetParsed.name,
@@ -401,8 +405,15 @@ export function useValueForwarding(
             resolvedParamName = result.paramName;
           } else continue;
         } else if (targetNode.data.nodeType === "pipeline") {
+          if (targetParsed.kind !== "param") continue;
           resolvedBackendId = resolveBackendId(edge.target);
           resolvedParamName = targetParsed.name;
+        } else if (
+          targetNode.data.nodeType === "custom_node" &&
+          targetParsed.kind === "stream"
+        ) {
+          resolvedBackendId = resolveBackendId(edge.target);
+          resolvedParamName = stripCustomNodeDirection(targetParsed.name);
         } else continue;
 
         if (

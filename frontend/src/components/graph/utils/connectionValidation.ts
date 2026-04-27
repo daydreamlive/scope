@@ -374,6 +374,30 @@ export function validateConnection(
     );
   }
 
+  // Param → stream targeting a custom_node input port. Custom-node input
+  // handles are stream-kind in the UI; the value is delivered as a
+  // parameter update at runtime (see useValueForwarding).
+  if (sourceParsed.kind === "param" && targetParsed.kind === "stream") {
+    const sourceNode = nodes.find(n => n.id === connection.source);
+    const targetNode = nodes.find(n => n.id === connection.target);
+    if (!sourceNode || !targetNode) return true;
+    if (targetNode.data.nodeType !== "custom_node") return false;
+    const inputs = targetNode.data.customNodeInputs;
+    const portName = stripCustomNodeDirection(targetParsed.name);
+    if (inputs === undefined) return true;
+    const port = inputs.find(p => p.name === portName);
+    if (!port) return false;
+    const srcType = resolveSourceType(
+      sourceNode,
+      nodes,
+      [],
+      new Set(),
+      connection.sourceHandle
+    );
+    if (!srcType) return true;
+    return srcType === port.port_type;
+  }
+
   // Stream ↔ stream: for custom_node edges, enforce port-type matching
   // against the node's declared inputs/outputs. For built-in source /
   // pipeline / sink nodes, streams are untyped (video) and always ok.

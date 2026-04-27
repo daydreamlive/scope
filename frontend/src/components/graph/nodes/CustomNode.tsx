@@ -1,21 +1,34 @@
-import { Handle, Position } from "@xyflow/react";
+import { Handle, Position, useEdges, useNodes } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import {
   customNodeInputHandleId,
   customNodeOutputHandleId,
+  parseHandleId,
+  stripCustomNodeDirection,
 } from "../../../lib/graphUtils";
+import type { NodeParamDef } from "../../../lib/api";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { useHandlePositions } from "../hooks/node/useHandlePositions";
-import { NodeCard, NodeHeader, NodeBody, collapsedHandleStyle } from "../ui";
+import { getAnyValueFromNode } from "../utils/getValueFromNode";
+import {
+  NodeCard,
+  NodeHeader,
+  NodeBody,
+  NodeParamRow,
+  NodePill,
+  NodePillInput,
+  NodePillSelect,
+  NodePillToggle,
+  collapsedHandleStyle,
+} from "../ui";
 
 const PARAM_PUSH_DEBOUNCE_MS = 100;
 
 type CustomNodeType = Node<FlowNodeData, "custom_node">;
 
-/* Port type -> color mapping for custom types */
 const PORT_COLORS: Record<string, string> = {
   audio: "#22c55e",
   video: "#eeeeee",
@@ -39,19 +52,88 @@ function portColor(portType: string): string {
   return PORT_COLORS[portType] ?? "#9ca3af";
 }
 
+interface ParamWidgetProps {
+  param: NodeParamDef;
+  value: unknown;
+  connected: boolean;
+  onChange: (value: unknown) => void;
+}
+
+function ParamWidget({ param, value, connected, onChange }: ParamWidgetProps) {
+  if (connected) {
+    return (
+      <NodePill className="opacity-50" title={String(value)}>
+        {String(value) || "—"}
+      </NodePill>
+    );
+  }
+  if (param.param_type === "select" && Array.isArray(param.ui?.options)) {
+    return (
+      <NodePillSelect
+        value={String(value)}
+        onChange={onChange}
+        options={(param.ui.options as string[]).map(o => ({
+          value: o,
+          label: o,
+        }))}
+      />
+    );
+  }
+  if (param.param_type === "boolean") {
+    return <NodePillToggle checked={Boolean(value)} onChange={onChange} />;
+  }
+  if (param.param_type === "number") {
+    return (
+      <NodePillInput
+        type="number"
+        value={Number(value)}
+        min={param.ui?.min as number | undefined}
+        max={param.ui?.max as number | undefined}
+        step={param.ui?.step as number | undefined}
+        onChange={v => onChange(Number(v))}
+      />
+    );
+  }
+  return (
+    <NodePillInput type="text" value={String(value)} onChange={onChange} />
+  );
+}
+
 export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
   const { updateData } = useNodeData(id);
   const { collapsed, toggleCollapse } = useNodeCollapse();
+  const edges = useEdges();
+  const allNodes = useNodes() as Node<FlowNodeData>[];
 
   const inputs = data.customNodeInputs ?? [];
   const outputs = data.customNodeOutputs ?? [];
   const params = data.customNodeParamDefs ?? [];
 
-  // Edit-time helper: update the React Flow node data (so the widget
-  // reflects the new value) and, when the node is connected to a running
-  // backend, push the same change through so the worker picks it up.
-  // The backend push is debounced per-param to keep slider drags from
-  // flooding the data channel.
+  // ComfyUI-style widget→input linkage: an input port whose name matches
+  // a param renders on the same row as the param, and the wire's
+  // upstream value overrides the widget's stored value.
+  const paramNames = new Set(params.map(p => p.name));
+  const linkedInputs = inputs.filter(p => paramNames.has(p.name));
+  const unlinkedInputs = inputs.filter(p => !paramNames.has(p.name));
+
+  const upstreamByPort = useMemo(() => {
+    const map = new Map<string, unknown>();
+    for (const e of edges) {
+      if (e.target !== id) continue;
+      const parsed = parseHandleId(e.targetHandle);
+      if (!parsed || parsed.kind !== "stream") continue;
+      const portName = stripCustomNodeDirection(parsed.name);
+      const sourceNode = allNodes.find(n => n.id === e.source);
+      const value = sourceNode
+        ? getAnyValueFromNode(sourceNode, e.sourceHandle)
+        : undefined;
+      map.set(portName, value);
+    }
+    return map;
+  }, [edges, allNodes, id]);
+
+  // Per-param debounce so slider drags don't flood the data channel
+  // between local widget edits and backend update_parameters calls.
   const onParamChangeRef = useRef(data.onCustomNodeParamChange);
   onParamChangeRef.current = data.onCustomNodeParamChange;
   const pushTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>(
@@ -80,13 +162,11 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
     data.customNodeTypeId ||
     "Custom Node";
 
-  // Measure each port row so handles can be positioned from DOM offsetTop
-  // rather than hard-coded pixel math. Re-measures when port lists change.
   const { setRowRef, rowPositions } = useHandlePositions([
     collapsed,
-    inputs.map(p => p.name).join("|"),
+    unlinkedInputs.map(p => p.name).join("|"),
     outputs.map(p => p.name).join("|"),
-    params.length,
+    params.map(p => p.name).join("|"),
   ]);
 
   return (
@@ -102,101 +182,45 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
         onCollapseToggle={toggleCollapse}
       />
       {!collapsed && (
-        <NodeBody>
-          {/* Show input ports */}
-          {inputs.length > 0 && (
-            <div className="flex flex-col gap-0.5 px-2 py-1">
-              {inputs.map(p => (
-                <div
-                  key={p.name}
-                  ref={setRowRef(`in_${p.name}`)}
-                  className="text-[11px] text-zinc-400 flex items-center gap-1"
-                >
-                  {p.name}
-                </div>
-              ))}
+        <NodeBody withGap>
+          {unlinkedInputs.map(p => (
+            <div key={`in-${p.name}`} ref={setRowRef(`in:${p.name}`)}>
+              <NodeParamRow label={p.name}>
+                <NodePill>{p.name}</NodePill>
+              </NodeParamRow>
             </div>
-          )}
-          {/* Show output ports */}
-          {outputs.length > 0 && (
-            <div className="flex flex-col gap-0.5 px-2 py-1">
-              {outputs.map(p => (
-                <div
-                  key={p.name}
-                  ref={setRowRef(`out_${p.name}`)}
-                  className="text-[11px] text-zinc-400 flex items-center gap-1 justify-end"
-                >
-                  {p.name}
-                </div>
-              ))}
+          ))}
+
+          {outputs.map(p => (
+            <div key={`out-${p.name}`} ref={setRowRef(`out:${p.name}`)}>
+              <NodeParamRow label={p.name}>
+                <NodePill>{p.name}</NodePill>
+              </NodeParamRow>
             </div>
-          )}
-          {/* Parameter widgets (ComfyUI-style editable params) */}
-          {params.length > 0 && (
-            <div className="flex flex-col gap-1 px-2 py-1 border-t border-zinc-800">
-              {params.map(p => {
-                const val = data.customNodeParams?.[p.name] ?? p.default ?? "";
-                return (
-                  <div
-                    key={p.name}
-                    className="flex items-center justify-between gap-2 text-[11px]"
-                  >
-                    <span
-                      className="text-zinc-500 shrink-0"
-                      title={p.description || p.name}
-                    >
-                      {p.description || p.name}
-                    </span>
-                    {p.param_type === "select" &&
-                    Array.isArray(p.ui?.options) ? (
-                      <select
-                        className="bg-zinc-900 text-zinc-200 rounded px-1 py-0.5 text-[11px] max-w-[130px]"
-                        value={String(val)}
-                        onChange={e => setParam(p.name, e.target.value)}
-                      >
-                        {(p.ui?.options as string[]).map(o => (
-                          <option key={o} value={o}>
-                            {o}
-                          </option>
-                        ))}
-                      </select>
-                    ) : p.param_type === "boolean" ? (
-                      <input
-                        type="checkbox"
-                        checked={Boolean(val)}
-                        onChange={e => setParam(p.name, e.target.checked)}
-                        className="accent-blue-500"
-                      />
-                    ) : p.param_type === "number" ? (
-                      <input
-                        type="number"
-                        className="bg-zinc-900 text-zinc-200 rounded px-1 py-0.5 text-[11px] w-[80px]"
-                        value={Number(val)}
-                        min={(p.ui?.min as number | undefined) ?? undefined}
-                        max={(p.ui?.max as number | undefined) ?? undefined}
-                        step={(p.ui?.step as number | undefined) ?? undefined}
-                        onChange={e => setParam(p.name, Number(e.target.value))}
-                      />
-                    ) : (
-                      <input
-                        type="text"
-                        className="bg-zinc-900 text-zinc-200 rounded px-1 py-0.5 text-[11px] max-w-[130px]"
-                        value={String(val)}
-                        onChange={e => setParam(p.name, e.target.value)}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          )}
+          ))}
+
+          {params.map(p => {
+            const connected = upstreamByPort.has(p.name);
+            const val = connected
+              ? (upstreamByPort.get(p.name) ?? "")
+              : (data.customNodeParams?.[p.name] ?? p.default ?? "");
+            return (
+              <div key={`param-${p.name}`} ref={setRowRef(`param:${p.name}`)}>
+                <NodeParamRow label={p.description || p.name}>
+                  <ParamWidget
+                    param={p}
+                    value={val}
+                    connected={connected}
+                    onChange={v => setParam(p.name, v)}
+                  />
+                </NodeParamRow>
+              </div>
+            );
+          })}
         </NodeBody>
       )}
 
-      {/* Input handles (left side). When expanded, positions come from the
-          port row's measured offsetTop; when collapsed, all handles overlap
-          at the vertical centre of the collapsed pill. */}
-      {inputs.map(p => (
+      {unlinkedInputs.map(p => (
         <Handle
           key={`in-${p.name}`}
           type="target"
@@ -208,14 +232,34 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
               ? collapsedHandleStyle("left")
               : {
                   backgroundColor: portColor(p.port_type),
-                  top: rowPositions[`in_${p.name}`] ?? 0,
+                  top: rowPositions[`in:${p.name}`] ?? 0,
                   left: 0,
                 }
           }
         />
       ))}
 
-      {/* Output handles (right side). */}
+      {/* Linked-input handles ride on the param row, not on a row of
+          their own — that's where the widget they override is rendered. */}
+      {linkedInputs.map(p => (
+        <Handle
+          key={`in-linked-${p.name}`}
+          type="target"
+          position={Position.Left}
+          id={customNodeInputHandleId(p.name)}
+          className="!w-2.5 !h-2.5 !border-0"
+          style={
+            collapsed
+              ? collapsedHandleStyle("left")
+              : {
+                  backgroundColor: portColor(p.port_type),
+                  top: rowPositions[`param:${p.name}`] ?? 0,
+                  left: 0,
+                }
+          }
+        />
+      ))}
+
       {outputs.map(p => (
         <Handle
           key={`out-${p.name}`}
@@ -228,7 +272,7 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
               ? collapsedHandleStyle("right")
               : {
                   backgroundColor: portColor(p.port_type),
-                  top: rowPositions[`out_${p.name}`] ?? 0,
+                  top: rowPositions[`out:${p.name}`] ?? 0,
                   right: 0,
                 }
           }

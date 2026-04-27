@@ -1,7 +1,10 @@
 import { useCallback } from "react";
 import { addEdge, reconnectEdge } from "@xyflow/react";
 import type { Connection, Edge, Node } from "@xyflow/react";
-import { parseHandleId } from "../../../../lib/graphUtils";
+import {
+  parseHandleId,
+  stripCustomNodeDirection,
+} from "../../../../lib/graphUtils";
 import type { FlowNodeData, SubgraphPort } from "../../../../lib/graphUtils";
 import { buildEdgeStyle } from "../../constants";
 import { PARAM_TYPE_COLORS } from "../../nodeColors";
@@ -45,19 +48,29 @@ export function useConnectionLogic(
         if (edge.source !== sourceNodeId) continue;
 
         const targetParsed = parseHandleId(edge.targetHandle);
-        if (targetParsed?.kind !== "param") continue;
+        if (!targetParsed) continue;
 
         const targetNode = nodes.find(n => n.id === edge.target);
-        if (
-          targetNode?.data.nodeType !== "pipeline" &&
-          targetNode?.data.nodeType !== "subgraph"
-        )
-          continue;
+        if (!targetNode) continue;
 
-        connected.push({
-          nodeId: edge.target,
-          paramName: targetParsed.name,
-        });
+        if (
+          targetParsed.kind === "param" &&
+          (targetNode.data.nodeType === "pipeline" ||
+            targetNode.data.nodeType === "subgraph")
+        ) {
+          connected.push({
+            nodeId: edge.target,
+            paramName: targetParsed.name,
+          });
+        } else if (
+          targetParsed.kind === "stream" &&
+          targetNode.data.nodeType === "custom_node"
+        ) {
+          connected.push({
+            nodeId: edge.target,
+            paramName: stripCustomNodeDirection(targetParsed.name),
+          });
+        }
       }
 
       return connected;
