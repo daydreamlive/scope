@@ -183,7 +183,7 @@ class PipelineManager:
             node_cls = NodeRegistry.get(node["node_type_id"])
             if node_cls is None:
                 continue
-            self.set_pipeline_instance(node["id"], node_cls())
+            self.set_pipeline_instance(node["id"], node_cls(node["id"]))
             logger.info(
                 f"Registered custom node {node['node_type_id']} as {node['id']}"
             )
