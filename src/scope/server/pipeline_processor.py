@@ -484,6 +484,20 @@ class PipelineProcessor:
             # Pass parameters (excluding prepare-only parameters)
             call_params = dict(self.parameters.items())
 
+            # Clear one-shot parameters from self.parameters now that they are captured
+            # in call_params. Popping before pipeline execution (instead of after success)
+            # ensures a failure — e.g. a bad image URL that raises FileNotFoundError —
+            # does not re-fire the same value on every subsequent chunk, which previously
+            # produced thousands of repeated tracebacks per second.
+            one_shot_params = (
+                "vace_ref_images",
+                "images",
+                "first_frame_image",
+                "last_frame_image",
+            )
+            for param in one_shot_params:
+                self.parameters.pop(param, None)
+
             # Pass reset_cache as init_cache to pipeline
             call_params["init_cache"] = not self.is_prepared or self._pending_cache_init
             if reset_cache:
@@ -557,18 +571,6 @@ class PipelineProcessor:
                 self.is_prepared = True
                 self._pending_cache_init = False
                 return
-
-            # Clear one-shot parameters after use to prevent sending them on subsequent chunks
-            # These parameters should only be sent when explicitly provided in parameter updates
-            one_shot_params = [
-                "vace_ref_images",
-                "images",
-                "first_frame_image",
-                "last_frame_image",
-            ]
-            for param in one_shot_params:
-                if param in call_params and param in self.parameters:
-                    self.parameters.pop(param, None)
 
             # Clear transition when complete
             if "transition" in call_params and "transition" in self.parameters:
