@@ -151,7 +151,10 @@ def build_graph(
                 raise ValueError(
                     f"Unknown node type '{node.node_type_id}' for node '{node.id}'"
                 )
-            node_instance = node_cls(node_id=node.id)
+            # Every node — artifact-bearing or stateless utility — goes
+            # through PipelineManager so lifecycle, dedup, and multi-
+            # instance keying match what config-driven pipelines get.
+            node_instance = pipeline_manager.get_pipeline_by_id(node.id)
             # Merge per-node params (from workflow) with global initial params.
             # Per-node values take precedence (e.g. "steps": 8 on DiffusionConfig).
             node_params = {**initial_parameters}
@@ -366,10 +369,12 @@ def _validate_edge_ports(
     for node in graph.nodes:
         if node.type == "pipeline" and node.pipeline_id is not None:
             pipeline = pipeline_manager.get_pipeline_by_id(node.id)
-            config_class = pipeline.get_config_class()
+            # Use get_definition() so declared NodePort entries (with
+            # non-video port_type) are recognised alongside string names.
+            defn = pipeline.get_definition()
             port_map[node.id] = (
-                set(config_class.inputs),
-                set(config_class.outputs),
+                {p.name for p in defn.inputs},
+                {p.name for p in defn.outputs},
             )
         elif node.type == "node" and node.node_type_id is not None:
             node_cls = NodeRegistry.get(node.node_type_id)

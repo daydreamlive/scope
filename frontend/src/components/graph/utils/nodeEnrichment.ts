@@ -250,6 +250,18 @@ export function enrichNodes(
         },
       };
     }
+    if (n.data.nodeType === "custom_node") {
+      // Expose a setter that mirrors widget edits to the running backend
+      // node via `handleNodeParameterChange` → `sendParameterUpdate`.
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          onCustomNodeParamChange: (key: string, value: unknown) =>
+            deps.handleNodeParameterChange(n.id, key, value),
+        },
+      };
+    }
     return n;
   });
 }
