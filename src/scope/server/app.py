@@ -1617,7 +1617,16 @@ class LoRAInstallResponse(BaseModel):
     file: LoRAFileInfo
 
 
-ALLOWED_LORA_HOSTS = {"civitai.com", "huggingface.co"}
+ALLOWED_LORA_HOSTS = {"civitai.com", "huggingface.co", "hf.co"}
+
+# Hosts that resolve to Hugging Face. `hf.co` is the official short
+# domain and redirects to huggingface.co. We treat both identically for
+# blob-vs-resolve detection and provenance tagging.
+_HUGGINGFACE_HOSTS = ("huggingface.co", "hf.co")
+
+
+def _is_huggingface_host(hostname: str) -> bool:
+    return any(hostname == h or hostname.endswith(f".{h}") for h in _HUGGINGFACE_HOSTS)
 
 
 @app.post("/api/v1/loras", response_model=LoRAInstallResponse)
@@ -1640,9 +1649,7 @@ async def install_lora_file(
     parsed = urlparse(url)
     hostname = parsed.hostname or ""
     is_civitai = hostname == "civitai.com" or hostname.endswith(".civitai.com")
-    is_huggingface = hostname == "huggingface.co" or hostname.endswith(
-        ".huggingface.co"
-    )
+    is_huggingface = _is_huggingface_host(hostname)
 
     # Reject HuggingFace "blob" URLs — these point at the file's HTML preview
     # page (e.g. /Repo/blob/main/file.safetensors), not the raw download.
@@ -1809,7 +1816,7 @@ async def install_lora_file(
         source: str
         if is_civitai:
             source = "civitai"
-        elif hostname == "huggingface.co" or hostname.endswith(".huggingface.co"):
+        elif _is_huggingface_host(hostname):
             source = "huggingface"
         else:
             source = "url"

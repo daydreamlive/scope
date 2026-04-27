@@ -10,7 +10,12 @@ import type { LoRAFileInfo } from "@/lib/api";
  * weights file. The HF "Copy download link" button produces the
  * correct `/resolve/main/` form. We surface this as inline guidance
  * before submit (and the backend rejects them too).
+ *
+ * Also handles `hf.co`, the official Hugging Face short domain that
+ * redirects to huggingface.co.
  */
+const HUGGING_FACE_HOSTS = ["huggingface.co", "hf.co"];
+
 function isHuggingFaceBlobUrl(raw: string): boolean {
   const trimmed = raw.trim();
   if (!trimmed) return false;
@@ -21,7 +26,9 @@ function isHuggingFaceBlobUrl(raw: string): boolean {
     return false;
   }
   const host = parsed.hostname.toLowerCase();
-  const isHf = host === "huggingface.co" || host.endsWith(".huggingface.co");
+  const isHf = HUGGING_FACE_HOSTS.some(
+    h => host === h || host.endsWith(`.${h}`)
+  );
   return isHf && parsed.pathname.includes("/blob/");
 }
 
