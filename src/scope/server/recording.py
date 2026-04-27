@@ -1,17 +1,15 @@
 """Recording-related utility functions for cleanup and download handling."""
 
-import fractions
 import logging
 import os
 import shutil
 import tempfile
 import threading
-import time
 from pathlib import Path
 
 from aiortc import MediaStreamTrack
 from aiortc.contrib.media import MediaRecorder, MediaRelay
-from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE
+from av import VideoFrame
 
 logger = logging.getLogger(__name__)
 
@@ -21,118 +19,28 @@ TEMP_FILE_PREFIXES = {
     "download": "scope_download_",
 }
 
-# Environment variables
-RECORDING_ENABLED = os.getenv("RECORDING_ENABLED", "false").lower() == "true"
-RECORDING_STARTUP_CLEANUP_ENABLED = (
-    os.getenv("RECORDING_STARTUP_CLEANUP_ENABLED", "true").lower() == "true"
-)
-
 RECORDING_MAX_FPS = 30.0  # Must match MediaRecorder's hardcoded rate=30
 
 
-class TimestampNormalizingTrack(MediaStreamTrack):
-    """Wraps a track and assigns wall-clock timestamps starting from 0.
+def ensure_even_video_frame(frame: VideoFrame) -> VideoFrame:
+    """Pad odd-dimension video frames so encoders like libx264 accept them."""
+    pts = frame.pts
+    time_base = frame.time_base
+    arr = frame.to_ndarray(format="rgb24")
+    h, w = arr.shape[:2]
+    pad_w = w % 2
+    pad_h = h % 2
+    if not (pad_w or pad_h):
+        return frame
 
-    Uses monotonic wall-clock time to compute PTS so that the recorded
-    MP4 plays back at real-time speed regardless of the source track's
-    own PTS cadence.  This is critical for cloud-relay recordings where
-    frames may arrive slower than the source track's nominal rate (e.g.
-    CloudTrack stamps every frame at 1/30 s intervals even when network
-    round-trips deliver them at 10-15 FPS).
+    import numpy as np
 
-    Important: We must create a copy of the frame rather than modifying it
-    in place, because the relay shares frame objects across all subscribers.
-    Modifying in place would affect the WebRTC sender and cause encoding errors.
-    """
-
-    def __init__(self, source_track: MediaStreamTrack):
-        super().__init__()
-        self.kind = source_track.kind
-        self._source = source_track
-        self._start_time: float | None = None
-        self._last_frame_time: float | None = None
-        self._min_frame_interval = 1.0 / RECORDING_MAX_FPS
-
-    async def recv(self):
-        import av
-
-        while True:
-            frame = await self._source.recv()
-
-            # Frame rate limiting - skip frames arriving faster than MAX_RECORDING_FPS
-            current_time = time.monotonic()
-            if self._last_frame_time is not None:
-                elapsed = current_time - self._last_frame_time
-                if elapsed < self._min_frame_interval:
-                    continue  # Skip this frame
-            self._last_frame_time = current_time
-
-            if self._start_time is None:
-                self._start_time = current_time
-
-            # Create a new frame with wall-clock-based timestamp.
-            # Pad to even dimensions — libx264 requires width and height divisible by 2.
-            arr = frame.to_ndarray(format="rgb24")
-            h, w = arr.shape[:2]
-            pad_w = w % 2
-            pad_h = h % 2
-            if pad_w or pad_h:
-                import numpy as np
-
-                arr = np.pad(arr, ((0, pad_h), (0, pad_w), (0, 0)), mode="edge")
-            new_frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
-            new_frame.pts = int((current_time - self._start_time) * VIDEO_CLOCK_RATE)
-            new_frame.time_base = VIDEO_TIME_BASE
-            return new_frame
-
-    def stop(self):
-        self._source.stop()
-        super().stop()
-
-
-class AudioTimestampNormalizingTrack(MediaStreamTrack):
-    """Wraps an audio track and assigns wall-clock timestamps starting from 0.
-
-    Analogous to TimestampNormalizingTrack but for AudioFrame objects.
-    Uses wall-clock time for PTS to stay in sync with the video track's
-    wall-clock timestamps.  Unlike video, audio frames are not rate-limited
-    here because the source AudioProcessingTrack already paces at 20ms
-    intervals.
-    """
-
-    kind = "audio"
-
-    def __init__(self, source_track: MediaStreamTrack):
-        super().__init__()
-        self._source = source_track
-        self._start_time: float | None = None
-
-    async def recv(self):
-        from av import AudioFrame as AvAudioFrame
-
-        frame = await self._source.recv()
-
-        current_time = time.monotonic()
-        if self._start_time is None:
-            self._start_time = current_time
-
-        # Create a copy with wall-clock PTS (relay shares frame objects,
-        # so we must not mutate in place).
-        new_frame = AvAudioFrame(
-            format=frame.format.name,
-            layout=frame.layout.name,
-            samples=frame.samples,
-        )
-        new_frame.sample_rate = frame.sample_rate
-        new_frame.pts = int((current_time - self._start_time) * frame.sample_rate)
-        new_frame.time_base = fractions.Fraction(1, frame.sample_rate)
-        for i, plane in enumerate(frame.planes):
-            new_frame.planes[i].update(bytes(plane))
-        return new_frame
-
-    def stop(self):
-        self._source.stop()
-        super().stop()
+    padded = np.pad(arr, ((0, pad_h), (0, pad_w), (0, 0)), mode="edge")
+    even_frame = VideoFrame.from_ndarray(padded, format="rgb24")
+    even_frame.pts = pts
+    if time_base is not None:
+        even_frame.time_base = time_base
+    return even_frame
 
 
 class RecordingManager:
@@ -182,42 +90,34 @@ class RecordingManager:
                 logger.warning(f"Error stopping recording track: {e}")
 
     def _create_recording_track(self) -> MediaStreamTrack | None:
-        """Create a video recording track.
-
-        Returns None if no video track is configured.  The track is wrapped
-        in TimestampNormalizingTrack to ensure frame timestamps start from 0
-        for each new recording.
-        """
+        """Create a video recording track, preserving source timestamps."""
         if self.video_track is None:
             return None
         if self.relay:
-            relay_track = self.relay.subscribe(self.video_track)
-            return TimestampNormalizingTrack(relay_track)
-        else:
-            logger.warning("No relay available for recording, using track directly")
-            return TimestampNormalizingTrack(self.video_track)
+            return self.relay.subscribe(self.video_track)
+        logger.warning("No relay available for recording, using track directly")
+        return self.video_track
 
     def _create_audio_recording_track(self) -> MediaStreamTrack | None:
-        """Create an audio recording track.
-
-        Returns None if no audio track is configured.
-        """
+        """Create an audio recording track, preserving source timestamps."""
         if self.audio_track is None:
             return None
         if self.audio_relay:
-            relay_track = self.audio_relay.subscribe(self.audio_track)
-            return AudioTimestampNormalizingTrack(relay_track)
-        else:
-            logger.warning(
-                "No audio relay available for recording, using track directly"
-            )
-            return AudioTimestampNormalizingTrack(self.audio_track)
+            return self.audio_relay.subscribe(self.audio_track)
+        logger.warning("No audio relay available for recording, using track directly")
+        return self.audio_track
 
     def _create_media_recorder(self, file_path: str) -> MediaRecorder:
         """Create a MediaRecorder instance with standard settings."""
         return MediaRecorder(
             file_path,
             format="mp4",
+            options={
+                # force timestamps to start at zero
+                "use_editlist": "0",
+                # allows playback before file is fully loaded, eg over http
+                "movflags": "+faststart",
+            },
         )
 
     async def start_recording(self):
@@ -450,12 +350,6 @@ def cleanup_recording_files():
     Clean up all recording files from previous sessions.
     This handles cases where the process crashed and files weren't cleaned up.
     """
-    if not RECORDING_STARTUP_CLEANUP_ENABLED:
-        logger.info(
-            "Recording startup cleanup disabled via RECORDING_STARTUP_CLEANUP_ENABLED"
-        )
-        return
-
     temp_dir = Path(tempfile.gettempdir())
     if not temp_dir.exists():
         return

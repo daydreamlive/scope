@@ -466,7 +466,9 @@ async def _media_output_loop(
             # TODO make this blocking; we busy-wait a LOT
             frame_item = None
             if record_node_id is not None:
-                frame_item = frame_processor.sink_manager.recording.get(record_node_id)
+                frame_item = frame_processor.sink_manager.recording.get_packet(
+                    record_node_id
+                )
                 if frame_item is None:
                     await asyncio.sleep(0.01)  # no frame yet, wait a bit
                     continue

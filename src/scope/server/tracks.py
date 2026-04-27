@@ -16,6 +16,7 @@ from scope.core.pacing import MediaPacingState, compute_pacing_decision
 
 from .media_packets import VideoPacket, ensure_video_packet
 from .pipeline_manager import PipelineManager
+from .recording import ensure_even_video_frame
 
 if TYPE_CHECKING:
     from .frame_processor import FrameProcessor
@@ -135,8 +136,8 @@ class QueueVideoTrack(MediaStreamTrack):
             if frame_squeezed.is_cuda:
                 frame_squeezed = frame_squeezed.cpu()
 
-            video_frame = VideoFrame.from_ndarray(
-                frame_squeezed.numpy(), format="rgb24"
+            video_frame = ensure_even_video_frame(
+                VideoFrame.from_ndarray(frame_squeezed.numpy(), format="rgb24")
             )
             if packet.timestamp.is_valid:
                 await _pace_preserved_timestamp(self, self._pacing, packet)
@@ -181,7 +182,9 @@ class NodeOutputTrack(MediaStreamTrack):
             packet = self._frame_getter(fp)
             if packet is not None:
                 packet = ensure_video_packet(packet)
-                frame = VideoFrame.from_ndarray(packet.tensor.numpy(), format="rgb24")
+                frame = ensure_even_video_frame(
+                    VideoFrame.from_ndarray(packet.tensor.numpy(), format="rgb24")
+                )
                 if packet.timestamp.is_valid:
                     await _pace_preserved_timestamp(self, self._pacing, packet)
                     frame.pts = packet.timestamp.pts
