@@ -27,11 +27,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _is_pipeline(node_class: object) -> bool:
-    """Return True for config-driven nodes (the historical "pipelines")."""
-    return isinstance(node_class, type) and node_class.get_config_class() is not None
-
-
 class PipelineRegistry:
     """Filtering view over :class:`NodeRegistry` for pipeline classes."""
 
@@ -58,7 +53,9 @@ class PipelineRegistry:
     @classmethod
     def get(cls, pipeline_id: str) -> type["Node"] | None:
         node_class = NodeRegistry.get(pipeline_id)
-        return node_class if _is_pipeline(node_class) else None
+        if node_class is None or node_class.get_config_class() is None:
+            return None
+        return node_class
 
     @classmethod
     def unregister(cls, pipeline_id: str) -> bool:
@@ -78,20 +75,8 @@ class PipelineRegistry:
     @classmethod
     def list_pipelines(cls) -> list[str]:
         return [
-            pid
-            for pid in NodeRegistry.list_node_types()
-            if _is_pipeline(NodeRegistry.get(pid))
+            pid for pid in NodeRegistry.list_node_types() if cls.get(pid) is not None
         ]
-
-    @classmethod
-    def chain_produces_video(cls, pipeline_ids: list[str]) -> bool:
-        """Deprecated — use :meth:`NodeRegistry.chain_produces_video`."""
-        return NodeRegistry.chain_produces_video(pipeline_ids)
-
-    @classmethod
-    def chain_produces_audio(cls, pipeline_ids: list[str]) -> bool:
-        """Deprecated — use :meth:`NodeRegistry.chain_produces_audio`."""
-        return NodeRegistry.chain_produces_audio(pipeline_ids)
 
 
 def _get_gpu_vram_gb() -> float | None:

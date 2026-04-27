@@ -20,7 +20,7 @@ from aiortc.codecs import h264, vpx
 from aiortc.contrib.media import MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
-from scope.core.pipelines.registry import PipelineRegistry
+from scope.core.nodes.registry import NodeRegistry
 
 from .audio_track import AudioProcessingTrack
 from .cloud_track import CloudTrack
@@ -331,7 +331,7 @@ class WebRTCManager:
             # (authoritative for local mode). initial_parameters values are not
             # used here because they may be stale from a previous pipeline load.
             pipeline_ids = initial_parameters.get("pipeline_ids", [])
-            produces_video = PipelineRegistry.chain_produces_video(pipeline_ids)
+            produces_video = NodeRegistry.chain_produces_video(pipeline_ids)
 
             # Parse graph from initial parameters to find sink/source/record node IDs
             (
@@ -481,7 +481,7 @@ class WebRTCManager:
                     "skipping video track"
                 )
 
-            produces_audio = PipelineRegistry.chain_produces_audio(pipeline_ids)
+            produces_audio = NodeRegistry.chain_produces_audio(pipeline_ids)
             if produces_audio:
                 audio_track = AudioProcessingTrack(
                     frame_processor=frame_processor,

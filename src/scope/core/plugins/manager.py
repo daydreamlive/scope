@@ -561,7 +561,7 @@ class PluginManager:
         The ``registry`` argument is accepted for legacy callers but
         ignored — the unified storage is always used.
         """
-        from scope.core.nodes.registry import NodeRegistry
+        from scope.core.nodes.registry import NodeRegistry, _derive_node_type_id
 
         del registry  # legacy parameter, kept for callsite compat
 
@@ -570,14 +570,7 @@ class PluginManager:
 
             def register_callback(node_class: Any) -> None:
                 NodeRegistry.register(node_class)
-                # NodeRegistry.register has already derived the type id
-                # (from either node_type_id or the config class); reuse
-                # the same derivation for logging rather than reimplementing.
-                node_id = getattr(node_class, "node_type_id", "") or (
-                    node_class.get_config_class().pipeline_id
-                    if node_class.get_config_class() is not None
-                    else node_class.__name__
-                )
+                node_id = _derive_node_type_id(node_class) or node_class.__name__
                 logger.info(f"Registered plugin node: {node_id}")
 
             self._pm.hook.register_nodes(register=register_callback)
@@ -596,7 +589,7 @@ class PluginManager:
         """
         from importlib.metadata import distributions
 
-        from scope.core.nodes.registry import NodeRegistry
+        from scope.core.nodes.registry import NodeRegistry, _derive_node_type_id
 
         all_ids = set(NodeRegistry.list_node_types())
         failed_packages = {fp.package_name for fp in self._failed_plugins}
@@ -620,11 +613,7 @@ class PluginManager:
                         def tracking_callback(
                             node_class: Any, pkg_name: str = package_name
                         ) -> None:
-                            type_id = getattr(node_class, "node_type_id", "") or (
-                                node_class.get_config_class().pipeline_id
-                                if node_class.get_config_class() is not None
-                                else ""
-                            )
+                            type_id = _derive_node_type_id(node_class)
                             if type_id and type_id in all_ids:
                                 self._type_to_plugin[type_id] = pkg_name
 

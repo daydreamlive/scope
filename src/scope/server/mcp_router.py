@@ -244,7 +244,7 @@ async def start_stream(
     - Simple: provide pipeline_id for a single-pipeline session
     - Graph: provide a graph dict with nodes/edges for multi-source/multi-sink
     """
-    from scope.core.pipelines.registry import PipelineRegistry
+    from scope.core.nodes.registry import NodeRegistry
 
     from .frame_processor import FrameProcessor
     from .headless import HeadlessSession
@@ -335,7 +335,7 @@ async def start_stream(
 
         session = HeadlessSession(
             frame_processor=frame_processor,
-            expect_audio=PipelineRegistry.chain_produces_audio(pipeline_id_list),
+            expect_audio=NodeRegistry.chain_produces_audio(pipeline_id_list),
         )
         session.start_frame_consumer()
         webrtc_manager.add_headless_session(session)
