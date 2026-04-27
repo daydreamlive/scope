@@ -73,10 +73,28 @@ export interface SerializedSubgraphEdge {
   targetHandle?: string | null;
 }
 
+/**
+ * Per-parameter OSC opt-in / address override / default override.
+ *
+ * Stored on `node.data.oscConfig` keyed by the node-data field name
+ * (e.g. "value" for a slider, "sourceMode" for a source). Computed by
+ * `useOscInventory` into the global OSC inventory POSTed to the
+ * backend. Persists with the rest of the graph.
+ */
+export interface OscParamConfig {
+  exposed: boolean;
+  /** Full OSC address (e.g. "/scope/tempo/value"); auto-derived when omitted. */
+  address?: string;
+  /** Advisory default published in the OSC docs; not auto-applied to the param. */
+  default?: unknown;
+}
+
 export interface FlowNodeData {
   label: string;
   /** User-editable display name; when set, overrides the default header title. */
   customTitle?: string;
+  /** Per-param OSC opt-in/override map. Absent ⇒ no params exposed for this node. */
+  oscConfig?: Record<string, OscParamConfig>;
   pipelineId?: string | null;
   nodeType:
     | "source"
