@@ -31,6 +31,7 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   const isPlaying = (data.isPlaying as boolean | undefined) ?? true;
   const onPlayPauseToggle = data.onPlayPauseToggle as (() => void) | undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
+  const audioRef = useRef<HTMLAudioElement>(null);
   const [videoSize, setVideoSize] = useState<{
     width: number;
     height: number;
@@ -49,14 +50,27 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   }, []);
 
   useEffect(() => {
-    if (videoRef.current && remoteStream instanceof MediaStream) {
-      videoRef.current.srcObject = remoteStream;
+    if (remoteStream instanceof MediaStream) {
+      if (videoRef.current) {
+        videoRef.current.srcObject = remoteStream;
+      }
       setHasAudioTrack(remoteStream.getAudioTracks().length > 0);
       setHasVideoTrack(remoteStream.getVideoTracks().length > 0);
+
+      // Persistent <audio> element gives Chrome a reliable target for
+      // audio-only WebRTC streams (zero-size <video> fails autoplay).
+      if (audioRef.current) {
+        audioRef.current.srcObject = remoteStream;
+        audioRef.current.play().catch(() => {});
+      }
 
       const handleTrackAdded = () => {
         setHasAudioTrack(remoteStream.getAudioTracks().length > 0);
         setHasVideoTrack(remoteStream.getVideoTracks().length > 0);
+        if (audioRef.current && audioRef.current.srcObject !== remoteStream) {
+          audioRef.current.srcObject = remoteStream;
+          audioRef.current.play().catch(() => {});
+        }
       };
       remoteStream.addEventListener("addtrack", handleTrackAdded);
       return () => {
@@ -69,7 +83,17 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
     if (videoRef.current) {
       videoRef.current.muted = isMuted;
     }
+    if (audioRef.current) {
+      audioRef.current.muted = isMuted;
+    }
   }, [isMuted, isFullscreen]);
+
+  // Auto-unmute when audio arrives without video (audio-only workflow)
+  useEffect(() => {
+    if (hasAudioTrack && !hasVideoTrack) {
+      setIsMuted(false);
+    }
+  }, [hasAudioTrack, hasVideoTrack]);
 
   useEffect(() => {
     if (!isFullscreen) return;
@@ -130,6 +154,7 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
             playsInline
             onResize={handleResize}
           />
+          <audio ref={audioRef} autoPlay style={{ display: "none" }} />
           {!hasVideoTrack && (
             <div className="flex flex-col items-center justify-center h-full gap-1 text-[#8c8c8d]">
               <Volume2 className="h-5 w-5" />
@@ -298,6 +323,17 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
           collapsed
             ? collapsedHandleStyle("left")
             : { top: handleY, left: 0, backgroundColor: "#ffffff" }
+        }
+      />
+      <Handle
+        type="target"
+        position={Position.Left}
+        id="stream:audio"
+        className="!w-2.5 !h-2.5 !border-0"
+        style={
+          collapsed
+            ? collapsedHandleStyle("left")
+            : { top: (handleY ?? 0) + 16, left: 0, backgroundColor: "#22c55e" }
         }
       />
       <Handle

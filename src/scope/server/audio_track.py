@@ -2,9 +2,12 @@ import asyncio
 import collections
 import fractions
 import logging
+import threading
 import time
+import weakref
 
 import numpy as np
+import torch
 from aiortc import MediaStreamTrack
 from aiortc.mediastreams import MediaStreamError
 from av import AudioFrame
@@ -23,6 +26,28 @@ AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
 # in a single chunk after each denoising pass, and for TTS pipelines that may
 # generate many seconds of speech before playback catches up.
 AUDIO_MAX_BUFFER_SAMPLES = AUDIO_CLOCK_RATE * 60
+
+
+# Registry of live audio tracks so graph nodes that need the playhead (e.g.
+# ACE-Step's StreamVAEDecode skip gate, which mirrors the realtime demo's
+# ``audio_eng.position / SAMPLE_RATE`` read in pipeline.py) can query it
+# without a hard dependency on FrameProcessor. Weak refs so closed tracks
+# drop out automatically.
+_PLAYHEAD_LOCK = threading.Lock()
+_PLAYHEAD_TRACKS: "weakref.WeakSet[AudioProcessingTrack]" = weakref.WeakSet()
+
+
+def get_current_playhead_seconds() -> float | None:
+    """Return the playhead position of the first live audio track, in seconds.
+
+    Returns None if no track is registered yet or none are live. Callers
+    should treat None as "skip gate disabled this tick".
+    """
+    with _PLAYHEAD_LOCK:
+        for track in _PLAYHEAD_TRACKS:
+            if track.readyState == "live":
+                return track.playhead_seconds
+    return None
 
 
 class AudioProcessingTrack(MediaStreamTrack):
@@ -56,6 +81,19 @@ class AudioProcessingTrack(MediaStreamTrack):
         self._start: float | None = None
         self._timestamp: int = 0
         self._last_preserved_pts: int | None = None
+
+        with _PLAYHEAD_LOCK:
+            _PLAYHEAD_TRACKS.add(self)
+
+    @property
+    def playhead_seconds(self) -> float:
+        """Current playback position in seconds (monotonic recv timestamp).
+
+        Mirrors the realtime demo's ``audio_eng.position / SAMPLE_RATE``
+        (see ``demos/realtime_motion_graph/pipeline.py``). Value is 0 before
+        the first ``recv`` call.
+        """
+        return self._timestamp / AUDIO_CLOCK_RATE
 
     @staticmethod
     def _resample_audio(
@@ -100,9 +138,15 @@ class AudioProcessingTrack(MediaStreamTrack):
         if self.frame_processor.paused:
             return self._create_silence_frame()
 
-        # Drain all available audio from the queue to minimise latency
-        # for bursty or small-chunk pipelines.
-        while True:
+        samples_needed = self._samples_per_frame * self.channels
+
+        # Lazy drain: pull chunks from the queue only until the local buffer
+        # has enough samples to serve this frame. Leaving unconsumed chunks
+        # in ``audio_output_queue`` creates natural backpressure — producers
+        # block on the (small) queue's blocking put and cascade the stall
+        # upstream through node-to-node edge queues, matching production
+        # rate to real-time consumption without silent drops.
+        while self._buffered_samples < samples_needed:
             audio_packet = self.frame_processor.get_audio_packet()
             if audio_packet is None:
                 break
@@ -125,6 +169,10 @@ class AudioProcessingTrack(MediaStreamTrack):
                 )
                 self._first_audio_logged = True
 
+            # numpy() rejects bfloat16/float16; upcast so half-precision tensors
+            # from GPU models (e.g. ACE-Step VAE decode) don't silently become silence.
+            if audio_tensor.dtype in (torch.bfloat16, torch.float16):
+                audio_tensor = audio_tensor.float()
             audio_np = audio_tensor.numpy()
             if audio_np.ndim == 1:
                 audio_np = audio_np.reshape(1, -1)
@@ -182,7 +230,6 @@ class AudioProcessingTrack(MediaStreamTrack):
             logger.warning("Audio buffer overflow, dropped oldest chunks")
 
         # Serve a 20ms frame from the buffer
-        samples_needed = self._samples_per_frame * self.channels
         if self._buffered_samples >= samples_needed:
             frame_parts: list[np.ndarray] = []
             remaining = samples_needed

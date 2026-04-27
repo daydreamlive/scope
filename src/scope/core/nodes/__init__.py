@@ -9,16 +9,18 @@ the frontend via ``GET /api/v1/nodes/definitions``.
 """
 
 from .base import BaseNode, NodeDefinition, NodeParam, NodePort
-from .builtins import SchedulerNode
+from .builtins import AudioSourceNode, SchedulerNode
 from .registry import NodeRegistry
 
 
 def register_builtin_nodes() -> None:
     """Register all built-in node types shipped with the foundation."""
     NodeRegistry.register(SchedulerNode)
+    NodeRegistry.register(AudioSourceNode)
 
 
 __all__ = [
+    "AudioSourceNode",
     "BaseNode",
     "NodeDefinition",
     "NodeParam",

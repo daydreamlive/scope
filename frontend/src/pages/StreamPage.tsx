@@ -2941,8 +2941,12 @@ export function StreamPage() {
           settings.kvCacheAttentionBias ?? 1.0;
       }
 
-      // Pipeline chain: preprocessors + main pipeline (already built above)
-      initialParameters.pipeline_ids = pipelineIds;
+      // Pipeline chain: preprocessors + main pipeline (already built above).
+      // Node-only graphs (custom nodes with no pipelines) leave this unset so
+      // the backend skips pipeline loading.
+      if (pipelineIds.length > 0) {
+        initialParameters.pipeline_ids = pipelineIds;
+      }
 
       // Media modalities from pipeline status — used by the backend to decide
       // which tracks to create (avoids unnecessary audio processing for

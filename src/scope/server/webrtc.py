@@ -60,6 +60,39 @@ vpx.MIN_BITRATE = 5000000
 vpx.MAX_BITRATE = 10000000
 
 
+def _graph_produces_audio(graph_data: dict) -> bool:
+    """Return True when any node in the graph exposes an audio output.
+
+    Inspects custom-node definitions from :class:`NodeRegistry` and
+    pipeline configs so WebRTC can decide whether to open an audio
+    track for graphs that produce audio through custom nodes rather
+    than through a registered pipeline.
+    """
+    from scope.core.nodes.registry import NodeRegistry
+
+    for node in graph_data.get("nodes", []):
+        node_type = node.get("type")
+        if node_type == "node":
+            node_type_id = node.get("node_type_id")
+            if node_type_id:
+                node_cls = NodeRegistry.get(node_type_id)
+                if node_cls is not None:
+                    defn = node_cls.get_definition()
+                    if any(p.port_type == "audio" for p in defn.outputs):
+                        return True
+        elif node_type == "pipeline":
+            pid = node.get("pipeline_id")
+            if pid:
+                cfg = PipelineRegistry.get_config_class(pid)
+                if cfg and getattr(cfg, "produces_audio", False):
+                    return True
+    # Also treat any audio-kind edge as an audio-producing graph.
+    for edge in graph_data.get("edges", []):
+        if edge.get("from_port") == "audio" or edge.get("to_port") == "audio":
+            return True
+    return False
+
+
 def _parse_graph_node_ids(
     initial_parameters: dict,
 ) -> tuple[list[str], list[str], list[str], list[str], list[str], bool]:
@@ -478,6 +511,11 @@ class WebRTCManager:
                 )
 
             produces_audio = PipelineRegistry.chain_produces_audio(pipeline_ids)
+            # Graphs that emit audio through custom nodes (e.g. ACEStep)
+            # have no pipeline-produced audio, so also inspect the graph.
+            graph_data_for_audio = initial_parameters.get("graph")
+            if not produces_audio and graph_data_for_audio:
+                produces_audio = _graph_produces_audio(graph_data_for_audio)
             if produces_audio:
                 audio_track = AudioProcessingTrack(
                     frame_processor=frame_processor,
@@ -619,6 +657,18 @@ class WebRTCManager:
                         # Parse the JSON message
                         data = json.loads(message)
                         logger.debug(f"Received parameter update: {data}")
+                        import os as _os
+
+                        if _os.environ.get("SCOPE_NODE_TRACE", "").lower() in (
+                            "1",
+                            "true",
+                            "yes",
+                        ):
+                            logger.info(
+                                "[scope.webrtc.datachannel] inbound keys=%s node_id=%s",
+                                sorted(data.keys()) if isinstance(data, dict) else None,
+                                data.get("node_id") if isinstance(data, dict) else None,
+                            )
 
                         # Always handle paused immediately (before quantized
                         # scheduling) so pause/unpause is never delayed.
