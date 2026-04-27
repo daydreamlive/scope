@@ -20,7 +20,7 @@ from aiortc.codecs import h264, vpx
 from aiortc.contrib.media import MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
-from scope.core.pipelines.registry import PipelineRegistry
+from scope.core.nodes.registry import NodeRegistry
 
 from .audio_track import AudioProcessingTrack
 from .cloud_track import CloudTrack
@@ -352,7 +352,7 @@ class WebRTCManager:
             # (authoritative for local mode). initial_parameters values are not
             # used here because they may be stale from a previous pipeline load.
             pipeline_ids = initial_parameters.get("pipeline_ids", [])
-            produces_video = PipelineRegistry.chain_produces_video(pipeline_ids)
+            produces_video = NodeRegistry.chain_produces_video(pipeline_ids)
 
             # Parse graph from initial parameters to find sink/source/record node IDs
             (
@@ -419,6 +419,10 @@ class WebRTCManager:
                             logger.info(
                                 f"Re-keyed pipeline {pid} as {node['id']} for graph"
                             )
+                # Plain custom nodes aren't pre-loaded via /pipeline/load,
+                # but the graph executor still resolves them through the
+                # PipelineManager — so instantiate and register them here.
+                pipeline_manager.register_graph_nodes(graph_data)
 
             # Create FrameProcessor (owned by session, shared between tracks)
             frame_processor = FrameProcessor(
@@ -498,7 +502,7 @@ class WebRTCManager:
                     "skipping video track"
                 )
 
-            produces_audio = PipelineRegistry.chain_produces_audio(pipeline_ids)
+            produces_audio = NodeRegistry.chain_produces_audio(pipeline_ids)
             if produces_audio:
                 audio_track = AudioProcessingTrack(
                     frame_processor=frame_processor,
@@ -1311,18 +1315,19 @@ class WebRTCManager:
             self.headless_session.frame_processor.update_parameters(parameters)
 
     def broadcast_notification(self, message: dict) -> None:
-        """Send a notification message to all active sessions via their data channels."""
-        message_str = json.dumps(message)
+        """Send a notification to active sessions via their data channels.
+
+        Safe to call from worker threads: sends are marshalled onto the
+        aiortc event loop through each session's :class:`NotificationSender`,
+        which also buffers messages until the data channel is open.
+        """
         for session in self.sessions.values():
             if session.pc.connectionState in ("closed", "failed"):
                 continue
-            if session.data_channel and session.data_channel.readyState == "open":
-                try:
-                    session.data_channel.send(message_str)
-                except Exception as e:
-                    logger.error(
-                        f"Failed to send notification to session {session.id}: {e}"
-                    )
+            sender = session.notification_sender
+            if sender is None:
+                continue
+            sender.call(message)
 
     async def stop(self):
         """Close and cleanup all sessions (WebRTC and headless)."""
