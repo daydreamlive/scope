@@ -212,17 +212,6 @@ def SinkOutputTrack(
     )
 
 
-def RecordOutputTrack(
-    frame_processor: FrameProcessor,
-    record_node_id: str,
-) -> NodeOutputTrack:
-    """Create a NodeOutputTrack that reads from a record node's output queue."""
-    return NodeOutputTrack(
-        frame_processor=frame_processor,
-        frame_getter=lambda fp: fp.sink_manager.recording.get_packet(record_node_id),
-    )
-
-
 class SourceInputHandler:
     """Handles input from a WebRTC track and routes frames to a specific source node.
 

@@ -404,6 +404,9 @@ export interface FlowNodeData {
   customNodeParams?: Record<string, unknown>;
   /** For custom_node: parameter definitions from API (widget metadata) */
   customNodeParamDefs?: NodeParamDef[];
+  /** For custom_node: push a param change through to the backend so the
+   *  running node picks up the new value without a session restart. */
+  onCustomNodeParamChange?: (key: string, value: unknown) => void;
 
   /* ── Node lock / pin / collapse ── */
   /** When true, parameter inputs on this node are disabled (read-only). */
@@ -469,6 +472,47 @@ export function stripCustomNodeDirection(name: string): string {
     return name.slice(CUSTOM_NODE_OUT_PREFIX.length);
   }
   return name;
+}
+
+/**
+ * Prompt port alias: the UI renders the "Enter prompt…" textarea under the
+ * widget handle ``param:__prompt`` (a composite pseudo-param that also
+ * stores raw widget state), while the backend pipeline exposes the
+ * matching port as ``prompts`` so the kwarg name matches at runtime.
+ * These two constants and the helpers below are the single spot where the
+ * rename is known — callers that import/export graphs translate through
+ * ``aliasWirePortForPipelineTarget`` / ``aliasWidgetPortForWire``.
+ */
+export const PROMPT_WIRE_PORT = "prompts";
+export const PROMPT_WIDGET_PORT = "__prompt";
+
+/** On import: rewrite the on-wire ``prompts`` target port to the widget name. */
+export function aliasWirePortForPipelineTarget(
+  toNode: string,
+  toPort: string,
+  pipelineTargetIds: ReadonlySet<string>
+): string {
+  if (pipelineTargetIds.has(toNode) && toPort === PROMPT_WIRE_PORT) {
+    return PROMPT_WIDGET_PORT;
+  }
+  return toPort;
+}
+
+/** On export: rewrite the widget ``__prompt`` target name back to the wire port. */
+export function aliasWidgetPortForWire(
+  targetNodeId: string,
+  toPort: string,
+  kind: "stream" | "parameter",
+  pipelineTargetIds: ReadonlySet<string>
+): string {
+  if (
+    kind === "stream" &&
+    toPort === PROMPT_WIDGET_PORT &&
+    pipelineTargetIds.has(targetNodeId)
+  ) {
+    return PROMPT_WIRE_PORT;
+  }
+  return toPort;
 }
 
 /**
@@ -904,19 +948,27 @@ export function graphConfigToFlow(
         nodes.filter(n => n.type === "custom_node").map(n => n.id)
       )
   );
+  const pipelineNodeIds = new Set(pipelines.map(n => n.id));
   const edges: Edge[] = graph.edges
     .filter(
       e => !isSubgraphInnerNode(e.from) && !isSubgraphInnerNode(e.to_node)
     )
     .map((e, i) => {
+      const toPort = aliasWirePortForPipelineTarget(
+        e.to_node,
+        e.to_port,
+        pipelineNodeIds
+      );
+      const isPromptPortTarget = toPort !== e.to_port;
       const sourceHandle =
         e.kind === "parameter"
           ? buildHandleId("param", e.from_port)
           : customNodeIds.has(e.from)
             ? customNodeOutputHandleId(e.from_port)
             : buildHandleId("stream", e.from_port);
-      const targetHandle =
-        e.kind === "parameter"
+      const targetHandle = isPromptPortTarget
+        ? buildHandleId("param", toPort)
+        : e.kind === "parameter"
           ? buildHandleId("param", e.to_port)
           : customNodeIds.has(e.to_node)
             ? customNodeInputHandleId(e.to_port)
@@ -1412,6 +1464,9 @@ export function flowToGraphConfig(
   // Strip the in:/out: prefix added to custom_node handles before writing
   // the bare port name back to the wire format.
   const graphNodeIds = new Set(graphNodes.map(n => n.id));
+  const pipelineTargetIds = new Set(
+    graphNodes.filter(n => n.type === "pipeline").map(n => n.id)
+  );
   const graphEdges: GraphEdge[] = flatEdges
     .filter(e => graphNodeIds.has(e.source) && graphNodeIds.has(e.target))
     .map(e => {
@@ -1424,9 +1479,14 @@ export function flowToGraphConfig(
       const fromName = sourceParsed?.name
         ? stripCustomNodeDirection(sourceParsed.name)
         : "video";
-      const toName = targetParsed?.name
-        ? stripCustomNodeDirection(targetParsed.name)
-        : "video";
+      const toName = aliasWidgetPortForWire(
+        e.target,
+        targetParsed?.name
+          ? stripCustomNodeDirection(targetParsed.name)
+          : "video",
+        kind as "stream" | "parameter",
+        pipelineTargetIds
+      );
       return {
         from: e.source,
         from_port: fromName,

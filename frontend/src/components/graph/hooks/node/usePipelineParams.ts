@@ -173,9 +173,17 @@ export function usePipelineParams({
       for (const [k, v] of Object.entries(params)) {
         if (k === "node_id") continue;
         if (k === "prompts") {
-          const arr = v as Array<{ text: string; weight: number }>;
-          if (Array.isArray(arr) && arr.length > 0) {
-            patch.__prompt = arr[0].text;
+          // Accept both the canonical list-of-dicts format coming back
+          // from sendParameterUpdate and a raw string (what an upstream
+          // node like the PromptEnhancer emits directly on the prompts
+          // port).
+          if (typeof v === "string") {
+            patch.__prompt = v;
+          } else if (Array.isArray(v) && v.length > 0) {
+            const first = v[0] as { text?: string };
+            if (typeof first?.text === "string") {
+              patch.__prompt = first.text;
+            }
           }
           continue;
         }

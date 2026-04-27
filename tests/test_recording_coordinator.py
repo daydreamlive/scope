@@ -2,6 +2,7 @@ import queue
 
 import pytest
 
+from scope.server import webrtc
 from scope.server.recording_coordinator import RecordingCoordinator
 
 
@@ -42,3 +43,23 @@ async def test_start_recording_drops_stale_record_queue_frames(monkeypatch):
     assert captured["queue_size_on_init"] == 0
     assert captured["fps"] == 29.97
     assert captured["manager_started"] is True
+
+
+def test_record_nodes_are_not_attached_as_live_webrtc_outputs(monkeypatch):
+    constructed_sinks = []
+
+    def fake_sink_output_track(*, frame_processor, sink_node_id):
+        constructed_sinks.append((frame_processor, sink_node_id))
+        return {"kind": "sink", "id": sink_node_id}
+
+    monkeypatch.setattr(webrtc, "SinkOutputTrack", fake_sink_output_track)
+
+    frame_processor = object()
+    tracks = webrtc._build_extra_output_tracks(
+        frame_processor=frame_processor,
+        sink_node_ids=["preview", "secondary"],
+        record_node_ids=["record"],
+    )
+
+    assert tracks == [{"kind": "sink", "id": "secondary"}]
+    assert constructed_sinks == [(frame_processor, "secondary")]

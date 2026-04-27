@@ -151,8 +151,11 @@ export function PipelineNode({
   const isResetCacheConnected = isParamConnected("reset_cache");
 
   const VACE_STREAM_PORTS = ["vace_input_frames", "vace_input_masks"];
+  // The "prompts" input is rendered by the dedicated "Enter prompt…" widget
+  // at the bottom of the node, so it shouldn't also show up as a plain
+  // stream-input row up top.
   const normalStreamInputs = streamInputs.filter(
-    p => !VACE_STREAM_PORTS.includes(p)
+    p => !VACE_STREAM_PORTS.includes(p) && p !== "prompts"
   );
   // When supportsVace is true, always show these ports (they are always in the
   // schema for VACE pipelines). Fall back to what streamInputs provides if
