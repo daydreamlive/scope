@@ -1152,6 +1152,61 @@ export const updateOscSettings = async (
 };
 
 // ---------------------------------------------------------------------------
+// OSC graph inventory + paths
+// ---------------------------------------------------------------------------
+
+export interface OscInventoryEntry {
+  osc_address: string;
+  type: "float" | "integer" | "bool" | "string" | "integer_list";
+  description?: string | null;
+  min?: number | null;
+  max?: number | null;
+  enum?: unknown[] | null;
+  default?: unknown;
+  /** React Flow node id this entry maps to (omit for global registry params). */
+  node_id?: string | null;
+  /** Field name on `node.data` (or pipeline schema property name). */
+  param?: string | null;
+  /** Pipeline id when the target is a pipeline node param. */
+  pipeline_id?: string | null;
+  /** Group label shown in the OSC docs (typically the node's display title). */
+  group?: string | null;
+}
+
+export interface OscPathsResponse {
+  active: Record<string, OscInventoryEntry[]>;
+  available: Record<string, OscInventoryEntry[]>;
+  active_pipeline_ids: string[];
+}
+
+export const setOscInventory = async (
+  paths: OscInventoryEntry[]
+): Promise<{ count: number }> => {
+  const response = await fetch("/api/v1/osc/inventory", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Set OSC inventory failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+export const fetchOscPaths = async (): Promise<OscPathsResponse> => {
+  const response = await fetch("/api/v1/osc/paths");
+  if (!response.ok) {
+    throw new Error(`Fetch OSC paths failed: ${response.status}`);
+  }
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
 // DMX settings
 // ---------------------------------------------------------------------------
 

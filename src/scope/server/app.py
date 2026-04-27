@@ -916,10 +916,60 @@ async def update_osc_settings(request: OscSettingsRequest):
 async def osc_paths(
     pm: "PipelineManager" = Depends(get_pipeline_manager),
 ):
-    """Return all OSC paths split into active / available sections."""
+    """Return all OSC paths split into active / available sections.
+
+    Includes the most recently registered graph inventory (see
+    ``POST /api/v1/osc/inventory``) so external clients can discover
+    user-curated node param paths alongside the registry-derived ones.
+    """
     from .osc_docs import get_osc_paths
 
-    return get_osc_paths(pm)
+    srv = get_osc_server()
+    graph_inventory = srv.graph_inventory if srv else None
+    return get_osc_paths(pm, graph_inventory)
+
+
+class OscInventoryEntry(BaseModel):
+    """One graph-supplied OSC path entry.
+
+    Mirrors the dict shape ``osc_docs._normalize_graph_entry`` expects.
+    Validated minimally: required fields are ``osc_address`` (must start
+    with ``/scope/`` or be coerced to it) and ``type``. Anything else
+    flows through as-is so the frontend can attach metadata (group,
+    description, etc.) without a backend schema bump.
+    """
+
+    osc_address: str
+    type: str
+    description: str | None = None
+    min: float | None = None
+    max: float | None = None
+    enum: list | None = None
+    default: Any | None = None
+    node_id: str | None = None
+    param: str | None = None
+    pipeline_id: str | None = None
+    group: str | None = None
+
+
+class OscInventoryRequest(BaseModel):
+    paths: list[OscInventoryEntry]
+
+
+@app.post("/api/v1/osc/inventory")
+async def set_osc_inventory(request: OscInventoryRequest):
+    """Replace the OSC server's per-graph inventory.
+
+    The frontend computes this list from each node's ``oscConfig`` overlay
+    and POSTs whenever the inventory changes (debounced). Empty list
+    clears the inventory and reverts behavior to registry-derived paths
+    only.
+    """
+    srv = get_osc_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="OSC server not running")
+    srv.set_graph_inventory([p.model_dump(exclude_none=True) for p in request.paths])
+    return {"count": len(request.paths)}
 
 
 @app.get("/api/v1/osc/stream")
@@ -965,7 +1015,8 @@ async def osc_docs_page(
 
     srv = get_osc_server()
     port = srv.port if srv else 8000
-    html_content = render_osc_docs_html(pm, port)
+    graph_inventory = srv.graph_inventory if srv else None
+    html_content = render_osc_docs_html(pm, port, graph_inventory)
     return Response(content=html_content, media_type="text/html")
 
 
