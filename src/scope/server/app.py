@@ -1640,6 +1640,25 @@ async def install_lora_file(
     parsed = urlparse(url)
     hostname = parsed.hostname or ""
     is_civitai = hostname == "civitai.com" or hostname.endswith(".civitai.com")
+    is_huggingface = hostname == "huggingface.co" or hostname.endswith(
+        ".huggingface.co"
+    )
+
+    # Reject HuggingFace "blob" URLs — these point at the file's HTML preview
+    # page (e.g. /Repo/blob/main/file.safetensors), not the raw download.
+    # Pasting one would either 404 or save HTML as a .safetensors file. The
+    # correct URL uses /resolve/main/, which the HF "Copy download link"
+    # button on the file's page produces. Apply this *before* cloud proxying
+    # so users get the same friendly error in both local and cloud modes.
+    if is_huggingface and "/blob/" in parsed.path:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This is a Hugging Face file preview page, not a download link. "
+                'Open the file on the LoRA page and click "Copy download link" '
+                "(it will contain /resolve/main/ instead of /blob/main/)."
+            ),
+        )
 
     if is_civitai:
         query_params = parse_qs(parsed.query)
