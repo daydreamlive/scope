@@ -74,13 +74,19 @@ def _parse_graph_node_ids(
     ``sink_mode`` (spout/ndi/syphon) since those are handled by per-node
     output sinks in FrameProcessor.
     ``all_sink_node_ids`` includes every sink node regardless of mode.
-    ``webrtc_source_node_ids`` excludes hardware sources (spout/ndi/syphon).
+    ``webrtc_source_node_ids`` excludes any source whose ``source_mode``
+    is handled server-side via :class:`InputSource` (built-in spout/ndi/
+    syphon/video_file plus any plugin-registered source like youtube).
     ``all_source_node_ids`` includes every source node regardless of mode;
     used by the cloud's ``handle_offer`` where hardware-source frames arrive
     via WebRTC tracks relayed by the local instance.
     ``record_node_ids`` contains IDs of record-type nodes that need
     dedicated output tracks in cloud mode.
     """
+    from scope.core.inputs import get_input_source_classes
+
+    server_side_source_ids = set(get_input_source_classes().keys())
+
     webrtc_sink_node_ids: list[str] = []
     all_sink_node_ids: list[str] = []
     webrtc_source_node_ids: list[str] = []
@@ -98,10 +104,10 @@ def _parse_graph_node_ids(
             elif node.get("type") == "source":
                 all_source_node_ids.append(node["id"])
                 sm = node.get("source_mode", "video")
-                if sm not in ("spout", "ndi", "syphon"):
-                    webrtc_source_node_ids.append(node["id"])
-                else:
+                if sm in server_side_source_ids:
                     has_non_webrtc_sources = True
+                else:
+                    webrtc_source_node_ids.append(node["id"])
             elif node.get("type") == "record":
                 record_node_ids.append(node["id"])
     return (

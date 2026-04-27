@@ -14,9 +14,11 @@ __all__ = [
 
 
 def get_input_source_classes() -> dict[str, type[InputSource]]:
-    """Get a mapping of source_id -> InputSource subclass for all built-in input sources.
+    """Get a mapping of source_id -> InputSource subclass.
 
-    Returns all known classes regardless of whether they are available on this platform.
+    Merges built-in sources with plugin-registered ones (any InputSource
+    subclass passed to the ``register_nodes`` hook). A plugin cannot
+    shadow a built-in: on id collision the built-in wins.
     """
     sources: dict[str, type[InputSource]] = {}
 
@@ -45,6 +47,16 @@ def get_input_source_classes() -> dict[str, type[InputSource]]:
         from .video_file import VideoFileInputSource
 
         sources[VideoFileInputSource.source_id] = VideoFileInputSource
+    except Exception:
+        pass
+
+    try:
+        from scope.core.plugins import get_plugin_input_sources
+
+        for source_id, cls in get_plugin_input_sources().items():
+            if source_id in sources:
+                continue  # built-in already registered — don't let plugins override
+            sources[source_id] = cls
     except Exception:
         pass
 

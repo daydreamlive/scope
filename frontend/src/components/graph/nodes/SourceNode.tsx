@@ -21,13 +21,19 @@ const HEADER_H = 28;
 const BODY_PAD = 6;
 const SELECT_ROW_H = 20;
 
-const SOURCE_MODE_OPTIONS = [
+// Browser-driven source modes (WebRTC) prepended to the backend's list.
+// Every other entry in the dropdown comes from /api/v1/input-sources.
+const BROWSER_SOURCE_OPTIONS = [
   { value: "video", label: "File" },
   { value: "camera", label: "Camera" },
-  { value: "spout", label: "Spout" },
-  { value: "ndi", label: "NDI" },
-  { value: "syphon", label: "Syphon" },
 ];
+
+// Built-ins that have bespoke UI branches below; everything else falls
+// through to the generic text-input branch.
+const SOURCES_WITH_CUSTOM_UI = new Set(["spout", "ndi", "syphon"]);
+
+// "video_file" is a headless-only alias for browser "video"; hide it.
+const HIDDEN_BACKEND_SOURCES = new Set(["video_file"]);
 
 export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const { updateData } = useNodeData(id);
@@ -45,6 +51,10 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const spoutAvailable = data.spoutAvailable ?? false;
   const ndiAvailable = data.ndiAvailable ?? false;
   const syphonAvailable = data.syphonAvailable ?? false;
+  const availableInputSources = data.availableInputSources ?? [];
+  const currentSourceInfo = availableInputSources.find(
+    s => s.source_id === sourceMode
+  );
   const onSpoutSourceChange = data.onSpoutSourceChange as
     | ((name: string) => void)
     | undefined;
@@ -129,11 +139,13 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   }, [syphonAvailable]);
 
   const handleSourceModeChange = (newMode: string) => {
+    // Preserve sourceName for every server-side mode (anything that
+    // isn't the browser-driven "video"/"camera"). Clearing it on every
+    // switch would lose the URL/path/sender the user just typed.
+    const isBrowserMode = newMode === "video" || newMode === "camera";
     updateData({
-      sourceMode: newMode as "video" | "camera" | "spout" | "ndi" | "syphon",
-      ...(newMode !== "spout" && newMode !== "ndi" && newMode !== "syphon"
-        ? { sourceName: undefined }
-        : {}),
+      sourceMode: newMode,
+      ...(isBrowserMode ? { sourceName: undefined } : {}),
     });
     onSourceModeChange?.(newMode);
   };
@@ -178,13 +190,18 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const showFilePicker = sourceMode === "video";
   const handleY = HEADER_H + BODY_PAD + SELECT_ROW_H / 2;
 
-  // Filter source mode options based on availability
-  const filteredSourceModeOptions = SOURCE_MODE_OPTIONS.filter(opt => {
-    if (opt.value === "spout") return spoutAvailable;
-    if (opt.value === "ndi") return ndiAvailable;
-    if (opt.value === "syphon") return syphonAvailable;
-    return true;
-  });
+  // Browser-driven options + every available backend source. Plugin-
+  // registered sources appear automatically.
+  const filteredSourceModeOptions = [
+    ...BROWSER_SOURCE_OPTIONS,
+    ...availableInputSources
+      .filter(s => s.available && !HIDDEN_BACKEND_SOURCES.has(s.source_id))
+      .map(s => ({ value: s.source_id, label: s.source_name })),
+  ];
+
+  const handleGenericSourceNameChange = (value: string | number) => {
+    updateData({ sourceName: String(value) });
+  };
 
   const ndiOptions = ndiSources.map(s => ({
     value: s.identifier,
@@ -399,13 +416,31 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
             </div>
           )}
 
-          {!showPreview &&
-            sourceMode !== "spout" &&
-            sourceMode !== "ndi" &&
-            sourceMode !== "syphon" && (
-              <div className="flex items-center justify-center rounded-md bg-black/30 text-[10px] text-[#8c8c8d] flex-1 min-h-[40px]">
-                Waiting for input...
-              </div>
+          {/* Generic text-input for plugin-registered sources (or any
+              backend source we don't have bespoke UI for). source_name
+              is a free-form identifier (URL, path, ...); source_description
+              from the backend is rendered below as help text. */}
+          {!SOURCES_WITH_CUSTOM_UI.has(sourceMode) &&
+            sourceMode !== "video" &&
+            sourceMode !== "camera" && (
+              <>
+                <div className="px-2">
+                  <NodeParamRow
+                    label={currentSourceInfo?.source_name ?? "Source"}
+                  >
+                    <NodePillInput
+                      type="text"
+                      value={sourceName}
+                      onChange={handleGenericSourceNameChange}
+                    />
+                  </NodeParamRow>
+                </div>
+                {currentSourceInfo?.source_description && (
+                  <div className="px-2 text-[10px] text-[#8c8c8d]">
+                    {currentSourceInfo.source_description}
+                  </div>
+                )}
+              </>
             )}
         </div>
       )}

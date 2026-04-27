@@ -151,7 +151,9 @@ function getVaceParams(
   return {};
 }
 
-/** When every source node is Spout/NDI/Syphon, the browser must not send a WebRTC video track. */
+/** When every source node is handled server-side (spout/ndi/syphon/youtube/
+ *  plugin-registered/...), the browser must not send a WebRTC video track.
+ *  Only "video" (file upload) and "camera" are browser-driven. */
 function graphHasOnlyServerSideSources(graph: GraphConfig | null): boolean {
   const nodes = graph?.nodes;
   if (!nodes?.length) return false;
@@ -159,7 +161,7 @@ function graphHasOnlyServerSideSources(graph: GraphConfig | null): boolean {
   if (sources.length === 0) return false;
   return sources.every(n => {
     const sm = n.source_mode || "video";
-    return sm === "spout" || sm === "ndi" || sm === "syphon";
+    return sm !== "video" && sm !== "camera";
   });
 }
 
@@ -895,7 +897,7 @@ export function StreamPage() {
     (newMode: string, nodeId?: string) => {
       if (!nodeId) {
         // Fallback: global mode switch (perform mode)
-        switchMode(newMode as "video" | "camera" | "spout" | "ndi" | "syphon");
+        switchMode(newMode);
         return;
       }
       // Stop any existing stream for this node
@@ -912,10 +914,11 @@ export function StreamPage() {
         createCameraStreamForNode(nodeId);
       }
       // Import/restore calls this with (mode, nodeId). Clear the global
-      // useVideoSource stream (e.g. test.mp4) when switching to server-side
-      // capture — otherwise WebRTC still sends that track alongside Syphon/NDI/Spout.
-      if (newMode === "spout" || newMode === "ndi" || newMode === "syphon") {
-        void switchMode(newMode as "spout" | "ndi" | "syphon");
+      // useVideoSource stream (e.g. test.mp4) when switching to a server-side
+      // source — otherwise WebRTC still sends that track alongside the
+      // server-side feed (spout/ndi/syphon/youtube/any plugin source).
+      if (newMode !== "video" && newMode !== "camera") {
+        void switchMode(newMode);
       }
       // When switching to file mode during streaming, auto-load a sample
       // video so the WebRTC track is replaced immediately.
@@ -2438,10 +2441,12 @@ export function StreamPage() {
             if (sourceNodes.length > 0) {
               graphSourceMode = "video";
 
-              // Use first server-side source for backward compat input_source param
+              // Use first server-side source for backward-compat input_source
+              // param. Server-side = anything that isn't the browser-provided
+              // "video" (file upload) or "camera".
               for (const sourceNode of sourceNodes) {
                 const sm = sourceNode.source_mode || "video";
-                if (sm === "spout" || sm === "ndi" || sm === "syphon") {
+                if (sm !== "video" && sm !== "camera") {
                   graphInputSource = {
                     enabled: true,
                     source_type: sm,
@@ -3147,16 +3152,17 @@ export function StreamPage() {
       // Reset paused state when starting a fresh stream
       updateSettings({ paused: false });
 
-      // Build per-source-node streams for multi-source WebRTC
-      // Each WebRTC source node gets its own video track sent to the backend
+      // Build per-source-node streams for multi-source WebRTC.
+      // Only browser-driven source modes ("video" file upload, "camera")
+      // get a WebRTC track; everything else is handled server-side.
       let sourceNodeStreamsForWebRTC: Record<string, MediaStream> | undefined;
       if (graphConfigForStream) {
         const webrtcSourceNodes = (graphConfigForStream.nodes ?? []).filter(
-          n =>
-            n.type === "source" &&
-            (n.source_mode || "video") !== "spout" &&
-            (n.source_mode || "video") !== "ndi" &&
-            (n.source_mode || "video") !== "syphon"
+          n => {
+            if (n.type !== "source") return false;
+            const sm = n.source_mode || "video";
+            return sm === "video" || sm === "camera";
+          }
         );
         if (webrtcSourceNodes.length > 0) {
           const streams: Record<string, MediaStream> = {};
@@ -3416,12 +3422,7 @@ export function StreamPage() {
 
                   const sourceNode = graphNodes.find(n => n.type === "source");
                   // Default to "video" if source node has no explicit mode
-                  const sourceMode = (sourceNode?.source_mode || "video") as
-                    | "video"
-                    | "camera"
-                    | "spout"
-                    | "ndi"
-                    | "syphon";
+                  const sourceMode = sourceNode?.source_mode || "video";
 
                   // Sync inputMode setting so perform mode reflects the graph's choice
                   const inputMode: InputMode =
@@ -3442,13 +3443,11 @@ export function StreamPage() {
                       };
                   updateSettings({ inputMode, resolution });
 
-                  // Sync to useVideoSource
-                  if (
-                    sourceMode === "spout" ||
-                    sourceMode === "ndi" ||
-                    sourceMode === "syphon"
-                  ) {
-                    // For server-side sources, update settings.inputSource with graph's source_name
+                  // Sync to useVideoSource. Any mode that isn't "video" or
+                  // "camera" is a server-side source (spout/ndi/syphon/
+                  // youtube/plugin-registered); mirror its config into
+                  // settings.inputSource so perform mode picks it up.
+                  if (sourceMode !== "video" && sourceMode !== "camera") {
                     updateSettings({
                       inputSource: {
                         enabled: true,
@@ -3529,6 +3528,7 @@ export function StreamPage() {
             spoutAvailable={spoutAvailable}
             ndiAvailable={ndiAvailable}
             syphonAvailable={syphonAvailable}
+            availableInputSources={availableInputSources}
             onSpoutSourceChange={handleSpoutSourceChange}
             onNdiSourceChange={handleNdiSourceChange}
             onSyphonSourceChange={handleSyphonSourceChange}
