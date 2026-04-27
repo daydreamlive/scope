@@ -433,8 +433,20 @@ class ScopeMediaRecorder:
                 ctx.task.cancel()
                 tasks.append(ctx.task)
                 ctx.task = None
+        task_errors: list[BaseException] = []
         if tasks:
-            await asyncio.gather(*tasks, return_exceptions=True)
+            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+            task_errors = [
+                result
+                for result in task_results
+                if isinstance(result, BaseException)
+                and not isinstance(result, asyncio.CancelledError)
+            ]
+            for error in task_errors:
+                logger.error(
+                    "Recording task failed",
+                    exc_info=(type(error), error, error.__traceback__),
+                )
 
         if self._container is not None:
             for context in self._contexts.values():
@@ -445,6 +457,8 @@ class ScopeMediaRecorder:
             self._container = None
 
         self._contexts = {}
+        if task_errors:
+            raise RuntimeError("Recording task failed") from task_errors[0]
 
     async def _run_track(self, context: _RecorderContext) -> None:
         while True:
