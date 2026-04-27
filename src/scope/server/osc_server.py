@@ -43,6 +43,11 @@ class OSCServer:
         # Cached path inventory to avoid rebuilding on every OSC message.
         self._known_paths_cache: dict[str, dict[str, Any]] | None = None
         self._known_paths_cache_time: float = 0.0
+        # Graph-supplied OSC inventory: list of path entries (see osc_docs).
+        # Populated by POST /api/v1/osc/inventory whenever the frontend's
+        # graph oscConfig changes. None means "no graph inventory yet" —
+        # behavior falls back to registry-derived paths only.
+        self._graph_inventory: list[dict[str, Any]] | None = None
 
     @property
     def port(self) -> int:
@@ -74,6 +79,20 @@ class OSCServer:
         # Invalidate the path cache when managers change.
         self._known_paths_cache = None
 
+    def set_graph_inventory(self, paths: list[dict[str, Any]] | None) -> None:
+        """Replace the graph-supplied OSC path inventory.
+
+        Called by ``POST /api/v1/osc/inventory`` whenever the frontend
+        recomputes its OSC paths from the graph. ``None`` clears the
+        inventory and reverts to registry-derived paths only.
+        """
+        self._graph_inventory = paths
+        self._known_paths_cache = None
+
+    @property
+    def graph_inventory(self) -> list[dict[str, Any]] | None:
+        return self._graph_inventory
+
     def subscribe(self) -> "asyncio.Queue[dict[str, Any]]":
         """Register a new SSE subscriber and return its event queue."""
         q: asyncio.Queue = asyncio.Queue(maxsize=100)
@@ -96,7 +115,9 @@ class OSCServer:
         ):
             from .osc_docs import get_all_known_paths
 
-            self._known_paths_cache = get_all_known_paths(self._pipeline_manager)
+            self._known_paths_cache = get_all_known_paths(
+                self._pipeline_manager, self._graph_inventory
+            )
             self._known_paths_cache_time = now
         return self._known_paths_cache
 
@@ -145,14 +166,40 @@ class OSCServer:
         if self._log_all_messages:
             logger.info("OSC OK  %s = %r", address, value)
 
-        # Apply the parameter immediately to all active local sessions so
-        # the pipeline effect takes place without waiting for the frontend
-        # round-trip.
+        # Route the value to the right consumer. Three cases:
+        #
+        #  1. Graph entry that targets a pipeline node — has `node_id` and
+        #     `pipeline_id`. Broadcast to WebRTC with `{node_id, <param>: value}`
+        #     so frame_processor.update_parameters can route to that processor
+        #     (frame_processor.py:828-839 already handles `node_id`).
+        #
+        #  2. Graph entry that targets a UI-only node (slider/knobs/etc.) —
+        #     has `node_id` but no pipeline_id. SSE only; the frontend
+        #     applies the value to the matching node via the React Flow
+        #     state (no backend processor exists for these).
+        #
+        #  3. Registry-derived entry (no `node_id`) — keeps the existing
+        #     flat-broadcast behavior so pre-existing TouchDesigner setups
+        #     using `/scope/prompt` etc. continue to work.
+        node_id = path_info.get("node_id")
+        param = path_info.get("param") or key
+        pipeline_id = path_info.get("pipeline_id")
+
         if self._webrtc_manager:
-            self._webrtc_manager.broadcast_parameter_update({key: value})
+            if node_id and pipeline_id:
+                self._webrtc_manager.broadcast_parameter_update(
+                    {"node_id": node_id, param: value}
+                )
+            elif not node_id:
+                self._webrtc_manager.broadcast_parameter_update({key: value})
 
         # Push to all SSE subscribers so the frontend can sync its UI state.
+        # Include `node_id` when present so the consumer can route to the
+        # specific React Flow node (UI-only nodes rely entirely on this).
         event: dict[str, Any] = {"type": "osc_command", "key": key, "value": value}
+        if node_id:
+            event["node_id"] = node_id
+            event["param"] = param
         for q in list(self._sse_queues):
             try:
                 q.put_nowait(event)

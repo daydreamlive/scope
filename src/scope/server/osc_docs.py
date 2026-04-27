@@ -134,6 +134,8 @@ def _extract_osc_paths_from_schema(
             entry["max"] = prop["maximum"]
         if "enum" in prop:
             entry["enum"] = prop["enum"]
+        if "default" in prop:
+            entry["default"] = prop["default"]
         paths.append(entry)
     return paths
 
@@ -155,12 +157,53 @@ def _collect_pipeline_paths() -> dict[str, list[dict[str, Any]]]:
     return pipeline_paths
 
 
+def _normalize_graph_entry(entry: dict[str, Any]) -> dict[str, Any]:
+    """Normalize one graph-supplied OSC inventory entry.
+
+    Strips the leading ``/scope/`` from ``osc_address`` to derive ``key``
+    (so the existing dispatcher logic in ``osc_server._handle_osc_message``
+    keeps working: it splits incoming addresses on ``/`` and looks up
+    everything after ``/scope/``).
+    """
+    osc_address = str(entry.get("osc_address") or "").strip()
+    if not osc_address.startswith("/scope/"):
+        # Be permissive: allow plain "<key>" or "/<key>" too.
+        cleaned = osc_address.lstrip("/")
+        osc_address = f"/scope/{cleaned}"
+    key = osc_address[len("/scope/") :]
+
+    out: dict[str, Any] = {**entry, "key": key, "osc_address": osc_address}
+    return out
+
+
+def _group_graph_entries(
+    entries: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Group graph inventory entries under stable source labels.
+
+    The frontend may attach a ``group`` field (typically the node's display
+    title); when absent we synthesize one from ``node_id`` so the entry
+    still appears somewhere in the docs.
+    """
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for e in entries:
+        label = str(e.get("group") or e.get("node_id") or "Graph") or "Graph"
+        grouped.setdefault(label, []).append(e)
+    return grouped
+
+
 def get_osc_paths(
     pipeline_manager: "PipelineManager | None",
+    graph_inventory: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build the full OSC path inventory split into *active* and *available* sections.
 
     Each section is a dict mapping source names to lists of path entries.
+
+    ``graph_inventory`` is the user-curated list of paths supplied by the
+    frontend via ``POST /api/v1/osc/inventory``. When provided, those
+    entries appear under their own per-node groups inside *active*. They
+    can override registry-derived addresses on collision (user wins).
     """
     active_pipeline_ids: list[str] = []
     if pipeline_manager:
@@ -178,12 +221,39 @@ def get_osc_paths(
         runtime_list.append({**p, "osc_address": f"/scope/{p['key']}"})
     active_groups["Runtime"] = runtime_list
 
+    # Track addresses already claimed by the graph inventory so we can
+    # suppress the registry-default flat path when the user has bound
+    # the same param somewhere else (e.g. /scope/main/prompt instead of
+    # /scope/prompt). Without this the same OSC address would appear
+    # twice and validation would prefer the wrong entry.
+    user_claimed_keys: set[str] = set()
+    user_claimed_pipeline_params: set[tuple[str, str]] = set()
+    for e in graph_inventory or []:
+        norm = _normalize_graph_entry(e)
+        user_claimed_keys.add(norm["key"])
+        pid = norm.get("pipeline_id")
+        param = norm.get("param")
+        if pid and param:
+            user_claimed_pipeline_params.add((pid, param))
+
     for pid, paths in pipeline_paths.items():
         target = active_groups if pid in active_pipeline_ids else available_groups
         group: list[dict[str, Any]] = []
         for p in paths:
+            # Skip the legacy flat entry when the user has explicitly
+            # bound this pipeline param via the graph inventory.
+            if (pid, p["key"]) in user_claimed_pipeline_params:
+                continue
             group.append({**p, "osc_address": f"/scope/{p['key']}"})
-        target[pid] = group
+        if group:
+            target[pid] = group
+
+    # Append graph-supplied entries under their own per-node groups so
+    # they're easy to scan in the docs page.
+    if graph_inventory:
+        normalized = [_normalize_graph_entry(e) for e in graph_inventory]
+        for label, entries in _group_graph_entries(normalized).items():
+            active_groups[label] = entries
 
     return {
         "active": active_groups,
@@ -194,12 +264,13 @@ def get_osc_paths(
 
 def get_all_known_paths(
     pipeline_manager: "PipelineManager | None",
+    graph_inventory: list[dict[str, Any]] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Return a flat dict mapping every known OSC key to its path metadata.
 
     Used by the OSC server for validating incoming messages.
     """
-    data = get_osc_paths(pipeline_manager)
+    data = get_osc_paths(pipeline_manager, graph_inventory)
     result: dict[str, dict[str, Any]] = {}
     for groups in (data["active"], data["available"]):
         for paths in groups.values():
@@ -293,7 +364,15 @@ def _path_row_html(path: dict[str, Any], osc_port: int, row_id: str) -> str:
         constraints.append(f"values: {path['enum']}")
     constraint_str = html.escape(", ".join(constraints)) if constraints else ""
 
-    example_val = _example_value(path)
+    default_str = html.escape(repr(path["default"])) if "default" in path else "&mdash;"
+
+    # Use the configured default in the example call when present, so the
+    # snippet reflects the user's chosen starting value rather than a
+    # synthetic mid-range guess.
+    if "default" in path:
+        example_val = repr(path["default"])
+    else:
+        example_val = _example_value(path)
     example_code = html.escape(
         f"from pythonosc.udp_client import SimpleUDPClient\n\n"
         f'client = SimpleUDPClient("127.0.0.1", {osc_port})\n'
@@ -306,10 +385,11 @@ def _path_row_html(path: dict[str, Any], osc_port: int, row_id: str) -> str:
         f"<td>{ptype}</td>"
         f"<td>{desc}</td>"
         f"<td>{constraint_str}</td>"
+        f"<td class='default'>{default_str}</td>"
         f'<td class="chevron">&#9654;</td>'
         f"</tr>\n"
         f'<tr id="{row_id}" class="example-row" style="display:none">'
-        f'<td colspan="5"><pre>{example_code}</pre></td>'
+        f'<td colspan="6"><pre>{example_code}</pre></td>'
         f"</tr>"
     )
 
@@ -329,7 +409,7 @@ def _render_source_group(
         f'<h3 class="source-header">{escaped_name}</h3>\n'
         f"<table><thead><tr>"
         f"<th>OSC Address</th><th>Type</th><th>Description</th>"
-        f"<th>Constraints</th><th></th>"
+        f"<th>Constraints</th><th>Default</th><th></th>"
         f"</tr></thead><tbody>\n{rows}\n</tbody></table>"
     )
 
@@ -337,9 +417,10 @@ def _render_source_group(
 def render_osc_docs_html(
     pipeline_manager: "PipelineManager | None",
     osc_port: int,
+    graph_inventory: list[dict[str, Any]] | None = None,
 ) -> str:
     """Render a self-contained HTML page documenting all current OSC paths."""
-    data = get_osc_paths(pipeline_manager)
+    data = get_osc_paths(pipeline_manager, graph_inventory)
     active_groups: dict[str, list] = data["active"]
     available_groups: dict[str, list] = data["available"]
 

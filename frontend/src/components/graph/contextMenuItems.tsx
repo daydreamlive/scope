@@ -29,6 +29,7 @@ import {
   Circle,
   Layers,
   Clock,
+  Radio,
 } from "lucide-react";
 import type { Node, Edge } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
@@ -331,6 +332,8 @@ export function buildNodeMenuItems(deps: {
     edges: Edge[],
     selectedIds: string[]
   ) => void;
+  /** Open the per-node Configure OSC modal. Optional — omitted in contexts where OSC is irrelevant. */
+  openOscConfig?: (nodeId: string) => void;
 }): ContextMenuItem[] {
   const {
     contextNodeId,
@@ -342,6 +345,7 @@ export function buildNodeMenuItems(deps: {
     handleEnterSubgraph,
     unpackSubgraph,
     createSubgraphFromSelection,
+    openOscConfig,
   } = deps;
 
   const isInSelection = selectedNodeIds.includes(contextNodeId);
@@ -426,6 +430,15 @@ export function buildNodeMenuItems(deps: {
         );
       },
     },
+    ...(openOscConfig && count === 1
+      ? [
+          {
+            label: "Configure OSC…",
+            icon: <Radio />,
+            onClick: () => openOscConfig(contextNodeId),
+          },
+        ]
+      : []),
     {
       label: count > 1 ? `Delete ${count} nodes` : "Delete",
       icon: <Trash2 />,
