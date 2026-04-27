@@ -1,15 +1,19 @@
 """Recording-related utility functions for cleanup and download handling."""
 
+import asyncio
+import fractions
 import logging
 import os
 import shutil
 import tempfile
 import threading
 from pathlib import Path
+from typing import Any
 
 from aiortc import MediaStreamTrack
-from aiortc.contrib.media import MediaRecorder, MediaRelay
-from av import VideoFrame
+from aiortc.contrib.media import MediaRelay
+from aiortc.mediastreams import MediaStreamError
+from av import AudioFrame, VideoFrame
 
 logger = logging.getLogger(__name__)
 
@@ -107,18 +111,9 @@ class RecordingManager:
         logger.warning("No audio relay available for recording, using track directly")
         return self.audio_track
 
-    def _create_media_recorder(self, file_path: str) -> MediaRecorder:
-        """Create a MediaRecorder instance with standard settings."""
-        return MediaRecorder(
-            file_path,
-            format="mp4",
-            options={
-                # force timestamps to start at zero
-                "use_editlist": "0",
-                # allows playback before file is fully loaded, eg over http
-                "movflags": "+faststart",
-            }
-        )
+    def _create_media_recorder(self, file_path: str) -> "ScopeMediaRecorder":
+        """Create a native PyAV media recorder with MP4 options."""
+        return ScopeMediaRecorder(file_path)
 
     async def start_recording(self):
         """Start recording frames to MP4 file using MediaRecorder."""
@@ -176,7 +171,7 @@ class RecordingManager:
 
     async def _cleanup_recording(
         self,
-        media_recorder: MediaRecorder | None,
+        media_recorder: "ScopeMediaRecorder | None",
         recording_track: MediaStreamTrack | None,
         recording_file: str | None,
         audio_recording_track: MediaStreamTrack | None = None,
@@ -387,3 +382,125 @@ def cleanup_temp_file(file_path: str):
     if os.path.exists(file_path):
         RecordingManager._safe_remove_file(file_path)
         logger.info(f"Cleaned up temporary download file: {file_path}")
+
+
+class _RecorderContext:
+    def __init__(self, track: MediaStreamTrack):
+        self.track = track
+        self.started = False
+        self.stream: Any | None = None
+        self.task: asyncio.Task[None] | None = None
+        self.codec_time_base_initialized = False
+
+
+class ScopeMediaRecorder:
+    """PyAV-based replacement for aiortc MediaRecorder.
+
+    Keeps the same high-level API surface used by RecordingManager
+    (`addTrack`, `start`, `stop`) while preserving incoming frame PTS/time_base.
+    """
+
+    def __init__(self, file_path: str):
+        import av
+
+        self._container = av.open(
+            file_path,
+            mode="w",
+            format="mp4",
+            options={
+                # Force timestamps to start at zero (disable edit list).
+                "use_editlist": "0",
+                # Allow playback before file is fully loaded, e.g. over HTTP.
+                "movflags": "+faststart",
+            },
+        )
+        self._contexts: dict[MediaStreamTrack, _RecorderContext] = {}
+
+    def addTrack(self, track: MediaStreamTrack) -> None:
+        context = _RecorderContext(track)
+        context.stream = self._create_stream(track.kind)
+        self._contexts[track] = context
+
+    async def start(self) -> None:
+        for context in self._contexts.values():
+            if context.task is None:
+                context.task = asyncio.create_task(self._run_track(context))
+
+    async def stop(self) -> None:
+        tasks: list[asyncio.Task[None]] = []
+        for ctx in self._contexts.values():
+            if ctx.task is not None:
+                ctx.task.cancel()
+                tasks.append(ctx.task)
+                ctx.task = None
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        if self._container is not None:
+            for context in self._contexts.values():
+                assert context.stream is not None
+                for packet in context.stream.encode(None):
+                    self._container.mux(packet)
+            self._container.close()
+            self._container = None
+
+        self._contexts = {}
+
+    async def _run_track(self, context: _RecorderContext) -> None:
+        while True:
+            try:
+                frame = await context.track.recv()
+            except asyncio.CancelledError:
+                return
+            except MediaStreamError:
+                return
+
+            if isinstance(frame, VideoFrame):
+                frame = ensure_even_video_frame(frame)
+            elif not isinstance(frame, AudioFrame):
+                raise TypeError("Only audio or video frames can be recorded")
+
+            if self._container is None:
+                return
+            if context.stream is None:
+                return
+
+            if isinstance(frame, VideoFrame) and not context.started:
+                context.stream.width = frame.width
+                context.stream.height = frame.height
+                context.started = True
+            elif isinstance(frame, AudioFrame) and not context.started:
+                try:
+                    context.stream.rate = frame.sample_rate or context.stream.rate
+                    context.stream.layout = frame.layout.name
+                except Exception:
+                    pass
+                context.started = True
+
+            self._initialize_codec_time_base(context, frame)
+            for packet in context.stream.encode(frame):
+                self._container.mux(packet)
+
+    def _create_stream(self, kind: str):
+        assert self._container is not None
+        if kind == "video":
+            stream = self._container.add_stream("libx264", rate=int(RECORDING_MAX_FPS))
+            stream.pix_fmt = "yuv420p"
+            return stream
+
+        return self._container.add_stream("aac")
+
+    @staticmethod
+    def _initialize_codec_time_base(
+        context: _RecorderContext, frame: AudioFrame | VideoFrame
+    ) -> None:
+        if context.codec_time_base_initialized:
+            return
+        if frame.time_base is None:
+            return
+        try:
+            context.stream.codec_context.time_base = fractions.Fraction(frame.time_base)
+            context.codec_time_base_initialized = True
+        except Exception:
+            # If the codec rejects this time base, keep encoder defaults.
+            return
