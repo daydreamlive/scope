@@ -225,6 +225,14 @@ def build_graph(
         if per_node:
             source_queues_by_node[node_id] = per_node
 
+    def _attach_source_output_queue(source_node_id: str, q: queue.Queue) -> None:
+        """Attach an output queue directly to a source node fan-out."""
+        per_node = source_queues_by_node.setdefault(source_node_id, [])
+        if q not in per_node:
+            per_node.append(q)
+        if q not in source_queues:
+            source_queues.append(q)
+
     # 4) Identify sinks: find the pipeline nodes that feed into sink nodes.
     # Each sink gets a **dedicated** output queue appended to its feeder
     # processor's output_queues list. The processor's fan-out loop
@@ -238,21 +246,21 @@ def build_graph(
         for e in graph.edges_to(sink_id):
             if e.kind == "stream":
                 feeder_proc = node_processors.get(e.from_node)
+                sink_node = node_by_id[sink_id]
+                sink_mode = sink_node.sink_mode
+                # WebRTC preview reads sink_queues_by_node; NDI/Spout/Syphon threads
+                # must use a separate queue or they steal frames from get_from_sink().
+                sink_q = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
+                sink_queues_by_node[sink_id] = sink_q
+                queues_to_add = [sink_q]
+                if sink_mode in ("ndi", "spout", "syphon"):
+                    sink_q_hw = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
+                    sink_hardware_queues_by_node[sink_id] = sink_q_hw
+                    queues_to_add.append(sink_q_hw)
+
+                port = e.from_port
                 if feeder_proc is not None:
                     sink_processors_by_node[sink_id] = feeder_proc
-                    sink_node = node_by_id[sink_id]
-                    sink_mode = sink_node.sink_mode
-                    # WebRTC preview reads sink_queues_by_node; NDI/Spout/Syphon threads
-                    # must use a separate queue or they steal frames from get_from_sink().
-                    sink_q = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
-                    sink_queues_by_node[sink_id] = sink_q
-                    queues_to_add = [sink_q]
-                    if sink_mode in ("ndi", "spout", "syphon"):
-                        sink_q_hw = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
-                        sink_hardware_queues_by_node[sink_id] = sink_q_hw
-                        queues_to_add.append(sink_q_hw)
-
-                    port = e.from_port
                     feeder_proc.output_queues.setdefault(port, []).extend(queues_to_add)
                     # Register external refs so _resize_output_queue keeps
                     # SinkManager's cached queue references in sync.
@@ -263,15 +271,26 @@ def build_graph(
                         feeder_proc.external_queue_refs.append(
                             (sink_hardware_queues_by_node, sink_id)
                         )
-                    logger.info(
-                        "Sink %s: dedicated queue(s) on %s port '%s' "
-                        "(webrtc + hardware=%s, total on port: %d)",
-                        sink_id,
-                        e.from_node,
-                        port,
-                        sink_id in sink_hardware_queues_by_node,
-                        len(feeder_proc.output_queues[port]),
-                    )
+                    total_queues = len(feeder_proc.output_queues[port])
+                else:
+                    source_node = node_by_id.get(e.from_node)
+                    if source_node is None or source_node.type != "source":
+                        sink_queues_by_node.pop(sink_id, None)
+                        sink_hardware_queues_by_node.pop(sink_id, None)
+                        continue
+                    for out_q in queues_to_add:
+                        _attach_source_output_queue(source_node.id, out_q)
+                    total_queues = len(source_queues_by_node[source_node.id])
+
+                logger.info(
+                    "Sink %s: dedicated queue(s) on %s port '%s' "
+                    "(webrtc + hardware=%s, total on port: %d)",
+                    sink_id,
+                    e.from_node,
+                    port,
+                    sink_id in sink_hardware_queues_by_node,
+                    total_queues,
+                )
                 break
 
     # Backward compat: first sink determines the primary sink_processor
@@ -315,6 +334,7 @@ def build_graph(
                 continue
             feeder_proc = node_processors.get(e.from_node)
             port = e.from_port
+            source_fallback_id: str | None = None
             if feeder_proc is None:
                 src_node = node_by_id.get(e.from_node)
                 if src_node is not None and src_node.type == "sink":
@@ -322,6 +342,13 @@ def build_graph(
                         if se.kind == "stream":
                             feeder_proc = node_processors.get(se.from_node)
                             port = se.from_port
+                            if feeder_proc is None:
+                                upstream_node = node_by_id.get(se.from_node)
+                                if (
+                                    upstream_node is not None
+                                    and upstream_node.type == "source"
+                                ):
+                                    source_fallback_id = upstream_node.id
                             break
             if feeder_proc is not None:
                 rec_q = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
@@ -334,6 +361,23 @@ def build_graph(
                     feeder_proc.node_id,
                     port,
                     len(feeder_proc.output_queues[port]),
+                )
+                break
+            source_node = (
+                node_by_id.get(source_fallback_id)
+                if source_fallback_id is not None
+                else node_by_id.get(e.from_node)
+            )
+            if source_node is not None and source_node.type == "source":
+                rec_q = queue.Queue(maxsize=DEFAULT_INPUT_QUEUE_MAXSIZE)
+                record_queues_by_node[rec_id] = rec_q
+                _attach_source_output_queue(source_node.id, rec_q)
+                logger.info(
+                    "Record %s: dedicated queue on source %s port '%s' (total queues: %d)",
+                    rec_id,
+                    source_node.id,
+                    port,
+                    len(source_queues_by_node[source_node.id]),
                 )
                 break
 
