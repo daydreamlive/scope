@@ -33,7 +33,6 @@ from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
 from .tracks import (
-    RecordOutputTrack,
     SinkOutputTrack,
     SourceInputHandler,
     VideoProcessingTrack,
@@ -58,6 +57,28 @@ vpx.MAX_FRAME_RATE = 8
 vpx.DEFAULT_BITRATE = 7000000
 vpx.MIN_BITRATE = 5000000
 vpx.MAX_BITRATE = 10000000
+
+
+def _build_extra_output_tracks(
+    frame_processor: FrameProcessor,
+    sink_node_ids: list[str],
+    record_node_ids: list[str],
+) -> list["NodeOutputTrack"]:
+    """Build live WebRTC output tracks for graph outputs.
+
+    Record-node queues are single-consumer recording queues. Attaching them as
+    live WebRTC tracks races with RecordingCoordinator and can drain/corrupt
+    recordings, so only sink nodes get live output tracks here.
+    """
+    if record_node_ids:
+        logger.debug(
+            "Skipping live WebRTC tracks for record nodes: %s",
+            record_node_ids,
+        )
+    return [
+        SinkOutputTrack(frame_processor=frame_processor, sink_node_id=sink_id)
+        for sink_id in sink_node_ids[1:]
+    ]
 
 
 def _parse_graph_node_ids(
@@ -458,8 +479,8 @@ class WebRTCManager:
                 # so they can be placed on the correct recvonly transceivers.
 
                 # Eagerly initialize frame processor when graph has sources,
-                # sinks, or record nodes, so SourceInputHandler /
-                # SinkOutputTrack / RecordOutputTrack can reference it immediately.
+                # sinks, or record nodes, so SourceInputHandler / SinkOutputTrack
+                # and recording endpoints can reference it immediately.
                 if (
                     webrtc_source_node_ids
                     or has_non_webrtc_sources
@@ -686,23 +707,17 @@ class WebRTCManager:
                         )
                         break
 
-            # Attach extra sink / record output tracks to the recvonly
-            # transceivers that the browser (or cloud client) created.
+            # Attach extra sink output tracks to the recvonly transceivers that
+            # the browser (or cloud client) created. Record nodes are not live
+            # WebRTC outputs because their queues are consumed by recordings.
             # Must happen AFTER setRemoteDescription so the transceivers exist.
             extra_output_tracks: list[NodeOutputTrack] = []
             if video_track is not None and relay is not None:
-                for sink_id in sink_node_ids[1:]:
-                    extra_output_tracks.append(
-                        SinkOutputTrack(
-                            frame_processor=frame_processor, sink_node_id=sink_id
-                        )
-                    )
-                for rec_id in record_node_ids:
-                    extra_output_tracks.append(
-                        RecordOutputTrack(
-                            frame_processor=frame_processor, record_node_id=rec_id
-                        )
-                    )
+                extra_output_tracks = _build_extra_output_tracks(
+                    frame_processor=frame_processor,
+                    sink_node_ids=sink_node_ids,
+                    record_node_ids=record_node_ids,
+                )
 
             if extra_output_tracks:
                 recv_only_video = [

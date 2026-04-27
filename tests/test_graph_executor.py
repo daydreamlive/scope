@@ -1,5 +1,6 @@
 import queue
 
+from scope.core.nodes import NodeDefinition, NodePort
 from scope.server.graph_executor import build_graph
 from scope.server.graph_schema import GraphConfig
 
@@ -14,6 +15,14 @@ class _StubPipelineConfig:
 
 
 class _StubPipeline:
+    def get_definition(self):
+        return NodeDefinition(
+            node_type_id="passthrough",
+            display_name="Passthrough",
+            inputs=[NodePort(name="video", port_type="video")],
+            outputs=[NodePort(name="video", port_type="video")],
+        )
+
     def get_config_class(self):
         return _StubPipelineConfig
 
