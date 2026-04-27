@@ -1,5 +1,6 @@
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
+import { useEffect, useRef } from "react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import {
   customNodeInputHandleId,
@@ -9,6 +10,8 @@ import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { useHandlePositions } from "../hooks/node/useHandlePositions";
 import { NodeCard, NodeHeader, NodeBody, collapsedHandleStyle } from "../ui";
+
+const PARAM_PUSH_DEBOUNCE_MS = 100;
 
 type CustomNodeType = Node<FlowNodeData, "custom_node">;
 
@@ -47,11 +50,29 @@ export function CustomNode({ id, data, selected }: NodeProps<CustomNodeType>) {
   // Edit-time helper: update the React Flow node data (so the widget
   // reflects the new value) and, when the node is connected to a running
   // backend, push the same change through so the worker picks it up.
+  // The backend push is debounced per-param to keep slider drags from
+  // flooding the data channel.
+  const onParamChangeRef = useRef(data.onCustomNodeParamChange);
+  onParamChangeRef.current = data.onCustomNodeParamChange;
+  const pushTimersRef = useRef<Record<string, ReturnType<typeof setTimeout>>>(
+    {}
+  );
+  useEffect(() => {
+    const timers = pushTimersRef.current;
+    return () => {
+      for (const t of Object.values(timers)) clearTimeout(t);
+    };
+  }, []);
   const setParam = (name: string, value: unknown) => {
     updateData({
       customNodeParams: { ...data.customNodeParams, [name]: value },
     });
-    data.onCustomNodeParamChange?.(name, value);
+    const existing = pushTimersRef.current[name];
+    if (existing) clearTimeout(existing);
+    pushTimersRef.current[name] = setTimeout(() => {
+      delete pushTimersRef.current[name];
+      onParamChangeRef.current?.(name, value);
+    }, PARAM_PUSH_DEBOUNCE_MS);
   };
   const displayName =
     data.customTitle ||
