@@ -117,7 +117,7 @@ class RecordingManager:
                 "use_editlist": "0",
                 # allows playback before file is fully loaded, eg over http
                 "movflags": "+faststart",
-            }
+            },
         )
 
     async def start_recording(self):
