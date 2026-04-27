@@ -69,7 +69,7 @@ from .kafka_publisher import (
 )
 from .logs_config import (
     LOG_FORMAT,
-    FalConnectionFilter,
+    ScopeLogContextFilter,
     cleanup_old_logs,
     ensure_logs_dir,
     get_current_log_file,
@@ -172,8 +172,8 @@ def _configure_logging():
     # Set root to WARNING to keep non-app libraries quiet by default
     logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT)
 
-    # Install filter on every handler so %(fal_conn)s is always populated
-    _fal_filter = FalConnectionFilter()
+    # Install filter on every handler so %(connection_id)s is always populated
+    _fal_filter = ScopeLogContextFilter()
     root_logger = logging.getLogger()
     for handler in root_logger.handlers:
         handler.addFilter(_fal_filter)
