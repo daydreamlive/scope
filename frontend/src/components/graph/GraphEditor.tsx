@@ -95,7 +95,7 @@ import {
   type KeyboardShortcutHandlers,
 } from "./hooks/graph/useKeyboardShortcuts";
 import { useGraphHistory } from "./hooks/graph/useGraphHistory";
-import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
+import { CheatSheetDialog } from "./CheatSheetDialog";
 import { useGraphNavigation } from "./hooks/subgraph/useGraphNavigation";
 import { useParentValueBridge } from "./hooks/value/useParentValueBridge";
 import { useSubgraphEval } from "./hooks/subgraph/useSubgraphEval";
@@ -191,6 +191,9 @@ interface GraphEditorProps {
   spoutAvailable?: boolean;
   ndiAvailable?: boolean;
   syphonAvailable?: boolean;
+  spoutReason?: string | null;
+  ndiReason?: string | null;
+  syphonReason?: string | null;
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
@@ -241,6 +244,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       spoutAvailable = false,
       ndiAvailable = false,
       syphonAvailable = false,
+      spoutReason = null,
+      ndiReason = null,
+      syphonReason = null,
       onSpoutSourceChange,
       onNdiSourceChange,
       onSyphonSourceChange,
@@ -343,6 +349,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         spoutOutputAvailable,
         ndiOutputAvailable,
         syphonOutputAvailable,
+        spoutReason,
+        ndiReason,
+        syphonReason,
       },
       {
         tempoState,
@@ -403,6 +412,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     const [showExportDialog, setShowExportDialog] = useState(false);
     const [showWorkflowExport, setShowWorkflowExport] = useState(false);
     const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
+    const [cheatSheetInitialTab, setCheatSheetInitialTab] = useState<
+      "basics" | "integrations" | "shortcuts"
+    >("basics");
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isDaydreamAuthenticated, setIsDaydreamAuthenticated] = useState(
       checkIsAuthenticated()
@@ -829,7 +841,10 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         export: () => setShowExportDialog(true),
         "toggle-stream": () =>
           isStreaming ? onStopStream?.() : onStartStream?.(),
-        "show-shortcuts": () => setShowShortcutsDialog(true),
+        "show-shortcuts": () => {
+          setCheatSheetInitialTab("basics");
+          setShowShortcutsDialog(true);
+        },
         "select-all": () =>
           setNodes(nds => nds.map(n => ({ ...n, selected: true }))),
         deselect: () =>
@@ -1253,6 +1268,22 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               />
             </ReactFlow>
 
+            {/* Help / cheat sheet button — sits directly above the React Flow
+                zoom controls (26×26 buttons at bottom-left: 15px margin × 4
+                buttons = 104px tall, so top of controls is at 119px). */}
+            <button
+              type="button"
+              onClick={() => {
+                setCheatSheetInitialTab("basics");
+                setShowShortcutsDialog(true);
+              }}
+              className="absolute bottom-[127px] left-[15px] z-30 w-[26px] h-[26px] rounded border border-[rgba(119,119,119,0.35)] bg-[rgba(17,17,17,0.8)] hover:border-[rgba(119,119,119,0.7)] hover:bg-[rgba(17,17,17,0.95)] transition-colors flex items-center justify-center text-[#b8b8b9] hover:text-white text-xs font-semibold"
+              title="Help & shortcuts"
+              aria-label="Open help cheat sheet"
+            >
+              ?
+            </button>
+
             {/* Add node button — upper right of canvas */}
             {!isStreaming && (
               <button
@@ -1465,9 +1496,10 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             buildWorkflow={buildCurrentWorkflow}
           />
 
-          <KeyboardShortcutsDialog
+          <CheatSheetDialog
             open={showShortcutsDialog}
             onOpenChange={setShowShortcutsDialog}
+            initialTab={cheatSheetInitialTab}
           />
         </div>
       </div>

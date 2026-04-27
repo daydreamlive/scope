@@ -224,11 +224,17 @@ export const downloadPipelineModels = async (
   return result;
 };
 
+export interface IntegrationAvailability {
+  available: boolean;
+  reason?: string | null;
+  install_hint?: string | null;
+}
+
 export interface HardwareInfoResponse {
   vram_gb: number | null;
-  spout_available: boolean;
-  ndi_available: boolean;
-  syphon_available: boolean;
+  spout: IntegrationAvailability;
+  ndi: IntegrationAvailability;
+  syphon: IntegrationAvailability;
 }
 
 export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {

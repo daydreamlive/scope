@@ -122,6 +122,9 @@ export interface GraphEditorAvailability {
   spoutOutputAvailable: boolean;
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
+  spoutReason?: string | null;
+  ndiReason?: string | null;
+  syphonReason?: string | null;
 }
 
 export function useGraphState(
@@ -290,6 +293,9 @@ export function useGraphState(
     spoutOutputAvailable: availability.spoutOutputAvailable,
     ndiOutputAvailable: availability.ndiOutputAvailable,
     syphonOutputAvailable: availability.syphonOutputAvailable,
+    spoutReason: availability.spoutReason ?? null,
+    ndiReason: availability.ndiReason ?? null,
+    syphonReason: availability.syphonReason ?? null,
     handleEdgeDelete,
     isStreaming: streams.isStreaming,
     isLoading: streams.isLoading ?? false,

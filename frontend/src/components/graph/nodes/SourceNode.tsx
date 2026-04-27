@@ -14,6 +14,7 @@ import {
   NodePillSearchableSelect,
   collapsedHandleStyle,
 } from "../ui";
+import type { NodePillSelectOption } from "../ui/NodePillSelect";
 
 type SourceNodeType = Node<FlowNodeData, "source">;
 
@@ -45,6 +46,9 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const spoutAvailable = data.spoutAvailable ?? false;
   const ndiAvailable = data.ndiAvailable ?? false;
   const syphonAvailable = data.syphonAvailable ?? false;
+  const spoutReason = data.spoutReason ?? "Spout is unavailable";
+  const ndiReason = data.ndiReason ?? "NDI is unavailable";
+  const syphonReason = data.syphonReason ?? "Syphon is unavailable";
   const onSpoutSourceChange = data.onSpoutSourceChange as
     | ((name: string) => void)
     | undefined;
@@ -178,13 +182,18 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const showFilePicker = sourceMode === "video";
   const handleY = HEADER_H + BODY_PAD + SELECT_ROW_H / 2;
 
-  // Filter source mode options based on availability
-  const filteredSourceModeOptions = SOURCE_MODE_OPTIONS.filter(opt => {
-    if (opt.value === "spout") return spoutAvailable;
-    if (opt.value === "ndi") return ndiAvailable;
-    if (opt.value === "syphon") return syphonAvailable;
-    return true;
-  });
+  // Annotate options with per-integration availability so unavailable ones
+  // stay visible but render disabled (with an install hint via `reason`).
+  const annotatedSourceModeOptions: NodePillSelectOption[] =
+    SOURCE_MODE_OPTIONS.map(opt => {
+      if (opt.value === "spout" && !spoutAvailable)
+        return { ...opt, disabled: true, reason: spoutReason };
+      if (opt.value === "ndi" && !ndiAvailable)
+        return { ...opt, disabled: true, reason: ndiReason };
+      if (opt.value === "syphon" && !syphonAvailable)
+        return { ...opt, disabled: true, reason: syphonReason };
+      return opt;
+    });
 
   const ndiOptions = ndiSources.map(s => ({
     value: s.identifier,
@@ -210,9 +219,19 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
               <NodePillSelect
                 value={sourceMode}
                 onChange={handleSourceModeChange}
-                options={filteredSourceModeOptions}
+                options={annotatedSourceModeOptions}
               />
             </NodeParamRow>
+            {(() => {
+              const current = annotatedSourceModeOptions.find(
+                o => o.value === sourceMode
+              );
+              return current?.disabled && current.reason ? (
+                <div className="mt-1 text-[10px] text-amber-400/80 italic">
+                  {current.reason}
+                </div>
+              ) : null;
+            })()}
           </div>
 
           {sourceMode === "spout" && (

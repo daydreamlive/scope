@@ -195,6 +195,12 @@ export interface FlowNodeData {
   ndiAvailable?: boolean;
   /** For source nodes: whether Syphon is available (macOS) */
   syphonAvailable?: boolean;
+  /** For source/output nodes: install hint shown when Spout is unavailable */
+  spoutReason?: string | null;
+  /** For source/output nodes: install hint shown when NDI is unavailable */
+  ndiReason?: string | null;
+  /** For source/output nodes: install hint shown when Syphon is unavailable */
+  syphonReason?: string | null;
   /** For source nodes: callback when Spout receiver name changes */
   onSpoutSourceChange?: (name: string) => void;
   /** For source nodes: callback when NDI source changes */

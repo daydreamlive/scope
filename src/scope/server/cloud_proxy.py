@@ -26,7 +26,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import Response
 
 from .models_config import get_assets_dir
-from .schema import AssetFileInfo, HardwareInfoResponse
+from .schema import AssetFileInfo, HardwareInfoResponse, IntegrationAvailability
 from .scope_cloud_types import ScopeCloudBackend
 
 logger = logging.getLogger(__name__)
@@ -154,9 +154,9 @@ async def proxy_with_body(
 
 async def get_hardware_info_from_cloud(
     cloud_manager: ScopeCloudBackend,
-    spout_available: bool,
-    ndi_available: bool = False,
-    syphon_available: bool = False,
+    spout: IntegrationAvailability,
+    ndi: IntegrationAvailability | None = None,
+    syphon: IntegrationAvailability | None = None,
 ) -> HardwareInfoResponse:
     """Fetch hardware info from cloud and return with local output availability.
 
@@ -187,9 +187,9 @@ async def get_hardware_info_from_cloud(
     data = response.get("data", {})
     return HardwareInfoResponse(
         vram_gb=data.get("vram_gb"),
-        spout_available=spout_available,
-        ndi_available=ndi_available,
-        syphon_available=syphon_available,
+        spout=spout,
+        ndi=ndi or IntegrationAvailability(),
+        syphon=syphon or IntegrationAvailability(),
     )
 
 
