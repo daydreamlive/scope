@@ -325,7 +325,10 @@ class PipelineManager:
             # Load the pipeline synchronously
             self.set_loading_stage("Initializing pipeline...")
             pipeline = self._load_pipeline_implementation(
-                pipeline_id, load_params, stage_callback=self.set_loading_stage
+                pipeline_id,
+                load_params,
+                stage_callback=self.set_loading_stage,
+                node_id=key,
             )
 
             # Hold lock while updating state
@@ -891,6 +894,7 @@ class PipelineManager:
         pipeline_id: str,
         load_params: dict | None = None,
         stage_callback=None,
+        node_id: str | None = None,
     ):
         """Synchronous node/pipeline loading (runs in thread executor)."""
         from scope.core.nodes.registry import NodeRegistry
@@ -904,12 +908,14 @@ class PipelineManager:
 
         # Plain-node path: a node with artifacts but no config class.
         # No Pydantic schema to merge — the node's own __init__ owns
-        # weight loading.
+        # weight loading. Pass node_id through so logging, OSC routing,
+        # and parameters_updated payloads see the graph instance key
+        # rather than an empty string.
         if pipeline_class is None and node_class is not None:
             logger.info(f"Loading node: {pipeline_id}")
             if stage_callback:
                 stage_callback("Initializing node...")
-            return node_class()
+            return node_class(node_id=node_id or pipeline_id)
 
         # List of built-in pipelines with custom initialization
         BUILTIN_PIPELINES = {
