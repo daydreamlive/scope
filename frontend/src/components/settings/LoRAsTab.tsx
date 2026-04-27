@@ -1,7 +1,36 @@
-import { RefreshCw, Trash2 } from "lucide-react";
+import { RefreshCw, Trash2, AlertTriangle } from "lucide-react";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import type { LoRAFileInfo } from "@/lib/api";
+
+/**
+ * Detect a Hugging Face file *preview page* URL. These look like
+ * `https://huggingface.co/<repo>/blob/main/<file>` and are NOT raw
+ * downloads — pasting them silently saves the HTML preview as the
+ * weights file. The HF "Copy download link" button produces the
+ * correct `/resolve/main/` form. We surface this as inline guidance
+ * before submit (and the backend rejects them too).
+ *
+ * Also handles `hf.co`, the official Hugging Face short domain that
+ * redirects to huggingface.co.
+ */
+const HUGGING_FACE_HOSTS = ["huggingface.co", "hf.co"];
+
+function isHuggingFaceBlobUrl(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  let parsed: URL;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    return false;
+  }
+  const host = parsed.hostname.toLowerCase();
+  const isHf = HUGGING_FACE_HOSTS.some(
+    h => host === h || host.endsWith(`.${h}`)
+  );
+  return isHf && parsed.pathname.includes("/blob/");
+}
 
 interface LoRAsTabProps {
   loraFiles: LoRAFileInfo[];
@@ -26,10 +55,12 @@ export function LoRAsTab({
   isInstalling = false,
   deletingLoRAs = new Set(),
 }: LoRAsTabProps) {
+  const isBlobUrl = isHuggingFaceBlobUrl(installUrl);
+
   const handleInstall = () => {
-    if (installUrl.trim()) {
-      onInstall(installUrl.trim());
-    }
+    const trimmed = installUrl.trim();
+    if (!trimmed || isBlobUrl) return;
+    onInstall(trimmed);
   };
 
   // Group LoRA files by folder
@@ -54,7 +85,7 @@ export function LoRAsTab({
   return (
     <div className="space-y-4">
       {/* Install Section */}
-      <div className="rounded-lg bg-muted/50 p-4 space-y-4">
+      <div className="rounded-lg bg-muted/50 p-4 space-y-2">
         <div className="flex items-center gap-2">
           <Input
             value={installUrl}
@@ -64,16 +95,30 @@ export function LoRAsTab({
             onKeyDown={e => {
               if (e.key === "Enter") handleInstall();
             }}
+            aria-invalid={isBlobUrl || undefined}
           />
           <Button
             onClick={handleInstall}
             variant="outline"
             size="sm"
-            disabled={isInstalling || !installUrl.trim()}
+            disabled={isInstalling || !installUrl.trim() || isBlobUrl}
           >
             {isInstalling ? "Installing..." : "Install"}
           </Button>
         </div>
+        {isBlobUrl && (
+          <div className="flex items-start gap-2 text-xs text-amber-400/90">
+            <AlertTriangle className="h-3.5 w-3.5 mt-[1px] shrink-0" />
+            <span>
+              That looks like a Hugging Face <em>preview</em> page. On the
+              LoRA&rsquo;s file page, click{" "}
+              <strong>&ldquo;Copy download link&rdquo;</strong> and paste that
+              URL instead (the correct one contains{" "}
+              <code className="font-mono">/resolve/main/</code>, not{" "}
+              <code className="font-mono">/blob/main/</code>).
+            </span>
+          </div>
+        )}
       </div>
 
       {/* Installed LoRAs Section */}
