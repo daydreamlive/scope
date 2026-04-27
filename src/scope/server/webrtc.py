@@ -20,7 +20,7 @@ from aiortc.codecs import h264, vpx
 from aiortc.contrib.media import MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
-from scope.core.pipelines.registry import PipelineRegistry
+from scope.core.nodes.registry import NodeRegistry
 
 from .audio_track import AudioProcessingTrack
 from .cloud_track import CloudTrack
@@ -33,7 +33,6 @@ from .pipeline_manager import PipelineManager
 from .recording import RecordingManager
 from .schema import WebRTCOfferRequest
 from .tracks import (
-    RecordOutputTrack,
     SinkOutputTrack,
     SourceInputHandler,
     VideoProcessingTrack,
@@ -58,6 +57,28 @@ vpx.MAX_FRAME_RATE = 8
 vpx.DEFAULT_BITRATE = 7000000
 vpx.MIN_BITRATE = 5000000
 vpx.MAX_BITRATE = 10000000
+
+
+def _build_extra_output_tracks(
+    frame_processor: FrameProcessor,
+    sink_node_ids: list[str],
+    record_node_ids: list[str],
+) -> list["NodeOutputTrack"]:
+    """Build live WebRTC output tracks for graph outputs.
+
+    Record-node queues are single-consumer recording queues. Attaching them as
+    live WebRTC tracks races with RecordingCoordinator and can drain/corrupt
+    recordings, so only sink nodes get live output tracks here.
+    """
+    if record_node_ids:
+        logger.debug(
+            "Skipping live WebRTC tracks for record nodes: %s",
+            record_node_ids,
+        )
+    return [
+        SinkOutputTrack(frame_processor=frame_processor, sink_node_id=sink_id)
+        for sink_id in sink_node_ids[1:]
+    ]
 
 
 def _parse_graph_node_ids(
@@ -331,7 +352,7 @@ class WebRTCManager:
             # (authoritative for local mode). initial_parameters values are not
             # used here because they may be stale from a previous pipeline load.
             pipeline_ids = initial_parameters.get("pipeline_ids", [])
-            produces_video = PipelineRegistry.chain_produces_video(pipeline_ids)
+            produces_video = NodeRegistry.chain_produces_video(pipeline_ids)
 
             # Parse graph from initial parameters to find sink/source/record node IDs
             (
@@ -398,6 +419,10 @@ class WebRTCManager:
                             logger.info(
                                 f"Re-keyed pipeline {pid} as {node['id']} for graph"
                             )
+                # Plain custom nodes aren't pre-loaded via /pipeline/load,
+                # but the graph executor still resolves them through the
+                # PipelineManager — so instantiate and register them here.
+                pipeline_manager.register_graph_nodes(graph_data)
 
             # Create FrameProcessor (owned by session, shared between tracks)
             frame_processor = FrameProcessor(
@@ -454,8 +479,8 @@ class WebRTCManager:
                 # so they can be placed on the correct recvonly transceivers.
 
                 # Eagerly initialize frame processor when graph has sources,
-                # sinks, or record nodes, so SourceInputHandler /
-                # SinkOutputTrack / RecordOutputTrack can reference it immediately.
+                # sinks, or record nodes, so SourceInputHandler / SinkOutputTrack
+                # and recording endpoints can reference it immediately.
                 if (
                     webrtc_source_node_ids
                     or has_non_webrtc_sources
@@ -477,7 +502,7 @@ class WebRTCManager:
                     "skipping video track"
                 )
 
-            produces_audio = PipelineRegistry.chain_produces_audio(pipeline_ids)
+            produces_audio = NodeRegistry.chain_produces_audio(pipeline_ids)
             if produces_audio:
                 audio_track = AudioProcessingTrack(
                     frame_processor=frame_processor,
@@ -678,23 +703,17 @@ class WebRTCManager:
                         )
                         break
 
-            # Attach extra sink / record output tracks to the recvonly
-            # transceivers that the browser (or cloud client) created.
+            # Attach extra sink output tracks to the recvonly transceivers that
+            # the browser (or cloud client) created. Record nodes are not live
+            # WebRTC outputs because their queues are consumed by recordings.
             # Must happen AFTER setRemoteDescription so the transceivers exist.
             extra_output_tracks: list[NodeOutputTrack] = []
             if video_track is not None and relay is not None:
-                for sink_id in sink_node_ids[1:]:
-                    extra_output_tracks.append(
-                        SinkOutputTrack(
-                            frame_processor=frame_processor, sink_node_id=sink_id
-                        )
-                    )
-                for rec_id in record_node_ids:
-                    extra_output_tracks.append(
-                        RecordOutputTrack(
-                            frame_processor=frame_processor, record_node_id=rec_id
-                        )
-                    )
+                extra_output_tracks = _build_extra_output_tracks(
+                    frame_processor=frame_processor,
+                    sink_node_ids=sink_node_ids,
+                    record_node_ids=record_node_ids,
+                )
 
             if extra_output_tracks:
                 recv_only_video = [
@@ -1288,18 +1307,19 @@ class WebRTCManager:
             self.headless_session.frame_processor.update_parameters(parameters)
 
     def broadcast_notification(self, message: dict) -> None:
-        """Send a notification message to all active sessions via their data channels."""
-        message_str = json.dumps(message)
+        """Send a notification to active sessions via their data channels.
+
+        Safe to call from worker threads: sends are marshalled onto the
+        aiortc event loop through each session's :class:`NotificationSender`,
+        which also buffers messages until the data channel is open.
+        """
         for session in self.sessions.values():
             if session.pc.connectionState in ("closed", "failed"):
                 continue
-            if session.data_channel and session.data_channel.readyState == "open":
-                try:
-                    session.data_channel.send(message_str)
-                except Exception as e:
-                    logger.error(
-                        f"Failed to send notification to session {session.id}: {e}"
-                    )
+            sender = session.notification_sender
+            if sender is None:
+                continue
+            sender.call(message)
 
     async def stop(self):
         """Close and cleanup all sessions (WebRTC and headless)."""

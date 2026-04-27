@@ -45,6 +45,11 @@ from scope.server.app import app as scope_app
 from scope.server.app import lifespan as scope_lifespan
 from scope.server.frame_processor import FrameProcessor
 from scope.server.kafka_publisher import publish_event
+from scope.server.logs_config import (
+    LOG_FORMAT,
+    ScopeLogContextFilter,
+    set_connection_id,
+)
 from scope.server.media_packets import ensure_video_packet
 
 logger = logging.getLogger(__name__)
@@ -1347,6 +1352,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
     await ws.accept()
     _connection_active = True
     _connection_count += 1
+    set_connection_id(None)
     logger.info("WebSocket client connected")
 
     stop_event = asyncio.Event()
@@ -1385,6 +1391,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         # wrapper's websocket_connected (which uses manifest_id as
         # connection_id).
         session.manifest_id = job_info.manifest_id
+        set_connection_id(session.manifest_id)
         session.session_id = str(uuid.uuid4())
         session.connection_info = _build_connection_info()
 
@@ -1464,6 +1471,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         if control_task is not None:
             await _shutdown_task(control_task, task_name="control_channel")
         _connection_active = False
+        set_connection_id(None)
 
 
 def get_daydream_api_base() -> str:
@@ -1713,12 +1721,15 @@ def _configure_trickle_log_handler(
 def main(host: str, port: int, reload: bool) -> None:
     """Run the Livepeer runner WebSocket server."""
     log_level = logging.DEBUG if os.getenv("LIVEPEER_DEBUG") else logging.INFO
-    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    logging.basicConfig(level=log_level, format=log_format)
-    _configure_trickle_log_handler(
+    log_filter = ScopeLogContextFilter()
+    logging.basicConfig(level=log_level, format=LOG_FORMAT)
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(log_filter)
+    trickle_handler = _configure_trickle_log_handler(
         level=log_level,
-        formatter=logging.Formatter(log_format),
+        formatter=logging.Formatter(LOG_FORMAT),
     )
+    trickle_handler.addFilter(log_filter)
     if os.getenv("LIVEPEER_DEBUG"):
         logging.getLogger("livepeer_gateway").setLevel(logging.DEBUG)
         logging.getLogger(__name__).setLevel(logging.DEBUG)

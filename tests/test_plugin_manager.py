@@ -771,7 +771,7 @@ class TestGetPluginForPipeline:
     def test_returns_plugin_name(self):
         """Known pipeline should return plugin name."""
         pm = PluginManager()
-        pm._pipeline_to_plugin["test-pipeline"] = "test-plugin"
+        pm._type_to_plugin["test-pipeline"] = "test-plugin"
 
         result = pm.get_plugin_for_pipeline("test-pipeline")
 
@@ -1426,7 +1426,7 @@ class TestLoadPluginsErrorHandling:
         assert "good-pkg" in pm._registered_plugins
 
         # Bad package's pipeline should NOT be in the mapping
-        assert "bad-pkg" not in pm._pipeline_to_plugin.values()
+        assert "bad-pkg" not in pm._type_to_plugin.values()
 
 
 class TestIsPackageInstalled:

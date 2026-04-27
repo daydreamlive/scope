@@ -138,9 +138,13 @@ function findPluginInstallSpec(
   workflow: ScopeWorkflow,
   pluginName: string
 ): string | null {
-  for (const p of workflow.pipelines) {
-    if (p.source.plugin_name === pluginName) {
-      return p.source.package_spec ?? p.source.plugin_name ?? null;
+  const sources = [
+    ...workflow.pipelines.map(p => p.source),
+    ...(workflow.nodes ?? []).map(n => n.source),
+  ];
+  for (const source of sources) {
+    if (source.plugin_name === pluginName) {
+      return source.package_spec ?? source.plugin_name ?? null;
     }
   }
   return null;

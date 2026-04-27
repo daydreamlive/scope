@@ -41,10 +41,17 @@ export async function fetchCreditsBalance(
   apiKey: string,
   deviceId?: string
 ): Promise<CreditsBalance> {
-  const url = deviceId
-    ? `${DAYDREAM_API_BASE}/credits/balance?deviceId=${encodeURIComponent(deviceId)}`
-    : `${DAYDREAM_API_BASE}/credits/balance`;
-  const res = await fetch(url, { headers: headers(apiKey) });
+  // Cache-bust with a timestamp param so intermediary caches (Electron's HTTP
+  // cache, any service worker, CDN heuristic caching) can't pin the balance
+  // between polls. `cache: "no-store"` handles the browser-side cache.
+  const params = new URLSearchParams();
+  if (deviceId) params.set("deviceId", deviceId);
+  params.set("_", String(Date.now()));
+  const url = `${DAYDREAM_API_BASE}/credits/balance?${params.toString()}`;
+  const res = await fetch(url, {
+    headers: headers(apiKey),
+    cache: "no-store",
+  });
   if (!res.ok)
     throw new Error(`Failed to fetch credits balance: ${res.status}`);
   return res.json();

@@ -498,7 +498,9 @@ class TestExtraFieldsIgnored:
             "min_scope_version": "0.5.0",
         }
         wf = WorkflowRequest.model_validate(data)
-        assert wf.pipelines[0].pipeline_id == "longlive"
+        # Legacy "pipelines" key folds into the canonical "nodes" list;
+        # "pipeline_id" aliases to "node_type_id".
+        assert wf.nodes[0].node_type_id == "longlive"
         assert wf.min_scope_version == "0.5.0"
 
     def test_unknown_top_level_fields_ignored(self):
@@ -507,7 +509,7 @@ class TestExtraFieldsIgnored:
             "future_field": "should be dropped",
         }
         wf = WorkflowRequest.model_validate(data)
-        assert wf.pipelines[0].pipeline_id == "p"
+        assert wf.nodes[0].node_type_id == "p"
         assert not hasattr(wf, "future_field")
 
 
@@ -640,7 +642,9 @@ class TestInputValidation:
     def test_too_many_pipelines_rejected(self):
         from pydantic import ValidationError
 
-        pipelines = [make_pipeline(f"pipe_{i}") for i in range(51)]
+        # Cap is 150 on the unified `nodes` list (was pipelines=50 +
+        # nodes=100 before the schemas merged).
+        pipelines = [make_pipeline(f"pipe_{i}") for i in range(151)]
         with pytest.raises(ValidationError):
             WorkflowRequest(pipelines=pipelines)
 
@@ -896,3 +900,170 @@ class TestPackageSpecInjection:
 
         plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
         assert expected_substring in items_by_kind(plan, "plugin")[0].action
+
+
+# ---------------------------------------------------------------------------
+# Node resolution (added with pipeline/node unification)
+# ---------------------------------------------------------------------------
+
+
+def _make_node(type_id: str = "scheduler", source_type: str = "builtin", **source_kw):
+    from scope.core.workflows.resolve import WorkflowNode as _WorkflowNode
+
+    return _WorkflowNode(
+        node_type_id=type_id,
+        source=WorkflowPipelineSource(type=source_type, **source_kw),
+    )
+
+
+class TestResolveBuiltinNode:
+    """Plain nodes from the node registry are validated like pipelines."""
+
+    @patch("scope.core.nodes.registry.NodeRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
+    def test_builtin_node_ok(
+        self, mock_pipeline_registry, mock_node_registry, tmp_path
+    ):
+        # Plain node: not in PipelineRegistry (no config class) but in
+        # NodeRegistry. Emits kind="node" to distinguish from pipelines.
+        mock_pipeline_registry.is_registered.return_value = False
+        mock_node_registry.is_registered.return_value = True
+
+        wf = WorkflowRequest(nodes=[_make_node("scheduler")])
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+
+        assert plan.can_apply is True
+        nodes = items_by_kind(plan, "node")
+        assert len(nodes) == 1
+        assert nodes[0].name == "scheduler"
+        assert nodes[0].status == "ok"
+
+    @patch("scope.core.nodes.registry.NodeRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
+    def test_missing_builtin_node(
+        self, mock_pipeline_registry, mock_node_registry, tmp_path
+    ):
+        mock_pipeline_registry.is_registered.return_value = False
+        mock_node_registry.is_registered.return_value = False
+
+        wf = WorkflowRequest(nodes=[_make_node("unknown-type")])
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+
+        assert plan.can_apply is False
+        missing = [i for i in plan.items if i.status == "missing"]
+        assert len(missing) == 1
+        assert "unknown-type" in missing[0].detail
+
+
+class TestResolvePluginNode:
+    """Plugin-provided nodes surface the same 'install plugin' action as pipelines."""
+
+    def test_missing_plugin_auto_resolvable(self, tmp_path):
+        wf = WorkflowRequest(
+            pipelines=[],
+            nodes=[
+                _make_node(
+                    "my-plugin.clock",
+                    "pypi",
+                    plugin_name="scope-my-plugin",
+                    plugin_version="0.2.0",
+                )
+            ],
+        )
+
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+
+        assert plan.can_apply is False
+        plugins = items_by_kind(plan, "plugin")
+        assert len(plugins) == 1
+        assert plugins[0].can_auto_resolve is True
+        assert "scope-my-plugin" in plugins[0].action
+
+    def test_plugin_installed_ok(self, tmp_path):
+        wf = WorkflowRequest(
+            pipelines=[],
+            nodes=[
+                _make_node(
+                    "my-plugin.clock",
+                    "pypi",
+                    plugin_name="scope-my-plugin",
+                    plugin_version="0.2.0",
+                )
+            ],
+        )
+
+        plan = resolve_workflow(
+            wf,
+            mock_plugin_manager([{"name": "scope-my-plugin", "version": "0.3.0"}]),
+            tmp_path,
+        )
+
+        assert plan.can_apply is True
+        assert items_by_kind(plan, "plugin")[0].status == "ok"
+
+
+class TestMixedPipelinesAndNodes:
+    """A workflow with both kinds returns ResolutionItems for each."""
+
+    @patch("scope.core.nodes.registry.NodeRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
+    def test_both_resolved(self, mock_pipeline_registry, mock_node_registry, tmp_path):
+        # pipe-a is a config-driven pipeline; node-a/node-b are plain nodes.
+        mock_pipeline_registry.is_registered.side_effect = lambda i: i == "pipe-a"
+        mock_node_registry.is_registered.side_effect = lambda i: i in (
+            "node-a",
+            "node-b",
+        )
+
+        wf = WorkflowRequest(
+            pipelines=[make_pipeline("pipe-a")],
+            nodes=[_make_node("node-a"), _make_node("node-b")],
+        )
+
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+
+        assert plan.can_apply is True
+        assert len(items_by_kind(plan, "pipeline")) == 1
+        assert len(items_by_kind(plan, "node")) == 2
+
+
+class TestLegacyFormatBackwardCompat:
+    """Legacy workflow JSON (pipelines field + pipeline_id key) still loads."""
+
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
+    def test_legacy_pipelines_key_merged(self, mock_pipeline_registry, tmp_path):
+        mock_pipeline_registry.is_registered.return_value = True
+
+        # Raw JSON in the legacy shape — `pipelines` + `pipeline_id`.
+        raw = {
+            "pipelines": [{"pipeline_id": "legacy-pipe", "source": {"type": "builtin"}}]
+        }
+        wf = WorkflowRequest.model_validate(raw)
+
+        # Internally the legacy list has been folded into `nodes`.
+        assert len(wf.nodes) == 1
+        assert wf.nodes[0].node_type_id == "legacy-pipe"
+
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        assert plan.can_apply is True
+        assert items_by_kind(plan, "pipeline")[0].name == "legacy-pipe"
+
+    @patch("scope.core.nodes.registry.NodeRegistry")
+    @patch("scope.core.pipelines.registry.PipelineRegistry")
+    def test_mixed_legacy_and_new_keys(
+        self, mock_pipeline_registry, mock_node_registry, tmp_path
+    ):
+        mock_pipeline_registry.is_registered.side_effect = lambda i: i == "old-pipe"
+        mock_node_registry.is_registered.side_effect = lambda i: i == "new-node"
+
+        raw = {
+            "pipelines": [{"pipeline_id": "old-pipe", "source": {"type": "builtin"}}],
+            "nodes": [{"node_type_id": "new-node", "source": {"type": "builtin"}}],
+        }
+        wf = WorkflowRequest.model_validate(raw)
+
+        # Both forms survive the merge — legacy entries come first.
+        assert [n.node_type_id for n in wf.nodes] == ["old-pipe", "new-node"]
+
+        plan = resolve_workflow(wf, mock_plugin_manager(), tmp_path)
+        assert plan.can_apply is True
