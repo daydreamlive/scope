@@ -267,6 +267,18 @@ def get_git_commit_hash() -> str:
     Returns:
         Git commit hash if available, otherwise a fallback message.
     """
+    # Packaged distributions (e.g. the Electron app) don't ship the .git
+    # directory, so the build pipeline writes the short hash into a sibling
+    # file that we read here.
+    commit_file = Path(__file__).parent.parent / "_git_commit.txt"
+    try:
+        if commit_file.is_file():
+            baked = commit_file.read_text().strip()
+            if baked:
+                return baked
+    except OSError:
+        pass
+
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
