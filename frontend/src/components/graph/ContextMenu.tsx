@@ -14,6 +14,10 @@ export interface ContextMenuItem {
   icon?: ReactNode;
   children?: ContextMenuItem[];
   keywords?: string[];
+  /** When true, the item is excluded from the static menu render but still
+   * participates in search results. Used to surface installed pipelines and
+   * plugin nodes via the search box without enlarging the resting menu. */
+  searchOnly?: boolean;
 }
 
 interface ContextMenuProps {
@@ -197,48 +201,50 @@ export function ContextMenu({
             ))
           )
         ) : (
-          items.map((item, i) => (
-            <div
-              key={i}
-              className="relative"
-              onMouseEnter={() =>
-                item.children ? setActiveSubmenu(i) : setActiveSubmenu(null)
-              }
-              onMouseLeave={() => setActiveSubmenu(null)}
-            >
-              <button
-                onClick={() => {
-                  if (!item.children) handleSelect(item);
-                }}
-                className={`w-full text-left px-3 py-1.5 text-[13px] flex items-center gap-2.5 transition-colors ${
-                  item.danger
-                    ? "text-red-400 hover:bg-[rgba(255,255,255,0.05)] hover:text-red-300"
-                    : "text-[#e0e0e0] hover:bg-[rgba(255,255,255,0.05)]"
-                }`}
+          items
+            .filter(item => !item.searchOnly)
+            .map((item, i) => (
+              <div
+                key={i}
+                className="relative"
+                onMouseEnter={() =>
+                  item.children ? setActiveSubmenu(i) : setActiveSubmenu(null)
+                }
+                onMouseLeave={() => setActiveSubmenu(null)}
               >
-                {item.icon && (
-                  <span className="text-[#777] shrink-0 [&_svg]:w-[15px] [&_svg]:h-[15px]">
-                    {item.icon}
-                  </span>
-                )}
-                <span className="flex-1">{item.label}</span>
-                {item.children && (
-                  <span className="text-[#555] text-[11px] ml-2">
-                    {flipX ? "‹" : "›"}
-                  </span>
-                )}
-              </button>
+                <button
+                  onClick={() => {
+                    if (!item.children) handleSelect(item);
+                  }}
+                  className={`w-full text-left px-3 py-1.5 text-[13px] flex items-center gap-2.5 transition-colors ${
+                    item.danger
+                      ? "text-red-400 hover:bg-[rgba(255,255,255,0.05)] hover:text-red-300"
+                      : "text-[#e0e0e0] hover:bg-[rgba(255,255,255,0.05)]"
+                  }`}
+                >
+                  {item.icon && (
+                    <span className="text-[#777] shrink-0 [&_svg]:w-[15px] [&_svg]:h-[15px]">
+                      {item.icon}
+                    </span>
+                  )}
+                  <span className="flex-1">{item.label}</span>
+                  {item.children && (
+                    <span className="text-[#555] text-[11px] ml-2">
+                      {flipX ? "‹" : "›"}
+                    </span>
+                  )}
+                </button>
 
-              {item.children && activeSubmenu === i && (
-                <SubmenuPanel
-                  items={item.children}
-                  flipX={flipX}
-                  flipY={flipY}
-                  onSelect={handleSelect}
-                />
-              )}
-            </div>
-          ))
+                {item.children && activeSubmenu === i && (
+                  <SubmenuPanel
+                    items={item.children.filter(c => !c.searchOnly)}
+                    flipX={flipX}
+                    flipY={flipY}
+                    onSelect={handleSelect}
+                  />
+                )}
+              </div>
+            ))
         )}
       </div>
     </div>

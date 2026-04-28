@@ -32,7 +32,10 @@ import {
 } from "lucide-react";
 import type { Node, Edge } from "@xyflow/react";
 import type { FlowNodeData } from "../../lib/graphUtils";
+import type { NodeDefinitionDto } from "../../lib/api";
+import type { PipelineInfo } from "../../types";
 import type { ContextMenuItem } from "./ContextMenu";
+import { buildCustomNodeExtraData } from "./customNodeExtraData";
 
 /* ── Pane (canvas) context menu ──────────────────────────────────────────── */
 
@@ -63,8 +66,10 @@ type NodeTypeSelectFn = (
     | "tempo"
     | "prompt_list"
     | "prompt_blend"
-    | "scheduler",
-  subType?: string
+    | "scheduler"
+    | "custom_node",
+  subType?: string,
+  extraData?: Partial<FlowNodeData>
 ) => void;
 
 export function buildPaneMenuItems(deps: {
@@ -78,6 +83,11 @@ export function buildPaneMenuItems(deps: {
     selectedIds: string[]
   ) => void;
   onOpenBlueprints: () => void;
+  /** Installed pipelines, used to surface plugin-provided pipelines via search. */
+  installedPipelines?: Record<string, PipelineInfo> | null;
+  /** Node definitions from /api/v1/nodes/definitions, used to surface plugin
+   *  custom nodes via search. */
+  customNodeDefs?: NodeDefinitionDto[];
 }): ContextMenuItem[] {
   const {
     handleNodeTypeSelect,
@@ -86,9 +96,11 @@ export function buildPaneMenuItems(deps: {
     edges,
     createSubgraphFromSelection,
     onOpenBlueprints,
+    installedPipelines,
+    customNodeDefs,
   } = deps;
 
-  return [
+  const baseItems: ContextMenuItem[] = [
     {
       label: "Source",
       icon: <Camera />,
@@ -309,6 +321,65 @@ export function buildPaneMenuItems(deps: {
         ]
       : []),
   ];
+
+  // Search-only ghost entries: invisible in the static menu, but discoverable
+  // via the search box. One per installed pipeline, one per plugin-provided
+  // custom node. Plugin package names are added to keywords so users can find
+  // a node by typing e.g. "gesture" → "scope-gesture-pipeline".
+  const ghostItems: ContextMenuItem[] = [];
+
+  if (installedPipelines) {
+    for (const [pipelineId, info] of Object.entries(installedPipelines)) {
+      const keywords = [
+        pipelineId,
+        info.pluginName ?? "",
+        "pipeline",
+        ...(info.about?.split(/\s+/).filter(Boolean) ?? []),
+      ].filter(Boolean);
+      ghostItems.push({
+        label: info.name || pipelineId,
+        icon: <Workflow />,
+        keywords,
+        searchOnly: true,
+        onClick: () =>
+          handleNodeTypeSelect("pipeline", undefined, {
+            pipelineId,
+          } as Partial<FlowNodeData>),
+      });
+    }
+  }
+
+  if (customNodeDefs) {
+    for (const def of customNodeDefs) {
+      // Mirror AddNodeModal filtering: skip pipelines (handled above) and the
+      // built-in scheduler (already a top-level entry).
+      if (def.pipeline_meta != null) continue;
+      if (def.node_type_id === "scheduler") continue;
+      // Surface plugin-provided nodes only — built-ins already have static
+      // entries in this menu.
+      if (!def.plugin_name) continue;
+      const keywords = [
+        def.node_type_id,
+        def.plugin_name,
+        def.category,
+        ...(def.description?.split(/\s+/).filter(Boolean) ?? []),
+      ].filter(Boolean);
+      ghostItems.push({
+        label: def.display_name || def.node_type_id,
+        icon: <PackageOpen />,
+        keywords,
+        searchOnly: true,
+        onClick: () =>
+          handleNodeTypeSelect(
+            "custom_node",
+            def.node_type_id,
+            buildCustomNodeExtraData(def)
+          ),
+      });
+    }
+  }
+
+  return [...baseItems, ...ghostItems];
 }
 
 /* ── Node context menu ───────────────────────────────────────────────────── */

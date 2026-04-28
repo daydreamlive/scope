@@ -520,13 +520,15 @@ export function useNodeFactories({
 }: UseNodeFactoriesArgs) {
   const existingIds = useMemo(() => new Set(nodes.map(n => n.id)), [nodes]);
 
-  /** Generic factory: creates a node from the NODE_DEFAULTS config map. */
+  /** Generic factory: creates a node from the NODE_DEFAULTS config map.
+   *  Returns the new node's id so callers can wire follow-up state (e.g.
+   *  preselecting a pipeline immediately after creation). */
   const addNode = useCallback(
     (
       key: NodeTypeKey,
       position?: { x: number; y: number },
       extraData?: Partial<FlowNodeData>
-    ) => {
+    ): string => {
       const def = NODE_DEFAULTS[key];
       const id = generateNodeId(def.idPrefix, existingIds);
       const newNode: Node<FlowNodeData> = {
@@ -544,6 +546,7 @@ export function useNodeFactories({
         } as FlowNodeData,
       };
       setNodes(nds => enrichNodes([...nds, newNode], enrichDepsRef.current));
+      return id;
     },
     [existingIds, nodes.length, setNodes, enrichDepsRef]
   );
@@ -588,11 +591,19 @@ export function useNodeFactories({
           addNode(`control_${subType}` as NodeTypeKey, pendingNodePosition);
         }
       } else if (type === "pipeline") {
-        addNode("pipeline", pendingNodePosition, {
+        const preselectedPipelineId = (
+          extraData as { pipelineId?: string } | undefined
+        )?.pipelineId;
+        const newId = addNode("pipeline", pendingNodePosition, {
           availablePipelineIds,
           pipelinePortsMap: portsMap,
           onPipelineSelect: handlePipelineSelect,
         });
+        if (preselectedPipelineId) {
+          // Mirror the manual dropdown flow so ports/params/streamInputs
+          // hydrate identically (see PipelineNode.tsx onPipelineSelect call).
+          handlePipelineSelect(newId, preselectedPipelineId);
+        }
       } else if (type === "output") {
         const defaultType = spoutOutputAvailable
           ? "spout"

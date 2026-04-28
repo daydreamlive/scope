@@ -73,6 +73,8 @@ import {
 import { createDaydreamImportSession } from "../../lib/daydreamExport";
 import { openExternalUrl } from "../../lib/openExternal";
 import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
+import { usePipelinesContext } from "../../contexts/PipelinesContext";
+import { useNodeDefinitions } from "../../hooks/useNodeDefinitions";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import {
   AlertDialog,
@@ -398,6 +400,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
 
     const [showAddNodeModal, setShowAddNodeModal] = useState(false);
     const [showBlueprintModal, setShowBlueprintModal] = useState(false);
+    const { pipelines: installedPipelines } = usePipelinesContext();
+    const customNodeDefs = useNodeDefinitions();
     const [showClearConfirm, setShowClearConfirm] = useState(false);
     const [showDefaultConfirm, setShowDefaultConfirm] = useState(false);
     const [showExportDialog, setShowExportDialog] = useState(false);
@@ -1296,6 +1300,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                         edges,
                         createSubgraphFromSelection,
                         onOpenBlueprints: () => setShowBlueprintModal(true),
+                        installedPipelines,
+                        customNodeDefs,
                       })
                     : buildNodeMenuItems({
                         contextNodeId: contextMenu.nodeId!,

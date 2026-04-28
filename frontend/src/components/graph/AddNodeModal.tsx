@@ -9,6 +9,7 @@ import {
 import type { FlowNodeData } from "../../lib/graphUtils";
 import type { NodeDefinitionDto } from "../../lib/api";
 import { fetchNodeDefinitions } from "../../lib/api";
+import { buildCustomNodeExtraData } from "./customNodeExtraData";
 
 interface AddNodeModalProps {
   open: boolean;
@@ -462,20 +463,11 @@ export function AddNodeModal({
   const handleSelect = useCallback(
     (item: NodeCatalogItem) => {
       if (item.type === "custom_node" && item.customNodeDef) {
-        const def = item.customNodeDef;
-        onSelectNodeType("custom_node", item.subType, {
-          customNodeTypeId: def.node_type_id,
-          customNodeDisplayName: def.display_name || def.node_type_id,
-          customNodeCategory: def.category || "",
-          customNodeInputs: def.inputs || [],
-          customNodeOutputs: def.outputs || [],
-          customNodeParamDefs: def.params || [],
-          customNodeParams: Object.fromEntries(
-            (def.params || [])
-              .filter(p => p.default != null)
-              .map(p => [p.name, p.default])
-          ),
-        });
+        onSelectNodeType(
+          "custom_node",
+          item.subType,
+          buildCustomNodeExtraData(item.customNodeDef)
+        );
       } else {
         onSelectNodeType(item.type, item.subType);
       }
