@@ -243,6 +243,37 @@ class PluginManager:
             return self._probe_kind_from_git(spec)
         return None
 
+    def _unregister_pluggy_plugins_for_dist(self, package_name: str) -> None:
+        """Unregister every pluggy plugin owned by distribution *package_name*.
+
+        Pluggy registers each ``scope`` entry point under its entry-point
+        name (e.g. ``scope_youtube``). The plugin object is whatever
+        ``ep.load()`` returns — for an entry point like
+        ``scope_youtube:plugin`` that's the plugin *instance*, which has
+        no ``__name__`` we can match against. So instead we walk
+        ``importlib.metadata.distributions()``, find the dist whose
+        normalized name matches, and unregister each of its scope entry
+        points by name.
+        """
+        from importlib.metadata import distributions
+
+        normalized = self._normalize_package_name(package_name)
+        for dist in distributions():
+            if self._normalize_package_name(dist.metadata["Name"]) != normalized:
+                continue
+            for ep in dist.entry_points:
+                if ep.group != "scope":
+                    continue
+                plugin = self._pm.get_plugin(ep.name)
+                if plugin is None:
+                    continue
+                try:
+                    self._pm.unregister(plugin)
+                    logger.info(f"Unregistered pluggy plugin: {ep.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to unregister {ep.name} from pluggy: {e}")
+            return
+
     def _probe_kind_from_git(self, git_spec: str) -> str | None:
         """Shallow-clone *git_spec* and probe ``__scope_kind__``."""
         import tempfile
@@ -1575,22 +1606,13 @@ class PluginManager:
                 self._type_to_plugin.pop(pipeline_id, None)
                 logger.info(f"Unregistered pipeline from registry: {pipeline_id}")
 
-        # Unregister the plugin from pluggy so its hooks no longer fire.
-        # Without this, a subsequent reload of any other plugin would
-        # re-fire the uninstalled plugin's `register_nodes`/`register_pipelines`
-        # hooks (its module is still loaded in `sys.modules` after
-        # `uv pip uninstall`) and resurrect its registrations.
-        plugin_to_unregister = None
-        for plugin in self._pm.get_plugins():
-            plugin_name = getattr(plugin, "__name__", "")
-            if name in plugin_name or plugin_name in name:
-                plugin_to_unregister = plugin
-                break
-        if plugin_to_unregister:
-            try:
-                self._pm.unregister(plugin_to_unregister)
-            except Exception as e:
-                logger.warning(f"Failed to unregister plugin {name} from pluggy: {e}")
+        # Unregister the plugin's pluggy registrations so its hooks no
+        # longer fire. Without this, a subsequent reload of any other
+        # plugin would re-fire the uninstalled plugin's
+        # ``register_nodes``/``register_pipelines`` hooks (its module is
+        # still loaded in ``sys.modules`` after ``uv pip uninstall``) and
+        # resurrect its registrations.
+        self._unregister_pluggy_plugins_for_dist(name)
 
         # Rebuild plugin-derived caches (`_type_to_plugin` and
         # `_plugin_input_sources`) from the remaining loaded plugins.
