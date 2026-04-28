@@ -1,45 +1,77 @@
-# e2e/ — RETIRED
+# Scope E2E Tests
 
-This TypeScript Playwright scaffold has been superseded by the Python
-product-tests system at [`../product-tests/`](../product-tests/README.md).
+End-to-end Playwright test for Scope's Livepeer cloud streaming path.
 
-## Where to go instead
+## What it verifies
 
-- **PR-gate cloud smoke:** `product-tests/scenarios/test_onboarding_cloud.py`
-- **Nightly full-matrix cloud:** `product-tests/release/test_cloud_full_matrix.py`
-- **CI wiring:** `.github/workflows/product-tests.yml`
+The single test in `tests/cloud-streaming.spec.ts` drives the full
+round-trip via a real browser:
 
-## Why it was retired
+1. App loads (signed-in via a baked-in API key)
+2. Switch to Perform mode
+3. Toggle Remote Inference on, wait for cloud connection
+4. Select the `passthrough` pipeline
+5. Switch input to Camera (headless Chromium gets a synthetic feed)
+6. Start the stream
+7. Verify the **output** `<video>` in the "Video Output" card is
+   actually playing (frames round-tripped through the fal runner)
+8. Stop the stream
 
-The old scaffold had TypeScript + `@playwright/test` infrastructure but
-no actual test bodies, no retry-counter gating, no chaos simulation, and
-no PR-comment integration. The new system treats onboarding (local +
-cloud) as the #1 gate, counts retries/unexpected closes as hard fails,
-and scores runs across multiple product-quality dimensions.
+## For the full setup guide
 
-## Running the migrated tests
+This directory is intentionally minimal. The canonical setup and
+workflow instructions — including `.env.local` contents, sudo system
+deps for Chromium (`libnss3 libnspr4 libasound2t64`), expected
+Kafka/ClickHouse event sequence, and common failure signatures — live
+in the Claude Code skill:
 
-```bash
-# Install the product-tests dep group:
-uv sync --group product-tests
-uv run playwright install chromium
-
-# Local PR gate:
-cd product-tests && uv run pytest scenarios/ chaos/
-
-# Cloud (PR-deployed fal app):
-SCOPE_CLOUD_APP_ID=daydream/scope-livepeer-pr-123--preview/ws \
-  uv run pytest product-tests/scenarios/test_onboarding_cloud.py
-
-# Nightly full matrix:
-SCOPE_CLOUD_RING=nightly \
-SCOPE_CLOUD_APP_ID=daydream/scope-livepeer--prod/ws \
-  uv run pytest product-tests/release/
+```
+.agents/skills/testing-livepeer-fal-deploy/SKILL.md
 ```
 
-## Leftover files
+Ask Claude to "test the fal deploy" (or any other trigger phrase from
+the skill's `description`) and it will walk the flow. Or read the
+SKILL.md directly.
 
-`package.json`, `package-lock.json`, and `playwright.config.ts` remain
-in place to avoid breaking any in-flight CI references. They can be
-removed in a follow-up cleanup PR once the product-tests CI rings have
-run green for a cycle.
+## Quick reference
+
+```bash
+# One-time setup
+cd e2e
+npm install
+npx playwright install chromium
+sudo apt-get install -y libnss3 libnspr4 libasound2t64  # first time only
+
+# Bake the API key into the frontend
+source ../.env.local
+(cd ../frontend && VITE_DAYDREAM_API_KEY="$SCOPE_CLOUD_API_KEY" npm run build)
+
+# Run
+../run-app.sh &           # scope on :8000
+npx playwright test       # ~2–5 min
+
+# Debug variants
+npm run test:headed       # visible browser
+npm run test:ui           # interactive UI
+npm run test:debug        # step through
+npm run report            # open last HTML report
+```
+
+## Env vars (via `.env.local`)
+
+See `.env.example` at the repo root. Required: `SCOPE_CLOUD_APP_ID`,
+`SCOPE_CLOUD_API_KEY`, `SCOPE_USER_ID`. Optional: `LIVEPEER_DEBUG=1`.
+
+## Fast HTTP-only smoke (no browser)
+
+For a quick "did the fal container come up?" check — bisect-friendly,
+no Playwright needed:
+
+```bash
+../test-cloud-connect.sh --skip-push --skip-build-wait --skip-deploy
+```
+
+This only exercises `/api/v1/cloud/connect`; it will not produce the
+`pipeline_loaded` / `session_created` / `stream_started` Kafka events
+that the Playwright test does. Use it for infrastructure-level
+regressions; use Playwright for everything else.

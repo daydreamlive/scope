@@ -5,10 +5,10 @@ import { defineConfig, devices } from "@playwright/test";
  *
  * The app is started locally with:
  *   VITE_DAYDREAM_API_KEY=... uv run build
- *   SCOPE_CLOUD_APP_ID=daydream/scope-livepeer-pr-<N>--preview/ws uv run daydream-scope
+ *   SCOPE_CLOUD_APP_ID=scope-pr-<N> uv run daydream-scope
  *
  * This runs the app at localhost:8000 with the API key handling auth
- * and SCOPE_CLOUD_APP_ID pointing to the Livepeer fal deployment.
+ * and SCOPE_CLOUD_APP_ID pointing to the fal deployment.
  */
 export default defineConfig({
   testDir: "./tests",
@@ -29,9 +29,12 @@ export default defineConfig({
     // Longer timeout for cloud operations
     actionTimeout: 30000,
     navigationTimeout: 60000,
+    // Grant camera/mic so getUserMedia() succeeds without a UI prompt
+    // (the browser launch flags below provide a synthetic feed).
+    permissions: ["camera", "microphone"],
   },
   // Global timeout per test
-  timeout: 180000, // 3 minutes for cloud streaming tests
+  timeout: 300000, // 5 minutes (cold-start fal containers can run long)
   expect: {
     timeout: 30000,
   },
@@ -40,6 +43,16 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
+        launchOptions: {
+          // Feed getUserMedia a synthetic video source so a real WebRTC
+          // peer connection can complete end-to-end — without these
+          // flags, headless Chromium has no camera and ICE stalls.
+          args: [
+            "--use-fake-device-for-media-stream",
+            "--use-fake-ui-for-media-stream",
+            "--auto-select-desktop-capture-source=fake",
+          ],
+        },
       },
     },
   ],
