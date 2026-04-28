@@ -26,6 +26,7 @@ from typing import Any
 
 import click
 import httpx
+import numpy as np
 import uvicorn
 from av import AudioFrame, VideoFrame
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
@@ -55,6 +56,8 @@ STREAM_TASK_CANCEL_TIMEOUT_S = 1.0
 MEDIA_STATS_INTERVAL_S = 10.0
 REMOTE_VIDEO_CLOCK_RATE = 90_000
 REMOTE_VIDEO_TIME_BASE = fractions.Fraction(1, REMOTE_VIDEO_CLOCK_RATE)
+REMOTE_AUDIO_CLOCK_RATE = 48_000
+REMOTE_AUDIO_TIME_BASE = fractions.Fraction(1, REMOTE_AUDIO_CLOCK_RATE)
 ASSETS_DIR_PATH = os.getenv("DAYDREAM_SCOPE_ASSETS_DIR", "/tmp/.daydream-scope/assets")
 
 
@@ -117,6 +120,15 @@ class LivepeerSession:
     manifest_id: str | None = None
     session_id: str | None = None
     connection_info: dict[str, Any] | None = None
+
+
+@dataclass
+class _AudioPublishState:
+    """Fallback audio timestamp state for one Livepeer media publisher."""
+
+    next_pts: int = 0
+    pts_sample_rate: int | None = None
+    last_media_ts: float | None = None
 
 
 def _build_connection_info() -> dict[str, Any]:
@@ -340,12 +352,6 @@ async def _stop_stream(session: LivepeerSession) -> None:
         session.output_sink_node_ids = []
         session.output_record_node_ids = []
 
-        for i, task in enumerate(media_input_tasks):
-            await _shutdown_task(task, task_name=f"media_input[{i}]")
-        for i, task in enumerate(media_output_tasks):
-            await _shutdown_task(task, task_name=f"media_output[{i}]")
-        await _shutdown_task(media_stats_task, task_name="media_stats")
-
         if session.frame_processor is not None:
             session.frame_processor.stop()
             session.frame_processor = None
@@ -359,6 +365,12 @@ async def _stop_stream(session: LivepeerSession) -> None:
                     connection_info=session.connection_info,
                 )
                 session.session_id = None
+
+        for i, task in enumerate(media_input_tasks):
+            await _shutdown_task(task, task_name=f"media_input[{i}]")
+        for i, task in enumerate(media_output_tasks):
+            await _shutdown_task(task, task_name=f"media_output[{i}]")
+        await _shutdown_task(media_stats_task, task_name="media_stats")
 
         if session.active_channels:
             channel_urls = [ch["url"] for ch in session.active_channels]
@@ -421,6 +433,144 @@ async def _media_input_loop(
             session.media_outputs[input_track_index] = None
 
 
+def _get_output_frame_item(
+    frame_processor: FrameProcessor,
+    *,
+    sink_node_id: str | None,
+    record_node_id: str | None,
+):
+    if record_node_id is not None:
+        return frame_processor.sink_manager.recording.get(record_node_id)
+    if sink_node_id is not None:
+        return frame_processor.get_packet_from_sink(sink_node_id)
+    return frame_processor.get_packet()
+
+
+def _get_output_queue_maxsize(
+    frame_processor: FrameProcessor,
+    *,
+    sink_node_id: str | None,
+    record_node_id: str | None,
+) -> int | None:
+    # TODO: Unify sink/record queue-size lookup into a single output-track path.
+    if sink_node_id is not None:
+        return frame_processor.sink_manager.get_sink_queue_maxsize(sink_node_id)
+    if record_node_id is not None:
+        return frame_processor.sink_manager.get_record_queue_maxsize(record_node_id)
+    return None
+
+
+def _resolve_frame_ptime(
+    frame_processor: FrameProcessor,
+    *,
+    sink_node_id: str | None,
+    fallback_fps: float,
+) -> float:
+    if sink_node_id is not None:
+        sink_fps = frame_processor.get_fps_for_sink(sink_node_id)
+        return 1.0 / sink_fps if sink_fps > 0 else 1.0 / fallback_fps
+    stream_fps = frame_processor.get_fps()
+    return 1.0 / stream_fps if stream_fps > 0 else 1.0 / fallback_fps
+
+
+def _resample_audio_np(
+    audio: np.ndarray,
+    source_rate: int,
+    target_rate: int,
+) -> np.ndarray:
+    if source_rate == target_rate:
+        return audio
+    n_in = audio.shape[1]
+    n_out = int(round(n_in * target_rate / source_rate))
+    if n_out == n_in:
+        return audio
+    x_in = np.linspace(0, 1, n_in, dtype=np.float64)
+    x_out = np.linspace(0, 1, n_out, dtype=np.float64)
+    resampled = np.empty((audio.shape[0], n_out), dtype=np.float32)
+    for ch in range(audio.shape[0]):
+        resampled[ch] = np.interp(x_out, x_in, audio[ch])
+    return resampled
+
+
+def _audio_packet_to_frame(
+    audio_packet,
+    state: _AudioPublishState,
+) -> AudioFrame | None:
+    audio_tensor = audio_packet.audio
+    sample_rate = audio_packet.sample_rate
+    if sample_rate is None or sample_rate <= 0 or audio_tensor is None:
+        return None
+
+    audio_np = audio_tensor.numpy()
+    if audio_np.ndim == 1:
+        audio_np = audio_np.reshape(1, -1)
+    if audio_np.shape[0] > 2:
+        audio_np = audio_np[:2]
+    audio_np = np.asarray(audio_np, dtype=np.float32)
+
+    sample_rate_int = int(sample_rate)
+    audio_np = _resample_audio_np(
+        audio_np,
+        source_rate=sample_rate_int,
+        target_rate=REMOTE_AUDIO_CLOCK_RATE,
+    )
+    if audio_np.shape[0] == 1:
+        audio_np = np.vstack([audio_np, audio_np])
+
+    frame = AudioFrame.from_ndarray(
+        np.ascontiguousarray(audio_np, dtype=np.float32),
+        format="fltp",
+        layout="stereo",
+    )
+    frame.sample_rate = REMOTE_AUDIO_CLOCK_RATE
+    frame_samples = int(getattr(frame, "samples", 0) or 0)
+    if frame_samples <= 0:
+        return None
+
+    if audio_packet.timestamp.is_valid:
+        media_ts = audio_packet.timestamp.pts * float(audio_packet.timestamp.time_base)
+        frame_duration_s = frame_samples / REMOTE_AUDIO_CLOCK_RATE
+        if state.last_media_ts is None or media_ts >= state.last_media_ts:
+            frame.pts = int(audio_packet.timestamp.pts)
+            frame.time_base = audio_packet.timestamp.time_base
+            state.last_media_ts = media_ts + frame_duration_s
+            # Keep synthetic fallback aligned with the preserved timeline.
+            state.pts_sample_rate = REMOTE_AUDIO_CLOCK_RATE
+            state.next_pts = (
+                int(round(media_ts * REMOTE_AUDIO_CLOCK_RATE)) + frame_samples
+            )
+            return frame
+
+        logger.warning(
+            "Ignoring non-monotonic preserved audio timestamp "
+            "(pts=%s, time_base=%s, start=%.6f, previous_end=%.6f)",
+            audio_packet.timestamp.pts,
+            audio_packet.timestamp.time_base,
+            media_ts,
+            state.last_media_ts,
+        )
+
+    # Fallback: stamp explicit monotonic PTS in sample-time so mux timing
+    # does not fall back to wall-clock heuristics.
+    if state.pts_sample_rate is None:
+        state.pts_sample_rate = REMOTE_AUDIO_CLOCK_RATE
+    elif REMOTE_AUDIO_CLOCK_RATE != state.pts_sample_rate:
+        # `next_pts` is the accumulated sample-count timeline in
+        # `pts_sample_rate` units (the previous frame rate basis). Convert it
+        # so PTS stays continuous when sample rate changes mid-stream.
+        state.next_pts = int(
+            round(state.next_pts * REMOTE_AUDIO_CLOCK_RATE / state.pts_sample_rate)
+        )
+        state.pts_sample_rate = REMOTE_AUDIO_CLOCK_RATE
+    frame.pts = state.next_pts
+    frame.time_base = REMOTE_AUDIO_TIME_BASE
+    state.next_pts += frame_samples
+    state.last_media_ts = (frame.pts * float(frame.time_base)) + (
+        frame_samples / REMOTE_AUDIO_CLOCK_RATE
+    )
+    return frame
+
+
 async def _media_output_loop(
     session: LivepeerSession,
     *,
@@ -457,33 +607,21 @@ async def _media_output_loop(
     try:
         while not stop_event.is_set():
             # TODO make this blocking; we busy-wait a LOT
-            frame_item = None
-            if record_node_id is not None:
-                frame_item = frame_processor.sink_manager.recording.get(record_node_id)
-                if frame_item is None:
-                    await asyncio.sleep(0.01)  # no frame yet, wait a bit
-                    continue
-            elif sink_node_id is not None:
-                frame_item = frame_processor.get_packet_from_sink(sink_node_id)
-            else:
-                frame_item = frame_processor.get_packet()
+            frame_item = _get_output_frame_item(
+                frame_processor,
+                sink_node_id=sink_node_id,
+                record_node_id=record_node_id,
+            )
             if frame_item is None:
                 await asyncio.sleep(0.01)  # no frame yet, wait a bit
                 continue
             frame_packet = ensure_video_packet(frame_item)
 
-            target_queue_size: int | None = None
-            # TODO: Unify sink/record queue-size lookup into a single output-track path.
-            if sink_node_id is not None:
-                target_queue_size = frame_processor.sink_manager.get_sink_queue_maxsize(
-                    sink_node_id
-                )
-            elif record_node_id is not None:
-                target_queue_size = (
-                    frame_processor.sink_manager.get_record_queue_maxsize(
-                        record_node_id
-                    )
-                )
+            target_queue_size = _get_output_queue_maxsize(
+                frame_processor,
+                sink_node_id=sink_node_id,
+                record_node_id=record_node_id,
+            )
 
             # TODO: Queue sizing policy currently exists in both graph_executor.py
             # and pipeline_processor.py; centralize this in one place later.
@@ -513,12 +651,11 @@ async def _media_output_loop(
                         exc,
                     )
 
-            if sink_node_id is not None:
-                sink_fps = frame_processor.get_fps_for_sink(sink_node_id)
-                frame_ptime = 1.0 / sink_fps if sink_fps > 0 else 1.0 / fps
-            else:
-                stream_fps = frame_processor.get_fps()
-                frame_ptime = 1.0 / stream_fps if stream_fps > 0 else 1.0 / fps
+            frame_ptime = _resolve_frame_ptime(
+                frame_processor,
+                sink_node_id=sink_node_id,
+                fallback_fps=fps,
+            )
 
             video_frame = VideoFrame.from_ndarray(
                 frame_packet.tensor.numpy(), format="rgb24"
@@ -563,16 +700,20 @@ async def _media_audio_output_loop(
     # Audio uses a larger queue than video to absorb jitter from async resampling.
     publisher = MediaPublish(
         publish_url,
-        config=MediaPublishConfig(tracks=[AudioOutputConfig()]),
+        config=MediaPublishConfig(
+            tracks=[
+                AudioOutputConfig(
+                    sample_rate=REMOTE_AUDIO_CLOCK_RATE,
+                    layout="stereo",
+                    format="fltp",
+                )
+            ]
+        ),
     )
     if 0 <= publish_slot_index < len(session.media_publishes):
         session.media_publishes[publish_slot_index] = publisher
 
-    import numpy as np
-
-    next_audio_pts = 0
-    pts_sample_rate: int | None = None
-    last_audio_media_ts: float | None = None
+    audio_state = _AudioPublishState()
 
     try:
         while not stop_event.is_set():
@@ -580,75 +721,9 @@ async def _media_audio_output_loop(
             if audio_packet is None:
                 await asyncio.sleep(0.01)
                 continue
-            audio_tensor = audio_packet.audio
-            sample_rate = audio_packet.sample_rate
-            if sample_rate is None or sample_rate <= 0:
+            frame = _audio_packet_to_frame(audio_packet, audio_state)
+            if frame is None:
                 continue
-
-            audio_np = audio_tensor.numpy()
-            if audio_np.ndim == 1:
-                audio_np = audio_np.reshape(1, -1)
-            if audio_np.shape[0] > 2:
-                audio_np = audio_np[:2]
-            audio_np = np.asarray(audio_np, dtype=np.float32)
-
-            sample_rate_int = int(sample_rate)
-            layout = "mono" if audio_np.shape[0] == 1 else "stereo"
-            frame = AudioFrame.from_ndarray(audio_np, format="fltp", layout=layout)
-            frame.sample_rate = sample_rate_int
-            frame_samples = int(getattr(frame, "samples", 0) or 0)
-            if frame_samples <= 0:
-                continue
-
-            should_use_preserved_ts = False
-            if audio_packet.timestamp.is_valid:
-                media_ts = audio_packet.timestamp.pts * float(
-                    audio_packet.timestamp.time_base
-                )
-                frame_duration_s = frame_samples / sample_rate_int
-                if last_audio_media_ts is None or media_ts >= last_audio_media_ts:
-                    should_use_preserved_ts = True
-                    frame.pts = int(audio_packet.timestamp.pts)
-                    frame.time_base = audio_packet.timestamp.time_base
-                    last_audio_media_ts = media_ts + frame_duration_s
-                    # Keep synthetic fallback aligned with the preserved timeline.
-                    pts_sample_rate = sample_rate_int
-                    next_audio_pts = (
-                        int(round(media_ts * sample_rate_int)) + frame_samples
-                    )
-                else:
-                    logger.warning(
-                        "Ignoring non-monotonic preserved audio timestamp "
-                        "(pts=%s, time_base=%s, start=%.6f, previous_end=%.6f)",
-                        audio_packet.timestamp.pts,
-                        audio_packet.timestamp.time_base,
-                        media_ts,
-                        last_audio_media_ts,
-                    )
-
-            if should_use_preserved_ts:
-                await publisher.write_frame(frame)
-                continue
-
-            # Fallback: stamp explicit monotonic PTS in sample-time so mux timing
-            # does not fall back to wall-clock heuristics.
-            if pts_sample_rate is None:
-                pts_sample_rate = sample_rate_int
-            elif sample_rate_int != pts_sample_rate:
-                # `next_audio_pts` is the accumulated sample-count timeline in
-                # `pts_sample_rate` units (the previous frame rate basis).
-                # Convert it into `sample_rate_int` units (the new frame rate basis)
-                # so PTS stays continuous when sample rate changes mid-stream.
-                next_audio_pts = int(
-                    round(next_audio_pts * sample_rate_int / pts_sample_rate)
-                )
-                pts_sample_rate = sample_rate_int
-            frame.pts = next_audio_pts
-            frame.time_base = fractions.Fraction(1, sample_rate_int)
-            next_audio_pts += frame_samples
-            last_audio_media_ts = (frame.pts * float(frame.time_base)) + (
-                frame_samples / sample_rate_int
-            )
             await publisher.write_frame(frame)
     except asyncio.CancelledError:
         raise
@@ -664,6 +739,133 @@ async def _media_audio_output_loop(
             and session.media_publishes[publish_slot_index] is publisher
         ):
             session.media_publishes[publish_slot_index] = None
+
+
+async def _media_av_output_loop(
+    session: LivepeerSession,
+    *,
+    publish_url: str,
+    output_track_index: int,
+    sink_node_id: str | None = None,
+    record_node_id: str | None = None,
+    fps: float = 30.0,
+) -> None:
+    """Publish the primary processed video and audio as one muxed MPEG-TS stream."""
+    frame_processor = session.frame_processor
+    stop_event = session.media_stop_event
+    if frame_processor is None:
+        logger.error("Media A/V output loop started without complete session state")
+        return
+
+    publisher_queue_size = 30
+    publisher = MediaPublish(
+        publish_url,
+        config=MediaPublishConfig(
+            tracks=[
+                VideoOutputConfig(fps=fps, queue_size=publisher_queue_size),
+                AudioOutputConfig(
+                    sample_rate=REMOTE_AUDIO_CLOCK_RATE,
+                    layout="stereo",
+                    format="fltp",
+                ),
+            ],
+            track_wait_timeout_s=10.0,
+        ),
+    )
+    video_tracks = publisher.get_tracks("video")
+    publisher_video_track = video_tracks[0] if video_tracks else None
+    if output_track_index >= len(session.media_publishes):
+        session.media_publishes.extend(
+            [None] * (output_track_index + 1 - len(session.media_publishes))
+        )
+    session.media_publishes[output_track_index] = publisher
+
+    next_video_pts = 0
+    audio_state = _AudioPublishState()
+
+    try:
+        while not stop_event.is_set():
+            wrote_any = False
+
+            frame_item = _get_output_frame_item(
+                frame_processor,
+                sink_node_id=sink_node_id,
+                record_node_id=record_node_id,
+            )
+            if frame_item is not None:
+                frame_packet = ensure_video_packet(frame_item)
+                target_queue_size = _get_output_queue_maxsize(
+                    frame_processor,
+                    sink_node_id=sink_node_id,
+                    record_node_id=record_node_id,
+                )
+                if (
+                    publisher_video_track is not None
+                    and target_queue_size is not None
+                    and target_queue_size > publisher_queue_size
+                ):
+                    try:
+                        publisher_video_track.resize(target_queue_size)
+                        logger.info(
+                            "Resized Livepeer A/V video queue %d -> %d "
+                            "(output_track_index=%d sink_node_id=%s record_node_id=%s)",
+                            publisher_queue_size,
+                            target_queue_size,
+                            output_track_index,
+                            sink_node_id,
+                            record_node_id,
+                        )
+                        publisher_queue_size = target_queue_size
+                    except Exception as exc:
+                        logger.warning(
+                            "Failed to resize Livepeer A/V video queue to %d "
+                            "(output_track_index=%d): %s",
+                            target_queue_size,
+                            output_track_index,
+                            exc,
+                        )
+
+                frame_ptime = _resolve_frame_ptime(
+                    frame_processor,
+                    sink_node_id=sink_node_id,
+                    fallback_fps=fps,
+                )
+                video_frame = VideoFrame.from_ndarray(
+                    frame_packet.tensor.numpy(), format="rgb24"
+                )
+                if frame_packet.timestamp.is_valid:
+                    video_frame.pts = frame_packet.timestamp.pts
+                    video_frame.time_base = frame_packet.timestamp.time_base
+                else:
+                    video_frame.pts = next_video_pts
+                    video_frame.time_base = REMOTE_VIDEO_TIME_BASE
+                    next_video_pts += int(frame_ptime * REMOTE_VIDEO_CLOCK_RATE)
+                await publisher.write_frame(video_frame)
+                wrote_any = True
+
+            audio_packet = frame_processor.get_audio_packet()
+            if audio_packet is not None:
+                audio_frame = _audio_packet_to_frame(audio_packet, audio_state)
+                if audio_frame is not None:
+                    await publisher.write_frame(audio_frame)
+                    wrote_any = True
+
+            if not wrote_any:
+                await asyncio.sleep(0.01)
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        logger.error("Media A/V output loop failed: %s", exc)
+    finally:
+        try:
+            await publisher.close()
+        except Exception as exc:
+            logger.warning("Media A/V publisher close failed: %s", exc)
+        if (
+            output_track_index < len(session.media_publishes)
+            and session.media_publishes[output_track_index] is publisher
+        ):
+            session.media_publishes[output_track_index] = None
 
 
 async def _media_stats_loop(session: LivepeerSession) -> None:
@@ -948,13 +1150,13 @@ async def _handle_control_message(
             record_node_ids = []
         elif sink_node_ids:
             output_sink_node_ids = [sink_node_ids[0], *sink_node_ids[1:]]
-        elif produces_audio:
-            # Audio-only pipelines should not synthesize a placeholder video output.
-            output_sink_node_ids = []
         else:
             output_sink_node_ids = [None]
         output_record_node_ids = [None] * len(output_sink_node_ids) + list(
             record_node_ids
+        )
+        mux_primary_av_output = produces_video and produces_audio and bool(
+            output_sink_node_ids
         )
 
         active_channels: list[dict[str, Any]] = []
@@ -992,10 +1194,17 @@ async def _handle_control_message(
                     record_node_ids=record_node_ids,
                 )
                 for channel in channels:
+                    output_media_kind = (
+                        "audio_video"
+                        if mux_primary_av_output and output_idx == 0
+                        else "video"
+                    )
                     ch = {
                         **channel,
                         "role": "output",
                         "output_track_index": output_idx,
+                        "output_media_kind": output_media_kind,
+                        "contains_audio": output_media_kind == "audio_video",
                         "sink_node_id": sink_node_id,
                         "record_node_id": record_node_id,
                     }
@@ -1005,7 +1214,7 @@ async def _handle_control_message(
                 if outbound_url is None:
                     raise RuntimeError("response did not include output track URL")
                 output_publish_urls[output_idx] = outbound_url
-            if produces_audio:
+            if produces_audio and not mux_primary_av_output:
                 channels = await _request_stream_channels(
                     session,
                     direction="out",
@@ -1097,7 +1306,11 @@ async def _handle_control_message(
             )
             session.media_output_tasks.append(
                 asyncio.create_task(
-                    _media_output_loop(
+                    (
+                        _media_av_output_loop
+                        if mux_primary_av_output and output_idx == 0
+                        else _media_output_loop
+                    )(
                         session,
                         publish_url=publish_url,
                         output_track_index=output_idx,

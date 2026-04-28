@@ -7,16 +7,20 @@ simple frame/parameter methods used by the relay manager.
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
 import inspect
 import logging
+import mimetypes
 import os
 import time
 import uuid
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
+from urllib.parse import quote, urlparse
 
+import aiohttp
 import numpy as np
 from av import VideoFrame
 from livepeer_gateway.channel_reader import JSONLReader
@@ -57,6 +61,10 @@ SHUTDOWN_TIMEOUT_S = 5.0
 TASK_DRAIN_TIMEOUT_S = 0.25
 RUNNER_RESTART_TIMEOUT_S = 30.0
 PAYMENT_SEND_INTERVAL_S = 10.0
+RUNNER_ASSET_UPLOAD_TIMEOUT_S = 120.0
+MAX_CONTROL_ASSET_UPLOAD_BYTES = 256 * 1024
+DAYDREAM_API_BASE_ENV = "DAYDREAM_API_BASE"
+DEFAULT_DAYDREAM_API_BASE = "https://api.daydream.live"
 
 
 @dataclass(slots=True)
@@ -146,6 +154,9 @@ class LivepeerClient:
         self._media_connected = False
         self._shutdown_started = False
         self._shutdown_lock = asyncio.Lock()
+        self._asset_upload_lock = asyncio.Lock()
+        self._runner_asset_paths: dict[str, str] = {}
+        self._runner_asset_uploads: dict[str, asyncio.Task[str]] = {}
         self._runner_ready_event = asyncio.Event()
         self._connection_id: str | None = None
 
@@ -198,6 +209,9 @@ class LivepeerClient:
 
         self._loop = asyncio.get_running_loop()
         self._shutdown_started = False
+        async with self._asset_upload_lock:
+            self._runner_asset_paths.clear()
+            self._runner_asset_uploads.clear()
         params: dict[str, Any] = dict(initial_parameters or {})
         logger.info(
             "Livepeer inference target: %s",
@@ -450,6 +464,243 @@ class LivepeerClient:
         return params
 
     @staticmethod
+    def _resolve_local_asset_path(value: str, assets_dir: Path) -> Path | None:
+        """Return a local asset file path for values that point into the assets dir."""
+        if not value or value.startswith(("http://", "https://", "data:")):
+            return None
+
+        try:
+            candidate = Path(value).expanduser()
+            if not candidate.is_absolute():
+                candidate = assets_dir / candidate
+            candidate = candidate.resolve()
+            assets_root = assets_dir.resolve()
+            if (
+                candidate.exists()
+                and candidate.is_file()
+                and candidate.is_relative_to(assets_root)
+            ):
+                return candidate
+        except (OSError, RuntimeError, ValueError):
+            return None
+
+        return None
+
+    async def _upload_local_asset_for_runner(
+        self,
+        asset_path: Path,
+        assets_dir: Path,
+    ) -> str:
+        cache_key = str(asset_path)
+        async with self._asset_upload_lock:
+            uploaded_path = self._runner_asset_paths.get(cache_key)
+            if uploaded_path is not None:
+                return uploaded_path
+
+            upload_task = self._runner_asset_uploads.get(cache_key)
+            if upload_task is None:
+                upload_task = asyncio.create_task(
+                    self._upload_local_asset_for_runner_uncached(asset_path, assets_dir)
+                )
+                self._runner_asset_uploads[cache_key] = upload_task
+
+        try:
+            uploaded_path = await upload_task
+        except Exception:
+            async with self._asset_upload_lock:
+                if self._runner_asset_uploads.get(cache_key) is upload_task:
+                    self._runner_asset_uploads.pop(cache_key, None)
+            raise
+
+        async with self._asset_upload_lock:
+            self._runner_asset_paths[cache_key] = uploaded_path
+            if self._runner_asset_uploads.get(cache_key) is upload_task:
+                self._runner_asset_uploads.pop(cache_key, None)
+        return uploaded_path
+
+    async def _upload_local_asset_for_runner_uncached(
+        self,
+        asset_path: Path,
+        assets_dir: Path,
+    ) -> str:
+        relative_path = asset_path.relative_to(assets_dir.resolve()).as_posix()
+        content_type = mimetypes.guess_type(asset_path.name)[0] or "application/octet-stream"
+        content = await asyncio.to_thread(asset_path.read_bytes)
+
+        logger.info(
+            "Uploading local asset to Livepeer runner: %s (%s bytes)",
+            relative_path,
+            len(content),
+        )
+        body: dict[str, Any]
+        cdn_url = await self._try_upload_content_to_fal_cdn(
+            content,
+            relative_path,
+            content_type,
+        )
+        if cdn_url is not None:
+            body = {
+                "_cdn_url": cdn_url,
+                "_content_type": content_type,
+            }
+        else:
+            if len(content) > MAX_CONTROL_ASSET_UPLOAD_BYTES:
+                raise RuntimeError(
+                    "CDN upload token is required to sync local assets larger than "
+                    f"{MAX_CONTROL_ASSET_UPLOAD_BYTES // 1024}KB to Livepeer"
+                )
+            body = {
+                "_base64_content": base64.b64encode(content).decode("ascii"),
+                "_content_type": content_type,
+            }
+
+        response = await self.api_request(
+            "POST",
+            f"/api/v1/assets?filename={quote(relative_path)}",
+            body=body,
+            timeout=RUNNER_ASSET_UPLOAD_TIMEOUT_S,
+        )
+        status = response.get("status", 999)
+        if status >= 400:
+            raise RuntimeError(
+                response.get("error")
+                or response.get("data", {}).get("detail")
+                or f"Livepeer asset upload failed with status {status}"
+            )
+
+        data = response.get("data")
+        if not isinstance(data, dict) or not isinstance(data.get("path"), str):
+            raise RuntimeError("Livepeer asset upload response missing asset path")
+        return data["path"]
+
+    async def _try_upload_content_to_fal_cdn(
+        self,
+        content: bytes,
+        filename: str,
+        content_type: str,
+    ) -> str | None:
+        if not self._api_key:
+            return None
+
+        try:
+            return await self._upload_content_to_fal_cdn(
+                content,
+                filename,
+                content_type,
+            )
+        except Exception as exc:
+            logger.warning("Failed to upload asset to fal CDN: %s", exc)
+            return None
+
+    async def _upload_content_to_fal_cdn(
+        self,
+        content: bytes,
+        filename: str,
+        content_type: str,
+    ) -> str:
+        api_base = os.getenv(DAYDREAM_API_BASE_ENV, DEFAULT_DAYDREAM_API_BASE).rstrip("/")
+        token_url = f"{api_base}/auth/fal/cdn-token"
+
+        timeout = aiohttp.ClientTimeout(total=RUNNER_ASSET_UPLOAD_TIMEOUT_S)
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.get(
+                token_url,
+                headers={"Authorization": f"Bearer {self._api_key}"},
+            ) as token_response:
+                if token_response.status != 200:
+                    error_text = await token_response.text()
+                    raise RuntimeError(
+                        "failed to fetch fal CDN token: "
+                        f"{token_response.status} {error_text[:200]}"
+                    )
+                token_data = await token_response.json()
+
+            token = token_data.get("token")
+            token_type = token_data.get("token_type")
+            base_url = token_data.get("base_url")
+            if not token or not token_type or not base_url:
+                raise RuntimeError("fal CDN token response missing upload credentials")
+
+            upload_url = f"{str(base_url).rstrip('/')}/files/upload"
+            async with session.post(
+                upload_url,
+                data=content,
+                headers={
+                    "Authorization": f"{token_type} {token}",
+                    "Content-Type": content_type,
+                    "X-Fal-File-Name": filename,
+                    "Accept": "application/json",
+                },
+            ) as upload_response:
+                if upload_response.status != 200:
+                    error_text = await upload_response.text()
+                    raise RuntimeError(
+                        "fal CDN upload failed: "
+                        f"{upload_response.status} {error_text[:200]}"
+                    )
+                upload_data = await upload_response.json()
+
+        cdn_url = upload_data.get("access_url") or upload_data.get("url")
+        if not isinstance(cdn_url, str) or not cdn_url:
+            raise RuntimeError("fal CDN upload response missing URL")
+        return cdn_url
+
+    async def _replace_local_asset_paths(
+        self,
+        value: Any,
+        assets_dir: Path,
+        uploaded_paths: dict[str, str],
+    ) -> Any:
+        if isinstance(value, dict):
+            return {
+                key: await self._replace_local_asset_paths(
+                    child,
+                    assets_dir,
+                    uploaded_paths,
+                )
+                for key, child in value.items()
+            }
+        if isinstance(value, list):
+            return [
+                await self._replace_local_asset_paths(
+                    child,
+                    assets_dir,
+                    uploaded_paths,
+                )
+                for child in value
+            ]
+        if not isinstance(value, str):
+            return value
+
+        asset_path = self._resolve_local_asset_path(value, assets_dir)
+        if asset_path is None:
+            return value
+
+        cache_key = str(asset_path)
+        if cache_key not in uploaded_paths:
+            uploaded_paths[cache_key] = await self._upload_local_asset_for_runner(
+                asset_path,
+                assets_dir,
+            )
+        return uploaded_paths[cache_key]
+
+    async def _prepare_assets_for_runner(self, params: dict[str, Any]) -> dict[str, Any]:
+        """Upload local asset references and replace them with runner-local paths."""
+        if not params:
+            return params
+
+        from .models_config import get_assets_dir
+
+        assets_dir = get_assets_dir()
+        uploaded_paths: dict[str, str] = {}
+        prepared = await self._replace_local_asset_paths(
+            params,
+            assets_dir,
+            uploaded_paths,
+        )
+        return prepared if isinstance(prepared, dict) else params
+
+    @staticmethod
     def _build_output_mapping(parsed: _BrowserGraphInfo) -> _OutputMapping:
         """Compute how runner tracks map to graph output slots."""
         num_sink_slots = max(len(parsed.sink_node_ids), 1)
@@ -498,6 +749,7 @@ class LivepeerClient:
 
         parsed = self._parse_browser_graph(initial_parameters)
         runner_params = self._filter_runner_params(initial_parameters, parsed)
+        runner_params = await self._prepare_assets_for_runner(runner_params)
 
         request_id = str(uuid.uuid4())
         future: asyncio.Future = self._loop.create_future()
@@ -536,6 +788,7 @@ class LivepeerClient:
 
         input_urls_by_track: dict[int, str] = {}
         output_urls_by_track: dict[int, str] = {}
+        output_media_kind_by_track: dict[int, str] = {}
         audio_output_url: str | None = None
         for channel in channels:
             if not isinstance(channel, dict):
@@ -565,6 +818,9 @@ class LivepeerClient:
                     idx_val if isinstance(idx_val, int) and idx_val >= 0 else 0
                 )
                 output_urls_by_track[track_index] = url
+                output_media_kind_by_track[track_index] = (
+                    media_kind if isinstance(media_kind, str) else "video"
+                )
 
         if (
             not input_urls_by_track
@@ -616,7 +872,7 @@ class LivepeerClient:
                     media_output,
                     output_track_index=output_idx,
                     local_handler_index=local_handler_index,
-                    media_kind="video",
+                    media_kind=output_media_kind_by_track.get(output_idx, "video"),
                 )
             )
             self._media_subscriber_tasks.append(subscriber)
@@ -639,7 +895,8 @@ class LivepeerClient:
             "Media channels started (inputs=%s outputs=%s audio=%s)",
             sum(1 for p in self._media_publishers if p is not None),
             sum(1 for o in self._media_outputs if o is not None),
-            audio_output_url is not None,
+            audio_output_url is not None
+            or any(kind == "audio_video" for kind in output_media_kind_by_track.values()),
         )
 
     async def stop_media(self, current_task: asyncio.Task | None = None) -> None:
@@ -1012,17 +1269,31 @@ class LivepeerClient:
         if self._loop is None:
             return
 
+        control_writer = self._control_writer
+
+        async def _send() -> None:
+            prepared_params = await self._prepare_assets_for_runner(params)
+            await control_writer.write(
+                {
+                    "type": "parameters",
+                    "params": prepared_params,
+                }
+            )
+
         try:
-            asyncio.run_coroutine_threadsafe(
-                self._control_writer.write(
-                    {
-                        "type": "parameters",
-                        "params": params,
-                    }
-                ),
+            future = asyncio.run_coroutine_threadsafe(
+                _send(),
                 self._loop,
             )
+            future.add_done_callback(self._log_parameter_send_result)
         except Exception as e:  # pragma: no cover - defensive scheduling guard
+            logger.error(f"Failed to send control parameters: {e}")
+
+    @staticmethod
+    def _log_parameter_send_result(future) -> None:
+        try:
+            future.result()
+        except Exception as e:
             logger.error(f"Failed to send control parameters: {e}")
 
     async def disconnect(self) -> None:
