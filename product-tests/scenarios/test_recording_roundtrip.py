@@ -21,6 +21,7 @@ from pathlib import Path
 import cv2
 import pytest
 import requests
+from harness import flows
 from harness.failure_watcher import FailureWatcher
 from harness.report import TestReport
 from harness.retry_probe import RetryProbe
@@ -56,7 +57,11 @@ def test_recording_roundtrip_local_passthrough(
 
     base = scope_harness.base_url
 
-    # 1. Start a headless session with passthrough pipeline.
+    # 1. Load the pipeline first — direct-HTTP tests skip the UI
+    # onboarding flow that would normally do this implicitly.
+    flows.http_load_pipeline_and_wait(base, ["passthrough"])
+
+    # 2. Start a headless session with passthrough pipeline.
     body = {
         "pipeline_id": "passthrough",
         "input_mode": "video",

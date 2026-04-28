@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 import requests
+from harness import flows
 from harness.failure_watcher import FailureWatcher
 from harness.report import TestReport
 from harness.retry_probe import RetryProbe
@@ -28,6 +29,10 @@ from harness.scope_process import ScopeHarness
 
 
 def _start_passthrough(base_url: str) -> None:
+    # Direct-HTTP tests must load the pipeline themselves — UI-driven
+    # tests get this via onboarding. Without it, FrameProcessor fails
+    # with "Pipeline passthrough not loaded".
+    flows.http_load_pipeline_and_wait(base_url, ["passthrough"])
     r = requests.post(
         f"{base_url}/api/v1/session/start",
         json={"pipeline_id": "passthrough", "input_mode": "camera"},

@@ -27,7 +27,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import requests
-from harness import media
+from harness import flows, media
 from harness.scenario import scenario
 
 
@@ -81,6 +81,9 @@ def test_passthrough_sink_frames_look_right(ctx):
     # we'd still want to override the source, so we skip the picker.
     src = ctx.test_report_dir / "gradient_source.mp4"
     _make_gradient_video(src, seconds=20, fps=30)
+
+    # Direct-HTTP test — must load pipeline before session/start.
+    flows.http_load_pipeline_and_wait(ctx.base_url, ["passthrough"])
 
     start_body = {
         "pipeline_id": "passthrough",
