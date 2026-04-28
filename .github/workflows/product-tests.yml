@@ -227,6 +227,12 @@ jobs:
           # main. Stable, known, no secret needed. Tests append "/ws" in
           # the fixture when they open a connection.
           SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer--main/ws"
+          # Scope client cloud auth — required for signer.daydream.live
+          # to accept the discover_orchestrators call. Empty if secrets
+          # not yet configured; cloud-marked tests will fail/skip
+          # without leaking until the secrets are wired.
+          SCOPE_CLOUD_API_KEY: ${{ secrets.SCOPE_CLOUD_API_KEY }}
+          SCOPE_USER_ID: ${{ secrets.SCOPE_USER_ID }}
           SCOPE_CLOUD_RING: "nightly"
           SCOPE_CHURN_DURATION_SEC: "180"
           # Multimodal enabled in the nightly ring only — daily budget cap
@@ -246,6 +252,12 @@ jobs:
           # main. Stable, known, no secret needed. Tests append "/ws" in
           # the fixture when they open a connection.
           SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer--main/ws"
+          # Scope client cloud auth — required for signer.daydream.live
+          # to accept the discover_orchestrators call. Empty if secrets
+          # not yet configured; cloud-marked tests will fail/skip
+          # without leaking until the secrets are wired.
+          SCOPE_CLOUD_API_KEY: ${{ secrets.SCOPE_CLOUD_API_KEY }}
+          SCOPE_USER_ID: ${{ secrets.SCOPE_USER_ID }}
           SCOPE_CLOUD_RING: "nightly"
         run: |
           uv run pytest product-tests/release/ -v --tb=short -m cloud
@@ -257,6 +269,12 @@ jobs:
           # main. Stable, known, no secret needed. Tests append "/ws" in
           # the fixture when they open a connection.
           SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer--main/ws"
+          # Scope client cloud auth — required for signer.daydream.live
+          # to accept the discover_orchestrators call. Empty if secrets
+          # not yet configured; cloud-marked tests will fail/skip
+          # without leaking until the secrets are wired.
+          SCOPE_CLOUD_API_KEY: ${{ secrets.SCOPE_CLOUD_API_KEY }}
+          SCOPE_USER_ID: ${{ secrets.SCOPE_USER_ID }}
           SCOPE_CLOUD_RING: "nightly"
           SCOPE_MULTIMODAL_EVAL: "1"
           SCOPE_MULTIMODAL_TRIAGE: "1"
