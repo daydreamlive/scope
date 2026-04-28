@@ -69,7 +69,7 @@ from .kafka_publisher import (
 )
 from .logs_config import (
     LOG_FORMAT,
-    FalConnectionFilter,
+    ScopeLogContextFilter,
     cleanup_old_logs,
     ensure_logs_dir,
     get_current_log_file,
@@ -172,8 +172,8 @@ def _configure_logging():
     # Set root to WARNING to keep non-app libraries quiet by default
     logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT)
 
-    # Install filter on every handler so %(fal_conn)s is always populated
-    _fal_filter = FalConnectionFilter()
+    # Install filter on every handler so %(connection_id)s is always populated
+    _fal_filter = ScopeLogContextFilter()
     root_logger = logging.getLogger()
     for handler in root_logger.handlers:
         handler.addFilter(_fal_filter)
@@ -849,10 +849,17 @@ async def get_node_definitions(
         return _node_definitions_cache
 
     from scope.core.nodes.registry import NodeRegistry
+    from scope.core.plugins import get_plugin_manager
 
-    response = NodeDefinitionsResponse(
-        nodes=[d.model_dump() for d in NodeRegistry.get_all_definitions()]
-    )
+    plugin_manager = get_plugin_manager()
+
+    definitions = []
+    for d in NodeRegistry.get_all_definitions():
+        payload = d.model_dump()
+        payload["plugin_name"] = plugin_manager.get_plugin_for_type_id(d.node_type_id)
+        definitions.append(payload)
+
+    response = NodeDefinitionsResponse(nodes=definitions)
     _node_definitions_cache = response
     return response
 

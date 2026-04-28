@@ -1,10 +1,14 @@
-"""Pipeline registry — a filtering view over :class:`NodeRegistry`.
+"""Pipeline registry — a deprecation shim over :class:`NodeRegistry`.
 
-Pipelines and plain custom nodes share the same ``NodeRegistry._nodes``
-storage. ``PipelineRegistry`` projects that storage down to entries
-whose class is a :class:`Pipeline` subclass and exposes the same API
-the rest of the codebase always used, so existing call sites and
-plugins keep working unchanged.
+After the node/pipeline unification there is one storage
+(``NodeRegistry._nodes``) and the "is this a pipeline?" question is
+answered by ``cls.get_config_class() is not None``. ``PipelineRegistry``
+survives only to keep existing call sites and plugins working — it
+forwards every operation to :class:`NodeRegistry`, filtering the
+results down to config-driven nodes where applicable.
+
+New code should use :class:`NodeRegistry` directly. This module will
+be removed once all internal and plugin call sites have migrated.
 """
 
 import importlib
@@ -16,28 +20,18 @@ import torch
 from scope.core.nodes.registry import NodeRegistry
 
 if TYPE_CHECKING:
-    from .interface import Pipeline
+    from scope.core.nodes.base import Node
+
     from .schema import BasePipelineConfig
 
 logger = logging.getLogger(__name__)
-
-
-def _is_pipeline(node_class: object) -> bool:
-    """Return True when ``node_class`` is a :class:`Pipeline` subclass.
-
-    Lazily imports :class:`Pipeline` to dodge the import cycle between
-    the pipelines and nodes packages at module load time.
-    """
-    from .interface import Pipeline
-
-    return isinstance(node_class, type) and issubclass(node_class, Pipeline)
 
 
 class PipelineRegistry:
     """Filtering view over :class:`NodeRegistry` for pipeline classes."""
 
     @classmethod
-    def register(cls, pipeline_id: str, pipeline_class: type["Pipeline"]) -> None:
+    def register(cls, pipeline_id: str, pipeline_class: type["Node"]) -> None:
         """Plant a pipeline class into the unified :class:`NodeRegistry`.
 
         Delegates to ``NodeRegistry.register`` so the same logging and
@@ -57,9 +51,11 @@ class PipelineRegistry:
         NodeRegistry.register(pipeline_class)
 
     @classmethod
-    def get(cls, pipeline_id: str) -> type["Pipeline"] | None:
+    def get(cls, pipeline_id: str) -> type["Node"] | None:
         node_class = NodeRegistry.get(pipeline_id)
-        return node_class if _is_pipeline(node_class) else None
+        if node_class is None or node_class.get_config_class() is None:
+            return None
+        return node_class
 
     @classmethod
     def unregister(cls, pipeline_id: str) -> bool:
@@ -79,41 +75,8 @@ class PipelineRegistry:
     @classmethod
     def list_pipelines(cls) -> list[str]:
         return [
-            pid
-            for pid in NodeRegistry.list_node_types()
-            if _is_pipeline(NodeRegistry.get(pid))
+            pid for pid in NodeRegistry.list_node_types() if cls.get(pid) is not None
         ]
-
-    @classmethod
-    def chain_produces_video(cls, pipeline_ids: list[str]) -> bool:
-        """Check whether the pipeline chain produces video output.
-
-        Returns True (the default) unless the *last* pipeline in the chain
-        explicitly declares ``produces_video = False`` in its config.
-        """
-        if not pipeline_ids:
-            return True
-
-        # The last pipeline in the chain determines the final output modality
-        last_id = pipeline_ids[-1]
-        config_cls = cls.get_config_class(last_id)
-        if config_cls is None:
-            return True
-        return getattr(config_cls, "produces_video", True)
-
-    @classmethod
-    def chain_produces_audio(cls, pipeline_ids: list[str]) -> bool:
-        """Check whether any pipeline in the chain produces audio output.
-
-        Returns True if *any* pipeline in the chain declares
-        ``produces_audio = True`` in its config.  Returns False (the default)
-        otherwise, so the server can skip creating an AudioProcessingTrack.
-        """
-        for pid in pipeline_ids:
-            config_cls = cls.get_config_class(pid)
-            if config_cls is not None and getattr(config_cls, "produces_audio", False):
-                return True
-        return False
 
 
 def _get_gpu_vram_gb() -> float | None:

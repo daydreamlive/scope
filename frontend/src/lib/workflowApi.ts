@@ -41,6 +41,11 @@ export interface WorkflowPipeline {
   role?: "preprocessor" | "main" | "postprocessor" | null;
 }
 
+export interface WorkflowNode {
+  node_type_id: string;
+  source: WorkflowPipelineSource;
+}
+
 export interface WorkflowPrompt {
   text: string;
   weight: number;
@@ -69,6 +74,8 @@ export interface ScopeWorkflow {
   format_version: string;
   metadata: WorkflowMetadata;
   pipelines: WorkflowPipeline[];
+  /** Custom backend nodes referenced by the graph. Absent in pre-1.1 workflows. */
+  nodes?: WorkflowNode[];
   timeline?: WorkflowTimeline | null;
   min_scope_version?: string | null;
   // Frontend-only fields (annotated post-backend, dropped by backend on validation)
@@ -85,7 +92,7 @@ export interface ScopeWorkflow {
 // ---------------------------------------------------------------------------
 
 export interface ResolutionItem {
-  kind: "pipeline" | "plugin" | "lora";
+  kind: "pipeline" | "node" | "plugin" | "lora";
   name: string;
   status: "ok" | "missing" | "version_mismatch";
   detail?: string | null;

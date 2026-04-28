@@ -78,7 +78,8 @@ function clearGraphFromLocalStorage(): void {
 function hydrateCustomNodeDefinitions(
   nodes: Node<FlowNodeData>[],
   setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>,
-  signal: AbortSignal
+  signal: AbortSignal,
+  onDefinitionsLoaded?: (defMap: Map<string, NodeDefinitionDto>) => void
 ): void {
   const customFlowNodes = nodes.filter(
     n => n.data.nodeType === "custom_node" && !n.data.customNodeInputs
@@ -90,6 +91,7 @@ function hydrateCustomNodeDefinitions(
       const defMap = new Map<string, NodeDefinitionDto>(
         data.nodes.map(d => [d.node_type_id, d])
       );
+      onDefinitionsLoaded?.(defMap);
       setNodes(prev => {
         if (signal.aborted) return prev;
         return prev.map(n => {
@@ -199,12 +201,22 @@ export function useGraphPersistence({
   // before each new hydrate and on unmount so a stale /api/v1/nodes/definitions
   // response can't overwrite newer nodes state.
   const hydrateAbortRef = useRef<AbortController | null>(null);
+  // Cache of node definitions from the most recent hydrate. Used by the
+  // export path to attribute custom nodes to their providing plugin.
+  const nodeDefinitionsRef = useRef<Map<string, NodeDefinitionDto>>(new Map());
   const startHydrate = useCallback(
     (initialNodes: Node<FlowNodeData>[]) => {
       hydrateAbortRef.current?.abort();
       const controller = new AbortController();
       hydrateAbortRef.current = controller;
-      hydrateCustomNodeDefinitions(initialNodes, setNodes, controller.signal);
+      hydrateCustomNodeDefinitions(
+        initialNodes,
+        setNodes,
+        controller.signal,
+        defMap => {
+          nodeDefinitionsRef.current = defMap;
+        }
+      );
     },
     [setNodes]
   );
@@ -585,6 +597,7 @@ export function useGraphPersistence({
         pluginInfoMap,
         scopeVersion: scopeVersion ?? "unknown",
         loraFiles,
+        nodeDefinitionMap: nodeDefinitionsRef.current,
       });
     },
     [

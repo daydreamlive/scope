@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from packaging.version import InvalidVersion, Version
-from pydantic import BaseModel, Field
+from pydantic import AliasChoices, BaseModel, Field, model_validator
 
 if TYPE_CHECKING:
     from scope.core.plugins.manager import PluginManager
@@ -48,15 +48,51 @@ class WorkflowPipelineSource(BaseModel, extra="ignore"):
     package_spec: str | None = None
 
 
-class WorkflowPipeline(BaseModel, extra="ignore"):
-    pipeline_id: str = Field(min_length=1)
+class WorkflowNode(BaseModel, extra="ignore"):
+    """A single graph-node reference from an exported workflow.
+
+    Covers every entry on the graph — config-driven pipelines (with
+    LoRAs) and plain utility nodes alike. Historical workflow files
+    named this ``WorkflowPipeline`` with a ``pipeline_id`` field; both
+    legacy keys are accepted via ``validation_alias`` so older JSON
+    still loads without migration.
+    """
+
+    node_type_id: str = Field(
+        min_length=1,
+        validation_alias=AliasChoices("node_type_id", "pipeline_id"),
+    )
     source: WorkflowPipelineSource
     loras: list[WorkflowLoRA] = Field(default=[], max_length=100)
 
 
+# Legacy type alias. Third-party code that imported ``WorkflowPipeline``
+# keeps working; new code should use :class:`WorkflowNode`.
+WorkflowPipeline = WorkflowNode
+
+
 class WorkflowRequest(BaseModel, extra="ignore"):
-    pipelines: list[WorkflowPipeline] = Field(max_length=50)
+    nodes: list[WorkflowNode] = Field(default=[], max_length=150)
     min_scope_version: str | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _merge_legacy_pipelines(cls, data):
+        """Fold a legacy ``pipelines`` input list into ``nodes``.
+
+        Older workflow files — and perform-mode exports — put config-
+        driven entries under ``pipelines``. After the node/pipeline
+        unification there is one canonical list (``nodes``); this
+        validator merges both keys when present so the rest of the code
+        only has to look at :attr:`nodes`.
+        """
+        if not isinstance(data, dict):
+            return data
+        legacy = data.pop("pipelines", None)
+        if legacy:
+            combined = list(legacy) + list(data.get("nodes") or [])
+            data["nodes"] = combined
+        return data
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +103,7 @@ class WorkflowRequest(BaseModel, extra="ignore"):
 class ResolutionItem(BaseModel):
     """A single dependency check result."""
 
-    kind: Literal["pipeline", "plugin", "lora"]
+    kind: Literal["pipeline", "node", "plugin", "lora"]
     name: str
     status: Literal["ok", "missing", "version_mismatch"]
     detail: str | None = None
@@ -88,51 +124,69 @@ class WorkflowResolutionPlan(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _resolve_builtin(pipeline_id: str) -> ResolutionItem:
+def _resolve_builtin(node_type_id: str) -> ResolutionItem:
+    """Check whether a built-in node type is registered locally.
+
+    Emits ``kind="pipeline"`` when the entry is a config-driven node
+    (historical pipeline) and ``kind="node"`` for plain utility nodes —
+    purely for UI wording. Missing entries default to ``kind="pipeline"``
+    because that's what the GPU hint speaks to and matches the legacy
+    resolution shape.
+    """
+    from scope.core.nodes.registry import NodeRegistry
     from scope.core.pipelines.registry import PipelineRegistry
 
-    if PipelineRegistry.is_registered(pipeline_id):
-        return ResolutionItem(kind="pipeline", name=pipeline_id, status="ok")
+    if PipelineRegistry.is_registered(node_type_id):
+        return ResolutionItem(kind="pipeline", name=node_type_id, status="ok")
+
+    if NodeRegistry.is_registered(node_type_id):
+        return ResolutionItem(kind="node", name=node_type_id, status="ok")
 
     import torch
 
     if not torch.cuda.is_available():
         detail = (
-            f"Built-in pipeline '{pipeline_id}' not found. "
+            f"Built-in pipeline '{node_type_id}' not found. "
             "Your hardware may not support this pipeline — a compatible GPU is required."
         )
     else:
-        detail = f"Built-in pipeline '{pipeline_id}' not found"
+        detail = f"Built-in pipeline '{node_type_id}' not found"
 
     return ResolutionItem(
         kind="pipeline",
-        name=pipeline_id,
+        name=node_type_id,
         status="missing",
         detail=detail,
     )
 
 
 def _resolve_plugin(
-    wp: WorkflowPipeline,
+    source: WorkflowPipelineSource,
+    target_name: str,
     plugins: list[dict],
 ) -> ResolutionItem:
-    plugin_name = wp.source.plugin_name
+    """Check whether the plugin that provides *target_name* is installed.
+
+    ``target_name`` is the pipeline_id or node_type_id; it's only used
+    for the ``ResolutionItem.name`` when no plugin_name is present.
+    """
+    plugin_name = source.plugin_name
     if plugin_name is None:
         return ResolutionItem(
             kind="plugin",
-            name=wp.pipeline_id,
+            name=target_name,
             status="missing",
             detail="No plugin name specified in workflow",
         )
 
     installed = next((p for p in plugins if p.get("name") == plugin_name), None)
     if installed is None:
-        return _missing_plugin_item(wp.source, plugin_name)
+        return _missing_plugin_item(source, plugin_name)
 
     return _check_plugin_version(
         plugin_name,
         installed.get("version"),
-        wp.source.plugin_version,
+        source.plugin_version,
     )
 
 
@@ -295,17 +349,17 @@ def resolve_workflow(
             "Could not read installed plugins. Plugin status may be inaccurate."
         )
 
-    for wp in workflow.pipelines:
-        if wp.source.type == "builtin":
-            item = _resolve_builtin(wp.pipeline_id)
+    for wn in workflow.nodes:
+        if wn.source.type == "builtin":
+            item = _resolve_builtin(wn.node_type_id)
         else:
-            item = _resolve_plugin(wp, plugins)
+            item = _resolve_plugin(wn.source, wn.node_type_id, plugins)
 
         items.append(item)
         if item.status in ("missing", "version_mismatch"):
             all_pipelines_ok = False
 
-        for lora in wp.loras:
+        for lora in wn.loras:
             items.append(_resolve_lora(lora, lora_dir, shared_lora_dir))
 
     if workflow.min_scope_version:

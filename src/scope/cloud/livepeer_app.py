@@ -45,10 +45,17 @@ from scope.server.app import app as scope_app
 from scope.server.app import lifespan as scope_lifespan
 from scope.server.frame_processor import FrameProcessor
 from scope.server.kafka_publisher import publish_event
+from scope.server.logs_config import (
+    LOG_FORMAT,
+    ScopeLogContextFilter,
+    set_connection_id,
+)
 from scope.server.media_packets import ensure_video_packet
 
 logger = logging.getLogger(__name__)
 scope_client: httpx.AsyncClient | None = None
+_connection_active = False
+_connection_count = 0
 
 STREAM_TASK_SHUTDOWN_GRACE_S = 1.0
 STREAM_TASK_CANCEL_TIMEOUT_S = 1.0
@@ -459,7 +466,9 @@ async def _media_output_loop(
             # TODO make this blocking; we busy-wait a LOT
             frame_item = None
             if record_node_id is not None:
-                frame_item = frame_processor.sink_manager.recording.get(record_node_id)
+                frame_item = frame_processor.sink_manager.recording.get_packet(
+                    record_node_id
+                )
                 if frame_item is None:
                     await asyncio.sleep(0.01)  # no frame yet, wait a bit
                     continue
@@ -1199,7 +1208,12 @@ async def _subscribe_control(
     logs_task = asyncio.create_task(_forward_logs_to_events(log_queue))
 
     try:
-        await events_writer.write({"type": "runner_ready"})
+        await events_writer.write(
+            {
+                "type": "runner_ready",
+                "runner_job_id": os.getenv("FAL_JOB_ID") or os.getenv("FAL_RUNNER_ID"),
+            }
+        )
         async for message in JSONLReader(control_url)():
             if stop_event.is_set():
                 break
@@ -1320,10 +1334,25 @@ async def cleanup_session() -> dict[str, Any]:
     }
 
 
+@app.get("/internal/status")
+async def internal_status() -> dict[str, Any]:
+    return {
+        "listener_ready": scope_client is not None,
+        "connection_active": _connection_active,
+        "connection_count": _connection_count,
+    }
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket) -> None:
     """Accept a WebSocket connection, read job info, then subscribe to the control channel."""
+    global _connection_active
+    global _connection_count
+
     await ws.accept()
+    _connection_active = True
+    _connection_count += 1
+    set_connection_id(None)
     logger.info("WebSocket client connected")
 
     stop_event = asyncio.Event()
@@ -1362,6 +1391,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         # wrapper's websocket_connected (which uses manifest_id as
         # connection_id).
         session.manifest_id = job_info.manifest_id
+        set_connection_id(session.manifest_id)
         session.session_id = str(uuid.uuid4())
         session.connection_info = _build_connection_info()
 
@@ -1440,6 +1470,8 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         await _stop_stream(session)
         if control_task is not None:
             await _shutdown_task(control_task, task_name="control_channel")
+        _connection_active = False
+        set_connection_id(None)
 
 
 def get_daydream_api_base() -> str:
@@ -1689,12 +1721,15 @@ def _configure_trickle_log_handler(
 def main(host: str, port: int, reload: bool) -> None:
     """Run the Livepeer runner WebSocket server."""
     log_level = logging.DEBUG if os.getenv("LIVEPEER_DEBUG") else logging.INFO
-    log_format = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    logging.basicConfig(level=log_level, format=log_format)
-    _configure_trickle_log_handler(
+    log_filter = ScopeLogContextFilter()
+    logging.basicConfig(level=log_level, format=LOG_FORMAT)
+    for handler in logging.getLogger().handlers:
+        handler.addFilter(log_filter)
+    trickle_handler = _configure_trickle_log_handler(
         level=log_level,
-        formatter=logging.Formatter(log_format),
+        formatter=logging.Formatter(LOG_FORMAT),
     )
+    trickle_handler.addFilter(log_filter)
     if os.getenv("LIVEPEER_DEBUG"):
         logging.getLogger("livepeer_gateway").setLevel(logging.DEBUG)
         logging.getLogger(__name__).setLevel(logging.DEBUG)

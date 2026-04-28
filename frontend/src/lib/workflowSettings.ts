@@ -14,10 +14,11 @@ import type {
 } from "../types";
 import type { TimelinePrompt } from "../components/PromptTimeline";
 import type { PromptItem, LoRAFileInfo, PluginInfo } from "./api";
-import type { GraphConfig } from "./api";
+import type { GraphConfig, NodeDefinitionDto } from "./api";
 import type {
   WorkflowPipeline,
   WorkflowPipelineSource,
+  WorkflowNode,
   WorkflowLoRA,
   WorkflowTimeline,
   WorkflowTimelineEntry,
@@ -147,6 +148,33 @@ function buildPipelineSource(
   const plugin = pluginInfoMap.get(info.pluginName);
   if (!plugin) {
     return { type: "builtin" };
+  }
+
+  return {
+    type: plugin.source,
+    plugin_name: plugin.name,
+    plugin_version: plugin.version ?? null,
+    package_spec: plugin.package_spec ?? null,
+  };
+}
+
+/** Determine the source for a custom backend node (builtin vs plugin). */
+function buildNodeSource(
+  nodeTypeId: string,
+  nodeDefinitionMap: Map<string, NodeDefinitionDto> | undefined,
+  pluginInfoMap: Map<string, PluginInfo>
+): WorkflowPipelineSource {
+  const pluginName = nodeDefinitionMap?.get(nodeTypeId)?.plugin_name;
+  if (!pluginName) {
+    return { type: "builtin" };
+  }
+
+  const plugin = pluginInfoMap.get(pluginName);
+  if (!plugin) {
+    // Node was emitted by a plugin whose package we can't resolve right now.
+    // Record the plugin name so the importer can at least report a useful
+    // missing-plugin message, even without version/spec info.
+    return { type: "pypi", plugin_name: pluginName };
   }
 
   return {
@@ -393,6 +421,12 @@ export interface BuildGraphWorkflowInput {
   pluginInfoMap: Map<string, PluginInfo>;
   scopeVersion: string;
   loraFiles?: LoRAFileInfo[];
+  /**
+   * Map of node_type_id -> NodeDefinition, used to attribute plain custom
+   * nodes to their providing plugin on export. Empty / undefined means all
+   * referenced custom nodes are emitted as ``{source: {type: "builtin"}}``.
+   */
+  nodeDefinitionMap?: Map<string, NodeDefinitionDto>;
 }
 
 /**
@@ -413,6 +447,7 @@ export function buildGraphWorkflow(
     pluginInfoMap,
     scopeVersion,
     loraFiles = [],
+    nodeDefinitionMap,
   } = input;
 
   const uiState = graphConfig.ui_state as Record<string, unknown> | undefined;
@@ -424,6 +459,7 @@ export function buildGraphWorkflow(
   const lorasByPipeline = extractLoRAsFromUiState(uiState);
 
   const pipelineNodes = graphConfig.nodes.filter(n => n.type === "pipeline");
+  const customNodes = graphConfig.nodes.filter(n => n.type === "node");
 
   const pipelines: WorkflowPipeline[] = pipelineNodes.map(node => {
     const pipelineId = node.pipeline_id ?? "";
@@ -468,6 +504,23 @@ export function buildGraphWorkflow(
     }
   }
 
+  // Every non-pipeline node in the graph (scheduler, math helper, plugin
+  // utility, ...) is emitted so the importer's review step can validate
+  // each type is registered locally or prompt the user to install the
+  // providing plugin. Deduped by node_type_id — the manifest lists types,
+  // not per-graph instances.
+  const seenNodeTypes = new Set<string>();
+  const nodes: WorkflowNode[] = [];
+  for (const n of customNodes) {
+    const typeId = n.node_type_id ?? "";
+    if (!typeId || seenNodeTypes.has(typeId)) continue;
+    seenNodeTypes.add(typeId);
+    nodes.push({
+      node_type_id: typeId,
+      source: buildNodeSource(typeId, nodeDefinitionMap, pluginInfoMap),
+    });
+  }
+
   return {
     format: "scope-workflow",
     format_version: "1.0",
@@ -477,6 +530,7 @@ export function buildGraphWorkflow(
       scope_version: scopeVersion,
     },
     pipelines,
+    nodes: nodes.length > 0 ? nodes : undefined,
     prompts: prompts.length > 0 ? prompts : undefined,
     graph: graphConfig,
   };
