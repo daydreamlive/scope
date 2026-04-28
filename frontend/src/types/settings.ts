@@ -9,4 +9,10 @@ export interface InstalledPlugin {
   update_available?: boolean | null;
   package_spec?: string | null;
   bundled?: boolean;
+  /** Plugin kind from the package's `__scope_kind__` attribute.
+   *  `"source"` means the plugin runs on the local machine even in
+   *  cloud mode. */
+  kind?: string | null;
+  /** Where this plugin record came from (only set in cloud mode). */
+  origin?: "local" | "cloud" | null;
 }

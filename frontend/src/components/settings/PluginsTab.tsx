@@ -32,6 +32,37 @@ const isElectron =
   typeof window !== "undefined" &&
   navigator.userAgent.toLowerCase().includes("electron");
 
+const ORIGIN_BADGE_CLASSES =
+  "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded";
+
+function OriginBadge({ plugin }: { plugin: InstalledPlugin }) {
+  if (plugin.origin === "local") {
+    return (
+      <span
+        className={`${ORIGIN_BADGE_CLASSES} bg-primary/15 text-primary`}
+        title={
+          plugin.kind === "source"
+            ? "Source-kind plugin: runs on this machine even in cloud mode"
+            : "Installed on this machine"
+        }
+      >
+        Local
+      </span>
+    );
+  }
+  if (plugin.origin === "cloud") {
+    return (
+      <span
+        className={`${ORIGIN_BADGE_CLASSES} bg-muted text-muted-foreground`}
+        title="Installed in the cloud-hosted backend"
+      >
+        Cloud
+      </span>
+    );
+  }
+  return null;
+}
+
 // Transform plain Git host URLs to git+ format on paste
 const transformGitUrl = (value: string): string => {
   const trimmed = value.trim();
@@ -158,6 +189,7 @@ export function PluginsTab({
                           v{plugin.version}
                         </span>
                       )}
+                      <OriginBadge plugin={plugin} />
                     </div>
                     {plugin.author && (
                       <p className="text-xs text-muted-foreground">

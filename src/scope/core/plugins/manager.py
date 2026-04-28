@@ -31,6 +31,100 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_NON_PACKAGE_DIRS = frozenset(
+    {"tests", "test", "examples", "docs", ".git", "__pycache__", "build", "dist"}
+)
+
+
+def _probe_kind_from_dir(root: Path) -> str | None:
+    """Walk *root* for an ``__init__.py`` that declares ``__scope_kind__``.
+
+    Returns the first declared kind found. Skips obviously non-package
+    directories (``tests``, ``examples``, ``__pycache__``, ...). The
+    text pre-check avoids AST-parsing files that can't possibly match.
+    AST parse only matches a top-level ``__scope_kind__ = "<literal>"``
+    (or annotated) assignment with a string-literal RHS, so the probe is
+    side-effect free.
+    """
+    import ast
+
+    for init in root.rglob("__init__.py"):
+        if any(p in _NON_PACKAGE_DIRS for p in init.relative_to(root).parts):
+            continue
+        try:
+            text = init.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"Failed to read {init}: {e}")
+            continue
+        if "__scope_kind__" not in text:
+            continue
+        try:
+            tree = ast.parse(text)
+        except Exception as e:
+            logger.debug(f"Failed to parse {init}: {e}")
+            continue
+        for node in tree.body:
+            if (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+            ):
+                name, value = node.targets[0].id, node.value
+            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
+                name, value = node.target.id, node.value
+            else:
+                continue
+            if (
+                name == "__scope_kind__"
+                and isinstance(value, ast.Constant)
+                and isinstance(value.value, str)
+            ):
+                return value.value
+    return None
+
+
+def _read_scope_kind(entry_points: list, package_name: str) -> str | None:
+    """Return ``__scope_kind__`` declared on the plugin's top-level package.
+
+    ``ep.load()`` would resolve the entry point's target attribute (e.g.
+    a plugin instance), which doesn't carry module-level globals — so we
+    import the top-level package directly via ``ep.module``.
+    """
+    import importlib
+
+    seen: set[str] = set()
+    for ep in entry_points:
+        top = ep.module.split(".")[0]
+        if top in seen:
+            continue
+        seen.add(top)
+        try:
+            kind = getattr(importlib.import_module(top), "__scope_kind__", None)
+        except Exception as e:
+            logger.debug(f"Could not import {top} for kind probe ({package_name}): {e}")
+            continue
+        if isinstance(kind, str):
+            return kind
+    return None
+
+
+def _split_git_spec(git_spec: str) -> tuple[str, str | None]:
+    """Split ``git+<url>[@branch]`` into ``(repo_url, branch)``.
+
+    Preserves a ``user@host`` segment in the URL by only splitting on an
+    ``@`` that appears after the path's first ``/``.
+    """
+    repo_url = git_spec.removeprefix("git+")
+    if "://" not in repo_url:
+        return repo_url, None
+    scheme, tail = repo_url.split("://", 1)
+    slash_idx = tail.find("/")
+    if slash_idx == -1 or "@" not in tail[slash_idx:]:
+        return repo_url, None
+    path_part, branch = tail[slash_idx:].rsplit("@", 1)
+    return f"{scheme}://{tail[:slash_idx]}{path_part}", branch
+
+
 def _get_torch_backend_args() -> list[str]:
     """Return torch backend args appropriate for the current platform.
 
@@ -122,6 +216,51 @@ class PluginManager:
         # TTL cache for plugin update checks: {name: (result_dict, timestamp)}
         self._update_check_cache: dict[str, tuple[dict[str, Any], float]] = {}
         self._update_check_ttl: float = 600.0  # 10 minutes
+
+    def probe_plugin_kind(self, package_spec: str) -> str | None:
+        """Probe a package specifier for the plugin's ``__scope_kind__``.
+
+        Used at install time to decide whether a plugin must be installed
+        locally even when Scope is connected to the cloud (``kind=source``).
+
+        Supported specifier forms:
+
+        - **Local path** (directory): walk and AST-parse ``__init__.py``
+          files for ``__scope_kind__ = "<literal>"``.
+        - **Git URL** (``git+https://...``): shallow-clone to a tempdir,
+          then walk the same way.
+        - **PyPI name / version specifier**: returns ``None`` (no probe).
+          For PyPI source-kind plugins the user can install via git URL,
+          or rely on the post-install ``__scope_kind__`` introspection.
+
+        Returns ``None`` if the kind cannot be determined.
+        """
+        spec = package_spec.strip()
+        path = Path(spec)
+        if path.is_dir():
+            return _probe_kind_from_dir(path)
+        if spec.startswith("git+"):
+            return self._probe_kind_from_git(spec)
+        return None
+
+    def _probe_kind_from_git(self, git_spec: str) -> str | None:
+        """Shallow-clone *git_spec* and probe ``__scope_kind__``."""
+        import tempfile
+
+        repo_url, branch = _split_git_spec(git_spec)
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd = ["git", "clone", "--depth=1"]
+            if branch:
+                cmd.extend(["--branch", branch])
+            cmd.extend([repo_url, tmp])
+            try:
+                subprocess.run(
+                    cmd, capture_output=True, check=True, timeout=60, text=True
+                )
+            except Exception as e:
+                logger.debug(f"Kind probe via git clone failed for {git_spec}: {e}")
+                return None
+            return _probe_kind_from_dir(Path(tmp))
 
     def clear_update_check_cache(self) -> None:
         """Clear the TTL cache for plugin update checks.
@@ -793,6 +932,13 @@ class PluginManager:
                         self._normalize_package_name(package_name) in bundled_names
                     )
 
+                    # Read ``__scope_kind__`` from the plugin's top-level
+                    # package. Imports the package proper rather than
+                    # ``ep.load()``, which would resolve to the entry
+                    # point's target attribute (e.g. a plugin instance)
+                    # and miss module-level declarations.
+                    kind = _read_scope_kind(scope_eps, package_name)
+
                     plugins.append(
                         {
                             "name": package_name,
@@ -808,6 +954,7 @@ class PluginManager:
                             "update_available": update_available,
                             "package_spec": package_spec,
                             "bundled": is_bundled,
+                            "kind": kind,
                         }
                     )
                 except Exception as e:
@@ -1735,3 +1882,8 @@ register_plugin_pipelines = register_plugin_nodes
 def get_plugin_input_sources() -> dict[str, type]:
     """Return ``source_id -> InputSource class`` for plugin-registered sources."""
     return get_plugin_manager().get_plugin_input_sources()
+
+
+def probe_plugin_kind(package_spec: str) -> str | None:
+    """Probe a package specifier for the plugin's ``__scope_kind__``."""
+    return get_plugin_manager().probe_plugin_kind(package_spec)
