@@ -1,25 +1,22 @@
 ## Description
 
-<!-- Describe the changes in this PR -->
+<!-- What does this PR change, and why? -->
 
 ## Type of Change
 
-- [ ] Bugfix (fixes an issue)
-- [ ] Feature (adds functionality)
+- [ ] Bugfix
+- [ ] Feature
 - [ ] Refactor
-- [ ] Documentation
-- [ ] CI/Infrastructure
+- [ ] Docs
+- [ ] CI / Infrastructure
 
-## Testing
+## Regression Test (bugfix PRs only)
 
-<!-- For bugfixes: Did you add a regression test? -->
-
-### Regression Test
-
-**If this is a bugfix**, please add a regression test to prevent this bug from recurring:
+If this PR is a bugfix, please include a regression test in `product-tests/regression/`.
+Without one, the bug can quietly regress later. See `CLAUDE.md` → "Regression Tests for Bugfix PRs".
 
 ```bash
-# Auto-generate from bug description (recommended):
+# Recommended — auto-generate from your bug description:
 /product-test-writer
 
 # Or manually:
@@ -27,20 +24,16 @@ cp product-tests/_templates/regression.py.tpl \
    product-tests/regression/pr_<your_pr_number>_<slug>.py
 ```
 
-See `CLAUDE.md` → "Regression Tests for Bugfix PRs" for details.
+- [ ] Added a regression test (or N/A — not a bugfix)
+- [ ] Verified the test reds on the buggy commit and greens on the fix commit (or N/A)
 
-- [ ] Added regression test (if bugfix)
-- [ ] Verified test reds before fix, greens after fix
-- [ ] Test uses `@scenario` decorator and fits on one screen
+## Manual Testing
 
-### Manual Testing
+<!-- How did you verify this works? Steps a reviewer can follow. -->
 
-<!-- Describe how you tested the changes -->
+## Pre-flight Checklist
 
-## Checklist
-
-- [ ] Code follows style guidelines (`npm run lint:fix` / `ruff check --fix`)
-- [ ] All commits are signed off (`git commit -s`)
-- [ ] Changes don't break existing tests (`uv run pytest tests/`)
-- [ ] Frontend builds (`npm run build`)
-- [ ] Server starts without errors (`uv run daydream-scope`)
+- [ ] Lint passes (`uv run ruff check src/` and `npm run lint` from `frontend/`)
+- [ ] Frontend builds (`npm run build` from `frontend/`)
+- [ ] Server starts cleanly (`uv run daydream-scope`)
+- [ ] Commits are signed off (DCO: `git commit -s`)

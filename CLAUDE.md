@@ -254,54 +254,51 @@ for name, color in [('test', (0,0,255)), ('test1', (0,255,0)), ('test2', (255,0,
 
 ### Regression Tests for Bugfix PRs
 
-**All PRs that fix bugs should include a regression test** in `product-tests/regression/` to prevent the bug from recurring.
-
-**Why:** Bugfixes without tests often regress months later. The test suite gates PRs and nightly runs, so a regression test ensures the bug stays fixed.
+**Bugfix PRs should include a regression test** in `product-tests/regression/`. Without one, the bug can quietly regress months later — the suite is the only thing that will catch it.
 
 **How:**
 
-1. **Auto-generate** — Use the `/product-test-writer` Claude skill:
-   ```
-   /product-test-writer
-   ```
-   Pass it your PR number + bug description. It generates `product-tests/regression/pr_<NNN>_<slug>.py` using the `@scenario` decorator, ready to run.
+1. **Auto-generate** — `/product-test-writer` skill takes a plain-English bug description (the same one you'd put in the PR body) and writes `product-tests/regression/pr_<NNN>_<slug>.py` using the `@scenario` decorator.
 
-2. **Manual** — Copy the template:
+2. **Manual** — copy the template:
    ```bash
    cp product-tests/_templates/regression.py.tpl product-tests/regression/pr_<NNN>_<slug>.py
    ```
-   Edit to reproduce your bugfix. See `product-tests/WRITING_TESTS.md` for the test API.
+   See `product-tests/WRITING_TESTS.md` for the `ctx` API.
 
-3. **Verify locally:**
+3. **Verify the test actually catches the bug.** Run it on the buggy commit (it should red), then on your fix commit (it should green):
    ```bash
-   # Before fix (should red)
-   git stash  # stash your fix
-   uv run pytest product-tests/regression/pr_<NNN>_<slug>.py -v
-
-   # After fix (should green)
-   git stash pop
-   uv run pytest product-tests/regression/pr_<NNN>_<slug>.py -v
+   git checkout <bug-commit>
+   uv run pytest product-tests/regression/pr_<NNN>_<slug>.py -v   # red
+   git checkout <fix-commit>
+   uv run pytest product-tests/regression/pr_<NNN>_<slug>.py -v   # green
    ```
+   A test that greens on both commits isn't testing the bug.
 
-**Example:**
+**Example** (matches the canonical local-passthrough pattern used by every other `@scenario` in the suite):
+
 ```python
 # product-tests/regression/pr_1234_parameter_spam_crash.py
-"""Regression for #1234: parameter spam during cloud stream crashed session."""
+"""Regression for #1234: parameter spam crashed the session."""
 from harness.scenario import scenario
 
-@scenario(mode="cloud", workflow="passthrough")
+@scenario(mode="local", workflow="local-passthrough", feature="params")
 def test_pr_1234_parameter_spam(ctx):
     ctx.complete_onboarding()
     ctx.run_and_wait_first_frame()
     for _ in range(200):
         ctx.set_parameter("__prompt", "test")
-    # ctx auto-asserts: zero retries, zero unexpected closes, zero UI errors.
+    # @scenario teardown auto-asserts: zero retries, zero unexpected closes,
+    # zero UI errors. If the spam crashed the session, the unexpected-close
+    # gate fails the test.
 ```
+
+**Why local-passthrough by default:** every existing `@scenario` uses it. It's CPU-only, no fal credentials required, runs on the PR ring. Switch to `mode="cloud"` only when the bug is specific to the cloud relay path.
 
 **Reference:**
 - Test cookbook: `product-tests/WRITING_TESTS.md`
 - Templates: `product-tests/_templates/`
-- Full harness API: `product-tests/harness/scenario.py`
+- Decorator + `ctx` API: `product-tests/harness/scenario.py`
 
 ## Style Guidelines
 
