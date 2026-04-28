@@ -252,6 +252,57 @@ for name, color in [('test', (0,0,255)), ('test1', (0,255,0)), ('test2', (255,0,
 - Pre-commit hooks run ruff (Python) and prettier/eslint (frontend)
 - Models stored in `~/.daydream-scope/models` (configurable via `DAYDREAM_SCOPE_MODELS_DIR`)
 
+### Regression Tests for Bugfix PRs
+
+**All PRs that fix bugs should include a regression test** in `product-tests/regression/` to prevent the bug from recurring.
+
+**Why:** Bugfixes without tests often regress months later. The test suite gates PRs and nightly runs, so a regression test ensures the bug stays fixed.
+
+**How:**
+
+1. **Auto-generate** — Use the `/product-test-writer` Claude skill:
+   ```
+   /product-test-writer
+   ```
+   Pass it your PR number + bug description. It generates `product-tests/regression/pr_<NNN>_<slug>.py` using the `@scenario` decorator, ready to run.
+
+2. **Manual** — Copy the template:
+   ```bash
+   cp product-tests/_templates/regression.py.tpl product-tests/regression/pr_<NNN>_<slug>.py
+   ```
+   Edit to reproduce your bugfix. See `product-tests/WRITING_TESTS.md` for the test API.
+
+3. **Verify locally:**
+   ```bash
+   # Before fix (should red)
+   git stash  # stash your fix
+   uv run pytest product-tests/regression/pr_<NNN>_<slug>.py -v
+
+   # After fix (should green)
+   git stash pop
+   uv run pytest product-tests/regression/pr_<NNN>_<slug>.py -v
+   ```
+
+**Example:**
+```python
+# product-tests/regression/pr_1234_parameter_spam_crash.py
+"""Regression for #1234: parameter spam during cloud stream crashed session."""
+from harness.scenario import scenario
+
+@scenario(mode="cloud", workflow="passthrough")
+def test_pr_1234_parameter_spam(ctx):
+    ctx.complete_onboarding()
+    ctx.run_and_wait_first_frame()
+    for _ in range(200):
+        ctx.set_parameter("__prompt", "test")
+    # ctx auto-asserts: zero retries, zero unexpected closes, zero UI errors.
+```
+
+**Reference:**
+- Test cookbook: `product-tests/WRITING_TESTS.md`
+- Templates: `product-tests/_templates/`
+- Full harness API: `product-tests/harness/scenario.py`
+
 ## Style Guidelines
 
 ### Backend
