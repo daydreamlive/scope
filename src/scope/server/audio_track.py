@@ -88,14 +88,16 @@ class AudioProcessingTrack(MediaStreamTrack):
             raise MediaStreamError
 
         # aiortc timing pattern: monotonic timestamp counter with wall-clock pacing
-        if self._start is not None:
+        if self._start is None:
+            self.frame_processor.notify_first_audio_packet()
+            await asyncio.to_thread(self.frame_processor.wait_for_av_sync_anchor)
+            self._start = time.time()
+            self._timestamp = 0
+        else:
             self._timestamp += self._samples_per_frame
             wait = self._start + (self._timestamp / AUDIO_CLOCK_RATE) - time.time()
             if wait > 0:
                 await asyncio.sleep(wait)
-        else:
-            self._start = time.time()
-            self._timestamp = 0
 
         if self.frame_processor.paused:
             return self._create_silence_frame()
