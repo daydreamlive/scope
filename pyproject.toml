@@ -50,7 +50,7 @@ dependencies = [
     "huggingface_hub>=0.25.0",
     "pluggy>=1.5.0",
     "click>=8.3.1",
-    "peft>=0.17.1",
+    "peft==0.18.1",
     "torchao==0.15.0",
     "kernels>=0.10.4",
     "triton==3.5.1; sys_platform == 'linux'",
