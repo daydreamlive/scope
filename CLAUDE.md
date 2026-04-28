@@ -108,12 +108,14 @@ client side (`src/scope/server/livepeer.py`,
 
 The skill provides two paths:
 
-- **Playwright e2e test** (`e2e/tests/cloud-streaming.spec.ts`) —
-  primary. Drives the real Perform-mode UI with a synthetic camera
-  and verifies the full trickle round-trip. Produces every lifecycle
-  Kafka event (`websocket_connected`, `pipeline_loaded`,
-  `session_created`, `stream_started`, `stream_heartbeat`,
-  `session_closed`, `websocket_disconnected`).
+- **Cloud-streaming test**
+  (`product-tests/release/test_cloud_streaming.py`) — primary. Drives
+  the real Perform-mode UI with a synthetic camera and verifies the
+  full trickle round-trip. Produces every lifecycle Kafka event
+  (`websocket_connected`, `pipeline_loaded`, `session_created`,
+  `stream_started`, `stream_heartbeat`, `session_closed`,
+  `websocket_disconnected`). Run via
+  `uv run pytest product-tests/release/test_cloud_streaming.py -v -m cloud`.
 - **`test-cloud-connect.sh`** at the repo root — fast bash/curl smoke
   test for `/api/v1/cloud/connect` only. Useful in `git bisect run`
   or for "did the fal container come up?". Does not produce

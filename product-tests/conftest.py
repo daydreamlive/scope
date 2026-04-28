@@ -185,11 +185,24 @@ def driver(
     auth blob so the CloudAuthStep auto-advances past the sign-in phase.
     """
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
+        # Fake-camera launch args are harmless when unused: they only affect
+        # getUserMedia, which most tests don't call. Tests that DO need a
+        # synthetic camera (cloud-streaming Perform-mode flow) get a real
+        # MediaStreamTrack without prompting. Mirrors what was in
+        # e2e/playwright.config.ts.
+        browser = pw.chromium.launch(
+            headless=True,
+            args=[
+                "--use-fake-device-for-media-stream",
+                "--use-fake-ui-for-media-stream",
+                "--auto-select-desktop-capture-source=fake",
+            ],
+        )
         context = browser.new_context(
             record_video_dir=str(test_report_dir),
             record_video_size={"width": 1280, "height": 800},
             viewport={"width": 1280, "height": 800},
+            permissions=["camera", "microphone"],
         )
         if request.node.get_closest_marker("cloud"):
             install_cloud_auth_bypass(context)

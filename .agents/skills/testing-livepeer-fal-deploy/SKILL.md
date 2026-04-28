@@ -53,28 +53,18 @@ Do **not** use this skill for local-only livepeer testing — that's
    - (Optional) `LIVEPEER_DEBUG=1` — surfaces per-orchestrator
      rejection reasons in scope.log; essential for diagnosing
      `All orchestrators failed (N tried)`.
-2. **Frontend rebuild with baked-in auth** (once per local workspace):
+2. **product-tests setup** (once per machine):
    ```bash
-   source .env.local
-   cd frontend && VITE_DAYDREAM_API_KEY="$SCOPE_CLOUD_API_KEY" npm run build
-   cd ..
+   uv sync --group product-tests
+   uv run playwright install --with-deps chromium
    ```
-   This bakes the API key into the dist bundle so the app appears
-   signed-in (otherwise Playwright hits the login screen).
-3. **Playwright setup** (once per machine):
-   ```bash
-   cd e2e
-   npm install
-   npx playwright install chromium
-   ```
-   Then install Chromium's system deps (sudo required — one-time):
-   ```bash
-   sudo apt-get install -y libnss3 libnspr4 libasound2t64
-   # or the Playwright-managed superset:
-   sudo npx playwright install-deps chromium
-   ```
-   Without these the browser fails to launch with
-   `error while loading shared libraries: libnspr4.so`.
+   This installs pytest, Playwright, and Chromium with the right
+   system deps. Without `--with-deps`, the browser fails to launch
+   with `error while loading shared libraries: libnspr4.so`.
+
+   The `@scenario(mode="cloud")` decorator on the test handles auth
+   via a localStorage bypass (see ``harness/cloud_auth.py``), so no
+   frontend rebuild with `VITE_DAYDREAM_API_KEY` is needed.
 
 ## Running the Playwright test (primary)
 
@@ -135,28 +125,31 @@ Docker base image isn't built yet (CI for the current commit is still
 running). If that's the case, either wait for CI or have the user
 confirm they want to deploy against an older base image.
 
-### Step 4 — Start scope and run Playwright
+### Step 4 — Run the cloud-streaming test
+
+The test spins up its own fresh scope subprocess per test (via the
+``scope_harness`` fixture), so you don't run ``./run-app.sh`` first —
+just point ``SCOPE_CLOUD_APP_ID`` at the deploy and let pytest do it.
 
 ```bash
-# Terminal 1 — scope (port 8000)
-SCOPE_CLOUD_APP_ID=<derived-url> ./run-app.sh
-
-# Terminal 2 — test
-cd e2e && npx playwright test
+SCOPE_CLOUD_APP_ID=<derived-url> \
+  uv run pytest product-tests/release/test_cloud_streaming.py -v -m cloud
 ```
+
+Reports land in ``product-tests/reports/<run-id>/`` (per-test
+``report.json``, ``trace.zip``, video, ``scope.log``, plus a
+top-level ``summary.md``).
 
 Expected on success (≤5 min cold, ~20 s warm):
 
 ```
-Enabling cloud mode...          ✅
-Waiting for cloud connection... ✅
-Selecting passthrough model...  ✅
-Switching input source to Camera... ✅
-Starting stream...              ✅
-Verifying output stream processing... ✅ Output frames flowing
-Stopping stream...              ✅
-1 passed
+product-tests/release/test_cloud_streaming.py::test_cloud_streaming_perform_mode_passthrough PASSED
+============ 1 passed in <duration> ============
 ```
+
+The summary.md at ``product-tests/reports/<run-id>/summary.md``
+records ``retry_count``, ``unexpected_close_count``, and
+``ui_error_events`` — all should be zero for a clean run.
 
 **What the test does in livepeer terms:**
 
@@ -169,8 +162,9 @@ Stopping stream...              ✅
    `pipeline_loaded`.
 4. Switches the input source to Camera — Playwright's launch args
    `--use-fake-device-for-media-stream` and
-   `--use-fake-ui-for-media-stream` (configured in
-   `e2e/playwright.config.ts`) give `getUserMedia()` a synthetic feed.
+   `--use-fake-ui-for-media-stream` (configured in the ``driver``
+   fixture in ``product-tests/conftest.py``) give ``getUserMedia()``
+   a synthetic feed.
    This is essential: without a real MediaStream, the browser↔local
    scope WebRTC ICE never completes, `CloudTrack._start()` is never
    called, and the runner never gets `start_stream`.
@@ -217,7 +211,9 @@ Playwright path is the supported way to exercise a full session.
 - `/tmp/test-cloud-connect/scope.log` — local scope stdout/stderr
   (grep for `livepeer_gateway` when `LIVEPEER_DEBUG=1`)
 - `~/.daydream-scope/logs/scope-logs-*.log` — scope's rolling app logs
-- `e2e/test-results/` — Playwright screenshots + traces on failure
+- `product-tests/reports/<run-id>/` — per-test ``report.json``,
+  Playwright video, ``trace.zip``, and the scope subprocess
+  ``scope.log``. Plus a top-level ``summary.md``.
 - fal dashboard — runner stdout/stderr, including `[Kafka] Published
   event: …` lines from `scope.server.kafka_publisher` in the runner.
   Not accessible via CLI; open <https://fal.ai/dashboard/logs>.
@@ -234,15 +230,16 @@ Playwright path is the supported way to exercise a full session.
 - **`discover_orchestrators requires discovery_url or signer_url`** →
   `SCOPE_CLOUD_API_KEY` not set; signer fallback isn't configured.
 - **Playwright: `error while loading shared libraries: libnspr4.so`** →
-  Chromium system deps missing; run the `sudo apt-get install`
-  command from setup.
+  Chromium system deps missing; re-run
+  `uv run playwright install --with-deps chromium` from setup.
 - **Playwright: test passes but ClickHouse only has
   `websocket_connected`** — the test probably clicked stop before ICE
   completed. Confirm the fake-device launch args are set and the
   Camera input was selected (not File).
 - **Playwright: `FrameProcessor failed to start: Pipeline X not
   loaded`** — you're running the HTTP script's `--full-session` flag,
-  not the Playwright test. Switch to `npx playwright test`.
+  not the cloud-streaming test. Switch to
+  `uv run pytest product-tests/release/test_cloud_streaming.py -v -m cloud`.
 
 ## What "round-trip verified" looks like in ClickHouse
 
