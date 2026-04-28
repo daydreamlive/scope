@@ -577,8 +577,23 @@ class PluginManager:
 
             def register_callback(cls: Any) -> None:
                 if isinstance(cls, type) and issubclass(cls, InputSource):
-                    self._plugin_input_sources[cls.source_id] = cls
-                    logger.info(f"Registered plugin input source: {cls.source_id}")
+                    source_id = getattr(cls, "source_id", None)
+                    if not source_id:
+                        logger.error(
+                            f"Plugin InputSource {cls.__name__} is missing "
+                            "required 'source_id' ClassVar; skipping registration"
+                        )
+                        return
+                    existing = self._plugin_input_sources.get(source_id)
+                    if existing is not None and existing is not cls:
+                        logger.warning(
+                            f"Plugin input source '{source_id}' from "
+                            f"{cls.__module__}.{cls.__name__} overrides existing "
+                            f"registration from "
+                            f"{existing.__module__}.{existing.__name__}"
+                        )
+                    self._plugin_input_sources[source_id] = cls
+                    logger.info(f"Registered plugin input source: {source_id}")
                     return
                 NodeRegistry.register(cls)
                 node_id = _derive_node_type_id(cls) or cls.__name__
@@ -1412,6 +1427,29 @@ class PluginManager:
                 PipelineRegistry.unregister(pipeline_id)
                 self._type_to_plugin.pop(pipeline_id, None)
                 logger.info(f"Unregistered pipeline from registry: {pipeline_id}")
+
+        # Unregister the plugin from pluggy so its hooks no longer fire.
+        # Without this, a subsequent reload of any other plugin would
+        # re-fire the uninstalled plugin's `register_nodes`/`register_pipelines`
+        # hooks (its module is still loaded in `sys.modules` after
+        # `uv pip uninstall`) and resurrect its registrations.
+        plugin_to_unregister = None
+        for plugin in self._pm.get_plugins():
+            plugin_name = getattr(plugin, "__name__", "")
+            if name in plugin_name or plugin_name in name:
+                plugin_to_unregister = plugin
+                break
+        if plugin_to_unregister:
+            try:
+                self._pm.unregister(plugin_to_unregister)
+            except Exception as e:
+                logger.warning(f"Failed to unregister plugin {name} from pluggy: {e}")
+
+        # Rebuild plugin-derived caches (`_type_to_plugin` and
+        # `_plugin_input_sources`) from the remaining loaded plugins.
+        # This drops the uninstalled plugin's input sources without
+        # needing to track ownership separately.
+        self.register_plugin_nodes()
 
         # Remove from plugins.txt
         plugins = self._read_plugins_file()
