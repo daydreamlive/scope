@@ -625,7 +625,20 @@ export function useValueForwarding(
         if (!sourceParsed || sourceParsed.kind !== "param") continue;
 
         const sourceValue = getAnyValueFromNode(sourceNode, edge.sourceHandle);
-        if (sourceValue === undefined || sourceValue === null) continue;
+        // VACE image inputs treat a null/undefined upstream value as an
+        // explicit "clear" signal (e.g. user removed the upstream Image).
+        // For all other targets, null means "no value yet" — skip so we
+        // don't clobber legitimate state.
+        const isVaceImageInput =
+          targetNode.data.nodeType === "vace" &&
+          (targetParsed.name === "ref_image" ||
+            targetParsed.name === "first_frame" ||
+            targetParsed.name === "last_frame");
+        if (
+          (sourceValue === undefined || sourceValue === null) &&
+          !isVaceImageInput
+        )
+          continue;
 
         const nodeUpdates = updates.get(edge.target) ?? {};
 
@@ -703,12 +716,13 @@ export function useValueForwarding(
             }
           }
         } else if (targetNode.data.nodeType === "vace") {
+          const v = sourceValue == null ? "" : String(sourceValue);
           if (targetParsed.name === "ref_image") {
-            nodeUpdates["vaceRefImage"] = String(sourceValue);
+            nodeUpdates["vaceRefImage"] = v;
           } else if (targetParsed.name === "first_frame") {
-            nodeUpdates["vaceFirstFrame"] = String(sourceValue);
+            nodeUpdates["vaceFirstFrame"] = v;
           } else if (targetParsed.name === "last_frame") {
-            nodeUpdates["vaceLastFrame"] = String(sourceValue);
+            nodeUpdates["vaceLastFrame"] = v;
           }
         } else if (targetNode.data.nodeType === "reroute") {
           nodeUpdates["value"] = sourceValue;
