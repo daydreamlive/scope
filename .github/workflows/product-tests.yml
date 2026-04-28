@@ -226,7 +226,7 @@ jobs:
           # The main-pinned app deployed by fal-deploy.yml on every push to
           # main. Stable, known, no secret needed. Tests append "/ws" in
           # the fixture when they open a connection.
-          SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer--main/ws"
+          SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer/ws"
           # Scope client cloud auth — required for signer.daydream.live
           # to accept the discover_orchestrators call. Empty if secrets
           # not yet configured; cloud-marked tests will fail/skip
@@ -251,7 +251,7 @@ jobs:
           # The main-pinned app deployed by fal-deploy.yml on every push to
           # main. Stable, known, no secret needed. Tests append "/ws" in
           # the fixture when they open a connection.
-          SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer--main/ws"
+          SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer/ws"
           # Scope client cloud auth — required for signer.daydream.live
           # to accept the discover_orchestrators call. Empty if secrets
           # not yet configured; cloud-marked tests will fail/skip
@@ -268,7 +268,7 @@ jobs:
           # The main-pinned app deployed by fal-deploy.yml on every push to
           # main. Stable, known, no secret needed. Tests append "/ws" in
           # the fixture when they open a connection.
-          SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer--main/ws"
+          SCOPE_CLOUD_APP_ID: "daydream/scope-livepeer/ws"
           # Scope client cloud auth — required for signer.daydream.live
           # to accept the discover_orchestrators call. Empty if secrets
           # not yet configured; cloud-marked tests will fail/skip
