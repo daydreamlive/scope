@@ -12,6 +12,7 @@ import time
 
 import torch
 
+from scope.core.nodes.base import NodeDefinition
 from scope.server.pipeline_processor import PipelineProcessor
 
 
@@ -23,6 +24,9 @@ class StubPipeline:
         self.delay = delay
         self.variance = variance
         self.call_count = 0
+
+    def get_definition(self):
+        return NodeDefinition(node_type_id="stub", display_name="Stub")
 
     def prepare(self, **kwargs):
         return None

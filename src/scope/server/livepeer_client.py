@@ -41,6 +41,7 @@ from scope.core.pacing import (
 )
 
 from .cloud_relay import AudioOutputHandler, FrameOutputHandler
+from .logs_config import set_connection_id
 
 logger = logging.getLogger(__name__)
 LIVEPEER_ORCH_URL_ENV = "LIVEPEER_ORCH_URL"
@@ -207,6 +208,7 @@ class LivepeerClient:
         if self.is_connected:
             await self.disconnect()
 
+        set_connection_id(None)
         self._loop = asyncio.get_running_loop()
         self._shutdown_started = False
         async with self._asset_upload_lock:
@@ -256,6 +258,7 @@ class LivepeerClient:
             use_tofu=bool(os.environ.get("LIVEPEER_DEV_MODE")),
         )
         self._connection_id = getattr(self._job, "manifest_id", None)
+        set_connection_id(self._connection_id)
 
         # start_scope runs in a worker thread without an event loop, so
         # deferred async initialisers need to be kicked off now.
@@ -1363,6 +1366,7 @@ class LivepeerClient:
             self._control_writer = None
             self._connected = False
             self._connection_id = None
+            set_connection_id(None)
 
         await self._teardown_media_handles(media_handles, current_task=current_task)
         await self._drain_or_cancel_task("events loop", events_task, current_task)

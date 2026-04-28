@@ -1,22 +1,36 @@
-"""Base classes for the Scope node system.
+"""Unified node abstraction for the Scope graph.
 
-Nodes are lightweight, fine-grained processing units that can be wired into
-pipeline graphs alongside pipelines. Each node type declares typed input/
-output ports and editable parameters, and subclasses implement their own
-execution contract (which may differ between execution backends).
+Everything on the graph is a :class:`Node`. A Node declares its input
+and output ports, optional editable parameters, optional artifacts,
+and optional lifecycle hooks. There are two invocation styles:
 
-This module intentionally keeps ``BaseNode`` minimal — only a class-level
-identifier and a ``get_definition()`` classmethod are required. Concrete
-execution backends (graph executor integration, event-driven runtime, etc.)
-layer their own abstract methods on top.
+- Event-style (``execute``): scheduled by :class:`NodeProcessor` — a
+  call per tick with the current input port values. Used by plain
+  utility nodes (scheduler, math, etc.).
+- Chunked-style (``__call__``): scheduled by
+  :class:`PipelineProcessor` — driven by buffered video frames via
+  queues, driven by a ``prepare()`` that returns how many frames to
+  batch together. Used by video pipelines.
+
+The same class hierarchy backs both: ``Pipeline`` is just an alias for
+``Node``. A node is treated as "config-driven" (i.e. what we used to
+call a pipeline) iff ``get_config_class()`` returns a non-None
+:class:`BasePipelineConfig`, which drives parameter-panel rendering,
+JSON-schema generation, and chunked execution.
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
-from typing import Any, ClassVar, Literal
+import logging
+from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from scope.core.pipelines.artifacts import Artifact
+    from scope.core.pipelines.base_schema import BasePipelineConfig
+
+logger = logging.getLogger(__name__)
 
 
 class NodePort(BaseModel):
@@ -97,52 +111,86 @@ class NodeDefinition(BaseModel):
     pipeline_meta: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Rich pipeline-only metadata (config_schema, mode_defaults, "
-            "supports_lora, supports_vace, etc.) for nodes that are "
-            ":class:`Pipeline` subclasses. ``None`` for plain nodes. "
-            "Populated by ``Pipeline.get_definition()`` from the config "
-            "class's ``get_schema_with_metadata()``."
+            "Rich metadata (config_schema, mode_defaults, supports_lora, "
+            "supports_vace, etc.) for nodes with a Pydantic config class. "
+            "``None`` for plain nodes. Populated by the default "
+            ":meth:`Node.get_definition` from the config class's "
+            "``get_schema_with_metadata()``."
+        ),
+    )
+    plugin_name: str | None = Field(
+        default=None,
+        description=(
+            "Python package name of the plugin that provides this node, or "
+            "``None`` for built-ins. Enriched by the discovery endpoint "
+            "from :class:`PluginManager`'s plugin mapping; not set by the "
+            "node class itself."
         ),
     )
 
 
-class BaseNode(ABC):
-    """Abstract base class for all backend node types.
+class Requirements(BaseModel):
+    """Runtime chunking requirements returned by :meth:`Node.prepare`.
 
-    Subclasses must set ``node_type_id`` as a ``ClassVar`` and implement
-    ``get_definition()`` and ``execute()``. Nodes run inside a
-    :class:`NodeProcessor` in the pipeline graph: input port values arrive
-    in the ``inputs`` dict and the return dict fans out to downstream
-    nodes or pipelines via queue edges.
-
-    Example::
-
-        class MyNode(BaseNode):
-            node_type_id: ClassVar[str] = "my-plugin.my-node"
-
-            @classmethod
-            def get_definition(cls) -> NodeDefinition:
-                return NodeDefinition(
-                    node_type_id=cls.node_type_id,
-                    display_name="My Node",
-                    inputs=[NodePort(name="audio", port_type="audio")],
-                    outputs=[NodePort(name="audio", port_type="audio")],
-                )
-
-            def execute(self, inputs, **kwargs):
-                return {"audio": inputs["audio"]}
+    Chunked-style nodes tell the runtime how many frames to batch per
+    ``__call__`` invocation. Event-style nodes return ``None``.
     """
 
-    node_type_id: ClassVar[str]
+    input_size: int
+
+
+class Node:
+    """Unified base class for every graph node.
+
+    Subclasses pick exactly one invocation style:
+
+    - **Event-style**: set ``node_type_id``, override :meth:`get_definition`
+      with static metadata, and implement :meth:`execute`. Scheduled by
+      :class:`NodeProcessor`.
+    - **Chunked-style**: override :meth:`get_config_class` to return a
+      :class:`BasePipelineConfig` subclass, implement :meth:`__call__`,
+      and optionally :meth:`prepare` for multi-frame batching.
+      Scheduled by :class:`PipelineProcessor`. The default
+      :meth:`get_definition` projects the config class into a
+      :class:`NodeDefinition` so nothing has to be declared twice.
+    """
+
+    node_type_id: ClassVar[str] = ""
 
     def __init__(self, node_id: str = "", config: dict[str, Any] | None = None):
         self.node_id = node_id
         self.config = config or {}
 
+    # ------------------------------------------------------------------
+    # Identity / metadata
+    # ------------------------------------------------------------------
+
     @classmethod
-    @abstractmethod
+    def get_config_class(cls) -> type[BasePipelineConfig] | None:
+        """Return the Pydantic config class, or ``None`` for plain nodes.
+
+        A non-None return marks this node as config-driven (a "pipeline"
+        in the historical sense): it gets its identity, ports, and
+        parameter-panel schema from the config class rather than from
+        static ``node_type_id`` + :meth:`get_definition` declarations.
+        """
+        return None
+
+    @classmethod
     def get_definition(cls) -> NodeDefinition:
-        """Return static metadata for this node type."""
+        """Return static metadata for this node type.
+
+        When :meth:`get_config_class` returns a class, the definition
+        is derived from it automatically. Plain nodes must override
+        this method.
+        """
+        config = cls.get_config_class()
+        if config is None:
+            raise NotImplementedError(
+                f"{cls.__name__} must either override get_definition() or "
+                "return a config class from get_config_class()."
+            )
+        return _definition_from_config(cls, config)
 
     @classmethod
     def get_dynamic_output_ports(cls, params: dict[str, Any]) -> set[str]:
@@ -151,41 +199,160 @@ class BaseNode(ABC):
         Used by the graph executor to accept edges from ports that are
         not declared statically in :meth:`get_definition` — e.g. the
         scheduler node derives one output port per user-configured
-        trigger. The default returns an empty set; nodes with dynamic
-        outputs override.
+        trigger. The default returns an empty set.
         """
         return set()
+
+    @classmethod
+    def get_artifacts(cls) -> list[Artifact]:
+        """Return the model artifacts this node depends on.
+
+        Artifacts are downloadable resources (HuggingFace repos, Google
+        Drive files, etc.) that must be present before the node can run.
+        The UI download flow and the :class:`PipelineManager` use this
+        list to decide whether the node needs lifecycle-managed loading.
+
+        The default delegates to ``get_config_class().artifacts`` so
+        config-driven nodes (historical "pipelines") keep declaring
+        artifacts on the config class. Plain event-style nodes that need
+        model weights override this method directly.
+        """
+        config = cls.get_config_class()
+        if config is None:
+            return []
+        return list(getattr(config, "artifacts", []) or [])
+
+    # ------------------------------------------------------------------
+    # Lifecycle
+    # ------------------------------------------------------------------
 
     def shutdown(self) -> None:  # noqa: B027 — intentional no-op hook
         """Release any resources held by the node.
 
-        Called by :class:`NodeProcessor` when the graph is torn down.
-        The default is a no-op; nodes that start background threads or
-        hold OS handles override.
+        Called by the processor when the graph is torn down. Nodes
+        with background threads or OS handles override.
         """
 
-    def execute(
-        self,
-        inputs: dict[str, Any],
-        **kwargs,
-    ) -> dict[str, Any]:
-        """Execute the node with the given inputs.
+    def prepare(self, **kwargs) -> Requirements | None:  # noqa: B027 — optional hook
+        """Chunked-style pre-execution hook.
 
-        Plain backend nodes (scheduled by ``NodeProcessor``) override
-        this. :class:`Pipeline` subclasses inherit the default because
-        they're driven by ``__call__`` from ``PipelineProcessor`` and
-        never reach this code path.
+        Called once per tick by :class:`PipelineProcessor` before
+        gathering input frames. Return a :class:`Requirements` with
+        the number of frames the next ``__call__`` expects, or
+        ``None`` if the node is idle / chunking is not applicable.
+        """
+        return None
 
-        Args:
-            inputs: Dict mapping input port names to their values.
-                Audio ports receive ``(tensor, sample_rate)`` tuples.
-                Video ports receive frame tensors.
-            **kwargs: Additional context (pipeline parameters, etc.)
+    # ------------------------------------------------------------------
+    # Execution
+    # ------------------------------------------------------------------
 
-        Returns:
-            Dict mapping output port names to their values.
+    def execute(self, inputs: dict[str, Any], **kwargs) -> dict[str, Any]:
+        """Event-style execution — one call per tick.
+
+        ``inputs`` maps input port names to the latest values on those
+        ports. Returns a dict mapping output port names to values,
+        which :class:`NodeProcessor` fans out to downstream edges.
+        Override in plain nodes; chunked-style nodes use
+        :meth:`__call__` instead.
         """
         raise NotImplementedError(
-            f"{type(self).__name__} must override execute() or be invoked "
-            "via PipelineProcessor (Pipeline subclass) instead of NodeProcessor."
+            f"{type(self).__name__} must override execute() to be invoked "
+            "via NodeProcessor (event-style), or override __call__() to be "
+            "invoked via PipelineProcessor (chunked-style)."
         )
+
+    def __call__(self, **kwargs) -> dict[str, Any]:
+        """Chunked-style execution — one call per batch of frames.
+
+        ``kwargs`` carries pipeline parameters plus per-port frame
+        lists (e.g. ``video=[tensor, ...]``). Returns a dict whose
+        keys match declared output ports (``video``, ``audio``, etc.).
+        Override in chunked-style nodes; event-style nodes use
+        :meth:`execute` instead.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must override __call__() to be invoked "
+            "via PipelineProcessor (chunked-style), or override execute() "
+            "to be invoked via NodeProcessor (event-style)."
+        )
+
+
+# ---------------------------------------------------------------------------
+# Backward-compatibility aliases.
+#
+# ``BaseNode`` was the old name of the base class; ``Pipeline`` used to be a
+# separate subclass. Now both are just ``Node`` so every call site, subclass,
+# and plugin that imported either continues to work unchanged.
+# ---------------------------------------------------------------------------
+
+BaseNode = Node
+
+
+def _definition_from_config(
+    cls: type[Node], config: type[BasePipelineConfig]
+) -> NodeDefinition:
+    """Project a :class:`BasePipelineConfig` class into a :class:`NodeDefinition`.
+
+    Populates the compact catalog fields (id, ports, etc.) and stores the full
+    ``get_schema_with_metadata()`` payload in ``pipeline_meta`` for the
+    frontend's parameter panel. ``params`` stays empty because the Pydantic
+    schema is too structured to flatten into ``NodeParam`` widgets.
+    """
+    try:
+        pipeline_meta = config.get_schema_with_metadata()
+    except Exception as e:
+        # Degrade gracefully: log the failure but keep the node visible
+        # in the catalog so a single bad plugin can't 500 the whole
+        # definitions endpoint.
+        logger.error(
+            "Failed to build pipeline_meta for %s: %s. Exposing degraded "
+            "payload (identity fields only, no config_schema).",
+            getattr(config, "pipeline_id", cls.__name__),
+            e,
+            exc_info=True,
+        )
+        pipeline_meta = {
+            "id": getattr(config, "pipeline_id", cls.__name__),
+            "name": getattr(config, "pipeline_name", cls.__name__),
+            "description": getattr(config, "pipeline_description", "") or "",
+            "version": getattr(config, "pipeline_version", ""),
+            "schema_error": str(e),
+        }
+    inputs = _as_ports(getattr(config, "inputs", ["video"]) or ["video"])
+    # Every prompt-capable pipeline (the BasePipelineConfig default) gets a
+    # `prompts` string input for free so a backend node — e.g. a Prompt
+    # Enhancer — can feed the same handle the UI exposes as "Enter prompt…"
+    # without the pipeline having to declare the port itself.
+    if getattr(config, "supports_prompts", False) and not any(
+        p.name == "prompts" for p in inputs
+    ):
+        inputs.append(NodePort(name="prompts", port_type="string"))
+    return NodeDefinition(
+        node_type_id=config.pipeline_id,
+        display_name=getattr(config, "pipeline_name", config.pipeline_id),
+        category="pipeline",
+        description=getattr(config, "pipeline_description", "") or "",
+        inputs=inputs,
+        outputs=_as_ports(getattr(config, "outputs", ["video"]) or ["video"]),
+        params=[],
+        continuous=False,
+        pipeline_meta=pipeline_meta,
+    )
+
+
+def _as_ports(entries: list[Any]) -> list[NodePort]:
+    """Normalise a config ``inputs``/``outputs`` list into :class:`NodePort`.
+
+    Supports mixed lists: a plain string is treated as a ``"video"`` port
+    (matches the original per-pipeline convention), while a :class:`NodePort`
+    entry passes through unchanged so pipelines can declare non-video ports
+    the same way scheduler-style nodes do.
+    """
+    ports: list[NodePort] = []
+    for entry in entries:
+        if isinstance(entry, NodePort):
+            ports.append(entry)
+        else:
+            ports.append(NodePort(name=str(entry), port_type="video"))
+    return ports

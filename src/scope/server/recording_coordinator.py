@@ -7,18 +7,21 @@ class.  FrameProcessor delegates all recording-related calls here.
 import logging
 import queue
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
-import torch
+from .media_packets import VideoPacket, ensure_video_packet
 
-from .media_packets import ensure_video_packet
+if TYPE_CHECKING:
+    from .recording import RecordingManager
+    from .tracks import QueueVideoTrack
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
 class _RecordingEntry:
-    manager: object  # RecordingManager
-    track: object  # QueueVideoTrack
+    manager: "RecordingManager"
+    track: "QueueVideoTrack"
     stopped_file: str | None = None  # File path after stop (before download)
 
 
@@ -89,34 +92,20 @@ class RecordingCoordinator:
             except queue.Empty:
                 return dropped
 
-    def get(self, record_node_id: str) -> torch.Tensor | None:
-        """Read a frame from a record node's output queue."""
+    def get_packet(self, record_node_id: str) -> VideoPacket | None:
+        """Read a packet from a record node's output queue."""
         rec_q = self._record_queues.get(record_node_id)
         if rec_q is None:
             return None
         try:
-            frame = ensure_video_packet(rec_q.get_nowait()).tensor
+            packet = ensure_video_packet(rec_q.get_nowait())
+            frame = packet.tensor
             frame = frame.squeeze(0)
             if frame.is_cuda:
                 frame = frame.cpu()
-            return frame
+            return VideoPacket(tensor=frame, timestamp=packet.timestamp)
         except queue.Empty:
             return None
-
-    def put(self, record_node_id: str, frame: torch.Tensor) -> bool:
-        """Write a frame into a record node's queue (cloud mode).
-
-        Returns True if the frame was enqueued, False if the queue is
-        missing or full.
-        """
-        rec_q = self._record_queues.get(record_node_id)
-        if rec_q is None:
-            return False
-        try:
-            rec_q.put_nowait(frame)
-            return True
-        except queue.Full:
-            return False
 
     # ------------------------------------------------------------------
     # Recording lifecycle

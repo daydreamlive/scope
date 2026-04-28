@@ -521,6 +521,10 @@ export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
 };
 
 export const getAssetUrl = (assetPath: string): string => {
+  if (assetPath.startsWith("blob:") || assetPath.startsWith("data:")) {
+    return assetPath;
+  }
+
   // The backend returns full absolute paths, but we need to extract the relative path
   // from the assets directory for the serving endpoint
   // Example: C:\Users\...\assets\myimage.png -> myimage.png
@@ -969,6 +973,8 @@ export interface NodeDefinitionDto {
    * underlying class is a Pipeline subclass. ``null`` for plain nodes.
    */
   pipeline_meta?: Record<string, unknown> | null;
+  /** Python package name that provides this node, or null for built-ins. */
+  plugin_name?: string | null;
 }
 
 export interface NodeDefinitionsResponse {
