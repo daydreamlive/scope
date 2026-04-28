@@ -624,15 +624,15 @@ export function useGraphPersistence({
       edgesRef.current
     );
     // Merge parameterValues from node data (graph connections written by the
-    // RAF loop in useValueForwarding) with nodeParams (manual edits).  Manual
-    // edits take precedence so explicit user changes aren't overwritten.
+    // RAF loop in useValueForwarding) with nodeParams (manual edits). Connected
+    // values take precedence so stale saved defaults can't shadow graph edges.
     const mergedParams: Record<string, Record<string, unknown>> = {};
     for (const node of root.nodes) {
       if (node.data.nodeType !== "pipeline") continue;
       const fromData =
         (node.data.parameterValues as Record<string, unknown>) ?? {};
       const fromState = nodeParamsRef.current[node.id] ?? {};
-      const merged = { ...fromData, ...fromState };
+      const merged = { ...fromState, ...fromData };
       if (Object.keys(merged).length > 0) {
         mergedParams[node.id] = merged;
       }
