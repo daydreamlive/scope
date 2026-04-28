@@ -1299,6 +1299,13 @@ class PluginManager:
     ) -> dict[str, Any]:
         """Install a plugin.
 
+        After a successful ``uv pip install`` the new package's entry
+        points exist on disk but pluggy hasn't discovered them — without
+        a follow-up ``load_setuptools_entrypoints`` call the plugin's
+        nodes/input sources stay invisible until the server restarts.
+        Re-fire ``register_plugin_nodes`` so its hooks plant into the
+        live registry.
+
         Args:
             package: Package specifier (PyPI name, git URL, or local path)
             editable: Install in editable mode
@@ -1315,9 +1322,16 @@ class PluginManager:
             PluginNameCollisionError: If plugin with same name exists from different source
         """
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None, self._install_plugin_sync, package, editable, upgrade, pre, force
         )
+        if result.get("success"):
+            try:
+                self.load_plugins()
+                self.register_plugin_nodes()
+            except Exception as e:
+                logger.warning(f"Failed to activate plugin after install: {e}")
+        return result
 
     def _install_plugin_sync(
         self,
