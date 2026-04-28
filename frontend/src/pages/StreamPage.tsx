@@ -3187,13 +3187,16 @@ export function StreamPage() {
           params = await rewriteAssetFields(
             initialParameters,
             [
-              // Only rewrite preview-page initial parameter fields here; other
-              // graph node media types like audio are forwarded separately and
-              // are not part of this initialParameters payload.
+              // Rewrite known media fields present in initialParameters.
+              // Graph media nodes may also feed these fields through graph
+              // node params; separate graph media forwarding still happens
+              // through useValueForwarding during streaming.
               { key: "images", kind: "image" },
               { key: "vace_ref_images", kind: "image" },
               { key: "first_frame_image", kind: "image" },
               { key: "last_frame_image", kind: "image" },
+              { key: "i2v_image", kind: "image" },
+              { key: "audio_input", kind: "audio" },
             ],
             uploadCacheRef.current
           );
