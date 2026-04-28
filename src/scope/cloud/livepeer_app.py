@@ -19,6 +19,7 @@ import queue
 import shutil
 import threading
 import uuid
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -124,6 +125,13 @@ class LivepeerSession:
     manifest_id: str | None = None
     session_id: str | None = None
     connection_info: dict[str, Any] | None = None
+    # Serializes every write on ``ws`` so concurrent senders (control-message
+    # responders, the notification pump, etc.) cannot interleave at the ASGI
+    # send boundary and corrupt the websocket stream.
+    ws_send_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+    notification_listener: Callable[[dict], None] | None = None
+    notification_queue: asyncio.Queue[str | None] | None = None
+    notification_pump_task: asyncio.Task | None = None
 
 
 def _build_connection_info() -> dict[str, Any]:
@@ -144,6 +152,38 @@ def _build_connection_info() -> dict[str, Any]:
         "fal_runner_id": os.getenv("FAL_JOB_ID", os.getenv("FAL_RUNNER_ID", "unknown")),
         "fal_log_labels": fal_log_labels,
     }
+
+
+async def _ws_send_json_locked(
+    session: LivepeerSession, payload: dict[str, Any]
+) -> None:
+    """Send a JSON payload on ``session.ws`` under the per-session send lock.
+
+    Every write site that targets ``session.ws`` must go through this helper
+    (or :func:`_ws_send_text_locked`). Concurrent direct ``send_json`` /
+    ``send_text`` calls on the same WebSocket can interleave at the ASGI send
+    boundary because Starlette does not lock around its lower-level send,
+    which corrupts the protocol stream and tears the connection.
+    """
+    ws = session.ws
+    if ws is None:
+        return
+    async with session.ws_send_lock:
+        await ws.send_json(payload)
+
+
+async def _ws_send_text_locked(session: LivepeerSession, text: str) -> None:
+    """Send a pre-serialized text frame on ``session.ws`` under the send lock.
+
+    Used by the notification pump, which serializes payloads in the worker
+    thread (so we never feed Starlette an unserializable value) and then
+    hands the resulting JSON string to the pump.
+    """
+    ws = session.ws
+    if ws is None:
+        return
+    async with session.ws_send_lock:
+        await ws.send_text(text)
 
 
 async def _shutdown_task(
@@ -261,13 +301,14 @@ async def _request_stream_channels(
     loop = asyncio.get_running_loop()
     future: asyncio.Future[dict[str, Any]] = loop.create_future()
     session.ws_pending_responses[ws_request_id] = future
-    await session.ws.send_json(
+    await _ws_send_json_locked(
+        session,
         {
             "type": "create_channels",
             "request_id": ws_request_id,
             "mime_type": mime_type,
             "direction": direction,
-        }
+        },
     )
     try:
         ws_response = await asyncio.wait_for(future, timeout=5.0)
@@ -309,11 +350,12 @@ async def _request_restart(session: LivepeerSession) -> None:
     future: asyncio.Future[dict[str, Any]] = loop.create_future()
     session.ws_pending_responses[ws_request_id] = future
     # This should stop keepalives on the server.
-    await session.ws.send_json(
+    await _ws_send_json_locked(
+        session,
         {
             "type": "restarting",
             "request_id": ws_request_id,
-        }
+        },
     )
     try:
         ws_response = await asyncio.wait_for(future, timeout=5.0)
@@ -353,6 +395,31 @@ async def _stop_stream(session: LivepeerSession) -> None:
             await _shutdown_task(task, task_name=f"media_output[{i}]")
         await _shutdown_task(media_stats_task, task_name="media_stats")
 
+        if session.notification_listener is not None:
+            webrtc_manager = scope_app_module.webrtc_manager
+            if webrtc_manager is not None:
+                webrtc_manager.remove_notification_listener(
+                    session.notification_listener
+                )
+            session.notification_listener = None
+
+        # Stop the notification pump after deregistering the listener so no
+        # new messages can be enqueued while we drain.
+        pump_task = session.notification_pump_task
+        if pump_task is not None:
+            queue = session.notification_queue
+            if queue is not None:
+                try:
+                    queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    pump_task.cancel()
+            try:
+                await pump_task
+            except asyncio.CancelledError:
+                pass
+            session.notification_pump_task = None
+            session.notification_queue = None
+
         if session.frame_processor is not None:
             session.frame_processor.stop()
             session.frame_processor = None
@@ -370,8 +437,9 @@ async def _stop_stream(session: LivepeerSession) -> None:
         if session.active_channels:
             channel_urls = [ch["url"] for ch in session.active_channels]
             try:
-                await session.ws.send_json(
-                    {"type": "close_channels", "channels": channel_urls}
+                await _ws_send_json_locked(
+                    session,
+                    {"type": "close_channels", "channels": channel_urls},
                 )
             except Exception as exc:
                 logger.warning("Failed to send close_channels over websocket: %s", exc)
@@ -1056,6 +1124,86 @@ async def _handle_control_message(
             connection_info=session.connection_info,
         )
         session.frame_processor.start()
+
+        # Forward runner-side notifications (e.g. parameters_updated emitted
+        # when an upstream node feeds a new value into a pipeline's scalar
+        # input port) to the local Scope over the websocket. The local
+        # ``LivepeerClient._events_loop`` re-broadcasts these onto the
+        # browser data channel so widgets like the Prompt textarea reflect
+        # backend-produced values in cloud mode the same way they do
+        # locally.
+        #
+        # Three properties this design relies on:
+        #
+        # 1. The listener fires from a worker thread (pipeline_processor's
+        #    drain loop). It must NOT touch the websocket directly. Instead
+        #    it serializes the payload in the worker thread (so non-JSON
+        #    values like Pydantic models surface as a single dropped message
+        #    rather than a write-time TypeError that taints the connection)
+        #    and hands the resulting string to the runner loop.
+        # 2. A single async pump task is the only writer of notification
+        #    frames, so we never schedule overlapping ``send_json`` calls.
+        # 3. The pump still goes through ``_ws_send_text_locked`` so it
+        #    serializes against unrelated senders on the same WebSocket
+        #    (control-message responders, pong, _stop_stream's
+        #    close_channels) — Starlette doesn't lock its underlying ASGI
+        #    send, so concurrent writes can corrupt the stream.
+        runner_loop = asyncio.get_running_loop()
+        webrtc_manager = scope_app_module.webrtc_manager
+        notification_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=256)
+
+        async def _notification_pump() -> None:
+            try:
+                while True:
+                    text = await notification_queue.get()
+                    if text is None:
+                        break
+                    try:
+                        await _ws_send_text_locked(session, text)
+                    except Exception:
+                        logger.debug(
+                            "Failed to forward notification over websocket",
+                            exc_info=True,
+                        )
+            except asyncio.CancelledError:
+                pass
+
+        def _enqueue_notification(text: str) -> None:
+            queue = session.notification_queue
+            if queue is None:
+                return
+            # Drop oldest on overflow so a slow websocket can't unboundedly
+            # grow runner memory.
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                queue.put_nowait(text)
+            except asyncio.QueueFull:
+                pass
+
+        def _forward_notification(message: dict) -> None:
+            try:
+                text = json.dumps(
+                    {"type": "notification", "payload": message},
+                    default=str,
+                )
+            except Exception:
+                # Best-effort: a payload we can't serialize is dropped.
+                return
+            try:
+                runner_loop.call_soon_threadsafe(_enqueue_notification, text)
+            except RuntimeError:
+                # Loop is closing.
+                pass
+
+        session.notification_queue = notification_queue
+        session.notification_pump_task = asyncio.create_task(_notification_pump())
+        if webrtc_manager is not None:
+            webrtc_manager.add_notification_listener(_forward_notification)
+            session.notification_listener = _forward_notification
         # Emit session_created so livepeer-mode event streams match the
         # cloud-relay shape (webrtc.py:731 fires this in relay mode; we
         # mirror it here because livepeer doesn't go through the WebRTC
@@ -1447,12 +1595,13 @@ async def websocket_endpoint(ws: WebSocket) -> None:
                 if not pending.done():
                     pending.set_result(message)
             elif msg_type == "ping":
-                await ws.send_json(
+                await _ws_send_json_locked(
+                    session,
                     {
                         "type": "pong",
                         "request_id": message.get("request_id"),
                         "timestamp": message.get("timestamp"),
-                    }
+                    },
                 )
             else:
                 logger.debug("Ignoring websocket message type: %s", msg_type)

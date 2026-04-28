@@ -829,6 +829,10 @@ class LivepeerClient:
                     _handle_cloud_logs(event)
                     continue
 
+                if msg_type == "notification":
+                    _forward_runner_notification(event.get("payload"))
+                    continue
+
                 logger.debug(f"Event: {event}")
         except asyncio.CancelledError:
             pass
@@ -1233,3 +1237,26 @@ def _handle_cloud_logs(data: dict[str, Any]) -> None:
         elif " - DEBUG - " in line:
             level = logging.DEBUG
         cloud_logger.log(level, "%s", line)
+
+
+def _forward_runner_notification(payload: Any) -> None:
+    """Re-broadcast a runner-side notification onto the local data channels.
+
+    The cloud runner emits these whenever its pipeline_processor would
+    have called ``broadcast_notification`` locally — e.g. after draining
+    a scalar input port that an upstream node fed into a pipeline. The
+    browser already knows how to render ``parameters_updated`` payloads,
+    so once we hand it to the local ``webrtc_manager`` the existing
+    widget refresh path takes over.
+    """
+    if not isinstance(payload, dict):
+        return
+    from . import app as _app
+
+    manager = getattr(_app, "webrtc_manager", None)
+    if manager is None:
+        return
+    try:
+        manager.broadcast_notification(payload)
+    except Exception:
+        logger.debug("Failed to re-broadcast runner notification", exc_info=True)

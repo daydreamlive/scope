@@ -307,6 +307,10 @@ class WebRTCManager:
         self.headless_session: HeadlessSession | None = None
         self.rtc_config = create_rtc_config()
         self.is_first_track = True
+        # External listeners for notifications. Used by livepeer cloud mode
+        # to forward runner-side notifications back to the local Scope over
+        # the websocket — see ``src/scope/cloud/livepeer_app.py``.
+        self._notification_listeners: list[Callable[[dict], None]] = []
 
     async def handle_offer(
         self,
@@ -1302,12 +1306,32 @@ class WebRTCManager:
         if self.headless_session and self.headless_session.frame_processor:
             self.headless_session.frame_processor.update_parameters(parameters)
 
+    def add_notification_listener(self, listener: Callable[[dict], None]) -> None:
+        """Register a callback that receives every broadcast notification.
+
+        Cloud-runner livepeer mode uses this to forward notifications
+        produced by pipeline_processor (e.g. ``parameters_updated``) over
+        the websocket to the local Scope, since the runner has no WebRTC
+        sessions of its own.
+        """
+        self._notification_listeners.append(listener)
+
+    def remove_notification_listener(self, listener: Callable[[dict], None]) -> None:
+        """Drop a previously registered notification listener."""
+        try:
+            self._notification_listeners.remove(listener)
+        except ValueError:
+            pass
+
     def broadcast_notification(self, message: dict) -> None:
         """Send a notification to active sessions via their data channels.
 
         Safe to call from worker threads: sends are marshalled onto the
         aiortc event loop through each session's :class:`NotificationSender`,
         which also buffers messages until the data channel is open.
+        Registered notification listeners (see
+        :meth:`add_notification_listener`) are also fired so cloud-runner
+        livepeer mode can forward the message to the local Scope.
         """
         for session in self.sessions.values():
             if session.pc.connectionState in ("closed", "failed"):
@@ -1316,6 +1340,11 @@ class WebRTCManager:
             if sender is None:
                 continue
             sender.call(message)
+        for listener in list(self._notification_listeners):
+            try:
+                listener(message)
+            except Exception:
+                logger.debug("Notification listener failed", exc_info=True)
 
     async def stop(self):
         """Close and cleanup all sessions (WebRTC and headless)."""
