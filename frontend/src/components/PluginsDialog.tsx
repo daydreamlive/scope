@@ -74,6 +74,8 @@ export function PluginsDialog({
         update_available: p.update_available,
         package_spec: p.package_spec,
         bundled: p.bundled,
+        kind: p.kind,
+        origin: p.origin,
       })),
     [pluginInfos]
   );
@@ -105,6 +107,28 @@ export function PluginsDialog({
     }
   };
 
+  // Restart the server and refresh plugins+pipelines. Refresh runs even
+  // if the restart wait times out (e.g. the cloud's restart took longer
+  // than the local poll budget) — the install/uninstall/reload itself
+  // already succeeded server-side, so the UI should pick up the new
+  // state regardless. Returns a label for the toast.
+  const restartAndRefresh = async (
+    successLabel: string,
+    fallbackLabel: string
+  ): Promise<string> => {
+    let label = successLabel;
+    try {
+      const oldStartTime = await restartServer();
+      await waitForServer(oldStartTime);
+    } catch (e) {
+      console.warn("Server restart wait did not complete:", e);
+      label = fallbackLabel;
+    }
+    await refreshPlugins();
+    await refetchPipelines();
+    return label;
+  };
+
   const handleInstallPlugin = async (packageSpec: string) => {
     setIsInstalling(true);
     isModifyingPluginsRef.current = true;
@@ -121,12 +145,11 @@ export function PluginsDialog({
         });
         setPluginInstallPath("");
 
-        const oldStartTime = await restartServer();
-        await waitForServer(oldStartTime);
-        toast.success("Server restarted", { id: toastId });
-
-        await refreshPlugins();
-        await refetchPipelines();
+        const label = await restartAndRefresh(
+          "Server restarted",
+          `Installed ${pluginName}`
+        );
+        toast.success(label, { id: toastId });
       } else {
         toast.error(response.message, { id: toastId });
       }
@@ -158,13 +181,11 @@ export function PluginsDialog({
         toast.loading(`Updated ${pluginName}. Restarting server...`, {
           id: toastId,
         });
-
-        const oldStartTime = await restartServer();
-        await waitForServer(oldStartTime);
-        toast.success("Server restarted", { id: toastId });
-
-        await refreshPlugins();
-        await refetchPipelines();
+        const label = await restartAndRefresh(
+          "Server restarted",
+          `Updated ${pluginName}`
+        );
+        toast.success(label, { id: toastId });
       } else {
         toast.error(response.message, { id: toastId });
       }
@@ -189,13 +210,11 @@ export function PluginsDialog({
         toast.loading(`Uninstalled ${pluginName}. Restarting server...`, {
           id: toastId,
         });
-
-        const oldStartTime = await restartServer();
-        await waitForServer(oldStartTime);
-        toast.success("Server restarted", { id: toastId });
-
-        await refreshPlugins();
-        await refetchPipelines();
+        const label = await restartAndRefresh(
+          "Server restarted",
+          `Uninstalled ${pluginName}`
+        );
+        toast.success(label, { id: toastId });
       } else {
         toast.error(response.message, { id: toastId });
       }
@@ -214,11 +233,11 @@ export function PluginsDialog({
     isModifyingPluginsRef.current = true;
     try {
       toast.info(`Reloading ${pluginName}. Restarting server...`);
-      const oldStartTime = await restartServer();
-      await waitForServer(oldStartTime);
-      toast.success("Server restarted");
-      await refreshPlugins();
-      await refetchPipelines();
+      const label = await restartAndRefresh(
+        "Server restarted",
+        `Reloaded ${pluginName}`
+      );
+      toast.success(label);
     } catch (error) {
       toast.error(
         error instanceof Error ? error.message : "Failed to reload node"
