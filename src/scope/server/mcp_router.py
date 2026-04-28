@@ -281,13 +281,15 @@ async def start_stream(
                 pipeline_tuples.append((node.id, node.node_type_id, None))
         pipeline_id_list = [t[1] for t in pipeline_tuples]
 
-        unknown = [p for p in pipeline_id_list if not PipelineRegistry.is_registered(p)]
+        # Validate against NodeRegistry — after the Pipeline/Node unification
+        # (#980), pipelines and plain custom nodes share one registry.
+        unknown = [p for p in pipeline_id_list if not NodeRegistry.is_registered(p)]
         if unknown:
             raise HTTPException(
                 status_code=400,
                 detail=(
-                    f"Unknown pipeline_id(s): {unknown}. "
-                    f"Known: {PipelineRegistry.list_pipelines()}"
+                    f"Unknown node type(s): {unknown}. "
+                    f"Known: {NodeRegistry.list_node_types()}"
                 ),
             )
 
