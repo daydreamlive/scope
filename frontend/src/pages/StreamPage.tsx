@@ -2784,8 +2784,24 @@ export function StreamPage() {
 
       const loadItems: PipelineLoadItem[] = graphConfigForStream
         ? graphConfigForStream.nodes
-            .filter(n => n.type === "pipeline" && n.pipeline_id)
+            .filter(
+              n =>
+                (n.type === "pipeline" && n.pipeline_id) ||
+                (n.type === "node" && n.node_type_id)
+            )
             .map(n => {
+              // Plain nodes (type="node") share the same registry as
+              // pipelines after the node/pipeline unification, so route
+              // them through /pipeline/load too. Their classes either
+              // ignore load_params or read defaults from per-node params
+              // at runtime, so an empty load_params is sufficient here.
+              if (n.type === "node") {
+                return {
+                  node_id: n.id,
+                  pipeline_id: n.node_type_id as string,
+                  load_params: {},
+                };
+              }
               const pid = n.pipeline_id as string;
               const pipeSchema = pipelines?.[pid];
               const nodeLoadParams = { ...(loadParams ?? {}) };

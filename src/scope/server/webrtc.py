@@ -419,10 +419,6 @@ class WebRTCManager:
                             logger.info(
                                 f"Re-keyed pipeline {pid} as {node['id']} for graph"
                             )
-                # Plain custom nodes aren't pre-loaded via /pipeline/load,
-                # but the graph executor still resolves them through the
-                # PipelineManager — so instantiate and register them here.
-                pipeline_manager.register_graph_nodes(graph_data)
 
             # Create FrameProcessor (owned by session, shared between tracks)
             frame_processor = FrameProcessor(
