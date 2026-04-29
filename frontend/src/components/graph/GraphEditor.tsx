@@ -73,6 +73,7 @@ import {
 import { createDaydreamImportSession } from "../../lib/daydreamExport";
 import { openExternalUrl } from "../../lib/openExternal";
 import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
+import { OscConfigDialog } from "./OscConfigDialog";
 import type { FlowNodeData } from "../../lib/graphUtils";
 import {
   AlertDialog,
@@ -87,6 +88,7 @@ import {
 
 import { useRightClickSelect } from "./hooks/ui/useRightClickSelect";
 import { useGraphState } from "./hooks/graph/useGraphState";
+import { useOscInventory } from "./hooks/graph/useOscInventory";
 import { useConnectionLogic } from "./hooks/connection/useConnectionLogic";
 import { useNodeFactories } from "./hooks/node/useNodeFactories";
 import { useValueForwarding } from "./hooks/value/useValueForwarding";
@@ -408,6 +410,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     const [showExportDialog, setShowExportDialog] = useState(false);
     const [showWorkflowExport, setShowWorkflowExport] = useState(false);
     const [showShortcutsDialog, setShowShortcutsDialog] = useState(false);
+    // Per-node Configure OSC modal: stores the id of the node being configured.
+    const [oscConfigNodeId, setOscConfigNodeId] = useState<string | null>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [isDaydreamAuthenticated, setIsDaydreamAuthenticated] = useState(
       checkIsAuthenticated()
@@ -919,6 +923,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
 
     useParentValueBridge(navStackRef, navDepth, setNodes);
     useSubgraphEval(nodes, edges, setNodes, visible);
+    // Push the user-curated OSC inventory to the backend whenever the
+    // graph or any node's oscConfig overlay changes.
+    useOscInventory(nodes);
 
     resolveRootGraphRef.current = getRootGraph;
     resetNavigationRef.current = resetStack;
@@ -1319,6 +1326,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                         handleEnterSubgraph,
                         unpackSubgraph,
                         createSubgraphFromSelection,
+                        openOscConfig: id => setOscConfigNodeId(id),
                       })
                 }
               />
@@ -1481,6 +1489,29 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           <KeyboardShortcutsDialog
             open={showShortcutsDialog}
             onOpenChange={setShowShortcutsDialog}
+          />
+
+          <OscConfigDialog
+            open={oscConfigNodeId !== null}
+            onOpenChange={open => {
+              if (!open) setOscConfigNodeId(null);
+            }}
+            node={
+              oscConfigNodeId
+                ? (nodes.find(n => n.id === oscConfigNodeId) ?? null)
+                : null
+            }
+            onSave={oscConfig => {
+              if (!oscConfigNodeId) return;
+              const targetId = oscConfigNodeId;
+              setNodes(nds =>
+                nds.map(n =>
+                  n.id === targetId
+                    ? { ...n, data: { ...n.data, oscConfig } }
+                    : n
+                )
+              );
+            }}
           />
         </div>
       </div>

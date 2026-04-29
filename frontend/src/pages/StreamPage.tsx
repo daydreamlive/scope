@@ -114,6 +114,10 @@ import { trackEvent } from "../lib/analytics";
 interface OscCommand {
   key: string;
   value: unknown;
+  /** Set by the OSC server when the path is bound to a specific React Flow node. */
+  node_id?: string;
+  /** The node-data field name to update (e.g. "value" for a slider). */
+  param?: string;
 }
 
 // Delay before resetting video reinitialization flag (ms)
@@ -1938,7 +1942,19 @@ export function StreamPage() {
   // Keep the OSC command handler ref in sync with current state/handlers
   useEffect(() => {
     oscCommandHandlerRef.current = (cmd: OscCommand) => {
-      const { key, value } = cmd;
+      const { key, value, node_id, param } = cmd;
+
+      // Node-scoped path (e.g. /scope/tempo/value with node_id set):
+      // route directly to the matching React Flow node so per-node
+      // params (Slider, Knobs, Source, etc.) update without going
+      // through the flat-key switch below.
+      if (node_id && param) {
+        graphEditorRef.current?.applyExternalParams(
+          { [param]: value },
+          node_id
+        );
+        return;
+      }
 
       switch (key) {
         case "prompt": {

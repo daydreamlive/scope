@@ -191,6 +191,23 @@ export function usePipelineParams({
       }
       if (Object.keys(patch).length === 0) return;
 
+      // For a non-pipeline target (Slider, Source, Bool, XYPad, etc.) the
+      // value must land directly on `node.data` — these nodes read their
+      // state from data fields, not from the pipeline `nodeParams` map.
+      if (targetNodeId) {
+        const targetNode = nodesRef.current.find(n => n.id === targetNodeId);
+        if (targetNode && targetNode.data.nodeType !== "pipeline") {
+          setNodes(nds =>
+            nds.map(n =>
+              n.id === targetNodeId
+                ? { ...n, data: { ...n.data, ...patch } }
+                : n
+            )
+          );
+          return;
+        }
+      }
+
       setNodeParams(prev => {
         const next = { ...prev };
         if (targetNodeId) {
