@@ -12,13 +12,14 @@ import { Input } from "../ui/input";
 import type { Node } from "@xyflow/react";
 import type { FlowNodeData, OscParamConfig } from "../../lib/graphUtils";
 import {
+  coerceDefaultForType,
   getNodeOscParams,
+  pickPipelineOscParams,
   readNodeParamValue,
   slugifyForOsc,
   type OscParamDescriptor,
 } from "../../lib/oscNodeParams";
 import { usePipelinesContext } from "../../contexts/PipelinesContext";
-import type { PipelineSchemaProperty } from "../../lib/api";
 
 interface OscConfigDialogProps {
   open: boolean;
@@ -58,33 +59,7 @@ export function OscConfigDialog({
     if (node.type === "pipeline") {
       const pid = node.data.pipelineId;
       if (!pid || !pipelines || !pipelines[pid]) return [];
-      const schema = pipelines[pid].configSchema;
-      if (!schema) return [];
-      const out: OscParamDescriptor[] = [];
-      for (const [key, rawProp] of Object.entries(schema.properties)) {
-        const prop = rawProp as PipelineSchemaProperty;
-        const ui = prop.ui;
-        if (ui?.is_load_param !== false) continue; // runtime params only
-        const t = String(prop.type ?? "any");
-        const oscType =
-          t === "number"
-            ? "float"
-            : t === "integer"
-              ? "integer"
-              : t === "boolean"
-                ? "bool"
-                : "string";
-        out.push({
-          name: key,
-          label: (ui as { label?: string } | undefined)?.label ?? key,
-          type: oscType,
-          min: prop.minimum as number | undefined,
-          max: prop.maximum as number | undefined,
-          enum: prop.enum as string[] | undefined,
-          description: (prop.description as string | undefined) ?? "",
-        });
-      }
-      return out;
+      return pickPipelineOscParams(pipelines[pid].configSchema);
     }
     return getNodeOscParams(node.type);
   }, [node, pipelines]);
@@ -113,12 +88,26 @@ export function OscConfigDialog({
   };
 
   const handleSave = () => {
-    // Drop rows where exposed is false AND no override fields, to keep the
-    // saved map small.
+    // Coerce each row's default to the descriptor's declared type so the
+    // OSC docs publish typed values (e.g. 0.85, true, [1,2,3]) instead of
+    // the raw strings the modal's text inputs return.
+    const descByName = new Map(descriptors.map(d => [d.name, d]));
     const cleaned: Record<string, OscParamConfig> = {};
     for (const [k, v] of Object.entries(staged)) {
-      if (v.exposed || v.address || v.default !== undefined) {
-        cleaned[k] = v;
+      const desc = descByName.get(k);
+      const coerced = desc
+        ? coerceDefaultForType(v.default, desc.type)
+        : v.default;
+      const entry: OscParamConfig = { ...v };
+      if (coerced === undefined) {
+        delete entry.default;
+      } else {
+        entry.default = coerced;
+      }
+      // Drop rows where exposed is false AND no override fields, to keep
+      // the saved map small.
+      if (entry.exposed || entry.address || entry.default !== undefined) {
+        cleaned[k] = entry;
       }
     }
     onSave(cleaned);

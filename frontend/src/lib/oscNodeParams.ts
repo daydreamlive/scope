@@ -11,6 +11,7 @@
  * that can be added in a follow-up without a breaking API change.
  */
 import type { FlowNodeData } from "./graphUtils";
+import type { PipelineConfigSchema, PipelineSchemaProperty } from "./api";
 
 export type OscParamType =
   | "float"
@@ -172,4 +173,95 @@ export function readNodeParamValue(
 ): unknown {
   if (!data) return undefined;
   return (data as Record<string, unknown>)[descriptor.name];
+}
+
+function oscTypeFromSchema(prop: PipelineSchemaProperty): OscParamType {
+  const t = String(prop.type ?? "any");
+  if (t === "number") return "float";
+  if (t === "integer") return "integer";
+  if (t === "boolean") return "bool";
+  if (t === "array") {
+    const items = prop.items as { type?: string } | undefined;
+    if (items?.type === "integer") return "integer_list";
+  }
+  return "string";
+}
+
+/**
+ * Convert a pipeline's JSON-Schema config into OSC param descriptors.
+ *
+ * Only runtime params (`ui.is_load_param === false`) are exposed — load-time
+ * params don't make sense to drive over OSC.
+ */
+export function pickPipelineOscParams(
+  schema: PipelineConfigSchema | null | undefined
+): OscParamDescriptor[] {
+  if (!schema) return [];
+  const out: OscParamDescriptor[] = [];
+  for (const [key, rawProp] of Object.entries(schema.properties)) {
+    const prop = rawProp as PipelineSchemaProperty;
+    const ui = prop.ui;
+    if (ui?.is_load_param !== false) continue;
+    out.push({
+      name: key,
+      label: (ui as { label?: string } | undefined)?.label ?? key,
+      type: oscTypeFromSchema(prop),
+      min: prop.minimum,
+      max: prop.maximum,
+      enum: prop.enum as string[] | undefined,
+      description: prop.description ?? "",
+    });
+  }
+  return out;
+}
+
+/**
+ * Coerce a user-typed default (always a string from the modal's text input)
+ * to the descriptor's declared type. Returns `undefined` for empty or
+ * un-parseable input — callers treat that as "no default set".
+ *
+ * For `integer_list`, accepts comma- or space-separated integers
+ * (e.g. `"1, 2, 3"` or `"1 2 3"`).
+ */
+export function coerceDefaultForType(
+  raw: unknown,
+  type: OscParamType
+): unknown {
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "string") return raw;
+  const trimmed = raw.trim();
+  if (trimmed === "") return undefined;
+  switch (type) {
+    case "float": {
+      const n = Number(trimmed);
+      return Number.isFinite(n) ? n : undefined;
+    }
+    case "integer": {
+      const n = Number(trimmed);
+      if (!Number.isFinite(n)) return undefined;
+      const i = Math.trunc(n);
+      return i === n ? i : undefined;
+    }
+    case "bool": {
+      const lower = trimmed.toLowerCase();
+      if (["true", "1", "yes", "on"].includes(lower)) return true;
+      if (["false", "0", "no", "off"].includes(lower)) return false;
+      return undefined;
+    }
+    case "integer_list": {
+      const parts = trimmed.split(/[\s,]+/).filter(Boolean);
+      const ints: number[] = [];
+      for (const p of parts) {
+        const n = Number(p);
+        if (!Number.isFinite(n)) return undefined;
+        const i = Math.trunc(n);
+        if (i !== n) return undefined;
+        ints.push(i);
+      }
+      return ints.length > 0 ? ints : undefined;
+    }
+    case "string":
+    default:
+      return trimmed;
+  }
 }

@@ -3,25 +3,13 @@ import type { Node } from "@xyflow/react";
 import type { FlowNodeData, OscParamConfig } from "../../../../lib/graphUtils";
 import {
   getNodeOscParams,
+  pickPipelineOscParams,
   readNodeParamValue,
   slugifyForOsc,
   type OscParamDescriptor,
 } from "../../../../lib/oscNodeParams";
 import { setOscInventory, type OscInventoryEntry } from "../../../../lib/api";
 import { usePipelinesContext } from "../../../../contexts/PipelinesContext";
-import type { PipelineSchemaProperty } from "../../../../lib/api";
-
-/**
- * Map a frontend OSC type to the JSON schema string the backend expects.
- * Mirrors `OscInventoryEntry["type"]` in api.ts.
- */
-function paramTypeFromSchema(prop: PipelineSchemaProperty): string {
-  const t = String(prop.type ?? "any");
-  if (t === "number") return "float";
-  if (t === "integer") return "integer";
-  if (t === "boolean") return "bool";
-  return "string";
-}
 
 interface ResolvedRow {
   descriptor: OscParamDescriptor;
@@ -78,26 +66,9 @@ export function useOscInventory(nodes: Node<FlowNodeData>[]): void {
       if (node.type === "pipeline") {
         const pid = node.data.pipelineId;
         if (pid && pipelines && pipelines[pid]) {
-          const schema = pipelines[pid].configSchema;
-          if (!schema) {
-            pipelineDescriptors = [];
-            continue;
-          }
-          pipelineDescriptors = [];
-          for (const [key, rawProp] of Object.entries(schema.properties)) {
-            const prop = rawProp as PipelineSchemaProperty;
-            const ui = prop.ui;
-            if (ui?.is_load_param !== false) continue;
-            pipelineDescriptors.push({
-              name: key,
-              label: (ui as { label?: string } | undefined)?.label ?? key,
-              type: paramTypeFromSchema(prop) as OscParamDescriptor["type"],
-              min: prop.minimum as number | undefined,
-              max: prop.maximum as number | undefined,
-              enum: prop.enum as string[] | undefined,
-              description: (prop.description as string | undefined) ?? "",
-            });
-          }
+          pipelineDescriptors = pickPipelineOscParams(
+            pipelines[pid].configSchema
+          );
         }
       }
 
