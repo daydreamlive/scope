@@ -338,8 +338,10 @@ class SourceManager:
     def setup_multi_sources(self, graph: Any) -> None:
         """Set up per-source-node input sources for non-WebRTC graph sources.
 
-        For source nodes with source_mode in (spout, ndi, syphon, video_file),
-        creates a separate InputSource + receiver thread for each one.
+        For each source node whose ``source_mode`` matches a registered
+        :class:`InputSource` (built-in or plugin-registered), creates a
+        separate receiver thread. WebRTC-driven modes (``video``, ``camera``)
+        have no registered class and are skipped.
         """
         from .graph_schema import GraphConfig
 
@@ -353,7 +355,11 @@ class SourceManager:
         for node in graph.nodes:
             if node.type != "source":
                 continue
-            if node.source_mode not in ("spout", "ndi", "syphon", "video_file"):
+            if not node.source_mode:
+                continue
+            source_class = input_source_classes.get(node.source_mode)
+            if source_class is None:
+                # WebRTC-driven source (video/camera) or truly unknown id.
                 continue
             source_name = node.source_name or ""
             node_id = node.id
@@ -361,8 +367,7 @@ class SourceManager:
             # Skip nodes without registered queues (unless handled by callback)
             if node_id not in self._source_queues_by_node and self._on_frame is None:
                 continue
-            source_class = input_source_classes.get(node.source_mode)
-            if source_class is None or not source_class.is_available():
+            if not source_class.is_available():
                 logger.warning(
                     f"Input source '{node.source_mode}' not available for node {node_id}"
                 )

@@ -50,6 +50,7 @@ export interface EnrichNodesDeps {
   spoutOutputAvailable: boolean;
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
+  availableInputSources: import("../../../lib/api").InputSourceType[];
   handleEdgeDelete: (edgeId: string) => void;
   isStreaming: boolean;
   isLoading: boolean;
@@ -171,6 +172,7 @@ export function enrichNodes(
           spoutAvailable: deps.spoutAvailable,
           ndiAvailable: deps.ndiAvailable,
           syphonAvailable: deps.syphonAvailable,
+          availableInputSources: deps.availableInputSources,
           onSpoutSourceChange: (name: string) =>
             deps.onSpoutSourceChangeRef.current?.(name),
           onNdiSourceChange: (identifier: string) =>

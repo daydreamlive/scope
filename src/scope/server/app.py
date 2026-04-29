@@ -16,7 +16,7 @@ from functools import wraps
 from importlib.metadata import version
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 import uvicorn
@@ -2788,6 +2788,29 @@ async def tail_logs(
 
 # Plugin Management API Endpoints
 
+SOURCE_KIND = "source"
+
+
+def _cloud_is_connected(cloud_manager: ScopeCloudBackend | None) -> bool:
+    """Return True iff *cloud_manager* is set and currently connected."""
+    return cloud_manager is not None and getattr(cloud_manager, "is_connected", False)
+
+
+async def _is_locally_installed(name: str) -> bool:
+    """Return True if *name* is currently installed in the local venv.
+
+    Used in cloud mode to decide whether uninstall/reload should target
+    the local instance (for source-kind plugins) or be proxied to cloud.
+    """
+    from scope.core.plugins import get_plugin_manager
+
+    try:
+        plugins = await get_plugin_manager().list_plugins_async(skip_update_check=True)
+    except Exception as e:
+        logger.warning(f"Local plugin listing failed during routing decision: {e}")
+        return False
+    return any(p.get("name") == name for p in plugins)
+
 
 def _convert_plugin_dict_to_info(plugin_dict: dict) -> "PluginInfo":
     """Convert a plugin dictionary from PluginManager to PluginInfo schema."""
@@ -2814,19 +2837,22 @@ def _convert_plugin_dict_to_info(plugin_dict: dict) -> "PluginInfo":
         update_available=plugin_dict.get("update_available"),
         package_spec=plugin_dict.get("package_spec"),
         bundled=plugin_dict.get("bundled", False),
+        kind=plugin_dict.get("kind"),
+        origin=plugin_dict.get("origin"),
     )
 
 
 @app.get("/api/v1/plugins")
-@cloud_proxy()
 async def list_plugins(
     http_request: Request,
     cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """List all installed plugins with metadata.
 
-    In cloud mode (when connected to cloud), this proxies the request to the
-    cloud-hosted scope backend.
+    In cloud mode the response merges plugins from the cloud-hosted scope
+    backend with any source-kind plugins installed locally. Each entry is
+    tagged with ``origin = "local" | "cloud"`` so the UI can distinguish
+    where each plugin runs.
     """
     from scope.core.plugins import get_plugin_manager
 
@@ -2838,11 +2864,29 @@ async def list_plugins(
 
     try:
         plugin_manager = get_plugin_manager()
-        plugins_data = await plugin_manager.list_plugins_async()
+        cloud_connected = _cloud_is_connected(cloud_manager)
 
-        plugins = [_convert_plugin_dict_to_info(p) for p in plugins_data]
+        if cloud_connected:
+            local_result, cloud_response = await asyncio.gather(
+                plugin_manager.list_plugins_async(),
+                _fetch_cloud_plugin_list(cloud_manager),
+                return_exceptions=True,
+            )
+            if isinstance(local_result, BaseException):
+                logger.warning(
+                    f"Local plugin listing failed in cloud mode; "
+                    f"returning cloud plugins only: {local_result}"
+                )
+                local_plugins_data = []
+            else:
+                local_plugins_data = local_result
+            if isinstance(cloud_response, BaseException):
+                cloud_response = None
+        else:
+            local_plugins_data = await plugin_manager.list_plugins_async()
+            cloud_response = None
 
-        failed = [
+        local_failed = [
             FailedPluginInfoSchema(
                 package_name=f.package_name,
                 entry_point_name=f.entry_point_name,
@@ -2852,8 +2896,37 @@ async def list_plugins(
             for f in plugin_manager.get_failed_plugins()
         ]
 
+        if cloud_connected:
+            # Only source-kind local plugins surface alongside cloud plugins;
+            # other local plugins are cloud-targeted and live under the cloud.
+            local_source_plugins = [
+                {**p, "origin": "local"}
+                for p in local_plugins_data
+                if p.get("kind") == SOURCE_KIND
+            ]
+            cloud_plugins_raw = [
+                {**p, "origin": "cloud"}
+                for p in (cloud_response or {}).get("plugins", [])
+            ]
+            combined = [
+                _convert_plugin_dict_to_info(p)
+                for p in (*local_source_plugins, *cloud_plugins_raw)
+            ]
+            cloud_failed = [
+                FailedPluginInfoSchema(**f)
+                for f in (cloud_response or {}).get("failed_plugins", [])
+            ]
+            response = PluginListResponse(
+                plugins=combined,
+                total=len(combined),
+                failed_plugins=[*local_failed, *cloud_failed],
+            )
+            _plugins_list_cache = response
+            return response
+
+        plugins = [_convert_plugin_dict_to_info(p) for p in local_plugins_data]
         response = PluginListResponse(
-            plugins=plugins, total=len(plugins), failed_plugins=failed
+            plugins=plugins, total=len(plugins), failed_plugins=local_failed
         )
         _plugins_list_cache = response
         return response
@@ -2862,8 +2935,30 @@ async def list_plugins(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+async def _fetch_cloud_plugin_list(
+    cloud_manager: ScopeCloudBackend,
+) -> dict[str, Any]:
+    """Fetch plugin list from cloud; return ``{"plugins": [], "failed_plugins": []}``
+    on failure so callers can merge unconditionally."""
+    try:
+        response = await proxy_with_body(
+            cloud_manager,
+            method="GET",
+            path="/api/v1/plugins",
+            body=None,
+            timeout=30.0,
+        )
+    except HTTPException as e:
+        logger.warning(f"Failed to fetch cloud plugin list: {e.detail}")
+        return {"plugins": [], "failed_plugins": []}
+    return (
+        response
+        if isinstance(response, dict)
+        else {"plugins": [], "failed_plugins": []}
+    )
+
+
 @app.post("/api/v1/plugins")
-@cloud_proxy(timeout=60.0)
 async def install_plugin(
     http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
@@ -2871,21 +2966,42 @@ async def install_plugin(
 ):
     """Install a plugin from PyPI, git URL, or local path.
 
-    In cloud mode (when connected to cloud), this proxies the request to the
-    cloud-hosted scope backend.
+    In cloud mode the request is proxied to the cloud-hosted scope backend
+    EXCEPT for source-kind plugins (declared via ``__scope_kind__`` in the
+    package's ``__init__.py``), which are always installed on the local
+    machine because their input frames originate locally.
     """
     from scope.core.plugins import (
         PluginDependencyError,
         PluginInstallError,
         PluginNameCollisionError,
         get_plugin_manager,
+        probe_plugin_kind,
     )
 
     from .schema import PluginInstallRequest, PluginInstallResponse
 
-    # Parse request body
     body = await http_request.json()
     install_request = PluginInstallRequest(**body)
+
+    if _cloud_is_connected(cloud_manager):
+        kind = probe_plugin_kind(install_request.package)
+        if kind != SOURCE_KIND:
+            logger.info(
+                f"Proxying plugin install to cloud "
+                f"(kind={kind!r}): {install_request.package}"
+            )
+            return await proxy_with_body(
+                cloud_manager,
+                method="POST",
+                path="/api/v1/plugins",
+                body=body,
+                timeout=60.0,
+            )
+        logger.info(
+            f"Installing source-kind plugin locally despite cloud mode: "
+            f"{install_request.package}"
+        )
 
     logger.info(f"Installing plugin: {install_request.package}")
     try:
@@ -2957,7 +3073,6 @@ async def install_plugin(
 
 
 @app.delete("/api/v1/plugins/{name}")
-@cloud_proxy(timeout=60.0)
 async def uninstall_plugin(
     name: str,
     http_request: Request,
@@ -2966,8 +3081,9 @@ async def uninstall_plugin(
 ):
     """Uninstall a plugin, cleaning up loaded pipelines.
 
-    In cloud mode (when connected to cloud), this proxies the request to the
-    cloud-hosted scope backend.
+    In cloud mode the request is proxied to the cloud-hosted scope backend
+    UNLESS the named plugin is installed locally (e.g. a source-kind
+    plugin), in which case it is uninstalled from the local venv.
     """
     from scope.core.plugins import (
         PluginInstallError,
@@ -2976,6 +3092,16 @@ async def uninstall_plugin(
     )
 
     from .schema import PluginUninstallResponse
+
+    if _cloud_is_connected(cloud_manager) and not await _is_locally_installed(name):
+        logger.info(f"Proxying plugin uninstall to cloud: {name}")
+        return await proxy_with_body(
+            cloud_manager,
+            method="DELETE",
+            path=f"/api/v1/plugins/{name}",
+            body=None,
+            timeout=60.0,
+        )
 
     logger.info(f"Uninstalling plugin: {name}")
     try:
@@ -3019,7 +3145,6 @@ async def uninstall_plugin(
 
 
 @app.post("/api/v1/plugins/{name}/reload")
-@cloud_proxy(timeout=60.0)
 async def reload_plugin(
     name: str,
     http_request: Request,
@@ -3028,8 +3153,9 @@ async def reload_plugin(
 ):
     """Reload an editable plugin for development (without server restart).
 
-    In cloud mode (when connected to cloud), this proxies the request to the
-    cloud-hosted scope backend.
+    In cloud mode the request is proxied to the cloud-hosted scope backend
+    UNLESS the named plugin is installed locally, in which case it is
+    reloaded in the local venv.
     """
     from scope.core.plugins import (
         PluginInUseError,
@@ -3043,6 +3169,16 @@ async def reload_plugin(
     # Parse request body
     body = await http_request.json()
     reload_request = PluginReloadRequest(**body)
+
+    if _cloud_is_connected(cloud_manager) and not await _is_locally_installed(name):
+        logger.info(f"Proxying plugin reload to cloud: {name}")
+        return await proxy_with_body(
+            cloud_manager,
+            method="POST",
+            path=f"/api/v1/plugins/{name}/reload",
+            body=body,
+            timeout=60.0,
+        )
 
     try:
         plugin_manager = get_plugin_manager()

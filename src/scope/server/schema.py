@@ -639,6 +639,22 @@ class PluginInfo(BaseModel):
         default=False,
         description="Whether this plugin is bundled and cannot be uninstalled",
     )
+    kind: str | None = Field(
+        default=None,
+        description=(
+            "Plugin kind from the package's ``__scope_kind__`` attribute. "
+            '``"source"`` means the plugin must run on the local machine even in '
+            "cloud mode; ``None`` (default) is treated as a regular pipeline plugin."
+        ),
+    )
+    origin: Literal["local", "cloud"] | None = Field(
+        default=None,
+        description=(
+            "Where this plugin record came from. Set by the server when merging "
+            "local source-kind plugins with cloud plugins in cloud mode; ``None`` "
+            "in single-instance mode."
+        ),
+    )
 
 
 class FailedPluginInfoSchema(BaseModel):

@@ -15,6 +15,7 @@ import {
   type PipelineSchemasResponse,
   type InputSourceType,
 } from "../lib/api";
+import { usePipelinesContext } from "../contexts/PipelinesContext";
 
 // Generic fallback defaults used before schemas are loaded.
 // Resolution and denoising steps use conservative values.
@@ -181,10 +182,14 @@ export function useStreamState() {
     null
   );
 
-  // Store available input sources from backend
+  // Store available input sources from backend. Refreshed on mount and
+  // whenever `pipelinesVersion` bumps (plugin install/update/delete/reload
+  // calls `refetchPipelines`, which bumps it), so newly-registered plugin
+  // input sources show up in the Source dropdown without a page reload.
   const [availableInputSources, setAvailableInputSources] = useState<
     InputSourceType[]
   >([]);
+  const { pipelinesVersion } = usePipelinesContext();
 
   // Function to refresh pipeline schemas (can be called externally)
   const refreshPipelineSchemas = useCallback(async () => {
@@ -239,12 +244,10 @@ export function useStreamState() {
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const [schemasResult, hardwareResult, inputSourcesResult] =
-          await Promise.allSettled([
-            getPipelineSchemas(),
-            getHardwareInfo(),
-            getInputSources(),
-          ]);
+        const [schemasResult, hardwareResult] = await Promise.allSettled([
+          getPipelineSchemas(),
+          getHardwareInfo(),
+        ]);
 
         if (schemasResult.status === "fulfilled") {
           const schemas = schemasResult.value;
@@ -282,22 +285,31 @@ export function useStreamState() {
             hardwareResult.reason
           );
         }
-
-        if (inputSourcesResult.status === "fulfilled") {
-          setAvailableInputSources(inputSourcesResult.value.input_sources);
-        } else {
-          console.error(
-            "useStreamState: Failed to fetch input sources:",
-            inputSourcesResult.reason
-          );
-        }
       } catch (error) {
         console.error("useStreamState: Failed to fetch initial data:", error);
       }
     };
 
     fetchInitialData();
-  }, [getPipelineSchemas, getHardwareInfo, getInputSources]);
+  }, [getPipelineSchemas, getHardwareInfo]);
+
+  // Fetch input sources on mount and whenever pipelines are refreshed.
+  // Plugin install/update/delete/reload calls `refetchPipelines`, which
+  // bumps `pipelinesVersion` — plugin-registered InputSources appear in
+  // the Source dropdown without requiring a browser refresh.
+  useEffect(() => {
+    let cancelled = false;
+    getInputSources()
+      .then(result => {
+        if (!cancelled) setAvailableInputSources(result.input_sources);
+      })
+      .catch(error => {
+        console.error("useStreamState: Failed to fetch input sources:", error);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [getInputSources, pipelinesVersion]);
 
   // Track previous pipelineId so we only reset inputMode when the pipeline actually changes
   const prevPipelineIdRef = useRef<string | null>(null);

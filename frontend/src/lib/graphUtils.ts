@@ -22,6 +22,21 @@ const START_Y = 50;
 
 export type PortType = "stream" | "string" | "number" | "boolean";
 
+/** Source modes provided by the browser (WebRTC). Everything else is a
+ *  server-side :class:`InputSource` (built-in spout/ndi/syphon/video_file
+ *  or any plugin-registered id). */
+export const BROWSER_SOURCE_MODES = ["video", "camera"] as const;
+
+const BROWSER_SOURCE_MODE_SET: ReadonlySet<string> = new Set(
+  BROWSER_SOURCE_MODES
+);
+
+/** True when *mode* is browser-driven (file upload or webcam) and gets a
+ *  WebRTC track; false for any server-side input source. */
+export function isBrowserSourceMode(mode: string | null | undefined): boolean {
+  return mode != null && BROWSER_SOURCE_MODE_SET.has(mode);
+}
+
 export interface ParameterPortDef {
   name: string;
   type: "string" | "number" | "boolean" | "list_number" | "trigger";
@@ -177,8 +192,10 @@ export interface FlowNodeData {
   outputSinkEnabled?: boolean;
   /** For output nodes: the sender name */
   outputSinkName?: string;
-  /** For source nodes: video source mode (video, camera, spout, ndi, syphon) */
-  sourceMode?: "video" | "camera" | "spout" | "ndi" | "syphon";
+  /** For source nodes: video source mode. "video" and "camera" are browser-
+   *  provided (WebRTC); any other id is a server-side :class:`InputSource`
+   *  (built-in spout/ndi/syphon/video_file or any plugin-registered source). */
+  sourceMode?: string;
   /** For source nodes: source name/identifier for Spout/NDI (sender name for Spout, identifier for NDI) */
   sourceName?: string;
   /** For source nodes: whether incoming Syphon frames should be flipped vertically */
@@ -195,6 +212,10 @@ export interface FlowNodeData {
   ndiAvailable?: boolean;
   /** For source nodes: whether Syphon is available (macOS) */
   syphonAvailable?: boolean;
+  /** For source nodes: full input-source catalog from the backend
+   *  (including plugin-registered ones). Used to build the Source
+   *  dropdown dynamically. */
+  availableInputSources?: import("./api").InputSourceType[];
   /** For source nodes: callback when Spout receiver name changes */
   onSpoutSourceChange?: (name: string) => void;
   /** For source nodes: callback when NDI source changes */
@@ -784,14 +805,7 @@ export function graphConfigToFlow(
       data: {
         label: n.id,
         nodeType: "source",
-        sourceMode:
-          (n.source_mode as
-            | "video"
-            | "camera"
-            | "spout"
-            | "ndi"
-            | "syphon"
-            | undefined) ?? "video",
+        sourceMode: n.source_mode ?? "video",
         sourceName: n.source_name ?? undefined,
         sourceFlipVertical: n.source_flip_vertical ?? false,
       },

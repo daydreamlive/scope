@@ -678,6 +678,10 @@ export interface PluginInfo {
   update_available: boolean | null;
   package_spec: string | null;
   bundled: boolean;
+  /** Plugin kind from the package's `__scope_kind__` attribute. */
+  kind?: string | null;
+  /** Where this plugin record came from (only set in cloud mode). */
+  origin?: "local" | "cloud" | null;
 }
 
 export interface FailedPluginInfo {

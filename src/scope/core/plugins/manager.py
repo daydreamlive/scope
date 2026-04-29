@@ -31,6 +31,114 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+_NON_PACKAGE_DIRS = frozenset(
+    {"tests", "test", "examples", "docs", ".git", "__pycache__", "build", "dist"}
+)
+
+
+def _probe_kind_from_dir(root: Path) -> str | None:
+    """Walk *root* for an ``__init__.py`` that declares ``__scope_kind__``.
+
+    Returns the first declared kind found. Skips obviously non-package
+    directories (``tests``, ``examples``, ``__pycache__``, ...). The
+    text pre-check avoids AST-parsing files that can't possibly match.
+    AST parse only matches a top-level ``__scope_kind__ = "<literal>"``
+    (or annotated) assignment with a string-literal RHS, so the probe is
+    side-effect free.
+    """
+    import ast
+
+    for init in root.rglob("__init__.py"):
+        if any(p in _NON_PACKAGE_DIRS for p in init.relative_to(root).parts):
+            continue
+        try:
+            text = init.read_text(encoding="utf-8")
+        except Exception as e:
+            logger.debug(f"Failed to read {init}: {e}")
+            continue
+        if "__scope_kind__" not in text:
+            continue
+        try:
+            tree = ast.parse(text)
+        except Exception as e:
+            logger.debug(f"Failed to parse {init}: {e}")
+            continue
+        for node in tree.body:
+            if not (
+                isinstance(node, ast.Assign)
+                and len(node.targets) == 1
+                and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == "__scope_kind__"
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
+            ):
+                continue
+            return node.value.value
+    return None
+
+
+# Cache of top-level-module-name -> __scope_kind__ value (or None for "no kind").
+# Populated by ``_read_scope_kind`` so a plugin-list refresh doesn't re-import
+# every plugin's top-level package on every call. Cleared by
+# ``PluginManager._invalidate_kind_cache`` on install/uninstall/reload, since
+# only those events change the on-disk package set.
+_scope_kind_cache: dict[str, str | None] = {}
+
+
+def _read_scope_kind(entry_points: list, package_name: str) -> str | None:
+    """Return ``__scope_kind__`` declared on the plugin's top-level package.
+
+    ``ep.load()`` would resolve the entry point's target attribute (e.g.
+    a plugin instance), which doesn't carry module-level globals — so we
+    import the top-level package directly via ``ep.module``. Result is
+    cached per top-level module to keep plugin-list refreshes cheap.
+    """
+    seen: set[str] = set()
+    for ep in entry_points:
+        top = ep.module.split(".")[0]
+        if top in seen:
+            continue
+        seen.add(top)
+        if top in _scope_kind_cache:
+            kind = _scope_kind_cache[top]
+        else:
+            try:
+                kind = getattr(importlib.import_module(top), "__scope_kind__", None)
+            except Exception as e:
+                logger.debug(
+                    f"Could not import {top} for kind probe ({package_name}): {e}"
+                )
+                _scope_kind_cache[top] = None
+                continue
+            if not isinstance(kind, str):
+                kind = None
+            _scope_kind_cache[top] = kind
+        if kind is not None:
+            return kind
+    return None
+
+
+def _split_git_spec(git_spec: str) -> tuple[str, str | None]:
+    """Split ``git+<url>[@branch]`` into ``(repo_url, branch)``.
+
+    Preserves a ``user@host`` segment in the URL by only splitting on an
+    ``@`` that appears after the path's first ``/``. Strips pip-style
+    ``#fragment`` and ``?query`` suffixes (e.g. ``#egg=pkg``,
+    ``#subdirectory=...``) before splitting so they don't get folded into
+    the branch name.
+    """
+    repo_url = git_spec.removeprefix("git+")
+    repo_url = repo_url.split("#", 1)[0].split("?", 1)[0]
+    if "://" not in repo_url:
+        return repo_url, None
+    scheme, tail = repo_url.split("://", 1)
+    slash_idx = tail.find("/")
+    if slash_idx == -1 or "@" not in tail[slash_idx:]:
+        return repo_url, None
+    path_part, branch = tail[slash_idx:].rsplit("@", 1)
+    return f"{scheme}://{tail[:slash_idx]}{path_part}", branch
+
+
 def _get_torch_backend_args() -> list[str]:
     """Return torch backend args appropriate for the current platform.
 
@@ -107,6 +215,9 @@ class PluginManager:
         # plugin package name that provided it.
         self._type_to_plugin: dict[str, str] = {}
 
+        # Plugin-registered input source classes: source_id -> class
+        self._plugin_input_sources: dict[str, type] = {}
+
         # Cache of registered plugin names (package names)
         self._registered_plugins: set[str] = set()
 
@@ -119,6 +230,79 @@ class PluginManager:
         # TTL cache for plugin update checks: {name: (result_dict, timestamp)}
         self._update_check_cache: dict[str, tuple[dict[str, Any], float]] = {}
         self._update_check_ttl: float = 600.0  # 10 minutes
+
+    def probe_plugin_kind(self, package_spec: str) -> str | None:
+        """Probe a package specifier for the plugin's ``__scope_kind__``.
+
+        Used at install time to decide whether a plugin must be installed
+        locally even when Scope is connected to the cloud (``kind=source``).
+
+        Supported specifier forms:
+
+        - **Local path** (directory): walk and AST-parse ``__init__.py``
+          files for ``__scope_kind__ = "<literal>"``.
+        - **Git URL** (``git+https://...``): shallow-clone to a tempdir,
+          then walk the same way.
+        - **PyPI name / version specifier**: returns ``None`` (no probe).
+          For PyPI source-kind plugins the user can install via git URL,
+          or rely on the post-install ``__scope_kind__`` introspection.
+
+        Returns ``None`` if the kind cannot be determined.
+        """
+        spec = package_spec.strip()
+        path = Path(spec)
+        if path.is_dir():
+            return _probe_kind_from_dir(path)
+        if spec.startswith("git+"):
+            return self._probe_kind_from_git(spec)
+        return None
+
+    def _unregister_pluggy_plugins_for_dist(self, package_name: str) -> None:
+        """Unregister every pluggy plugin owned by distribution *package_name*.
+
+        Pluggy registers each ``scope`` entry point under its entry-point
+        name (e.g. ``scope_youtube``). The plugin object is whatever
+        ``ep.load()`` returns — for an entry point like
+        ``scope_youtube:plugin`` that's the plugin *instance*, which has
+        no ``__name__`` to match against. So we look up the distribution
+        by name and unregister each of its scope entry points by name.
+        """
+        from importlib.metadata import PackageNotFoundError, distribution
+
+        try:
+            dist = distribution(package_name)
+        except PackageNotFoundError:
+            return
+        for ep in dist.entry_points:
+            if ep.group != "scope":
+                continue
+            plugin = self._pm.get_plugin(ep.name)
+            if plugin is None:
+                continue
+            try:
+                self._pm.unregister(plugin)
+                logger.info(f"Unregistered pluggy plugin: {ep.name}")
+            except Exception as e:
+                logger.warning(f"Failed to unregister {ep.name} from pluggy: {e}")
+
+    def _probe_kind_from_git(self, git_spec: str) -> str | None:
+        """Shallow-clone *git_spec* and probe ``__scope_kind__``."""
+        import tempfile
+
+        repo_url, branch = _split_git_spec(git_spec)
+        with tempfile.TemporaryDirectory() as tmp:
+            cmd = ["git", "clone", "--depth=1"]
+            if branch:
+                cmd.extend(["--branch", branch])
+            cmd.extend([repo_url, tmp])
+            try:
+                subprocess.run(
+                    cmd, capture_output=True, check=True, timeout=60, text=True
+                )
+            except Exception as e:
+                logger.debug(f"Kind probe via git clone failed for {git_spec}: {e}")
+                return None
+            return _probe_kind_from_dir(Path(tmp))
 
     def clear_update_check_cache(self) -> None:
         """Clear the TTL cache for plugin update checks.
@@ -555,22 +739,45 @@ class PluginManager:
     def register_plugin_nodes(self, registry: Any = None) -> None:
         """Fire ``register_nodes`` and ``register_pipelines`` hooks.
 
-        Both hooks plant into the unified :class:`NodeRegistry` storage,
-        so existing plugins using ``register_pipelines(register)`` keep
-        working unchanged alongside new ones using ``register_nodes``.
+        Both hooks plant into the unified :class:`NodeRegistry` storage.
+        :class:`InputSource` subclasses go into :attr:`_plugin_input_sources`
+        keyed by ``source_id`` instead — they're registered through the
+        same hook as a convenience since a plugin-provided input source is
+        conceptually just a node that feeds the graph.
         The ``registry`` argument is accepted for legacy callers but
         ignored — the unified storage is always used.
         """
+        from scope.core.inputs import InputSource
         from scope.core.nodes.registry import NodeRegistry, _derive_node_type_id
 
         del registry  # legacy parameter, kept for callsite compat
 
         with self._lock:
             self._type_to_plugin.clear()
+            self._plugin_input_sources.clear()
 
-            def register_callback(node_class: Any) -> None:
-                NodeRegistry.register(node_class)
-                node_id = _derive_node_type_id(node_class) or node_class.__name__
+            def register_callback(cls: Any) -> None:
+                if isinstance(cls, type) and issubclass(cls, InputSource):
+                    source_id = getattr(cls, "source_id", None)
+                    if not source_id:
+                        logger.error(
+                            f"Plugin InputSource {cls.__name__} is missing "
+                            "required 'source_id' ClassVar; skipping registration"
+                        )
+                        return
+                    existing = self._plugin_input_sources.get(source_id)
+                    if existing is not None and existing is not cls:
+                        logger.warning(
+                            f"Plugin input source '{source_id}' from "
+                            f"{cls.__module__}.{cls.__name__} overrides existing "
+                            f"registration from "
+                            f"{existing.__module__}.{existing.__name__}"
+                        )
+                    self._plugin_input_sources[source_id] = cls
+                    logger.info(f"Registered plugin input source: {source_id}")
+                    return
+                NodeRegistry.register(cls)
+                node_id = _derive_node_type_id(cls) or cls.__name__
                 logger.info(f"Registered plugin node: {node_id}")
 
             self._pm.hook.register_nodes(register=register_callback)
@@ -579,6 +786,11 @@ class PluginManager:
 
     # Backwards-compat alias for internal callers using the legacy name.
     register_plugin_pipelines = register_plugin_nodes
+
+    def get_plugin_input_sources(self) -> dict[str, type]:
+        """Return a snapshot of plugin-registered input source classes."""
+        with self._lock:
+            return dict(self._plugin_input_sources)
 
     def _update_plugin_mapping(self) -> None:
         """Refresh the registry-type-id → plugin-package-name mapping.
@@ -632,16 +844,12 @@ class PluginManager:
         with self._lock:
             return self._type_to_plugin.get(type_id)
 
-    # Backwards-compat aliases. ``pipeline_id`` and ``node_type_id`` are
-    # the same namespace now; external callers that still use the old
-    # names keep working.
+    # Backwards-compat alias: ``pipeline_id`` and ``node_type_id`` share
+    # the same namespace post-unification; existing callers using the
+    # pipeline-flavored name keep working.
     def get_plugin_for_pipeline(self, pipeline_id: str) -> str | None:
         """Alias of :meth:`get_plugin_for_type_id`."""
         return self.get_plugin_for_type_id(pipeline_id)
-
-    def get_plugin_for_node(self, node_type_id: str) -> str | None:
-        """Alias of :meth:`get_plugin_for_type_id`."""
-        return self.get_plugin_for_type_id(node_type_id)
 
     def _get_plugin_source(self, dist: Any) -> tuple[str, bool, str | None, str | None]:
         """Determine the source of a plugin installation.
@@ -762,6 +970,13 @@ class PluginManager:
                         self._normalize_package_name(package_name) in bundled_names
                     )
 
+                    # Read ``__scope_kind__`` from the plugin's top-level
+                    # package. Imports the package proper rather than
+                    # ``ep.load()``, which would resolve to the entry
+                    # point's target attribute (e.g. a plugin instance)
+                    # and miss module-level declarations.
+                    kind = _read_scope_kind(scope_eps, package_name)
+
                     plugins.append(
                         {
                             "name": package_name,
@@ -777,6 +992,7 @@ class PluginManager:
                             "update_available": update_available,
                             "package_spec": package_spec,
                             "bundled": is_bundled,
+                            "kind": kind,
                         }
                     )
                 except Exception as e:
@@ -1090,6 +1306,13 @@ class PluginManager:
     ) -> dict[str, Any]:
         """Install a plugin.
 
+        After a successful ``uv pip install`` the new package's entry
+        points exist on disk but pluggy hasn't discovered them — without
+        a follow-up ``load_setuptools_entrypoints`` call the plugin's
+        nodes/input sources stay invisible until the server restarts.
+        Re-fire ``register_plugin_nodes`` so its hooks plant into the
+        live registry.
+
         Args:
             package: Package specifier (PyPI name, git URL, or local path)
             editable: Install in editable mode
@@ -1106,9 +1329,17 @@ class PluginManager:
             PluginNameCollisionError: If plugin with same name exists from different source
         """
         loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(
+        result = await loop.run_in_executor(
             None, self._install_plugin_sync, package, editable, upgrade, pre, force
         )
+        if result.get("success"):
+            _scope_kind_cache.clear()
+            try:
+                self.load_plugins()
+                self.register_plugin_nodes()
+            except Exception as e:
+                logger.warning(f"Failed to activate plugin after install: {e}")
+        return result
 
     def _install_plugin_sync(
         self,
@@ -1397,6 +1628,21 @@ class PluginManager:
                 self._type_to_plugin.pop(pipeline_id, None)
                 logger.info(f"Unregistered pipeline from registry: {pipeline_id}")
 
+        # Unregister the plugin's pluggy registrations so its hooks no
+        # longer fire. Without this, a subsequent reload of any other
+        # plugin would re-fire the uninstalled plugin's
+        # ``register_nodes``/``register_pipelines`` hooks (its module is
+        # still loaded in ``sys.modules`` after ``uv pip uninstall``) and
+        # resurrect its registrations.
+        self._unregister_pluggy_plugins_for_dist(name)
+
+        # Rebuild plugin-derived caches (`_type_to_plugin` and
+        # `_plugin_input_sources`) from the remaining loaded plugins.
+        # This drops the uninstalled plugin's input sources without
+        # needing to track ownership separately.
+        _scope_kind_cache.clear()
+        self.register_plugin_nodes()
+
         # Remove from plugins.txt
         plugins = self._read_plugins_file()
         normalized_name = self._normalize_package_name(name)
@@ -1555,6 +1801,7 @@ class PluginManager:
         # Reload the plugin module
         editable_path = plugin_info.get("editable_path")
         if editable_path:
+            _scope_kind_cache.clear()
             self._reload_module_tree(name, editable_path)
 
         # Re-load plugins via entry points (with prevalidation)
@@ -1676,3 +1923,13 @@ def register_plugin_nodes(registry: Any = None) -> None:
 
 # Backwards-compat alias for internal callers using the legacy name.
 register_plugin_pipelines = register_plugin_nodes
+
+
+def get_plugin_input_sources() -> dict[str, type]:
+    """Return ``source_id -> InputSource class`` for plugin-registered sources."""
+    return get_plugin_manager().get_plugin_input_sources()
+
+
+def probe_plugin_kind(package_spec: str) -> str | None:
+    """Probe a package specifier for the plugin's ``__scope_kind__``."""
+    return get_plugin_manager().probe_plugin_kind(package_spec)
