@@ -271,7 +271,7 @@ const NODE_DEFAULTS: Record<NodeTypeKey, NodeDefaults> = {
     type: "audio",
     idPrefix: "audio",
     defaultX: 50,
-    style: { width: 160, height: 100 },
+    style: { width: 180, height: 132 },
     data: {
       label: "Audio",
       nodeType: "audio",
@@ -582,12 +582,17 @@ export function useNodeFactories({
         | "custom_node",
       subType?: string,
       extraData?: Partial<FlowNodeData>
-    ) => {
-      if (!pendingNodePosition) return;
+    ): string | null => {
+      if (!pendingNodePosition) return null;
+
+      let createdNodeId: string | null = null;
 
       if (type === "control") {
         if (subType === "float" || subType === "int" || subType === "string") {
-          addNode(`control_${subType}` as NodeTypeKey, pendingNodePosition);
+          createdNodeId = addNode(
+            `control_${subType}` as NodeTypeKey,
+            pendingNodePosition
+          );
         }
       } else if (type === "pipeline") {
         const id = addNode(
@@ -603,8 +608,9 @@ export function useNodeFactories({
         if (subType) {
           handlePipelineSelect(id, subType);
         }
+        createdNodeId = id;
       } else if (type === "source") {
-        addNode(
+        createdNodeId = addNode(
           "source",
           pendingNodePosition,
           subType ? { sourceMode: subType } : undefined
@@ -622,21 +628,22 @@ export function useNodeFactories({
           ndi: "Scope",
           syphon: "Scope",
         };
-        addNode("output", pendingNodePosition, {
+        createdNodeId = addNode("output", pendingNodePosition, {
           outputSinkType: defaultType,
           outputSinkName: defaultNames[defaultType] || "Scope",
         });
       } else if (type === "custom_node") {
-        addNode("custom_node", pendingNodePosition, {
+        createdNodeId = addNode("custom_node", pendingNodePosition, {
           customNodeTypeId: subType,
           label: subType || "Custom Node",
           ...extraData,
         });
       } else {
-        addNode(type as NodeTypeKey, pendingNodePosition);
+        createdNodeId = addNode(type as NodeTypeKey, pendingNodePosition);
       }
 
       setPendingNodePosition(null);
+      return createdNodeId;
     },
     [
       nodes,

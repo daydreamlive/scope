@@ -63,6 +63,7 @@ export interface ParameterPortDef {
   type: "string" | "number" | "boolean" | "list_number" | "trigger";
   defaultValue?: unknown;
   label?: string;
+  component?: string;
   min?: number;
   max?: number;
   step?: number;
@@ -637,6 +638,7 @@ export function extractParameterPorts(
         type: "list_number",
         defaultValue: schemaProp.default,
         label,
+        component: ui?.component,
         isLoadParam: ui?.is_load_param,
       });
       continue;
@@ -656,6 +658,7 @@ export function extractParameterPorts(
           type: "list_number",
           defaultValue: schemaProp.default,
           label,
+          component: ui?.component,
           isLoadParam: ui?.is_load_param,
         });
         continue;
@@ -756,6 +759,7 @@ export function extractParameterPorts(
       type: paramType,
       defaultValue: schemaProp.default,
       label,
+      component: ui?.component,
       min: typeof minimum === "number" ? minimum : undefined,
       max: typeof maximum === "number" ? maximum : undefined,
       step: paramType === "number" && isInteger ? 1 : undefined,

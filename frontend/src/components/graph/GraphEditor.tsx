@@ -156,6 +156,10 @@ type ConnectionMenuState = {
   items: ContextMenuItem[];
 };
 
+type PendingConnectionCreate = {
+  start: ConnectionDragStart;
+};
+
 function getClientPoint(event: MouseEvent | TouchEvent) {
   if ("clientX" in event) return { x: event.clientX, y: event.clientY };
   const touch = event.changedTouches[0] ?? event.touches[0];
@@ -538,6 +542,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
     const graphWrapperRef = useRef<HTMLDivElement>(null);
     const [connectionMenu, setConnectionMenu] =
       useState<ConnectionMenuState | null>(null);
+    const pendingConnectionCreateRef = useRef<PendingConnectionCreate | null>(
+      null
+    );
     const suppressNextPaneClickRef = useRef(false);
 
     const { selectionRect, contextMenu, setContextMenu, handleRightMouseDown } =
@@ -556,6 +563,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           y: screenY,
         });
         setPendingNodePosition(flowPosition);
+        pendingConnectionCreateRef.current = null;
         setConnectionMenu(null);
         setContextMenu({ x: screenX, y: screenY, type: "pane" });
       },
@@ -626,6 +634,13 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       [isStreaming, rawOnReconnect]
     );
 
+    const isValidConnectionRef = useRef(isValidConnection);
+    const onConnectRef = useRef(onConnect);
+    useEffect(() => {
+      isValidConnectionRef.current = isValidConnection;
+      onConnectRef.current = onConnect;
+    }, [isValidConnection, onConnect]);
+
     const { handleNodeTypeSelect, handleDeleteNodes, insertBlueprint } =
       useNodeFactories({
         nodes,
@@ -643,6 +658,72 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         handleEdgeDelete,
         enrichDepsRef,
       });
+
+    const connectPendingCreatedNode = useCallback((newNodeId: string | null) => {
+      const pending = pendingConnectionCreateRef.current;
+      pendingConnectionCreateRef.current = null;
+      if (!pending || !newNodeId) return;
+
+      const { start } = pending;
+      const oppositeHandleType =
+        start.handleType === "source"
+          ? "target"
+          : start.handleType === "target"
+            ? "source"
+            : null;
+      if (!start.handleId || !oppositeHandleType) return;
+
+      const tryConnect = () => {
+        const wrapper = graphWrapperRef.current;
+        if (!wrapper) return;
+
+        const handles = Array.from(
+          wrapper.querySelectorAll<HTMLElement>(
+            `.react-flow__handle.${oppositeHandleType}`
+          )
+        )
+          .map(readHandleElement)
+          .filter(
+            (
+              handle
+            ): handle is NonNullable<ReturnType<typeof readHandleElement>> =>
+              !!handle && handle.nodeId === newNodeId
+          );
+
+        for (const handle of handles) {
+          const connection: Connection =
+            start.handleType === "source"
+              ? {
+                  source: start.nodeId,
+                  sourceHandle: start.handleId,
+                  target: newNodeId,
+                  targetHandle: handle.handleId,
+                }
+              : {
+                  source: newNodeId,
+                  sourceHandle: handle.handleId,
+                  target: start.nodeId,
+                  targetHandle: start.handleId,
+                };
+
+          if (!isValidConnectionRef.current(connection)) continue;
+          onConnectRef.current(connection);
+          return;
+        }
+
+        toast.info("Created node, but no compatible handle was found");
+      };
+
+      requestAnimationFrame(() => requestAnimationFrame(tryConnect));
+    }, []);
+
+    const handleCreateNodeTypeSelect = useCallback(
+      (...args: Parameters<typeof handleNodeTypeSelect>) => {
+        const newNodeId = handleNodeTypeSelect(...args);
+        connectPendingCreatedNode(newNodeId);
+      },
+      [handleNodeTypeSelect, connectPendingCreatedNode]
+    );
 
     const { createSubgraphFromSelection, unpackSubgraph } =
       useSubgraphOperations({
@@ -886,6 +967,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               });
             }
           }
+          pendingConnectionCreateRef.current = null;
           setShowAddNodeModal(true);
         },
         undo,
@@ -1120,6 +1202,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           y: event.clientY,
         });
         setPendingNodePosition(position);
+        pendingConnectionCreateRef.current = null;
         setConnectionMenu(null);
         setContextMenu({
           x: event.clientX,
@@ -1188,12 +1271,22 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
 
     const openConnectionMenu = useCallback(
       (start: ConnectionDragStart, point: { x: number; y: number }) => {
-        const items = getCompatibleConnectionMenuItems(start);
-        if (items.length === 0) {
-          setConnectionMenu(null);
-          toast.info("No compatible nodes for this handle");
-          return;
-        }
+        const rf = reactFlowInstanceRef.current;
+        const createItem: ContextMenuItem = {
+          label: "Create Node...",
+          icon: <Plus />,
+          keywords: ["create", "new", "node"],
+          onClick: () => {
+            if (!rf) return;
+            setPendingNodePosition(
+              rf.screenToFlowPosition({ x: point.x, y: point.y })
+            );
+            pendingConnectionCreateRef.current = { start };
+            setConnectionMenu(null);
+            setContextMenu({ x: point.x, y: point.y, type: "pane" });
+          },
+        };
+        const items = [createItem, ...getCompatibleConnectionMenuItems(start)];
 
         suppressNextPaneClickRef.current = true;
         window.setTimeout(() => {
@@ -1420,12 +1513,15 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               <ContextMenu
                 x={contextMenu.x}
                 y={contextMenu.y}
-                onClose={() => setContextMenu(null)}
+                onClose={() => {
+                  setContextMenu(null);
+                  pendingConnectionCreateRef.current = null;
+                }}
                 header={contextMenu.type === "pane" ? "Create" : undefined}
                 items={
                   contextMenu.type === "pane"
                     ? buildPaneMenuItems({
-                        handleNodeTypeSelect,
+                        handleNodeTypeSelect: handleCreateNodeTypeSelect,
                         selectedNodeIds,
                         nodes,
                         edges,

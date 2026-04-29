@@ -1,7 +1,7 @@
 import { Handle, Position, useEdges } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import { RotateCcw, AlertTriangle, ArrowUp, Info } from "lucide-react";
-import type { FlowNodeData } from "../../../lib/graphUtils";
+import type { FlowNodeData, ParameterPortDef } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
 import type { PipelineId } from "../../../types";
 import {
@@ -25,7 +25,12 @@ import {
   NODE_TOKENS,
   collapsedHandleStyle,
 } from "../ui";
-import { PARAM_TYPE_COLORS, HANDLE_COLORS, COLOR_DEFAULT } from "../nodeColors";
+import {
+  PARAM_TYPE_COLORS,
+  HANDLE_COLORS,
+  COLOR_AUDIO,
+  COLOR_DEFAULT,
+} from "../nodeColors";
 
 type PipelineNodeType = Node<FlowNodeData, "pipeline">;
 
@@ -33,10 +38,9 @@ function getPortColorHex(portName: string): string {
   return HANDLE_COLORS[portName] ?? COLOR_DEFAULT;
 }
 
-function getParamTypeColor(
-  type: "string" | "number" | "boolean" | "list_number" | "trigger"
-): string {
-  return PARAM_TYPE_COLORS[type] || COLOR_DEFAULT;
+function getParamPortColor(param: ParameterPortDef): string {
+  if (param.component === "audio") return COLOR_AUDIO;
+  return PARAM_TYPE_COLORS[param.type] || COLOR_DEFAULT;
 }
 
 function displayFilePath(value: string, maxLen = 24): string {
@@ -561,7 +565,7 @@ export function PipelineNode({
               : {
                   top: rowPositions[`param:${param.name}`] ?? 0,
                   left: 0,
-                  backgroundColor: getParamTypeColor(param.type),
+                  backgroundColor: getParamPortColor(param),
                 }
           }
         />
@@ -585,7 +589,7 @@ export function PipelineNode({
               : {
                   top: rowPositions[`param:${param.name}`] ?? 0,
                   left: 0,
-                  backgroundColor: getParamTypeColor(param.type),
+                  backgroundColor: getParamPortColor(param),
                 }
           }
         />

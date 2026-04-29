@@ -81,7 +81,7 @@ export interface EnrichNodesDeps {
   onRefreshTempoSourcesRef: React.RefObject<(() => void) | undefined>;
 }
 
-const FIXED_SIZE_NODE_TYPES = new Set(["source", "sink", "image"]);
+const FIXED_SIZE_NODE_TYPES = new Set(["source", "sink", "image", "audio"]);
 
 /**
  * Clear saved height from nodes that use autoMinHeight so NodeCard's

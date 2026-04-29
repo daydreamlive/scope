@@ -203,7 +203,7 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
             isOpen={isMediaPickerOpen}
             onClose={() => setIsMediaPickerOpen(false)}
             onSelectImage={handleSelectMedia}
-            accept="all"
+            accept="media"
           />,
           document.body
         )}
