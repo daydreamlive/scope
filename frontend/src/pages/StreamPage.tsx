@@ -73,6 +73,7 @@ import {
 import type { ScopeWorkflow } from "../lib/workflowApi";
 import {
   applyHardwareInputSourceToLinearGraph,
+  isBrowserSourceMode,
   linearGraphFromSettings,
   stripUIFields,
 } from "../lib/graphUtils";
@@ -159,10 +160,7 @@ function graphHasOnlyServerSideSources(graph: GraphConfig | null): boolean {
   if (!nodes?.length) return false;
   const sources = nodes.filter(n => n.type === "source");
   if (sources.length === 0) return false;
-  return sources.every(n => {
-    const sm = n.source_mode || "video";
-    return sm !== "video" && sm !== "camera";
-  });
+  return sources.every(n => !isBrowserSourceMode(n.source_mode || "video"));
 }
 
 export function StreamPage() {
@@ -917,7 +915,7 @@ export function StreamPage() {
       // useVideoSource stream (e.g. test.mp4) when switching to a server-side
       // source — otherwise WebRTC still sends that track alongside the
       // server-side feed (spout/ndi/syphon/youtube/any plugin source).
-      if (newMode !== "video" && newMode !== "camera") {
+      if (!isBrowserSourceMode(newMode)) {
         void switchMode(newMode);
       }
       // When switching to file mode during streaming, auto-load a sample
@@ -2446,7 +2444,7 @@ export function StreamPage() {
               // "video" (file upload) or "camera".
               for (const sourceNode of sourceNodes) {
                 const sm = sourceNode.source_mode || "video";
-                if (sm !== "video" && sm !== "camera") {
+                if (!isBrowserSourceMode(sm)) {
                   graphInputSource = {
                     enabled: true,
                     source_type: sm,
@@ -3158,11 +3156,8 @@ export function StreamPage() {
       let sourceNodeStreamsForWebRTC: Record<string, MediaStream> | undefined;
       if (graphConfigForStream) {
         const webrtcSourceNodes = (graphConfigForStream.nodes ?? []).filter(
-          n => {
-            if (n.type !== "source") return false;
-            const sm = n.source_mode || "video";
-            return sm === "video" || sm === "camera";
-          }
+          n =>
+            n.type === "source" && isBrowserSourceMode(n.source_mode || "video")
         );
         if (webrtcSourceNodes.length > 0) {
           const streams: Record<string, MediaStream> = {};
@@ -3447,7 +3442,7 @@ export function StreamPage() {
                   // "camera" is a server-side source (spout/ndi/syphon/
                   // youtube/plugin-registered); mirror its config into
                   // settings.inputSource so perform mode picks it up.
-                  if (sourceMode !== "video" && sourceMode !== "camera") {
+                  if (!isBrowserSourceMode(sourceMode)) {
                     updateSettings({
                       inputSource: {
                         enabled: true,

@@ -3,6 +3,8 @@
 Input sources provide video frames from external sources like NDI, Spout, etc.
 """
 
+import logging
+
 from .interface import InputSource, InputSourceInfo
 
 __all__ = [
@@ -11,6 +13,8 @@ __all__ = [
     "get_input_source_classes",
     "get_available_input_sources",
 ]
+
+logger = logging.getLogger(__name__)
 
 
 def get_input_source_classes() -> dict[str, type[InputSource]]:
@@ -57,8 +61,8 @@ def get_input_source_classes() -> dict[str, type[InputSource]]:
             if source_id in sources:
                 continue  # built-in already registered — don't let plugins override
             sources[source_id] = cls
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug(f"Failed to merge plugin input sources: {e}")
 
     return sources
 

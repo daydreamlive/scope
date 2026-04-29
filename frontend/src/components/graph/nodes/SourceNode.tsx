@@ -1,6 +1,7 @@
 import { useEffect, useRef, useCallback, useState } from "react";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
+import { isBrowserSourceMode } from "../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { getInputSourceSources, type DiscoveredSource } from "../../../lib/api";
 import { useNodeData } from "../hooks/node/useNodeData";
@@ -142,10 +143,9 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     // Preserve sourceName for every server-side mode (anything that
     // isn't the browser-driven "video"/"camera"). Clearing it on every
     // switch would lose the URL/path/sender the user just typed.
-    const isBrowserMode = newMode === "video" || newMode === "camera";
     updateData({
       sourceMode: newMode,
-      ...(isBrowserMode ? { sourceName: undefined } : {}),
+      ...(isBrowserSourceMode(newMode) ? { sourceName: undefined } : {}),
     });
     onSourceModeChange?.(newMode);
   };
@@ -191,13 +191,27 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
   const handleY = HEADER_H + BODY_PAD + SELECT_ROW_H / 2;
 
   // Browser-driven options + every available backend source. Plugin-
-  // registered sources appear automatically.
+  // registered sources appear automatically. If the graph was saved with
+  // a mode that isn't currently available on this machine (e.g. NDI graph
+  // opened on a host without NDI), keep it in the list as "(unavailable)"
+  // so the user can see what's set instead of the dropdown silently
+  // collapsing to a different selection.
   const filteredSourceModeOptions = [
     ...BROWSER_SOURCE_OPTIONS,
     ...availableInputSources
       .filter(s => s.available && !HIDDEN_BACKEND_SOURCES.has(s.source_id))
       .map(s => ({ value: s.source_id, label: s.source_name })),
   ];
+  if (
+    sourceMode &&
+    !filteredSourceModeOptions.some(o => o.value === sourceMode)
+  ) {
+    const label = currentSourceInfo?.source_name ?? sourceMode;
+    filteredSourceModeOptions.push({
+      value: sourceMode,
+      label: `${label} (unavailable)`,
+    });
+  }
 
   const handleGenericSourceNameChange = (value: string | number) => {
     updateData({ sourceName: String(value) });
@@ -421,8 +435,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
               is a free-form identifier (URL, path, ...); source_description
               from the backend is rendered below as help text. */}
           {!SOURCES_WITH_CUSTOM_UI.has(sourceMode) &&
-            sourceMode !== "video" &&
-            sourceMode !== "camera" && (
+            !isBrowserSourceMode(sourceMode) && (
               <>
                 <div className="px-2">
                   <NodeParamRow

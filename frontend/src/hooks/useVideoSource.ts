@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { isBrowserSourceMode } from "../lib/graphUtils";
 
 /** Video source mode identifier.
  *
@@ -210,7 +211,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       // id like "youtube") don't need a local MediaStream — frames come from
       // the backend's source_manager. Only "video" and "camera" are browser-
       // driven.
-      if (newMode !== "video" && newMode !== "camera") {
+      if (!isBrowserSourceMode(newMode)) {
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop());
         }

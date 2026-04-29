@@ -22,6 +22,21 @@ const START_Y = 50;
 
 export type PortType = "stream" | "string" | "number" | "boolean";
 
+/** Source modes provided by the browser (WebRTC). Everything else is a
+ *  server-side :class:`InputSource` (built-in spout/ndi/syphon/video_file
+ *  or any plugin-registered id). */
+export const BROWSER_SOURCE_MODES = ["video", "camera"] as const;
+
+const BROWSER_SOURCE_MODE_SET: ReadonlySet<string> = new Set(
+  BROWSER_SOURCE_MODES
+);
+
+/** True when *mode* is browser-driven (file upload or webcam) and gets a
+ *  WebRTC track; false for any server-side input source. */
+export function isBrowserSourceMode(mode: string | null | undefined): boolean {
+  return mode != null && BROWSER_SOURCE_MODE_SET.has(mode);
+}
+
 export interface ParameterPortDef {
   name: string;
   type: "string" | "number" | "boolean" | "list_number" | "trigger";

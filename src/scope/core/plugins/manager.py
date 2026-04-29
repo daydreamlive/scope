@@ -83,27 +83,43 @@ def _probe_kind_from_dir(root: Path) -> str | None:
     return None
 
 
+# Cache of top-level-module-name -> __scope_kind__ value (or None for "no kind").
+# Populated by ``_read_scope_kind`` so a plugin-list refresh doesn't re-import
+# every plugin's top-level package on every call. Cleared by
+# ``PluginManager._invalidate_kind_cache`` on install/uninstall/reload, since
+# only those events change the on-disk package set.
+_scope_kind_cache: dict[str, str | None] = {}
+
+
 def _read_scope_kind(entry_points: list, package_name: str) -> str | None:
     """Return ``__scope_kind__`` declared on the plugin's top-level package.
 
     ``ep.load()`` would resolve the entry point's target attribute (e.g.
     a plugin instance), which doesn't carry module-level globals — so we
-    import the top-level package directly via ``ep.module``.
+    import the top-level package directly via ``ep.module``. Result is
+    cached per top-level module to keep plugin-list refreshes cheap.
     """
-    import importlib
-
     seen: set[str] = set()
     for ep in entry_points:
         top = ep.module.split(".")[0]
         if top in seen:
             continue
         seen.add(top)
-        try:
-            kind = getattr(importlib.import_module(top), "__scope_kind__", None)
-        except Exception as e:
-            logger.debug(f"Could not import {top} for kind probe ({package_name}): {e}")
-            continue
-        if isinstance(kind, str):
+        if top in _scope_kind_cache:
+            kind = _scope_kind_cache[top]
+        else:
+            try:
+                kind = getattr(importlib.import_module(top), "__scope_kind__", None)
+            except Exception as e:
+                logger.debug(
+                    f"Could not import {top} for kind probe ({package_name}): {e}"
+                )
+                _scope_kind_cache[top] = None
+                continue
+            if not isinstance(kind, str):
+                kind = None
+            _scope_kind_cache[top] = kind
+        if kind is not None:
             return kind
     return None
 
@@ -112,9 +128,13 @@ def _split_git_spec(git_spec: str) -> tuple[str, str | None]:
     """Split ``git+<url>[@branch]`` into ``(repo_url, branch)``.
 
     Preserves a ``user@host`` segment in the URL by only splitting on an
-    ``@`` that appears after the path's first ``/``.
+    ``@`` that appears after the path's first ``/``. Strips pip-style
+    ``#fragment`` and ``?query`` suffixes (e.g. ``#egg=pkg``,
+    ``#subdirectory=...``) before splitting so they don't get folded into
+    the branch name.
     """
     repo_url = git_spec.removeprefix("git+")
+    repo_url = repo_url.split("#", 1)[0].split("?", 1)[0]
     if "://" not in repo_url:
         return repo_url, None
     scheme, tail = repo_url.split("://", 1)
@@ -250,29 +270,26 @@ class PluginManager:
         name (e.g. ``scope_youtube``). The plugin object is whatever
         ``ep.load()`` returns — for an entry point like
         ``scope_youtube:plugin`` that's the plugin *instance*, which has
-        no ``__name__`` we can match against. So instead we walk
-        ``importlib.metadata.distributions()``, find the dist whose
-        normalized name matches, and unregister each of its scope entry
-        points by name.
+        no ``__name__`` to match against. So we look up the distribution
+        by name and unregister each of its scope entry points by name.
         """
-        from importlib.metadata import distributions
+        from importlib.metadata import PackageNotFoundError, distribution
 
-        normalized = self._normalize_package_name(package_name)
-        for dist in distributions():
-            if self._normalize_package_name(dist.metadata["Name"]) != normalized:
-                continue
-            for ep in dist.entry_points:
-                if ep.group != "scope":
-                    continue
-                plugin = self._pm.get_plugin(ep.name)
-                if plugin is None:
-                    continue
-                try:
-                    self._pm.unregister(plugin)
-                    logger.info(f"Unregistered pluggy plugin: {ep.name}")
-                except Exception as e:
-                    logger.warning(f"Failed to unregister {ep.name} from pluggy: {e}")
+        try:
+            dist = distribution(package_name)
+        except PackageNotFoundError:
             return
+        for ep in dist.entry_points:
+            if ep.group != "scope":
+                continue
+            plugin = self._pm.get_plugin(ep.name)
+            if plugin is None:
+                continue
+            try:
+                self._pm.unregister(plugin)
+                logger.info(f"Unregistered pluggy plugin: {ep.name}")
+            except Exception as e:
+                logger.warning(f"Failed to unregister {ep.name} from pluggy: {e}")
 
     def _probe_kind_from_git(self, git_spec: str) -> str | None:
         """Shallow-clone *git_spec* and probe ``__scope_kind__``."""
@@ -1326,6 +1343,7 @@ class PluginManager:
             None, self._install_plugin_sync, package, editable, upgrade, pre, force
         )
         if result.get("success"):
+            _scope_kind_cache.clear()
             try:
                 self.load_plugins()
                 self.register_plugin_nodes()
@@ -1632,6 +1650,7 @@ class PluginManager:
         # `_plugin_input_sources`) from the remaining loaded plugins.
         # This drops the uninstalled plugin's input sources without
         # needing to track ownership separately.
+        _scope_kind_cache.clear()
         self.register_plugin_nodes()
 
         # Remove from plugins.txt
@@ -1792,6 +1811,7 @@ class PluginManager:
         # Reload the plugin module
         editable_path = plugin_info.get("editable_path")
         if editable_path:
+            _scope_kind_cache.clear()
             self._reload_module_tree(name, editable_path)
 
         # Re-load plugins via entry points (with prevalidation)

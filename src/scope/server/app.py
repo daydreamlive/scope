@@ -2855,10 +2855,21 @@ async def list_plugins(
         cloud_connected = _cloud_is_connected(cloud_manager)
 
         if cloud_connected:
-            local_plugins_data, cloud_response = await asyncio.gather(
+            local_result, cloud_response = await asyncio.gather(
                 plugin_manager.list_plugins_async(),
                 _fetch_cloud_plugin_list(cloud_manager),
+                return_exceptions=True,
             )
+            if isinstance(local_result, BaseException):
+                logger.warning(
+                    f"Local plugin listing failed in cloud mode; "
+                    f"returning cloud plugins only: {local_result}"
+                )
+                local_plugins_data = []
+            else:
+                local_plugins_data = local_result
+            if isinstance(cloud_response, BaseException):
+                cloud_response = None
         else:
             local_plugins_data = await plugin_manager.list_plugins_async()
             cloud_response = None
