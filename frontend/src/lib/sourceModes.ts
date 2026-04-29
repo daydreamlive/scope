@@ -1,28 +1,11 @@
 import type { InputSourceType } from "./api";
 
-export interface BrowserSourceMode {
-  id: string;
-  label: string;
-  description: string;
-  keywords: string[];
-}
-
-// Browser-driven (WebRTC) source modes. Not registered by the backend, so
-// they're prepended to the dynamic list from /api/v1/input-sources.
-export const BROWSER_SOURCE_MODES: BrowserSourceMode[] = [
-  {
-    id: "video",
-    label: "File",
-    description: "Upload or cycle sample video files",
-    keywords: ["file", "video", "upload"],
-  },
-  {
-    id: "camera",
-    label: "Camera",
-    description: "Use the browser's webcam",
-    keywords: ["webcam", "camera", "capture"],
-  },
-];
+// Re-exported so source-related UI code can import everything from one place.
+// The canonical definition lives in graphUtils.ts because `isBrowserSourceMode`
+// (and its callers in StreamPage / SourceNode / useVideoSource) need the id
+// list as shared logic, not just menu metadata.
+export type { BrowserSourceMode } from "./graphUtils";
+export { BROWSER_SOURCE_MODES } from "./graphUtils";
 
 // Headless-only alias for the browser "video" mode — never surface in UI.
 export const HIDDEN_BACKEND_SOURCES = new Set(["video_file"]);
