@@ -174,6 +174,15 @@ def build_graph(
         else:
             continue
 
+        # If this pipeline gets unloaded mid-session (e.g. a user-triggered
+        # pipeline swap), the worker thread must exit before the manager drops
+        # its reference — otherwise the worker keeps allocating GPU memory
+        # right through the "unload" and OOMs the next load. Capture processor
+        # by default-arg to avoid the late-binding closure pitfall.
+        pipeline_manager.register_pre_unload_hook(
+            node.id, lambda _key, p=processor: p.stop()
+        )
+
         for e in graph.edges_to(node.id):
             if e.kind != "stream":
                 continue
