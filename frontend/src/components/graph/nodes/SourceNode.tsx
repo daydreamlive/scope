@@ -186,7 +186,7 @@ export function SourceNode({ id, data, selected }: NodeProps<SourceNodeType>) {
     [onVideoFileUpload]
   );
 
-  const showPreview = sourceMode === "video" || sourceMode === "camera";
+  const showPreview = isBrowserSourceMode(sourceMode);
   const showFilePicker = sourceMode === "video";
   const handleY = HEADER_H + BODY_PAD + SELECT_ROW_H / 2;
 
