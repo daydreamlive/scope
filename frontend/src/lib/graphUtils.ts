@@ -22,13 +22,34 @@ const START_Y = 50;
 
 export type PortType = "stream" | "string" | "number" | "boolean";
 
+export interface BrowserSourceMode {
+  id: string;
+  label: string;
+  description: string;
+  keywords: string[];
+}
+
 /** Source modes provided by the browser (WebRTC). Everything else is a
  *  server-side :class:`InputSource` (built-in spout/ndi/syphon/video_file
- *  or any plugin-registered id). */
-export const BROWSER_SOURCE_MODES = ["video", "camera"] as const;
+ *  or any plugin-registered id). The label/description/keywords are used by
+ *  the canvas context menu and Add Node modal. */
+export const BROWSER_SOURCE_MODES: readonly BrowserSourceMode[] = [
+  {
+    id: "video",
+    label: "File",
+    description: "Upload or cycle sample video files",
+    keywords: ["file", "video", "upload"],
+  },
+  {
+    id: "camera",
+    label: "Camera",
+    description: "Use the browser's webcam",
+    keywords: ["webcam", "camera", "capture"],
+  },
+];
 
 const BROWSER_SOURCE_MODE_SET: ReadonlySet<string> = new Set(
-  BROWSER_SOURCE_MODES
+  BROWSER_SOURCE_MODES.map(m => m.id)
 );
 
 /** True when *mode* is browser-driven (file upload or webcam) and gets a

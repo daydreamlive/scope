@@ -7,8 +7,13 @@ import {
   DialogDescription,
 } from "../ui/dialog";
 import type { FlowNodeData } from "../../lib/graphUtils";
-import type { NodeDefinitionDto } from "../../lib/api";
-import { fetchNodeDefinitions } from "../../lib/api";
+import type { NodeDefinitionDto, InputSourceType } from "../../lib/api";
+import { usePipelinesContext } from "../../contexts/PipelinesContext";
+import { useNodeDefinitions } from "../../hooks/useNodeDefinitions";
+import {
+  BROWSER_SOURCE_MODES,
+  getVisibleBackendSources,
+} from "../../lib/sourceModes";
 
 interface AddNodeModalProps {
   open: boolean;
@@ -44,6 +49,7 @@ interface AddNodeModalProps {
     subType?: string,
     extraData?: Partial<FlowNodeData>
   ) => void;
+  availableInputSources?: InputSourceType[];
 }
 
 interface NodeCatalogItem {
@@ -84,20 +90,6 @@ interface NodeCatalogItem {
 }
 
 const NODE_CATALOG: NodeCatalogItem[] = [
-  {
-    type: "source",
-    name: "Source",
-    description: "Input node for the workflow",
-    color: "#4ade80",
-    category: "I/O",
-  },
-  {
-    type: "pipeline",
-    name: "Pipeline",
-    description: "Processing pipeline node",
-    color: "#60a5fa",
-    category: "I/O",
-  },
   {
     type: "control",
     subType: "float",
@@ -304,6 +296,8 @@ const NODE_CATALOG: NodeCatalogItem[] = [
 
 const CATEGORIES = [
   "All",
+  "Pipelines",
+  "Sources",
   "I/O",
   "Values",
   "Controls",
@@ -401,49 +395,62 @@ export function AddNodeModal({
   open,
   onClose,
   onSelectNodeType,
+  availableInputSources = [],
 }: AddNodeModalProps) {
   const [searchText, setSearchText] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
-  const [customNodes, setCustomNodes] = useState<NodeCatalogItem[]>([]);
+  const { pipelines } = usePipelinesContext();
+  const { customNodes: customNodeDefs } = useNodeDefinitions();
 
-  useEffect(() => {
-    if (!open) return;
-    const controller = new AbortController();
-    fetchNodeDefinitions({ signal: controller.signal })
-      .then(data => {
-        if (controller.signal.aborted) return;
-        // The unified endpoint returns both pipelines (pipeline_meta != null)
-        // and plain custom nodes. Pipelines are still added via the hardcoded
-        // "Pipeline" catalog entry (placeholder + dropdown); the scheduler
-        // has its own catalog entry with a bespoke widget. Filter both out
-        // of the plugin listing to avoid duplication.
-        const items: NodeCatalogItem[] = (data.nodes ?? [])
-          .filter(
-            n => n.pipeline_meta == null && n.node_type_id !== "scheduler"
-          )
-          .map(n => ({
-            type: "custom_node" as const,
-            subType: n.node_type_id,
-            name: n.display_name || n.node_type_id,
-            description: n.description || "",
-            color: "#9ca3af",
-            category: "Plugins",
-            customNodeDef: n,
-          }));
-        setCustomNodes(items);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        // Custom nodes won't appear, but log so plugin-registration
-        // regressions don't disappear silently.
-        console.warn("Failed to fetch custom node definitions:", err);
-      });
-    return () => controller.abort();
-  }, [open]);
+  const customNodes = useMemo<NodeCatalogItem[]>(
+    () =>
+      customNodeDefs.map(n => ({
+        type: "custom_node" as const,
+        subType: n.node_type_id,
+        name: n.display_name || n.node_type_id,
+        description: n.description || "",
+        color: "#9ca3af",
+        category: "Plugins",
+        customNodeDef: n,
+      })),
+    [customNodeDefs]
+  );
+
+  const pipelineNodes = useMemo<NodeCatalogItem[]>(() => {
+    if (!pipelines) return [];
+    return Object.entries(pipelines).map(([id, info]) => ({
+      type: "pipeline" as const,
+      subType: id,
+      name: info.name || id,
+      description: info.about || "",
+      color: "#60a5fa",
+      category: "Pipelines",
+    }));
+  }, [pipelines]);
+
+  const sourceNodes = useMemo<NodeCatalogItem[]>(() => {
+    const browser = BROWSER_SOURCE_MODES.map(s => ({
+      type: "source" as const,
+      subType: s.id,
+      name: s.label,
+      description: s.description,
+      color: "#4ade80",
+      category: "Sources",
+    }));
+    const backend = getVisibleBackendSources(availableInputSources).map(s => ({
+      type: "source" as const,
+      subType: s.source_id,
+      name: s.source_name,
+      description: s.source_description || "",
+      color: "#4ade80",
+      category: "Sources",
+    }));
+    return [...browser, ...backend];
+  }, [availableInputSources]);
 
   const fullCatalog = useMemo(
-    () => [...NODE_CATALOG, ...customNodes],
-    [customNodes]
+    () => [...pipelineNodes, ...sourceNodes, ...NODE_CATALOG, ...customNodes],
+    [pipelineNodes, sourceNodes, customNodes]
   );
 
   const filteredItems = useMemo(() => {
@@ -452,7 +459,8 @@ export function AddNodeModal({
       const matchesSearch =
         !lowerSearch ||
         item.name.toLowerCase().includes(lowerSearch) ||
-        item.description.toLowerCase().includes(lowerSearch);
+        item.description.toLowerCase().includes(lowerSearch) ||
+        (item.subType?.toLowerCase().includes(lowerSearch) ?? false);
       const matchesCategory =
         activeCategory === "All" || item.category === activeCategory;
       return matchesSearch && matchesCategory;
