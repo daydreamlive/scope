@@ -17,6 +17,7 @@ import {
   SelectionMode,
 } from "@xyflow/react";
 import type {
+  Connection,
   Edge,
   Node,
   NodeChange,
@@ -57,7 +58,7 @@ import { PromptBlendNode } from "./nodes/PromptBlendNode";
 import { SchedulerNode } from "./nodes/SchedulerNode";
 import { CustomNode } from "./nodes/CustomNode";
 import { CustomEdge } from "./CustomEdge";
-import { ContextMenu } from "./ContextMenu";
+import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import { AddNodeModal } from "./AddNodeModal";
 import { BlueprintBrowserModal } from "./BlueprintBrowserModal";
 import { BreadcrumbNav } from "./BreadcrumbNav";
@@ -141,6 +142,53 @@ const nodeTypes = {
 const edgeTypes = {
   default: CustomEdge,
 };
+
+type ConnectionDragStart = {
+  nodeId: string;
+  handleId: string | null;
+  handleType: HandleType | null;
+};
+
+type ConnectionMenuState = {
+  x: number;
+  y: number;
+  header: string;
+  items: ContextMenuItem[];
+};
+
+function getClientPoint(event: MouseEvent | TouchEvent) {
+  if ("clientX" in event) return { x: event.clientX, y: event.clientY };
+  const touch = event.changedTouches[0] ?? event.touches[0];
+  return touch ? { x: touch.clientX, y: touch.clientY } : null;
+}
+
+function readHandleElement(element: Element | null) {
+  const handleEl = element?.closest<HTMLElement>(".react-flow__handle");
+  if (!handleEl) return null;
+  const nodeId =
+    handleEl.dataset.nodeid ??
+    handleEl.getAttribute("data-nodeid") ??
+    handleEl.getAttribute("data-node-id");
+  const handleId =
+    handleEl.dataset.handleid ??
+    handleEl.getAttribute("data-handleid") ??
+    handleEl.getAttribute("data-handle-id");
+  const handleType = handleEl.classList.contains("source")
+    ? "source"
+    : handleEl.classList.contains("target")
+      ? "target"
+      : null;
+
+  if (!nodeId || !handleId || !handleType) return null;
+  return { element: handleEl, nodeId, handleId, handleType };
+}
+
+function getHandleMenuLabel(handleId: string) {
+  const rawName = handleId.includes(":")
+    ? handleId.split(":").slice(1).join(":")
+    : handleId;
+  return rawName.replace(/^in:/, "").replace(/^out:/, "").replace(/_/g, " ");
+}
 
 export interface GraphEditorHandle {
   refreshGraph: () => void;
@@ -487,6 +535,10 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       Node<FlowNodeData>,
       Edge
     > | null>(null);
+    const graphWrapperRef = useRef<HTMLDivElement>(null);
+    const [connectionMenu, setConnectionMenu] =
+      useState<ConnectionMenuState | null>(null);
+    const suppressNextPaneClickRef = useRef(false);
 
     const { selectionRect, contextMenu, setContextMenu, handleRightMouseDown } =
       useRightClickSelect(
@@ -504,6 +556,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           y: screenY,
         });
         setPendingNodePosition(flowPosition);
+        setConnectionMenu(null);
         setContextMenu({ x: screenX, y: screenY, type: "pane" });
       },
       [setContextMenu]
@@ -1067,6 +1120,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           y: event.clientY,
         });
         setPendingNodePosition(position);
+        setConnectionMenu(null);
         setContextMenu({
           x: event.clientX,
           y: event.clientY,
@@ -1076,12 +1130,89 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       [isStreaming, setContextMenu]
     );
 
+    const getCompatibleConnectionMenuItems = useCallback(
+      (start: ConnectionDragStart): ContextMenuItem[] => {
+        const oppositeHandleType =
+          start.handleType === "source"
+            ? "target"
+            : start.handleType === "target"
+              ? "source"
+              : null;
+        if (!start.handleId || !oppositeHandleType || !graphWrapperRef.current) {
+          return [];
+        }
+
+        const nodeById = new Map(nodes.map(node => [node.id, node]));
+        const items: ContextMenuItem[] = [];
+
+        for (const handleEl of Array.from(
+          graphWrapperRef.current.querySelectorAll<HTMLElement>(
+            `.react-flow__handle.${oppositeHandleType}`
+          )
+        )) {
+          const handle = readHandleElement(handleEl);
+          if (!handle || handle.nodeId === start.nodeId) continue;
+
+          const connection: Connection =
+            start.handleType === "source"
+              ? {
+                  source: start.nodeId,
+                  sourceHandle: start.handleId,
+                  target: handle.nodeId,
+                  targetHandle: handle.handleId,
+                }
+              : {
+                  source: handle.nodeId,
+                  sourceHandle: handle.handleId,
+                  target: start.nodeId,
+                  targetHandle: start.handleId,
+                };
+
+          if (!isValidConnection(connection)) continue;
+
+          const node = nodeById.get(handle.nodeId);
+          if (!node) continue;
+          const nodeLabel = node.data.customTitle || node.data.label || node.id;
+          const handleLabel = getHandleMenuLabel(handle.handleId);
+          items.push({
+            label: `${nodeLabel} (${handleLabel})`,
+            keywords: [nodeLabel, node.id, handleLabel],
+            onClick: () => onConnect(connection),
+          });
+        }
+
+        return items;
+      },
+      [isValidConnection, nodes, onConnect]
+    );
+
+    const openConnectionMenu = useCallback(
+      (start: ConnectionDragStart, point: { x: number; y: number }) => {
+        const items = getCompatibleConnectionMenuItems(start);
+        if (items.length === 0) {
+          setConnectionMenu(null);
+          toast.info("No compatible nodes for this handle");
+          return;
+        }
+
+        suppressNextPaneClickRef.current = true;
+        window.setTimeout(() => {
+          suppressNextPaneClickRef.current = false;
+        }, 50);
+        setContextMenu(null);
+        setConnectionMenu({
+          x: point.x,
+          y: point.y,
+          header:
+            start.handleType === "source" ? "Connect Target" : "Connect Source",
+          items,
+        });
+      },
+      [getCompatibleConnectionMenuItems, setContextMenu]
+    );
+
     // Track connection drag for noodle-drop context menu
-    const connectStartRef = useRef<{
-      nodeId: string;
-      handleId: string | null;
-      handleType: string | null;
-    } | null>(null);
+    const connectStartRef = useRef<ConnectionDragStart | null>(null);
 
     const handleConnectStart = useCallback(
       (
@@ -1089,9 +1220,11 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         params: {
           nodeId: string | null;
           handleId: string | null;
-          handleType: string | null;
+          handleType: HandleType | null;
         }
       ) => {
+        setConnectionMenu(null);
+        setContextMenu(null);
         connectStartRef.current = params.nodeId
           ? {
               nodeId: params.nodeId,
@@ -1100,7 +1233,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             }
           : null;
       },
-      []
+      [setContextMenu]
     );
 
     const handleConnectEnd = useCallback(
@@ -1112,36 +1245,14 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           connectStartRef.current = null;
           return;
         }
-        if (
-          connectStartRef.current &&
-          !connectionState.isValid &&
-          !connectionState.toNode
-        ) {
-          const rf = reactFlowInstanceRef.current;
-          if (rf) {
-            const clientX =
-              "clientX" in event
-                ? event.clientX
-                : event.changedTouches[0].clientX;
-            const clientY =
-              "clientY" in event
-                ? event.clientY
-                : event.changedTouches[0].clientY;
-            const position = rf.screenToFlowPosition({
-              x: clientX,
-              y: clientY,
-            });
-            setPendingNodePosition(position);
-            setContextMenu({
-              x: clientX,
-              y: clientY,
-              type: "pane",
-            });
-          }
+        const start = connectStartRef.current;
+        if (start && !connectionState.isValid) {
+          const point = getClientPoint(event);
+          if (point) openConnectionMenu(start, point);
         }
         connectStartRef.current = null;
       },
-      [isStreaming, setContextMenu]
+      [isStreaming, openConnectionMenu]
     );
 
     // Track reconnect state so dropping on canvas deletes the edge
@@ -1212,6 +1323,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
           />
 
           <div
+            ref={graphWrapperRef}
             className={`flex-1 relative${isStreaming ? " streaming" : ""}`}
             onMouseDown={handleRightMouseDown}
             onDoubleClick={handleWrapperDoubleClick}
@@ -1228,7 +1340,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
               onReconnectEnd={handleReconnectEnd}
               onConnectStart={handleConnectStart}
               onConnectEnd={handleConnectEnd}
-              reconnectRadius={25}
+              edgesReconnectable={!isStreaming}
+              reconnectRadius={35}
               nodesConnectable={!isStreaming}
               isValidConnection={isValidConnection}
               minZoom={0.1}
@@ -1250,7 +1363,14 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                   return next;
                 })
               }
-              onPaneClick={() => setContextMenu(null)}
+              onPaneClick={() => {
+                if (suppressNextPaneClickRef.current) {
+                  suppressNextPaneClickRef.current = false;
+                  return;
+                }
+                setContextMenu(null);
+                setConnectionMenu(null);
+              }}
               onPaneContextMenu={suppressContextMenu}
               onNodeContextMenu={suppressNodeContextMenu}
               nodeTypes={nodeTypes}
@@ -1329,6 +1449,16 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
                         openOscConfig: id => setOscConfigNodeId(id),
                       })
                 }
+              />
+            )}
+
+            {connectionMenu && !isStreaming && (
+              <ContextMenu
+                x={connectionMenu.x}
+                y={connectionMenu.y}
+                onClose={() => setConnectionMenu(null)}
+                header={connectionMenu.header}
+                items={connectionMenu.items}
               />
             )}
 
