@@ -124,6 +124,7 @@ class LivepeerSession:
     manifest_id: str | None = None
     session_id: str | None = None
     connection_info: dict[str, Any] | None = None
+    notification_queue: asyncio.Queue[dict | None] | None = None
 
 
 def _build_connection_info() -> dict[str, Any]:
@@ -1042,6 +1043,38 @@ async def _handle_control_message(
         except RuntimeError as exc:
             return {"type": "error", "request_id": request_id, "error": str(exc)}
 
+        # Enqueue notif gets called in non-async code. Capture the loop so
+        # asyncio.Queue can be safely called from non-async / threaded code
+        runner_loop = asyncio.get_running_loop()
+        notification_queue = session.notification_queue
+
+        def _enqueue_notification(message: dict) -> None:
+            if notification_queue is None:
+                return
+
+            # Drop oldest on overflow
+            def _put_with_drop() -> None:
+                try:
+                    # Drained into the events trickle channel
+                    notification_queue.put_nowait(message)
+                except asyncio.QueueFull:
+                    try:
+                        notification_queue.get_nowait()
+                    except asyncio.QueueEmpty:
+                        pass
+                    try:
+                        notification_queue.put_nowait(message)
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "Dropped runner notification under queue pressure"
+                        )
+
+            try:
+                runner_loop.call_soon_threadsafe(_put_with_drop)
+            except RuntimeError:
+                # Loop is closing.
+                pass
+
         session.frame_processor = FrameProcessor(
             pipeline_manager=pipeline_manager,
             initial_parameters={
@@ -1050,6 +1083,7 @@ async def _handle_control_message(
                 "produces_video": produces_video,
                 "produces_audio": produces_audio,
             },
+            notification_callback=_enqueue_notification,
             session_id=session.session_id,
             user_id=session.user_id,
             connection_id=session.manifest_id,
@@ -1207,6 +1241,36 @@ async def _subscribe_control(
     log_queue = log_broadcaster.subscribe(logging_id)
     logs_task = asyncio.create_task(_forward_logs_to_events(log_queue))
 
+    # Forward notifications (parameter updates etc) to scope via event channel
+    # use a queue to backpressure high volume events
+    notification_queue: asyncio.Queue[dict | None] = asyncio.Queue(maxsize=256)
+    session.notification_queue = notification_queue
+
+    async def _forward_notifications_to_events() -> None:
+        try:
+            while not stop_event.is_set():
+                try:
+                    message = await asyncio.wait_for(
+                        notification_queue.get(), timeout=1.0
+                    )
+                except TimeoutError:
+                    continue
+                if message is None:
+                    break
+                try:
+                    await events_writer.write(
+                        {"type": "notification", "payload": message}
+                    )
+                except Exception:
+                    logger.debug(
+                        "Failed to forward notification to events channel",
+                        exc_info=True,
+                    )
+        except asyncio.CancelledError:
+            pass
+
+    notif_task = asyncio.create_task(_forward_notifications_to_events())
+
     try:
         await events_writer.write(
             {
@@ -1235,6 +1299,17 @@ async def _subscribe_control(
         except asyncio.CancelledError:
             pass
         log_broadcaster.unsubscribe(logging_id)
+        # Wake the notification forwarder so it exits on its own; fall back
+        # to cancellation if the queue is somehow saturated.
+        try:
+            notification_queue.put_nowait(None)
+        except asyncio.QueueFull:
+            notif_task.cancel()
+        try:
+            await notif_task
+        except asyncio.CancelledError:
+            pass
+        session.notification_queue = None
         await _stop_stream(session)
         try:
             await events_writer.close()

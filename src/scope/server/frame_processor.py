@@ -1003,6 +1003,7 @@ class FrameProcessor:
             connection_info=self.connection_info,
             tempo_sync=self.tempo_sync,
             modulation_engine=self.modulation_engine,
+            notification_callback=self.notification_callback,
         )
 
         self._sink_processor = graph_run.sink_processor

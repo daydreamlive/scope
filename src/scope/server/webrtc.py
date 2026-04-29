@@ -819,6 +819,12 @@ class WebRTCManager:
             )
             self.sessions[session.id] = session
 
+            # NotificationSender forwards runner-side notifications (parameter
+            # updates from cloud nodes like the Prompt Enhancer) onto the
+            # browser data channel so the UI stays in sync.
+            notification_sender = NotificationSender()
+            session.notification_sender = notification_sender
+
             # Parse graph from initial parameters for multi-source/sink/record
             (
                 _,  # webrtc_sink_node_ids (unused — use all_sink_node_ids)
@@ -1015,6 +1021,11 @@ class WebRTCManager:
             def on_data_channel(data_channel):
                 logger.info(f"Data channel: {data_channel.label}")
                 session.data_channel = data_channel
+                notification_sender.set_data_channel(data_channel)
+
+                @data_channel.on("open")
+                def on_data_channel_open():
+                    notification_sender.flush_pending_notifications()
 
                 @data_channel.on("message")
                 def on_data_channel_message(message):

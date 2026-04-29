@@ -6,6 +6,7 @@ import random
 import threading
 import time
 from collections import deque
+from collections.abc import Callable
 from fractions import Fraction
 from typing import Any
 
@@ -55,6 +56,7 @@ class PipelineProcessor:
         tempo_sync: Any | None = None,
         modulation_engine: Any | None = None,
         node_id: str | None = None,
+        notification_callback: Callable[[dict], None] | None = None,
     ):
         """Initialize a pipeline processor.
 
@@ -69,6 +71,7 @@ class PipelineProcessor:
             tempo_sync: TempoSync instance for beat state injection
             modulation_engine: ModulationEngine for beat-synced param modulation
             node_id: Graph node ID (used for per-node parameter routing in graph mode)
+            notification_callback: Lets consumers know of parameter updates etc
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
@@ -79,6 +82,7 @@ class PipelineProcessor:
         self.connection_info = connection_info
         self.tempo_sync = tempo_sync
         self.modulation_engine = modulation_engine
+        self.notification_callback = notification_callback
 
         # Port-based queues wired by graph_executor.build_graph()
         self.input_queues: dict[str, queue.Queue] = {}
@@ -157,9 +161,10 @@ class PipelineProcessor:
         Non-video ports (string, number, …) deliver discrete values rather
         than frame streams; the latest value on each queue wins. Video ports
         are left alone — those follow the chunk-gathering path below. Drained
-        values are broadcast so widgets like the Prompt textarea reflect
-        what an upstream backend node produced; NotificationSender buffers
-        the payload if the WebRTC data channel isn't open yet.
+        values are emitted via ``self.notification_callback`` so widgets like
+        the Prompt textarea reflect what an upstream backend node produced.
+        Where the notification ends up (WebRTC data channel, events trickle
+        channel, …) is the constructor caller's concern.
         """
         if not self._non_video_input_ports:
             return
@@ -184,19 +189,16 @@ class PipelineProcessor:
                 drained_values[port] = latest
         if not drained_values:
             return
-        from . import app as _app
-
-        manager = getattr(_app, "webrtc_manager", None)
-        if manager is None:
+        if self.notification_callback is None:
             return
         payload = {"node_id": self.node_id, **drained_values}
         try:
-            manager.broadcast_notification(
+            self.notification_callback(
                 {"type": "parameters_updated", "parameters": payload}
             )
         except Exception:
             logger.debug(
-                "Failed to broadcast parameters_updated for %s",
+                "Failed to notify parameters_updated for %s",
                 self.node_id,
                 exc_info=True,
             )

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import queue
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -67,6 +68,7 @@ def build_graph(
     connection_info: dict | None = None,
     tempo_sync: Any | None = None,
     modulation_engine: Any | None = None,
+    notification_callback: Callable[[dict], None] | None = None,
 ) -> GraphRun:
     """Build executable graph: create queues and processors, wire edges.
 
@@ -75,6 +77,7 @@ def build_graph(
         pipeline_manager: Manager to resolve pipeline_id -> instance.
         initial_parameters: Parameters passed to all pipelines.
         session_id, user_id, connection_id, connection_info: For processors.
+        notification_callback: Notify of pipeline / param updates.
 
     Returns:
         GraphRun with source_queues, sink_processor, processors, pipeline_ids.
@@ -140,6 +143,7 @@ def build_graph(
                 tempo_sync=tempo_sync if node_gets_tempo else None,
                 modulation_engine=modulation_engine if node_gets_tempo else None,
                 node_id=node.id,
+                notification_callback=notification_callback,
             )
             node_processors[node.id] = processor
             pipeline_ids.append(node.pipeline_id)
