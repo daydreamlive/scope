@@ -322,6 +322,10 @@ class PipelineProcessor:
         except queue.Full:
             pass
 
+    def _should_flush_audio_on_prompt_change(self) -> bool:
+        """Only flush prompt audio when it cannot desync queued video."""
+        return not self.output_queues.get("video")
+
     def update_parameters(self, parameters: dict[str, Any]):
         """Update parameters that will be used in the next pipeline call."""
         try:
@@ -445,13 +449,15 @@ class PipelineProcessor:
         try:
             new_parameters = self.parameters_queue.get_nowait()
             if new_parameters != self.parameters:
-                # Flush stale audio when prompts change so the new
-                # speech is heard immediately instead of after the old
-                # audio finishes playing.
+                # Flush stale audio for audio-only pipelines so the new speech
+                # starts immediately. For A/V pipelines, keep audio queued:
+                # video frames already emitted for the previous prompt remain
+                # queued as well, and dropping only audio makes them play silent.
                 if "prompts" in new_parameters and new_parameters.get(
                     "prompts"
                 ) != self.parameters.get("prompts"):
-                    self._flush_audio()
+                    if self._should_flush_audio_on_prompt_change():
+                        self._flush_audio()
 
                 # Clear stale transition when new prompts arrive without transition
                 if (
