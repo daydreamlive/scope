@@ -64,22 +64,16 @@ def _probe_kind_from_dir(root: Path) -> str | None:
             logger.debug(f"Failed to parse {init}: {e}")
             continue
         for node in tree.body:
-            if (
+            if not (
                 isinstance(node, ast.Assign)
                 and len(node.targets) == 1
                 and isinstance(node.targets[0], ast.Name)
+                and node.targets[0].id == "__scope_kind__"
+                and isinstance(node.value, ast.Constant)
+                and isinstance(node.value.value, str)
             ):
-                name, value = node.targets[0].id, node.value
-            elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name):
-                name, value = node.target.id, node.value
-            else:
                 continue
-            if (
-                name == "__scope_kind__"
-                and isinstance(value, ast.Constant)
-                and isinstance(value.value, str)
-            ):
-                return value.value
+            return node.value.value
     return None
 
 
@@ -850,16 +844,12 @@ class PluginManager:
         with self._lock:
             return self._type_to_plugin.get(type_id)
 
-    # Backwards-compat aliases. ``pipeline_id`` and ``node_type_id`` are
-    # the same namespace now; external callers that still use the old
-    # names keep working.
+    # Backwards-compat alias: ``pipeline_id`` and ``node_type_id`` share
+    # the same namespace post-unification; existing callers using the
+    # pipeline-flavored name keep working.
     def get_plugin_for_pipeline(self, pipeline_id: str) -> str | None:
         """Alias of :meth:`get_plugin_for_type_id`."""
         return self.get_plugin_for_type_id(pipeline_id)
-
-    def get_plugin_for_node(self, node_type_id: str) -> str | None:
-        """Alias of :meth:`get_plugin_for_type_id`."""
-        return self.get_plugin_for_type_id(node_type_id)
 
     def _get_plugin_source(self, dist: Any) -> tuple[str, bool, str | None, str | None]:
         """Determine the source of a plugin installation.
