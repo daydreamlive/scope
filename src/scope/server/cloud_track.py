@@ -85,6 +85,7 @@ class CloudTrack(MediaStreamTrack):
         self.frame_processor = frame_processor
         self._last_frame: VideoFrame | None = None
         self._started = False
+        self._first_frame_emitted = False
 
         # Multi-source / multi-sink / record (wired up in _start after cloud connects)
         # Store (source_node_id, track). Resolving to a cloud input track index
@@ -269,6 +270,12 @@ class CloudTrack(MediaStreamTrack):
                     packet = ensure_video_packet(frame_packet)
                     frame_np = packet.tensor.numpy()
                     frame = VideoFrame.from_ndarray(frame_np, format="rgb24")
+                    if not self._first_frame_emitted:
+                        self._first_frame_emitted = True
+                        self.frame_processor.notify_first_video_packet()
+                        await asyncio.to_thread(
+                            self.frame_processor.wait_for_av_sync_anchor
+                        )
                     if self.preserve_output_timestamps and packet.timestamp.is_valid:
                         frame.pts = packet.timestamp.pts
                         frame.time_base = packet.timestamp.time_base
@@ -413,7 +420,7 @@ class CloudSinkOutputTrack(MediaStreamTrack):
 
     kind = "video"
 
-    def __init__(self, fps: int = 30):
+    def __init__(self, fps: int = 30, frame_processor: FrameProcessor | None = None):
         super().__init__()
         self._queue: asyncio.Queue[VideoFrame] = asyncio.Queue(maxsize=2)
         self.fps = fps
@@ -421,6 +428,8 @@ class CloudSinkOutputTrack(MediaStreamTrack):
         self._pts: int = 0
         self._last_send_time: float | None = None
         self._last_frame: VideoFrame | None = None
+        self._first_frame_emitted = False
+        self._frame_processor = frame_processor
 
     def put_frame(self, frame: VideoFrame) -> None:
         """Enqueue a frame received from cloud (drop-if-full)."""
@@ -439,6 +448,14 @@ class CloudSinkOutputTrack(MediaStreamTrack):
                 else:
                     await asyncio.sleep(0.01)
                     continue
+
+            if not self._first_frame_emitted:
+                self._first_frame_emitted = True
+                if self._frame_processor is not None:
+                    self._frame_processor.notify_first_video_packet()
+                    await asyncio.to_thread(
+                        self._frame_processor.wait_for_av_sync_anchor
+                    )
 
             # Pace output
             if self._last_send_time is not None:

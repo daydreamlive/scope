@@ -87,19 +87,89 @@ class AudioProcessingTrack(MediaStreamTrack):
         if self.readyState != "live":
             raise MediaStreamError
 
-        # aiortc timing pattern: monotonic timestamp counter with wall-clock pacing
-        if self._start is not None:
+        samples_needed = self._samples_per_frame * self.channels
+        if self._start is None:
+            await self._wait_for_initial_audio(samples_needed)
+        else:
+            # aiortc timing pattern: monotonic timestamp counter with wall-clock pacing
             self._timestamp += self._samples_per_frame
             wait = self._start + (self._timestamp / AUDIO_CLOCK_RATE) - time.time()
             if wait > 0:
                 await asyncio.sleep(wait)
-        else:
-            self._start = time.time()
-            self._timestamp = 0
 
         if self.frame_processor.paused:
             return self._create_silence_frame()
 
+        # Pull in any newly generated packets before deciding whether this
+        # tick has enough buffered audio or should fall back to silence.
+        self._drain_audio_packets()
+        self._trim_buffer()
+
+        # Serve a 20ms frame from the buffer
+        if self._buffered_samples >= samples_needed:
+            frame_parts: list[np.ndarray] = []
+            remaining = samples_needed
+            preserved_pts: int | None = None
+            first_chunk = True
+
+            while remaining > 0 and self._chunks:
+                chunk, pts = self._chunks[0]
+                take = min(len(chunk), remaining)
+                if first_chunk:
+                    # The emitted frame inherits the timestamp of its first
+                    # output sample.
+                    preserved_pts = pts
+                    first_chunk = False
+
+                frame_parts.append(chunk[:take])
+                if take == len(chunk):
+                    self._chunks.popleft()
+                else:
+                    # The leftover tail becomes a new buffered chunk whose
+                    # first-sample PTS advances by the number of consumed
+                    # output samples.
+                    shifted_pts = None if pts is None else pts + (take // self.channels)
+                    self._chunks[0] = (chunk[take:], shifted_pts)
+
+                self._buffered_samples -= take
+                remaining -= take
+
+            frame_samples = np.concatenate(frame_parts)
+            frame_pts = preserved_pts
+            if frame_pts is not None:
+                if (
+                    self._last_preserved_pts is None
+                    or frame_pts > self._last_preserved_pts
+                ):
+                    self._last_preserved_pts = frame_pts
+                else:
+                    logger.warning(
+                        "Ignoring non-monotonic preserved audio timestamp in AudioProcessingTrack"
+                    )
+                    frame_pts = None
+            return self._create_audio_frame(frame_samples, pts_override=frame_pts)
+
+        return self._create_silence_frame()
+
+    async def _wait_for_initial_audio(self, samples_needed: int) -> None:
+        while self._buffered_samples < samples_needed:
+            if self.readyState != "live":
+                raise MediaStreamError
+
+            if not self.frame_processor.paused:
+                self._drain_audio_packets()
+                self._trim_buffer()
+                if self._buffered_samples >= samples_needed:
+                    break
+
+            await asyncio.sleep(0.01)
+
+        self.frame_processor.notify_first_audio_packet()
+        await asyncio.to_thread(self.frame_processor.wait_for_av_sync_anchor)
+        self._start = time.time()
+        self._timestamp = 0
+
+    def _drain_audio_packets(self) -> None:
         # Drain all available audio from the queue to minimise latency
         # for bursty or small-chunk pipelines.
         while True:
@@ -157,6 +227,7 @@ class AudioProcessingTrack(MediaStreamTrack):
             self._chunks.append((interleaved, chunk_pts))
             self._buffered_samples += len(interleaved)
 
+    def _trim_buffer(self) -> None:
         # Cap buffer to prevent unbounded growth.
         # Trim-to-tail: concatenate and keep only the newest samples so a
         # single large chunk (e.g. LTX2 delivering >1s at once) is never
@@ -180,53 +251,6 @@ class AudioProcessingTrack(MediaStreamTrack):
 
         if self._buffered_samples > max_interleaved:
             logger.warning("Audio buffer overflow, dropped oldest chunks")
-
-        # Serve a 20ms frame from the buffer
-        samples_needed = self._samples_per_frame * self.channels
-        if self._buffered_samples >= samples_needed:
-            frame_parts: list[np.ndarray] = []
-            remaining = samples_needed
-            preserved_pts: int | None = None
-            first_chunk = True
-
-            while remaining > 0 and self._chunks:
-                chunk, pts = self._chunks[0]
-                take = min(len(chunk), remaining)
-                if first_chunk:
-                    # The emitted frame inherits the timestamp of its first
-                    # output sample.
-                    preserved_pts = pts
-                    first_chunk = False
-
-                frame_parts.append(chunk[:take])
-                if take == len(chunk):
-                    self._chunks.popleft()
-                else:
-                    # The leftover tail becomes a new buffered chunk whose
-                    # first-sample PTS advances by the number of consumed
-                    # output samples.
-                    shifted_pts = None if pts is None else pts + (take // self.channels)
-                    self._chunks[0] = (chunk[take:], shifted_pts)
-
-                self._buffered_samples -= take
-                remaining -= take
-
-            frame_samples = np.concatenate(frame_parts)
-            frame_pts = preserved_pts
-            if frame_pts is not None:
-                if (
-                    self._last_preserved_pts is None
-                    or frame_pts > self._last_preserved_pts
-                ):
-                    self._last_preserved_pts = frame_pts
-                else:
-                    logger.warning(
-                        "Ignoring non-monotonic preserved audio timestamp in AudioProcessingTrack"
-                    )
-                    frame_pts = None
-            return self._create_audio_frame(frame_samples, pts_override=frame_pts)
-
-        return self._create_silence_frame()
 
     def _create_audio_frame(
         self, samples: np.ndarray, pts_override: int | None = None

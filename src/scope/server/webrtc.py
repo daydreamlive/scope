@@ -353,6 +353,7 @@ class WebRTCManager:
             # used here because they may be stale from a previous pipeline load.
             pipeline_ids = initial_parameters.get("pipeline_ids", [])
             produces_video = NodeRegistry.chain_produces_video(pipeline_ids)
+            produces_audio = NodeRegistry.chain_produces_audio(pipeline_ids)
 
             # Parse graph from initial parameters to find sink/source/record node IDs
             (
@@ -431,6 +432,10 @@ class WebRTCManager:
                 connection_info=request.connection_info,
                 tempo_sync=tempo_sync,
             )
+            frame_processor.set_expected_kinds(
+                video=produces_video,
+                audio=produces_audio,
+            )
             frame_processor.start()
             session.frame_processor = frame_processor
 
@@ -498,7 +503,6 @@ class WebRTCManager:
                     "skipping video track"
                 )
 
-            produces_audio = NodeRegistry.chain_produces_audio(pipeline_ids)
             if produces_audio:
                 audio_track = AudioProcessingTrack(
                     frame_processor=frame_processor,
@@ -882,6 +886,11 @@ class WebRTCManager:
                 )
                 session.audio_track = audio_track
 
+            frame_processor.set_expected_kinds(
+                video=produces_video,
+                audio=produces_audio,
+            )
+
             # Recording setup (local recording from relayed cloud frames)
             recording_param = initial_parameters.get("recording")
             recording_enabled = bool(recording_param)
@@ -1062,7 +1071,7 @@ class WebRTCManager:
                     f"transceivers for {len(sink_node_ids) - 1} extra sink(s)"
                 )
                 for i, sink_id in enumerate(sink_node_ids[1:]):
-                    extra_track = CloudSinkOutputTrack()
+                    extra_track = CloudSinkOutputTrack(frame_processor=frame_processor)
                     extra_sink_tracks.append(extra_track)
                     session.additional_tracks.append(extra_track)
                     relayed = relay.subscribe(extra_track)

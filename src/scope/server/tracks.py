@@ -171,6 +171,7 @@ class NodeOutputTrack(MediaStreamTrack):
         self._fps_getter = fps_getter
         self._ts = {"fps": 30, "_pts": 0, "_last_send_time": None}
         self._pacing = MediaPacingState()
+        self._first_frame_emitted = False
 
     async def recv(self) -> VideoFrame:
         fp = self._frame_processor
@@ -185,6 +186,12 @@ class NodeOutputTrack(MediaStreamTrack):
                 frame = ensure_even_video_frame(
                     VideoFrame.from_ndarray(packet.tensor.numpy(), format="rgb24")
                 )
+                if not self._first_frame_emitted:
+                    self._first_frame_emitted = True
+                    self._frame_processor.notify_first_video_packet()
+                    await asyncio.to_thread(
+                        self._frame_processor.wait_for_av_sync_anchor
+                    )
                 if packet.timestamp.is_valid:
                     await _pace_preserved_timestamp(self, self._pacing, packet)
                     frame.pts = packet.timestamp.pts
@@ -284,6 +291,7 @@ class VideoProcessingTrack(MediaStreamTrack):
         self._frame_lock = threading.Lock()
         self._ts = {"fps": fps, "_pts": 0, "_last_send_time": None}
         self._pacing = MediaPacingState()
+        self._first_frame_emitted = False
 
         # Server-side input mode - when enabled, frames come from the backend
         # instead of WebRTC (no browser video track needed)
@@ -352,6 +360,12 @@ class VideoProcessingTrack(MediaStreamTrack):
                         )
 
                 if frame is not None:
+                    if not self._first_frame_emitted:
+                        self._first_frame_emitted = True
+                        self.frame_processor.notify_first_video_packet()
+                        await asyncio.to_thread(
+                            self.frame_processor.wait_for_av_sync_anchor
+                        )
                     if packet is not None and packet.timestamp.is_valid:
                         await _pace_preserved_timestamp(self, self._pacing, packet)
                         frame.pts = packet.timestamp.pts

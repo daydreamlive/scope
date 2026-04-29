@@ -145,6 +145,17 @@ class FrameProcessor:
         self._last_heartbeat_time = time.time()
         self._playback_ready_emitted = False
         self._stream_start_time: float | None = None
+        self._stream_start_wall: float | None = None
+
+        # A/V sync anchor barrier for first RTP packet alignment.
+        self._expects_video = False
+        self._expects_audio = False
+        self._first_video_wall: float | None = None
+        self._first_audio_wall: float | None = None
+        self._first_video_event = threading.Event()
+        self._first_audio_event = threading.Event()
+        self._av_sync_lock = threading.Lock()
+        self._av_sync_logged = False
 
         # Store pipeline_ids from initial_parameters if provided
         pipeline_ids = (initial_parameters or {}).get("pipeline_ids")
@@ -188,7 +199,17 @@ class FrameProcessor:
         self._last_heartbeat_time = time.time()
         self._playback_ready_emitted = False
         self._stream_start_time = time.monotonic()
+        self._stream_start_wall = time.time()
         self._last_stats_time = time.time()
+        self._first_video_wall = None
+        self._first_audio_wall = None
+        self._first_video_event = threading.Event()
+        self._first_audio_event = threading.Event()
+        self._av_sync_logged = False
+        if not self._expects_video:
+            self._first_video_event.set()
+        if not self._expects_audio:
+            self._first_audio_event.set()
 
         if self._cloud_relay is not None:
             # Cloud mode: frames go to cloud instead of local pipelines
@@ -638,6 +659,80 @@ class FrameProcessor:
         if fps is not None:
             return fps
         return self.get_fps()
+
+    def set_expected_kinds(self, video: bool, audio: bool) -> None:
+        """Declare whether this session expects first video/audio packets."""
+        with self._av_sync_lock:
+            self._expects_video = video
+            self._expects_audio = audio
+
+            if not self._expects_video or self._first_video_wall is not None:
+                self._first_video_event.set()
+            else:
+                self._first_video_event.clear()
+            if not self._expects_audio or self._first_audio_wall is not None:
+                self._first_audio_event.set()
+            else:
+                self._first_audio_event.clear()
+
+            self._maybe_log_av_sync_anchor()
+
+    def notify_first_video_packet(self) -> None:
+        """Record first video packet arrival and release barrier participants."""
+        with self._av_sync_lock:
+            if self._first_video_wall is None:
+                self._first_video_wall = time.time()
+            self._first_video_event.set()
+            self._maybe_log_av_sync_anchor()
+
+    def notify_first_audio_packet(self) -> None:
+        """Record first audio packet arrival and release barrier participants."""
+        with self._av_sync_lock:
+            if self._first_audio_wall is None:
+                self._first_audio_wall = time.time()
+            self._first_audio_event.set()
+            self._maybe_log_av_sync_anchor()
+
+    def wait_for_av_sync_anchor(self) -> None:
+        """Wait for expected first audio/video packet arrival events."""
+        self._first_video_event.wait()
+        self._first_audio_event.wait()
+
+    def _maybe_log_av_sync_anchor(self) -> None:
+        if self._av_sync_logged:
+            return
+        if not (self._expects_video and self._expects_audio):
+            return
+        if self._first_video_wall is None or self._first_audio_wall is None:
+            return
+
+        self._av_sync_logged = True
+        delta_ms = int(round((self._first_audio_wall - self._first_video_wall) * 1000))
+        held = "none"
+        if delta_ms < 0:
+            held = "audio"
+        elif delta_ms > 0:
+            held = "video"
+
+        if self._stream_start_wall is None:
+            audio_first_ms = None
+            video_first_ms = None
+        else:
+            audio_first_ms = int(
+                round((self._first_audio_wall - self._stream_start_wall) * 1000)
+            )
+            video_first_ms = int(
+                round((self._first_video_wall - self._stream_start_wall) * 1000)
+            )
+
+        logger.info(
+            "[FRAME-PROCESSOR] A/V sync anchor: audio_first=%sms "
+            "video_first=%sms delta=audio-video=%+dms (held=%s)",
+            audio_first_ms,
+            video_first_ms,
+            delta_ms,
+            held,
+        )
 
     def _on_frame_output(self, packet: VideoPacket) -> None:
         """Common post-output logic: increment counter, emit playback_ready, fan out to sinks."""
