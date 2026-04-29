@@ -341,6 +341,7 @@ export function useGraphState(
     availability.spoutOutputAvailable,
     availability.ndiOutputAvailable,
     availability.syphonOutputAvailable,
+    availability.availableInputSources,
     tempo.tempoState,
     tempo.tempoSources,
   ]);
