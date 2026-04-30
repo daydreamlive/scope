@@ -200,7 +200,7 @@ class TestResampling:
 
 class TestRecv:
     def test_no_audio_returns_silence(self):
-        track = _make_track(started=False)
+        track = _make_track()
         frame = _run(track.recv())
         raw = np.frombuffer(bytes(frame.planes[0]), dtype=np.int16)
         assert np.all(raw == 0)
@@ -247,7 +247,7 @@ class TestRecv:
         assert isinstance(frame, AudioFrame)
 
     def test_paused_returns_silence(self):
-        track = _make_track(started=False)
+        track = _make_track()
         track.frame_processor.paused = True
         audio = torch.randn(2, SAMPLES_PER_FRAME + 100)
         track.frame_processor.get_audio_packet = MagicMock(
@@ -259,7 +259,7 @@ class TestRecv:
         assert np.all(raw == 0)
 
     def test_undersized_chunk_returns_silence(self):
-        track = _make_track(started=False)
+        track = _make_track()
         audio = torch.randn(2, 100)  # too small for a 960-sample frame
         track.frame_processor.get_audio_packet = MagicMock(
             side_effect=_once(audio, 48000)
