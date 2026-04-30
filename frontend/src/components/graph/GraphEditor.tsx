@@ -248,6 +248,9 @@ interface GraphEditorProps {
   ndiAvailable?: boolean;
   syphonAvailable?: boolean;
   availableInputSources?: import("../../lib/api").InputSourceType[];
+  spoutReason?: string | null;
+  ndiReason?: string | null;
+  syphonReason?: string | null;
   onSpoutSourceChange?: (name: string) => void;
   onNdiSourceChange?: (identifier: string) => void;
   onSyphonSourceChange?: (identifier: string) => void;
@@ -299,6 +302,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       ndiAvailable = false,
       syphonAvailable = false,
       availableInputSources = [],
+      spoutReason = null,
+      ndiReason = null,
+      syphonReason = null,
       onSpoutSourceChange,
       onNdiSourceChange,
       onSyphonSourceChange,
@@ -402,6 +408,9 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         ndiOutputAvailable,
         syphonOutputAvailable,
         availableInputSources,
+        spoutReason,
+        ndiReason,
+        syphonReason,
       },
       {
         tempoState,

@@ -51,6 +51,9 @@ export interface EnrichNodesDeps {
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
   availableInputSources: import("../../../lib/api").InputSourceType[];
+  spoutReason?: string | null;
+  ndiReason?: string | null;
+  syphonReason?: string | null;
   handleEdgeDelete: (edgeId: string) => void;
   isStreaming: boolean;
   isLoading: boolean;
@@ -173,6 +176,9 @@ export function enrichNodes(
           ndiAvailable: deps.ndiAvailable,
           syphonAvailable: deps.syphonAvailable,
           availableInputSources: deps.availableInputSources,
+          spoutReason: deps.spoutReason ?? null,
+          ndiReason: deps.ndiReason ?? null,
+          syphonReason: deps.syphonReason ?? null,
           onSpoutSourceChange: (name: string) =>
             deps.onSpoutSourceChangeRef.current?.(name),
           onNdiSourceChange: (identifier: string) =>
@@ -222,6 +228,9 @@ export function enrichNodes(
           spoutAvailable: deps.spoutOutputAvailable,
           ndiAvailable: deps.ndiOutputAvailable,
           syphonAvailable: deps.syphonOutputAvailable,
+          spoutReason: deps.spoutReason ?? null,
+          ndiReason: deps.ndiReason ?? null,
+          syphonReason: deps.syphonReason ?? null,
         },
       };
     }

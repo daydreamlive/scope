@@ -123,6 +123,9 @@ export interface GraphEditorAvailability {
   ndiOutputAvailable: boolean;
   syphonOutputAvailable: boolean;
   availableInputSources: import("../../../../lib/api").InputSourceType[];
+  spoutReason?: string | null;
+  ndiReason?: string | null;
+  syphonReason?: string | null;
 }
 
 export function useGraphState(
@@ -292,6 +295,9 @@ export function useGraphState(
     ndiOutputAvailable: availability.ndiOutputAvailable,
     syphonOutputAvailable: availability.syphonOutputAvailable,
     availableInputSources: availability.availableInputSources,
+    spoutReason: availability.spoutReason ?? null,
+    ndiReason: availability.ndiReason ?? null,
+    syphonReason: availability.syphonReason ?? null,
     handleEdgeDelete,
     isStreaming: streams.isStreaming,
     isLoading: streams.isLoading ?? false,

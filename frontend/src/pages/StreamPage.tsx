@@ -250,6 +250,9 @@ export function StreamPage() {
     spoutAvailable,
     ndiOutputAvailable,
     syphonOutputAvailable,
+    spoutReason,
+    ndiReason,
+    syphonReason,
     availableInputSources,
     refreshPipelineSchemas,
     refreshHardwareInfo,
@@ -3559,6 +3562,9 @@ export function StreamPage() {
             ndiAvailable={ndiAvailable}
             syphonAvailable={syphonAvailable}
             availableInputSources={availableInputSources}
+            spoutReason={spoutReason}
+            ndiReason={ndiReason}
+            syphonReason={syphonReason}
             onSpoutSourceChange={handleSpoutSourceChange}
             onNdiSourceChange={handleNdiSourceChange}
             onSyphonSourceChange={handleSyphonSourceChange}
