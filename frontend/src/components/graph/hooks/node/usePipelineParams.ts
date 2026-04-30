@@ -12,6 +12,11 @@ import type {
 import { getDefaultPromptForMode } from "../../../../data/pipelines";
 import type { InputMode } from "../../../../types";
 
+// Stable reference for pipeline nodes that have no params yet. Without this,
+// `nodeParams[id] || {}` produces a fresh object every keystroke, causing
+// every pipeline node's data ref to flip and forcing spurious re-renders.
+const EMPTY_PARAMS: Record<string, unknown> = Object.freeze({});
+
 interface UsePipelineParamsArgs {
   setNodes: React.Dispatch<React.SetStateAction<Node<FlowNodeData>[]>>;
   setEdges: React.Dispatch<React.SetStateAction<Edge[]>>;
@@ -284,15 +289,21 @@ export function usePipelineParams({
       let changed = false;
       const result = nds.map(n => {
         if (n.data.nodeType === "pipeline") {
-          const vals = nodeParams[n.id] || {};
-          if (n.data.parameterValues === vals) return n;
+          const vals = nodeParams[n.id] || EMPTY_PARAMS;
+          const promptText = (vals.__prompt as string) || "";
+          if (
+            n.data.parameterValues === vals &&
+            n.data.promptText === promptText
+          ) {
+            return n;
+          }
           changed = true;
           return {
             ...n,
             data: {
               ...n.data,
               parameterValues: vals,
-              promptText: (vals.__prompt as string) || "",
+              promptText,
             },
           };
         }
