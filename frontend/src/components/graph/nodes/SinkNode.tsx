@@ -118,6 +118,7 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
         <>
           <video
             ref={videoRef}
+            data-testid="sink-video"
             className={
               hasVideoTrack
                 ? isFullscreen

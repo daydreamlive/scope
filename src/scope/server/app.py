@@ -3520,6 +3520,70 @@ async def update_onboarding_status(body: OnboardingStatusUpdate):
     )
 
 
+# ---------------------------------------------------------------------------
+# Debug / Product-test Instrumentation
+#
+# Only active when SCOPE_TEST_INSTRUMENTATION=1. Production binaries pay
+# no cost — counters are no-ops and the endpoints 404.
+# ---------------------------------------------------------------------------
+
+
+class RetryStatsResponse(BaseModel):
+    enabled: bool
+    counts: dict[str, int]
+    events: list[dict]
+
+
+@app.get("/api/v1/_debug/retry_stats", response_model=RetryStatsResponse)
+async def get_retry_stats():
+    """Return current retry/failure counter snapshot.
+
+    Used by product-test harness to enforce zero-retry gates. 404 when
+    SCOPE_TEST_INSTRUMENTATION is unset.
+    """
+    from .retry_counter import is_enabled, retry_counter
+
+    if not is_enabled():
+        raise HTTPException(status_code=404, detail="Test instrumentation not enabled")
+    return RetryStatsResponse(
+        enabled=True,
+        counts=retry_counter.snapshot(),
+        events=retry_counter.events(),
+    )
+
+
+@app.post("/api/v1/_debug/retry_stats/reset")
+async def reset_retry_stats():
+    """Zero all retry counters. Used by tests between phases."""
+    from .retry_counter import is_enabled, retry_counter
+
+    if not is_enabled():
+        raise HTTPException(status_code=404, detail="Test instrumentation not enabled")
+    retry_counter.reset()
+    return {"ok": True}
+
+
+class FrontendRetryIncrement(BaseModel):
+    name: str
+    by: int = 1
+    context: dict | None = None
+
+
+@app.post("/api/v1/_debug/retry_stats/incr")
+async def frontend_retry_incr(body: FrontendRetryIncrement):
+    """Let the frontend report a retry/reconnect event.
+
+    The frontend's WebRTC/reconnect logic lives in the browser, so it can't
+    touch the in-process counter directly. It POSTs here instead.
+    """
+    from .retry_counter import is_enabled, retry_counter
+
+    if not is_enabled():
+        raise HTTPException(status_code=404, detail="Test instrumentation not enabled")
+    retry_counter.incr(body.name, by=body.by, **(body.context or {}))
+    return {"ok": True}
+
+
 @app.get("/{path:path}")
 async def serve_frontend(request: Request, path: str):
     """Serve the frontend for all non-API routes (fallback for client-side routing)."""
