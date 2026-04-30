@@ -1,5 +1,6 @@
 import hashlib
 import logging
+import threading
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -9,6 +10,13 @@ from pydantic import BaseModel
 logger = logging.getLogger(__name__)
 
 MANIFEST_FILENAME = "lora_manifest.json"
+
+# Serialize manifest read-modify-write across concurrent download / tag
+# operations within a single process. Without this, two near-simultaneous
+# add_manifest_entry calls can overwrite each other (e.g. when downloads
+# triggered in quick succession finish around the same scheduler slice).
+# Cross-process safety still requires a file lock; that is out of scope here.
+_MANIFEST_LOCK = threading.Lock()
 
 
 class LoRAProvenance(BaseModel):
@@ -75,7 +83,8 @@ def add_manifest_entry(
         size_bytes=size_bytes,
         added_at=datetime.now(UTC),
     )
-    manifest = load_manifest(lora_dir)
-    manifest.entries[filename] = entry
-    save_manifest(lora_dir, manifest)
+    with _MANIFEST_LOCK:
+        manifest = load_manifest(lora_dir)
+        manifest.entries[filename] = entry
+        save_manifest(lora_dir, manifest)
     return entry

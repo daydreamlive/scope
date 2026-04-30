@@ -204,7 +204,15 @@ async def download_lora(
         version_id=request.version_id,
         url=request.url,
     )
-    add_manifest_entry(lora_dir, relative_filename, provenance, sha256, size_bytes)
+    await loop.run_in_executor(
+        None,
+        add_manifest_entry,
+        lora_dir,
+        relative_filename,
+        provenance,
+        sha256,
+        size_bytes,
+    )
 
     return LoRADownloadResult(
         filename=relative_filename,
