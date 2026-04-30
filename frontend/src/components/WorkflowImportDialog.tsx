@@ -418,11 +418,22 @@ export function WorkflowImportDialog({
         if (
           !parsed.metadata ||
           typeof parsed.metadata.name !== "string" ||
-          !Array.isArray(parsed.pipelines) ||
-          parsed.pipelines.length === 0
+          !Array.isArray(parsed.pipelines)
         ) {
           toast.error("Malformed workflow file", {
             description: "Missing required fields: metadata or pipelines",
+          });
+          return;
+        }
+
+        // A graph workflow may legitimately have an empty pipelines array
+        // (utility-only graphs), as long as it carries an embedded graph.
+        const hasEmbeddedGraph = Boolean(
+          parsed.graph?.nodes && parsed.graph?.edges
+        );
+        if (parsed.pipelines.length === 0 && !hasEmbeddedGraph) {
+          toast.error("Malformed workflow file", {
+            description: "Workflow has no pipelines and no graph to import",
           });
           return;
         }
