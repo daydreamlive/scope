@@ -85,13 +85,21 @@ class WorkflowRequest(BaseModel, extra="ignore"):
         unification there is one canonical list (``nodes``); this
         validator merges both keys when present so the rest of the code
         only has to look at :attr:`nodes`.
+
+        Must not mutate ``data``. Starlette caches the parsed request
+        JSON on ``request._json`` and ``cloud_proxy`` reads it again to
+        forward the body to the cloud — popping ``pipelines`` here
+        would strip it from the proxied request and break older cloud
+        builds that still require that field.
         """
         if not isinstance(data, dict):
             return data
-        legacy = data.pop("pipelines", None)
+        legacy = data.get("pipelines")
         if legacy:
-            combined = list(legacy) + list(data.get("nodes") or [])
-            data["nodes"] = combined
+            return {
+                **data,
+                "nodes": list(legacy) + list(data.get("nodes") or []),
+            }
         return data
 
 

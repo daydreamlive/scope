@@ -512,6 +512,24 @@ class TestExtraFieldsIgnored:
         assert wf.nodes[0].node_type_id == "p"
         assert not hasattr(wf, "future_field")
 
+    def test_validation_does_not_mutate_input_dict(self):
+        """Starlette caches the parsed request body on ``request._json`` and
+        ``cloud_proxy`` reads it again to forward the body upstream. If
+        validation pops/replaces keys on the input dict, the proxied request
+        loses ``pipelines`` — which breaks older cloud builds that still
+        require that field. Guard against that regression here.
+        """
+        data = {
+            "format": "scope-workflow",
+            "pipelines": [{"pipeline_id": "longlive", "source": {"type": "builtin"}}],
+        }
+        snapshot = {"keys": sorted(data.keys()), "pipelines": list(data["pipelines"])}
+        wf = WorkflowRequest.model_validate(data)
+        assert wf.nodes[0].node_type_id == "longlive"
+        assert sorted(data.keys()) == snapshot["keys"]
+        assert "pipelines" in data
+        assert data["pipelines"] == snapshot["pipelines"]
+
 
 # ---------------------------------------------------------------------------
 # min_scope_version tests
