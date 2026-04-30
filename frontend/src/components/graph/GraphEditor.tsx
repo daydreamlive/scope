@@ -659,63 +659,66 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         enrichDepsRef,
       });
 
-    const connectPendingCreatedNode = useCallback((newNodeId: string | null) => {
-      const pending = pendingConnectionCreateRef.current;
-      pendingConnectionCreateRef.current = null;
-      if (!pending || !newNodeId) return;
+    const connectPendingCreatedNode = useCallback(
+      (newNodeId: string | null) => {
+        const pending = pendingConnectionCreateRef.current;
+        pendingConnectionCreateRef.current = null;
+        if (!pending || !newNodeId) return;
 
-      const { start } = pending;
-      const oppositeHandleType =
-        start.handleType === "source"
-          ? "target"
-          : start.handleType === "target"
-            ? "source"
-            : null;
-      if (!start.handleId || !oppositeHandleType) return;
+        const { start } = pending;
+        const oppositeHandleType =
+          start.handleType === "source"
+            ? "target"
+            : start.handleType === "target"
+              ? "source"
+              : null;
+        if (!start.handleId || !oppositeHandleType) return;
 
-      const tryConnect = () => {
-        const wrapper = graphWrapperRef.current;
-        if (!wrapper) return;
+        const tryConnect = () => {
+          const wrapper = graphWrapperRef.current;
+          if (!wrapper) return;
 
-        const handles = Array.from(
-          wrapper.querySelectorAll<HTMLElement>(
-            `.react-flow__handle.${oppositeHandleType}`
+          const handles = Array.from(
+            wrapper.querySelectorAll<HTMLElement>(
+              `.react-flow__handle.${oppositeHandleType}`
+            )
           )
-        )
-          .map(readHandleElement)
-          .filter(
-            (
-              handle
-            ): handle is NonNullable<ReturnType<typeof readHandleElement>> =>
-              !!handle && handle.nodeId === newNodeId
-          );
+            .map(readHandleElement)
+            .filter(
+              (
+                handle
+              ): handle is NonNullable<ReturnType<typeof readHandleElement>> =>
+                !!handle && handle.nodeId === newNodeId
+            );
 
-        for (const handle of handles) {
-          const connection: Connection =
-            start.handleType === "source"
-              ? {
-                  source: start.nodeId,
-                  sourceHandle: start.handleId,
-                  target: newNodeId,
-                  targetHandle: handle.handleId,
-                }
-              : {
-                  source: newNodeId,
-                  sourceHandle: handle.handleId,
-                  target: start.nodeId,
-                  targetHandle: start.handleId,
-                };
+          for (const handle of handles) {
+            const connection: Connection =
+              start.handleType === "source"
+                ? {
+                    source: start.nodeId,
+                    sourceHandle: start.handleId,
+                    target: newNodeId,
+                    targetHandle: handle.handleId,
+                  }
+                : {
+                    source: newNodeId,
+                    sourceHandle: handle.handleId,
+                    target: start.nodeId,
+                    targetHandle: start.handleId,
+                  };
 
-          if (!isValidConnectionRef.current(connection)) continue;
-          onConnectRef.current(connection);
-          return;
-        }
+            if (!isValidConnectionRef.current(connection)) continue;
+            onConnectRef.current(connection);
+            return;
+          }
 
-        toast.info("Created node, but no compatible handle was found");
-      };
+          toast.info("Created node, but no compatible handle was found");
+        };
 
-      requestAnimationFrame(() => requestAnimationFrame(tryConnect));
-    }, []);
+        requestAnimationFrame(() => requestAnimationFrame(tryConnect));
+      },
+      []
+    );
 
     const handleCreateNodeTypeSelect = useCallback(
       (...args: Parameters<typeof handleNodeTypeSelect>) => {
@@ -1221,7 +1224,11 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
             : start.handleType === "target"
               ? "source"
               : null;
-        if (!start.handleId || !oppositeHandleType || !graphWrapperRef.current) {
+        if (
+          !start.handleId ||
+          !oppositeHandleType ||
+          !graphWrapperRef.current
+        ) {
           return [];
         }
 
@@ -1430,8 +1437,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         if (handle.handleType !== "target") return;
 
         const edge = edges.find(
-          e =>
-            e.target === handle.nodeId && e.targetHandle === handle.handleId
+          e => e.target === handle.nodeId && e.targetHandle === handle.handleId
         );
         if (!edge) return;
 

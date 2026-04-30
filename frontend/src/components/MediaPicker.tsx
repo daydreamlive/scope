@@ -24,10 +24,18 @@ function getAssetKind(
   asset: AssetFileInfo,
   accept: MediaPickerProps["accept"]
 ): "image" | "video" | "audio" {
-  if (asset.type === "audio" || accept === "audio" || isAudioAsset(asset.path)) {
+  if (
+    asset.type === "audio" ||
+    accept === "audio" ||
+    isAudioAsset(asset.path)
+  ) {
     return "audio";
   }
-  if (asset.type === "video" || accept === "video" || isVideoAsset(asset.path)) {
+  if (
+    asset.type === "video" ||
+    accept === "video" ||
+    isVideoAsset(asset.path)
+  ) {
     return "video";
   }
   return "image";
@@ -142,11 +150,11 @@ export function MediaPicker({
       ? [...imageTypes, ...videoTypes, ...audioTypes]
       : accept === "media"
         ? [...imageTypes, ...videoTypes]
-      : accept === "video"
-        ? videoTypes
-        : accept === "audio"
-          ? audioTypes
-          : imageTypes;
+        : accept === "video"
+          ? videoTypes
+          : accept === "audio"
+            ? audioTypes
+            : imageTypes;
   const fileAcceptAttr = allowedTypes.join(",");
 
   const handleFileUpload = async (
