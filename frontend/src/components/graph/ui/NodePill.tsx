@@ -10,7 +10,7 @@ interface NodePillProps {
 export function NodePill({ children, className = "", title }: NodePillProps) {
   return (
     <div
-      className={`${NODE_TOKENS.pill} w-[110px] flex items-center justify-center ${className}`}
+      className={`${NODE_TOKENS.pill} w-full flex items-center justify-center ${className}`}
       title={title}
     >
       <p

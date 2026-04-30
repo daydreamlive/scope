@@ -292,13 +292,15 @@ function matchParameterInputs(
   );
   if (!targetParam) return undefined;
   // Permissive coercions: number → list_number, list_number → list_number,
-  // {video,audio}_path → string.
+  // video_path → string, audio_path → audio component fields only.
   if (targetParam.type === "list_number" && sourceType === "number")
     return true;
   if (targetParam.type === "list_number" && sourceType === "list_number")
     return true;
   if (targetParam.type === "string" && sourceType === "video_path") return true;
-  if (targetParam.type === "string" && sourceType === "audio_path") return true;
+  if (targetParam.type === "string" && sourceType === "audio_path") {
+    return targetParam.component === "audio";
+  }
   return sourceType === targetParam.type;
 }
 

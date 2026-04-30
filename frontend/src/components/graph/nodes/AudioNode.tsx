@@ -5,9 +5,11 @@ import type { NodeProps, Node } from "@xyflow/react";
 import { Music, X } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
 import { buildHandleId } from "../../../lib/graphUtils";
+import { getAssetUrl } from "../../../lib/api";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { MediaPicker } from "../../MediaPicker";
+import { AudioPreviewPlaceholder } from "../../AudioPreviewPlaceholder";
 import { NodeCard, NodeHeader, NODE_TOKENS, collapsedHandleStyle } from "../ui";
 import { COLOR_AUDIO } from "../nodeColors";
 
@@ -41,26 +43,37 @@ export function AudioNode({ id, data, selected }: NodeProps<AudioNodeType>) {
   return (
     <NodeCard
       selected={selected}
-      minWidth={120}
-      minHeight={60}
-      className="!min-w-0"
+      minWidth={160}
+      minHeight={132}
+      className={`border-emerald-400/45 shadow-[0_0_18px_rgba(52,211,153,0.12)] ${
+        collapsed ? "" : "!min-w-[160px] min-h-[132px]"
+      }`}
       collapsed={collapsed}
+      autoMinHeight={false}
     >
       <NodeHeader
         title={data.customTitle || "Audio"}
         onTitleChange={newTitle => updateData({ customTitle: newTitle })}
         collapsed={collapsed}
         onCollapseToggle={toggleCollapse}
+        className="bg-emerald-400/10 border-b-emerald-400/20"
       />
       {!collapsed && (
         <>
-          <div className="flex-1 min-h-0 relative mx-2 my-1.5">
+          <div className="mx-2 my-1.5 min-h-[76px]">
             {audioPath ? (
-              <div
-                className="absolute inset-0 rounded-lg overflow-hidden border border-[rgba(119,119,119,0.15)] group cursor-pointer flex flex-col items-center justify-center bg-[#1a1a1a]"
-                onClick={() => setIsPickerOpen(true)}
-              >
-                <Music className="h-8 w-8 text-emerald-400 mb-1" />
+              <div className="relative h-full min-h-[76px] rounded-lg border border-emerald-400/25 group overflow-hidden">
+                <AudioPreviewPlaceholder
+                  src={getAssetUrl(audioPath)}
+                  fileName={fileName}
+                />
+                <button
+                  onClick={() => setIsPickerOpen(true)}
+                  className="absolute bottom-1 right-1 rounded bg-black/70 px-1.5 py-0.5 text-[9px] font-medium text-white opacity-0 transition-opacity hover:bg-black group-hover:opacity-100"
+                  title="Replace audio"
+                >
+                  Replace
+                </button>
                 <button
                   onClick={handleRemove}
                   className="absolute top-1 right-1 bg-black/70 hover:bg-black text-white rounded p-1 opacity-0 group-hover:opacity-100 transition-opacity"
@@ -68,19 +81,16 @@ export function AudioNode({ id, data, selected }: NodeProps<AudioNodeType>) {
                 >
                   <X className="h-3 w-3" />
                 </button>
-                <div className="absolute inset-0 bg-black/0 hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 pointer-events-none">
-                  <span className="text-[10px] text-white font-medium bg-black/60 px-2 py-1 rounded">
-                    Replace
-                  </span>
-                </div>
               </div>
             ) : (
               <button
                 onClick={() => setIsPickerOpen(true)}
-                className="absolute inset-0 rounded-lg border-2 border-dashed border-[rgba(119,119,119,0.3)] flex flex-col items-center justify-center hover:border-[rgba(119,119,119,0.5)] hover:bg-[rgba(255,255,255,0.02)] transition-colors"
+                className="h-full min-h-[76px] w-full rounded-lg border-2 border-dashed border-emerald-400/35 flex flex-col items-center justify-center hover:border-emerald-400/60 hover:bg-emerald-400/[0.06] transition-colors"
               >
-                <Music className="h-4 w-4 mb-0.5 text-[#666]" />
-                <span className="text-[10px] text-[#666]">Add Audio</span>
+                <Music className="h-4 w-4 mb-0.5 text-emerald-300/80" />
+                <span className="text-[10px] text-emerald-300/80">
+                  Add Audio
+                </span>
               </button>
             )}
           </div>

@@ -28,12 +28,17 @@ export function NodePillSearchableSelect({
   const [dropdownPos, setDropdownPos] = useState<{
     top: number;
     left: number;
-  }>({ top: 0, left: 0 });
+    width: number;
+  }>({ top: 0, left: 0, width: 200 });
 
   const updatePosition = useCallback(() => {
     if (!buttonRef.current) return;
     const rect = buttonRef.current.getBoundingClientRect();
-    setDropdownPos({ top: rect.bottom + 4, left: rect.left });
+    setDropdownPos({
+      top: rect.bottom + 4,
+      left: rect.left,
+      width: Math.max(rect.width, 200),
+    });
   }, []);
 
   useEffect(() => {
@@ -91,15 +96,15 @@ export function NodePillSearchableSelect({
   };
 
   return (
-    <div className={`relative ${className}`}>
+    <div className={`relative min-w-0 ${className}`}>
       <button
         ref={buttonRef}
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
-        className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputText} w-[110px] text-left cursor-pointer flex items-center justify-between`}
+        className={`${NODE_TOKENS.pillInput} ${NODE_TOKENS.pillInputText} text-left cursor-pointer flex items-center justify-between`}
       >
-        <span className="truncate">{displayText}</span>
+        <span className="min-w-0 truncate">{displayText}</span>
         <span className="ml-1 shrink-0">▼</span>
       </button>
 
@@ -107,8 +112,12 @@ export function NodePillSearchableSelect({
         createPortal(
           <div
             ref={dropdownRef}
-            className="fixed z-[9999] w-[200px] bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)] rounded-md shadow-[0_4px_16px_rgba(0,0,0,0.4)] max-h-[240px] overflow-hidden flex flex-col nowheel"
-            style={{ top: dropdownPos.top, left: dropdownPos.left }}
+            className="fixed z-[9999] bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)] rounded-md shadow-[0_4px_16px_rgba(0,0,0,0.4)] max-h-[240px] overflow-hidden flex flex-col nowheel"
+            style={{
+              top: dropdownPos.top,
+              left: dropdownPos.left,
+              width: dropdownPos.width,
+            }}
             onMouseDown={e => e.stopPropagation()}
             onWheel={e => e.stopPropagation()}
           >
