@@ -246,7 +246,7 @@ export function PipelineNode({
                   <button
                     type="button"
                     onClick={() => onParameterChange?.(id, "reset_cache", true)}
-                    className={`${NODE_TOKENS.pill} flex items-center justify-center gap-1 w-[110px] cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
+                    className={`${NODE_TOKENS.pill} flex w-full items-center justify-center gap-1 cursor-pointer hover:bg-[#2a2a2a] active:bg-[#333] transition-colors`}
                     title="Clear longlive cache to regenerate fresh frames"
                   >
                     <RotateCcw className="h-3 w-3 text-[#fafafa]" />

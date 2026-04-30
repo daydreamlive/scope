@@ -7,14 +7,15 @@ export const NODE_TOKENS = {
   bodyWithGap: "py-1 px-2.5 flex flex-col gap-0.5",
   pill: "bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)] rounded-md px-2.5 py-0.5",
   pillInput:
-    "bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)] rounded-md px-2.5 py-0.5 text-[#fafafa] text-[10px] appearance-none focus:outline-none focus:ring-1 focus:ring-blue-400/60 w-[110px]",
+    "bg-[#1a1a1a] border border-[rgba(255,255,255,0.06)] rounded-md px-2.5 py-0.5 text-[#fafafa] text-[10px] appearance-none focus:outline-none focus:ring-1 focus:ring-blue-400/60 w-full",
   pillInputText: "text-center",
   pillInputNumber:
     "text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
   labelText: "text-[#737373] text-[10px] font-normal tracking-wide",
   primaryText: "text-[#e8e8e8] text-[10px] font-medium",
   headerText: "text-[#f0f0f0] text-[11px] font-semibold tracking-tight",
-  paramRow: "flex items-center justify-between min-h-[18px]",
+  paramRow:
+    "grid grid-cols-[minmax(0,1fr)_minmax(110px,1.35fr)] items-center gap-2 min-h-[18px]",
   sectionTitle:
     "text-[9px] font-semibold text-[#666] uppercase tracking-widest mb-2",
   panelBackground: "bg-[#161616]",
