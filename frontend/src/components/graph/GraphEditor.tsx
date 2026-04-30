@@ -1391,6 +1391,136 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       [isStreaming, handleEdgeDelete]
     );
 
+    // ComfyUI/Blueprints-style "grab existing edge from connected handle".
+    //
+    // React Flow's built-in reconnect (edgesReconnectable + onReconnect) only
+    // triggers when the user grabs the edge endpoint hit-area near the handle
+    // — clicking the Handle DOM itself starts a *new* connection because the
+    // Handle's pointerdown wins event ordering. We intercept pointerdown in
+    // the capture phase on the wrapper, and when a user click-drags a target
+    // handle that already has an incoming edge we (a) swallow the event so
+    // React Flow doesn't start a new connection, (b) wait until the cursor
+    // moves past a small threshold so a stray click doesn't tear the edge,
+    // (c) detach the existing edge, (d) synthesize a mousedown on the
+    // opposite *source* handle so React Flow starts a connection drag from
+    // there, and (e) immediately kickstart that drag with a synthesized
+    // mousemove so the live connection line shows while the button is still
+    // held — without this final step React Flow stays under the
+    // connectionDragThreshold and falls into click-to-connect mode (line
+    // only appears after release).
+    useEffect(() => {
+      const root = graphWrapperRef.current;
+      if (!root) return;
+
+      const PICKUP_THRESHOLD_SQ = 9; // 3 px
+      const KICKSTART_DELTA = 4; // px past XYHandle's connectionDragThreshold
+
+      const onPointerDownCapture = (event: PointerEvent) => {
+        if (event.button !== 0) return;
+        // Synthesized events (the ones we dispatch below) must pass through.
+        if (!event.isTrusted) return;
+        if (isStreaming) return;
+        if (isReconnectingRef.current) return;
+
+        const handle = readHandleElement(event.target as Element | null);
+        if (!handle) return;
+        // Only pick up from target handles. Source handles can fan out to
+        // many edges, so the natural "start a new connection" behavior on
+        // mousedown is preserved there.
+        if (handle.handleType !== "target") return;
+
+        const edge = edges.find(
+          e =>
+            e.target === handle.nodeId && e.targetHandle === handle.handleId
+        );
+        if (!edge) return;
+
+        const sourceHandleEl = root.querySelector<HTMLElement>(
+          `.react-flow__handle.source[data-nodeid="${edge.source}"][data-handleid="${edge.sourceHandle ?? ""}"]`
+        );
+        if (!sourceHandleEl) return;
+
+        event.stopPropagation();
+        event.preventDefault();
+
+        const startX = event.clientX;
+        const startY = event.clientY;
+
+        const cleanup = () => {
+          document.removeEventListener("mousemove", onMove, true);
+          document.removeEventListener("mouseup", onUp, true);
+        };
+
+        const triggerPickup = (clientX: number, clientY: number) => {
+          cleanup();
+          handleEdgeDelete(edge.id);
+
+          const baseInit: MouseEventInit = {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            button: 0,
+            buttons: 1,
+            view: window,
+          };
+
+          // Start a connection drag from the source handle anchored at the
+          // user's original click position. React's delegated onMouseDown
+          // picks this up, calling XYHandle.onPointerDown which attaches
+          // mousemove/mouseup listeners on the document for the drag.
+          sourceHandleEl.dispatchEvent(
+            new MouseEvent("mousedown", {
+              ...baseInit,
+              clientX: startX,
+              clientY: startY,
+            })
+          );
+
+          // Push past XYHandle's connectionDragThreshold immediately so the
+          // live connection line appears while the button is still held.
+          // Without this, the user has to release before the line shows
+          // (click-to-connect mode kicks in instead of drag mode).
+          document.dispatchEvent(
+            new MouseEvent("mousemove", {
+              ...baseInit,
+              clientX: clientX + KICKSTART_DELTA,
+              clientY: clientY + KICKSTART_DELTA,
+            })
+          );
+          // Settle the connection line at the user's actual cursor.
+          document.dispatchEvent(
+            new MouseEvent("mousemove", {
+              ...baseInit,
+              clientX,
+              clientY,
+            })
+          );
+        };
+
+        const onMove = (e: MouseEvent) => {
+          const dx = e.clientX - startX;
+          const dy = e.clientY - startY;
+          if (dx * dx + dy * dy < PICKUP_THRESHOLD_SQ) return;
+          triggerPickup(e.clientX, e.clientY);
+        };
+
+        const onUp = () => {
+          // Released without crossing the pickup threshold: leave the edge
+          // intact and let React Flow's normal click handling proceed (a
+          // tiny click on a connected handle is a no-op for us).
+          cleanup();
+        };
+
+        document.addEventListener("mousemove", onMove, true);
+        document.addEventListener("mouseup", onUp, true);
+      };
+
+      root.addEventListener("pointerdown", onPointerDownCapture, true);
+      return () => {
+        root.removeEventListener("pointerdown", onPointerDownCapture, true);
+      };
+    }, [edges, isStreaming, handleEdgeDelete]);
+
     return (
       <div className="flex h-full w-full">
         <div className="flex flex-col flex-1">
