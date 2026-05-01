@@ -33,14 +33,17 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         TAE_ARTIFACT,
         LIGHTTAE_ARTIFACT,
         HuggingfaceRepoArtifact(
-            repo_id="Wan-AI/Wan2.1-T2V-14B",
+            repo_id="daydreamlive/Wan2.1-T2V-14B",
             files=["config.json"],
         ),
         HuggingfaceRepoArtifact(
-            repo_id="krea/krea-realtime-video",
-            files=["krea-realtime-video-14b.safetensors"],
+            repo_id="daydreamlive/krea-realtime-video",
+            files=["config.json", "krea-realtime-video-14b.safetensors"],
         ),
     ]
+
+    inputs = ["video", "vace_input_frames", "vace_input_masks"]
+    outputs = ["video"]
 
     supports_cache_management = True
     supports_kv_cache_bias = True
@@ -106,7 +109,12 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         default=[1000, 750, 500, 250],
         description="Denoising step schedule for progressive generation",
         json_schema_extra=ui_field_config(
-            order=6, component="denoising_steps", is_load_param=True
+            order=6,
+            component="denoising_steps",
+            is_load_param=True,
+            modulatable=True,
+            modulatable_min=100,
+            modulatable_max=1000,
         ),
     )
     noise_scale: float = Field(
@@ -115,14 +123,17 @@ class KreaRealtimeVideoConfig(BasePipelineConfig):
         le=1.0,
         description="Amount of noise to add during video generation (video mode only)",
         json_schema_extra=ui_field_config(
-            order=7, component="noise", modes=["video"], is_load_param=True
+            order=7,
+            component="noise",
+            modes=["video"],
+            is_load_param=False,
         ),
     )
     noise_controller: bool = Field(
         default=True,
         description="Enable dynamic noise control during generation (video mode only)",
         json_schema_extra=ui_field_config(
-            order=7, component="noise", modes=["video"], is_load_param=True
+            order=7, component="noise", modes=["video"], is_load_param=False
         ),
     )
     quantization: Quantization | None = Field(

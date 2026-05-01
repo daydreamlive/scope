@@ -48,7 +48,12 @@ def client(mock_plugin_manager, mock_pipeline_manager):
         with patch("scope.server.app.pipeline_manager", mock_pipeline_manager):
             with patch("scope.server.app.webrtc_manager", MagicMock()):
                 # Import app after patching
+                import scope.server.app as app_module
                 from scope.server.app import app
+
+                # Clear cached responses so each test starts fresh
+                app_module._pipeline_schemas_cache = None
+                app_module._plugins_list_cache = None
 
                 yield TestClient(app, raise_server_exceptions=False)
 
@@ -83,6 +88,7 @@ class TestListPluginsEndpoint:
                 ],
                 "latest_version": "2.0.0",
                 "update_available": True,
+                "bundled": True,
             }
         ]
 
@@ -97,6 +103,7 @@ class TestListPluginsEndpoint:
         assert len(data["plugins"][0]["pipelines"]) == 1
         assert data["plugins"][0]["latest_version"] == "2.0.0"
         assert data["plugins"][0]["update_available"] is True
+        assert data["plugins"][0]["bundled"] is True
 
     def test_handles_manager_errors(self, client, mock_plugin_manager):
         """Manager exception should return 500 error."""

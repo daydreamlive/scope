@@ -4,14 +4,52 @@ Logs configuration module for daydream-scope.
 Provides centralized configuration for log storage location with support for:
 - Default location: ~/.daydream-scope/logs
 - Environment variable override: DAYDREAM_SCOPE_LOGS_DIR
+- Correlation ID injection into log lines
 """
 
 import logging
 import os
+import threading
 from datetime import datetime, timedelta
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# Correlation ID tracking — thread-safe globals for log correlation
+# ---------------------------------------------------------------------------
+
+_connection_id: str | None = None
+_connection_id_lock = threading.Lock()
+
+
+def set_connection_id(connection_id: str | None) -> None:
+    """Set (or clear) the connection ID that is injected into every log line."""
+    global _connection_id
+    with _connection_id_lock:
+        _connection_id = connection_id
+
+
+def get_connection_id() -> str | None:
+    """Return the current connection ID, or None if not set."""
+    return _connection_id
+
+
+class ScopeLogContextFilter(logging.Filter):
+    """Logging filter that adds correlation prefixes to every record."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        connection_id = _connection_id
+        if record.name == "scope.cloud":
+            connection_id = None
+        record.connection_id = (  # type: ignore[attr-defined]
+            f"[({connection_id})] " if connection_id else ""
+        )
+        return True
+
+
+LOG_FORMAT = "%(asctime)s - %(name)s - %(levelname)s - %(connection_id)s%(message)s"
 
 # Default logs directory
 DEFAULT_LOGS_DIR = "~/.daydream-scope/logs"

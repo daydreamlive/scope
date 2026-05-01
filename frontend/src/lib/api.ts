@@ -1,4 +1,11 @@
 import type { IceServersResponse, ModelStatusResponse } from "../types";
+import type {
+  ScopeWorkflow,
+  WorkflowResolutionPlan,
+  LoRADownloadRequest,
+  LoRADownloadResult,
+} from "./workflowApi";
+import { fetchFalCdnToken } from "./auth";
 
 export interface PromptItem {
   text: string;
@@ -15,6 +22,7 @@ export interface WebRTCOfferRequest {
   sdp?: string;
   type?: string;
   initialParameters?: {
+    input_mode?: "text" | "video";
     prompts?: string[] | PromptItem[];
     prompt_interpolation_method?: "linear" | "slerp";
     transition?: PromptTransition;
@@ -27,6 +35,7 @@ export interface WebRTCOfferRequest {
     vace_context_scale?: number;
     pipeline_ids?: string[];
     images?: string[];
+    graph?: GraphConfig;
   };
 }
 
@@ -38,8 +47,15 @@ export interface PipelineLoadParams {
 // Generic load params - accepts any key-value pairs based on pipeline config
 export type PipelineLoadParamsGeneric = Record<string, unknown>;
 
+export interface PipelineLoadItem {
+  node_id: string;
+  pipeline_id: string;
+  load_params?: PipelineLoadParamsGeneric | null;
+}
+
 export interface PipelineLoadRequest {
-  pipeline_ids: string[];
+  pipelines?: PipelineLoadItem[];
+  pipeline_ids?: string[];
   load_params?: PipelineLoadParamsGeneric | null;
 }
 
@@ -50,6 +66,11 @@ export interface PipelineStatusResponse {
   // Optional list of loaded LoRA adapters, provided by backend when available.
   loaded_lora_adapters?: { path: string; scale: number }[];
   error?: string;
+  loading_stage?: string | null;
+  /** Whether the loaded pipeline chain produces video output. */
+  produces_video?: boolean;
+  /** Whether the loaded pipeline chain produces audio output. */
+  produces_audio?: boolean;
 }
 
 export const getIceServers = async (): Promise<IceServersResponse> => {
@@ -203,10 +224,17 @@ export const downloadPipelineModels = async (
   return result;
 };
 
+export interface IntegrationAvailability {
+  available: boolean;
+  reason?: string | null;
+  install_hint?: string | null;
+}
+
 export interface HardwareInfoResponse {
   vram_gb: number | null;
-  spout_available: boolean;
-  ndi_available: boolean;
+  spout: IntegrationAvailability;
+  ndi: IntegrationAvailability;
+  syphon: IntegrationAvailability;
 }
 
 export const getHardwareInfo = async (): Promise<HardwareInfoResponse> => {
@@ -319,9 +347,15 @@ export const getInputSourceResolution = async (
 export const getInputSourceStreamUrl = (
   sourceType: string,
   identifier: string,
-  fps = 2
-): string =>
-  `/api/v1/input-sources/${sourceType}/sources/${encodeURIComponent(identifier)}/stream?fps=${fps}`;
+  fps = 2,
+  options?: { flipVertical?: boolean }
+): string => {
+  const params = new URLSearchParams({ fps: String(fps) });
+  if (options?.flipVertical) {
+    params.set("flip_vertical", "true");
+  }
+  return `/api/v1/input-sources/${sourceType}/sources/${encodeURIComponent(identifier)}/stream?${params.toString()}`;
+};
 
 export const fetchCurrentLogs = async (): Promise<string> => {
   const response = await fetch("/api/v1/logs/current", {
@@ -339,11 +373,23 @@ export const fetchCurrentLogs = async (): Promise<string> => {
   return logsText;
 };
 
+export interface LoRAProvenance {
+  source: "huggingface" | "civitai" | "url" | "local";
+  repo_id?: string | null;
+  hf_filename?: string | null;
+  model_id?: string | null;
+  version_id?: string | null;
+  url?: string | null;
+}
+
 export interface LoRAFileInfo {
   name: string;
   path: string;
   size_mb: number;
   folder?: string | null;
+  sha256?: string | null;
+  provenance?: LoRAProvenance | null;
+  read_only?: boolean;
 }
 
 export interface LoRAFilesResponse {
@@ -386,10 +432,8 @@ export const installLoRAFile = async (
   });
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(
-      `Install LoRA failed: ${response.status} ${response.statusText}: ${errorText}`
-    );
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
   }
 
   const result = await response.json();
@@ -421,7 +465,7 @@ export interface AssetFileInfo {
   path: string;
   size_mb: number;
   folder?: string | null;
-  type: string; // "image" or "video"
+  type: string; // "image", "video", or "audio"
   created_at: number; // Unix timestamp
 }
 
@@ -430,7 +474,7 @@ export interface AssetsResponse {
 }
 
 export const listAssets = async (
-  type?: "image" | "video"
+  type?: "image" | "video" | "audio"
 ): Promise<AssetsResponse> => {
   const url = type ? `/api/v1/assets?type=${type}` : "/api/v1/assets";
   const response = await fetch(url, {
@@ -452,11 +496,22 @@ export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
   const fileContent = await file.arrayBuffer();
   const filename = encodeURIComponent(file.name);
 
+  const headers: Record<string, string> = {
+    "Content-Type": "application/octet-stream",
+  };
+
+  try {
+    const cdnToken = await fetchFalCdnToken();
+    headers["X-Fal-CDN-Token"] = cdnToken.token;
+    headers["X-Fal-CDN-Token-Type"] = cdnToken.token_type;
+    headers["X-Fal-CDN-Base-URL"] = cdnToken.base_url;
+  } catch (e) {
+    console.warn("uploadAsset: failed to fetch CDN token, upload may fail:", e);
+  }
+
   const response = await fetch(`/api/v1/assets?filename=${filename}`, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/octet-stream",
-    },
+    headers,
     body: fileContent,
   });
 
@@ -472,6 +527,10 @@ export const uploadAsset = async (file: File): Promise<AssetFileInfo> => {
 };
 
 export const getAssetUrl = (assetPath: string): string => {
+  if (assetPath.startsWith("blob:") || assetPath.startsWith("data:")) {
+    return assetPath;
+  }
+
   // The backend returns full absolute paths, but we need to extract the relative path
   // from the assets directory for the serving endpoint
   // Example: C:\Users\...\assets\myimage.png -> myimage.png
@@ -504,6 +563,13 @@ export interface SchemaFieldUI {
   modes?: ("text" | "video")[];
   /** If true, field is a load param (disabled when streaming); if false, runtime param (editable when streaming). Omit = treated as load param. */
   is_load_param?: boolean;
+  label?: string;
+  /** If true, this field can be targeted by the beat-synced modulation engine. */
+  modulatable?: boolean;
+  /** Safe lower bound for modulation (tighter than field validation range). */
+  modulatable_min?: number;
+  /** Safe upper bound for modulation. */
+  modulatable_max?: number;
 }
 
 // Pipeline schema types - matches output of get_schema_with_metadata()
@@ -520,6 +586,7 @@ export interface PipelineSchemaProperty {
   $ref?: string;
   /** UI hints from backend (Field json_schema_extra) */
   ui?: SchemaFieldUI;
+  [k: string]: unknown;
 }
 
 export interface PipelineConfigSchema {
@@ -571,6 +638,9 @@ export interface PipelineSchemaInfo {
   recommended_quantization_vram_threshold: number | null;
   modified: boolean;
   plugin_name: string | null;
+  // Graph port declarations
+  inputs?: string[];
+  outputs?: string[];
 }
 
 export interface PipelineSchemasResponse {
@@ -613,6 +683,11 @@ export interface PluginInfo {
   latest_version: string | null;
   update_available: boolean | null;
   package_spec: string | null;
+  bundled: boolean;
+  /** Plugin kind from the package's `__scope_kind__` attribute. */
+  kind?: string | null;
+  /** Where this plugin record came from (only set in cloud mode). */
+  origin?: "local" | "cloud" | null;
 }
 
 export interface FailedPluginInfo {
@@ -848,12 +923,112 @@ export const deleteApiKey = async (
   return response.json();
 };
 
-export const downloadRecording = async (sessionId: string): Promise<void> => {
+// Graph Configuration types
+
+export interface GraphNode {
+  id: string;
+  type: "source" | "pipeline" | "sink" | "record" | "node";
+  pipeline_id?: string | null;
+  /** Node type ID (NodeRegistry key) when type is "node" */
+  node_type_id?: string | null;
+  /** Per-node parameter values for custom nodes */
+  params?: Record<string, unknown> | null;
+  x?: number | null;
+  y?: number | null;
+  w?: number | null;
+  h?: number | null;
+  source_mode?: string | null;
+  source_name?: string | null;
+  source_flip_vertical?: boolean;
+  tempo_sync?: boolean;
+  sink_mode?: string | null;
+  sink_name?: string | null;
+}
+
+export interface NodePortDef {
+  name: string;
+  port_type: string;
+  required?: boolean;
+  description?: string;
+  default_value?: unknown;
+}
+
+export interface NodeParamDef {
+  name: string;
+  param_type: "number" | "string" | "boolean" | "select";
+  default?: unknown;
+  description?: string;
+  /**
+   * Free-form widget hints (``min``/``max``/``step`` for number,
+   * ``options`` for select, …). Keeps widget-specific fields off the
+   * base schema; the frontend renderer dispatches on ``param_type``
+   * and reads whichever ``ui`` keys apply.
+   */
+  ui?: Record<string, unknown> | null;
+  convertible_to_input?: boolean;
+}
+
+export interface NodeDefinitionDto {
+  node_type_id: string;
+  display_name: string;
+  category: string;
+  description: string;
+  inputs: NodePortDef[];
+  outputs: NodePortDef[];
+  params: NodeParamDef[];
+  continuous: boolean;
+  /**
+   * Rich pipeline-only metadata (config_schema, mode_defaults,
+   * supports_lora, supports_vace, etc.) populated for entries whose
+   * underlying class is a Pipeline subclass. ``null`` for plain nodes.
+   */
+  pipeline_meta?: Record<string, unknown> | null;
+  /** Python package name that provides this node, or null for built-ins. */
+  plugin_name?: string | null;
+}
+
+export interface NodeDefinitionsResponse {
+  nodes: NodeDefinitionDto[];
+}
+
+export const fetchNodeDefinitions = async (
+  options: { signal?: AbortSignal } = {}
+): Promise<NodeDefinitionsResponse> => {
+  const response = await fetch("/api/v1/nodes/definitions", {
+    method: "GET",
+    signal: options.signal,
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch node definitions: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export interface GraphEdge {
+  from: string;
+  from_port: string;
+  to_node: string;
+  to_port: string;
+  kind?: "stream" | "parameter";
+}
+
+export interface GraphConfig {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+  /** Opaque frontend UI state (frontend-only nodes, edges, etc.). Stored and returned as-is by the backend. */
+  ui_state?: Record<string, unknown> | null;
+}
+
+export const downloadRecording = async (
+  sessionId: string,
+  nodeId?: string
+): Promise<void> => {
   if (!sessionId) {
     throw new Error("Session ID is required to download recording");
   }
 
-  const response = await fetch(`/api/v1/recordings/${sessionId}`, {
+  const params = nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : "";
+  const response = await fetch(`/api/v1/recordings/${sessionId}${params}`, {
     method: "GET",
   });
 
@@ -869,9 +1044,407 @@ export const downloadRecording = async (sessionId: string): Promise<void> => {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `recording-${new Date().toISOString().split("T")[0]}.mp4`;
+  const suffix = nodeId ? `-${nodeId}` : "";
+  link.download = `recording${suffix}-${new Date().toISOString().split("T")[0]}.mp4`;
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
   URL.revokeObjectURL(url);
+};
+
+export const startRecording = async (
+  sessionId: string,
+  nodeId?: string
+): Promise<{ status: string }> => {
+  const params = nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : "";
+  const response = await fetch(
+    `/api/v1/recordings/${sessionId}/start${params}`,
+    {
+      method: "POST",
+    }
+  );
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Start recording failed: ${response.status}: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const stopRecording = async (
+  sessionId: string,
+  nodeId?: string
+): Promise<{ status: string }> => {
+  const params = nodeId ? `?node_id=${encodeURIComponent(nodeId)}` : "";
+  const response = await fetch(
+    `/api/v1/recordings/${sessionId}/stop${params}`,
+    {
+      method: "POST",
+    }
+  );
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Stop recording failed: ${response.status}: ${errorText}`);
+  }
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// Workflow
+// ---------------------------------------------------------------------------
+
+export const resolveWorkflow = async (
+  workflow: ScopeWorkflow
+): Promise<WorkflowResolutionPlan> => {
+  const response = await fetch("/api/v1/workflow/resolve", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(workflow),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+export const downloadLoRA = async (
+  request: LoRADownloadRequest
+): Promise<LoRADownloadResult> => {
+  const response = await fetch("/api/v1/lora/download", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// OSC settings
+// ---------------------------------------------------------------------------
+
+export interface OscSettingsRequest {
+  log_all_messages: boolean;
+}
+
+export interface OscStatusResponse {
+  enabled: boolean;
+  listening: boolean;
+  port: number | null;
+  host: string | null;
+  log_all_messages: boolean;
+}
+
+export const updateOscSettings = async (
+  settings: OscSettingsRequest
+): Promise<OscStatusResponse> => {
+  const response = await fetch("/api/v1/osc/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Update OSC settings failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// OSC graph inventory + paths
+// ---------------------------------------------------------------------------
+
+export interface OscInventoryEntry {
+  osc_address: string;
+  type: "float" | "integer" | "bool" | "string" | "integer_list";
+  description?: string | null;
+  min?: number | null;
+  max?: number | null;
+  enum?: unknown[] | null;
+  default?: unknown;
+  /** React Flow node id this entry maps to (omit for global registry params). */
+  node_id?: string | null;
+  /** Field name on `node.data` (or pipeline schema property name). */
+  param?: string | null;
+  /** Pipeline id when the target is a pipeline node param. */
+  pipeline_id?: string | null;
+  /** Group label shown in the OSC docs (typically the node's display title). */
+  group?: string | null;
+}
+
+export interface OscPathsResponse {
+  active: Record<string, OscInventoryEntry[]>;
+  available: Record<string, OscInventoryEntry[]>;
+  active_pipeline_ids: string[];
+}
+
+export const setOscInventory = async (
+  paths: OscInventoryEntry[]
+): Promise<{ count: number }> => {
+  const response = await fetch("/api/v1/osc/inventory", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ paths }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `Set OSC inventory failed: ${response.status} ${response.statusText}: ${errorText}`
+    );
+  }
+
+  return response.json();
+};
+
+export const fetchOscPaths = async (): Promise<OscPathsResponse> => {
+  const response = await fetch("/api/v1/osc/paths");
+  if (!response.ok) {
+    throw new Error(`Fetch OSC paths failed: ${response.status}`);
+  }
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// DMX settings
+// ---------------------------------------------------------------------------
+
+export interface DmxStatusResponse {
+  enabled: boolean;
+  listening: boolean;
+  port: number | null;
+  preferred_port: number;
+  host: string | null;
+  log_all_messages: boolean;
+  mapping_count: number;
+}
+
+export interface DmxMapping {
+  universe: number;
+  channel: number;
+  key: string;
+}
+
+export interface DmxConfigResponse {
+  enabled: boolean;
+  preferred_port: number;
+  log_all_messages: boolean;
+  mappings: DmxMapping[];
+}
+
+export interface DmxPathEntry {
+  key: string;
+  type: string;
+  description: string;
+  min?: number;
+  max?: number;
+  pipeline_id?: string;
+}
+
+export interface DmxPathsResponse {
+  active: Record<string, DmxPathEntry[]>;
+  available: Record<string, DmxPathEntry[]>;
+  active_pipeline_ids: string[];
+}
+
+export const getDmxStatus = async (): Promise<DmxStatusResponse> => {
+  const response = await fetch("/api/v1/dmx/status");
+  if (!response.ok) {
+    throw new Error("Failed to fetch DMX status");
+  }
+  return response.json();
+};
+
+export const updateDmxSettings = async (settings: {
+  enabled?: boolean;
+  log_all_messages?: boolean;
+  preferred_port?: number;
+}): Promise<DmxStatusResponse> => {
+  const response = await fetch("/api/v1/dmx/settings", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to update DMX settings");
+  }
+  return response.json();
+};
+
+export const applyDmxPort = async (
+  preferredPort: number
+): Promise<DmxStatusResponse> => {
+  const response = await fetch("/api/v1/dmx/restart", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ preferred_port: preferredPort }),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to apply DMX port");
+  }
+  return response.json();
+};
+
+export const getDmxPaths = async (): Promise<DmxPathsResponse> => {
+  const response = await fetch("/api/v1/dmx/paths");
+  if (!response.ok) {
+    throw new Error("Failed to fetch DMX paths");
+  }
+  return response.json();
+};
+
+export const getDmxConfig = async (): Promise<DmxConfigResponse> => {
+  const response = await fetch("/api/v1/dmx/config");
+  if (!response.ok) {
+    throw new Error("Failed to fetch DMX config");
+  }
+  return response.json();
+};
+
+export const saveDmxConfig = async (
+  config: Partial<DmxConfigResponse>
+): Promise<DmxConfigResponse> => {
+  const response = await fetch("/api/v1/dmx/config", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(config),
+  });
+  if (!response.ok) {
+    throw new Error("Failed to save DMX config");
+  }
+  return response.json();
+};
+
+// ---------------------------------------------------------------------------
+// Daydream API – workflow import from community hub
+// ---------------------------------------------------------------------------
+
+const DAYDREAM_API_BASE =
+  (import.meta.env.VITE_DAYDREAM_API_BASE as string | undefined) ||
+  "https://api.daydream.live";
+
+export const fetchDaydreamWorkflow = async (
+  workflowId: string
+): Promise<ScopeWorkflow> => {
+  const response = await fetch(
+    `${DAYDREAM_API_BASE}/v1/workflows/${encodeURIComponent(workflowId)}`
+  );
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(`Failed to fetch workflow: ${detail}`);
+  }
+  const data = await response.json();
+
+  const workflow: ScopeWorkflow | undefined = data.workflowData;
+  if (
+    !workflow ||
+    workflow.format !== "scope-workflow" ||
+    !workflow.metadata?.name ||
+    !Array.isArray(workflow.pipelines) ||
+    workflow.pipelines.length === 0
+  ) {
+    throw new Error(
+      "The fetched workflow is missing required data (workflowData, metadata, or pipelines)."
+    );
+  }
+
+  return workflow;
+};
+
+// =============================================================================
+// Tempo Sync API
+// =============================================================================
+
+export interface TempoStatusResponse {
+  enabled: boolean;
+  source: { type: string; num_peers?: number } | null;
+  beats_per_bar: number;
+  beat_state: {
+    bpm: number;
+    beat_phase: number;
+    bar_position: number;
+    beat_count: number;
+    is_playing: boolean;
+    source: string;
+  } | null;
+}
+
+export interface TempoSourcesResponse {
+  sources: Record<
+    string,
+    {
+      available: boolean;
+      name: string;
+      devices?: string[];
+      install_hint?: string;
+    }
+  >;
+}
+
+export interface TempoEnableRequest {
+  source: "link" | "midi_clock";
+  midi_device?: string;
+  bpm?: number;
+  beats_per_bar?: number;
+}
+
+export const getTempoStatus = async (): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/status");
+  if (!response.ok) {
+    throw new Error(`Failed to get tempo status: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const enableTempo = async (
+  request: TempoEnableRequest
+): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/enable", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(request),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to enable tempo: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const disableTempo = async (): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/disable", {
+    method: "POST",
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to disable tempo: ${response.statusText}`);
+  }
+  return response.json();
+};
+
+export const setTempo = async (bpm: number): Promise<TempoStatusResponse> => {
+  const response = await fetch("/api/v1/tempo/set_tempo", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ bpm }),
+  });
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Failed to set tempo: ${errorText}`);
+  }
+  return response.json();
+};
+
+export const getTempoSources = async (): Promise<TempoSourcesResponse> => {
+  const response = await fetch("/api/v1/tempo/sources");
+  if (!response.ok) {
+    throw new Error(`Failed to get tempo sources: ${response.statusText}`);
+  }
+  return response.json();
 };

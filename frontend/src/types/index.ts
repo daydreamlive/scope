@@ -1,9 +1,15 @@
+// Discriminated union for deep-link action payloads
+export type DeepLinkActionData =
+  | { action: "install-plugin"; package: string }
+  | { action: "install-workflow"; id: string };
+
 // Electron preload exposes scope API on window
 interface ScopeAPI {
   browseDirectory?: (title: string) => Promise<string | null>;
   onDeepLinkAction?: (
-    callback: (data: { action: string; package: string }) => void
+    callback: (data: DeepLinkActionData) => void
   ) => () => void;
+  getEnvTelemetryDisabled?: () => boolean;
 }
 
 declare global {
@@ -96,7 +102,27 @@ export interface SettingsState {
     enabled: boolean;
     source_type: string;
     source_name: string;
+    flip_vertical?: boolean;
   };
+  // Beat-quantize mode for discrete parameter changes
+  quantizeMode?: "none" | "beat" | "bar" | "2_bar" | "4_bar";
+  // Lookahead in ms for beat-sync scheduling (compensates for pipeline latency)
+  lookaheadMs?: number;
+  // Beat-synced cache reset rate (fires init_cache=True at rhythmic intervals)
+  beatCacheResetRate?: "none" | "beat" | "bar" | "2_bar" | "4_bar";
+  // Beat-synced prompt cycling rate (advances to next timeline prompt on boundary)
+  promptCycleRate?: "none" | "beat" | "bar" | "2_bar" | "4_bar";
+  // Beat-synced parameter modulation configs
+  modulations?: Record<
+    string,
+    {
+      enabled: boolean;
+      shape: string;
+      depth: number;
+      rate: string;
+      base_value: number;
+    }
+  >;
   // Dynamic schema-driven fields (key = schema field name snake_case, value = parsed value)
   schemaFieldOverrides?: Record<string, unknown>;
   // Schema-driven overrides for preprocessor/postprocessor plugin configs
@@ -110,6 +136,7 @@ export interface PipelineInfo {
   about: string;
   projectUrl?: string;
   docsUrl?: string;
+  version?: string;
   modified?: boolean;
   defaultPrompt?: string;
   estimatedVram?: number;

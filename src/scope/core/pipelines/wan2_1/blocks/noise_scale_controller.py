@@ -119,11 +119,15 @@ class NoiseScaleControllerBlock(ModularPipelineBlocks):
             block_state.noise_scale = self._apply_motion_aware_noise_controller(
                 video, chunk_size, block_state.noise_scale
             )
-        elif (
-            block_state.manage_cache
-            and block_state.current_noise_scale != block_state.noise_scale
-        ):
-            block_state.init_cache = True
+            # Cache init on discrete jumps from the motion controller
+            if (
+                block_state.manage_cache
+                and block_state.current_noise_scale is not None
+                and block_state.current_noise_scale != block_state.noise_scale
+            ):
+                block_state.init_cache = True
+        # When noise_controller is off (e.g. during modulation), let noise_scale
+        # changes flow through without triggering expensive cache resets.
 
         block_state.current_noise_scale = block_state.noise_scale
 

@@ -1,0 +1,57 @@
+{
+  "name": "Bouncing Prompt Weights",
+  "description": "An IntControl bounces 0–100 and drives the first weight of a two-prompt Prompt List, automatically cross-fading between the two prompts",
+  "category": "Prompts",
+  "color": "#fbbf24",
+  "thumbnail": null,
+  "nodes": [
+    {
+      "id": "bounce",
+      "type": "control",
+      "position": { "x": 0, "y": 40 },
+      "data": {
+        "label": "Bounce",
+        "nodeType": "control",
+        "controlType": "int",
+        "controlPattern": "bounce",
+        "controlSpeed": 0.3,
+        "controlMin": 0,
+        "controlMax": 100,
+        "isPlaying": false,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    },
+    {
+      "id": "prompt_blend",
+      "type": "prompt_blend",
+      "position": { "x": 360, "y": 0 },
+      "data": {
+        "label": "Prompt List",
+        "nodeType": "prompt_blend",
+        "promptBlendItems": [
+          { "text": "prompt 1", "weight": 50 },
+          { "text": "prompt 2", "weight": 50 }
+        ],
+        "promptBlendMethod": "linear",
+        "parameterInputs": [
+          { "name": "prompt_0", "type": "string", "defaultValue": "" },
+          { "name": "prompt_1", "type": "string", "defaultValue": "" }
+        ],
+        "parameterOutputs": [
+          { "name": "prompts", "type": "string", "defaultValue": "" }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_bounce_weight",
+      "source": "bounce",
+      "sourceHandle": "param:value",
+      "target": "prompt_blend",
+      "targetHandle": "param:weight_0"
+    }
+  ]
+}

@@ -19,11 +19,13 @@ import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import { SliderWithInput } from "./ui/slider-with-input";
 import { PARAMETER_METADATA } from "../data/parameterMetadata";
 import { DenoisingStepsSlider } from "./DenoisingStepsSlider";
+import { AudioManager } from "./AudioManager";
 import { ImageManager } from "./ImageManager";
 import { LoRAManager } from "./LoRAManager";
 import { RotateCcw } from "lucide-react";
 import type { PipelineId, LoRAConfig, LoraMergeStrategy } from "../types";
 import type { SchemaFieldUI } from "../lib/schemaSettings";
+import { MIDIMappable } from "./MIDIMappable";
 
 /** Slider state from useLocalSliderValue, passed in from parent */
 export interface SliderState {
@@ -101,6 +103,30 @@ export function SchemaComplexField({
   context: ctx,
   ui,
 }: SchemaComplexFieldProps): React.ReactNode {
+  if (component === "audio") {
+    const value = ctx.schemaFieldOverrides?.[fieldKey];
+    const path = value == null ? null : String(value);
+    const isRuntimeParam = ui?.is_load_param === false;
+    const disabled =
+      ((ctx.isStreaming ?? false) && !isRuntimeParam) ||
+      (ctx.isLoading ?? false);
+    return (
+      <div key={fieldKey} className="space-y-1">
+        {ui?.label != null && (
+          <span className="text-xs text-muted-foreground">{ui.label}</span>
+        )}
+        <AudioManager
+          audioPath={path}
+          onAudioChange={p =>
+            ctx.onSchemaFieldOverrideChange?.(fieldKey, p, isRuntimeParam)
+          }
+          disabled={disabled}
+          label={ui?.label ?? "Audio Input"}
+        />
+      </div>
+    );
+  }
+
   if (component === "image") {
     const value = ctx.schemaFieldOverrides?.[fieldKey];
     const path = value == null ? null : String(value);
@@ -192,17 +218,19 @@ export function SchemaComplexField({
                 className="text-xs text-muted-foreground w-16"
               />
               <div className="flex-1 min-w-0">
-                <SliderWithInput
-                  value={ctx.vaceContextScaleSlider.localValue}
-                  onValueChange={ctx.vaceContextScaleSlider.handleValueChange}
-                  onValueCommit={ctx.vaceContextScaleSlider.handleValueCommit}
-                  min={0}
-                  max={2}
-                  step={0.1}
-                  incrementAmount={0.1}
-                  valueFormatter={ctx.vaceContextScaleSlider.formatValue}
-                  inputParser={v => parseFloat(v) || 1.0}
-                />
+                <MIDIMappable parameterId="vace_context_scale">
+                  <SliderWithInput
+                    value={ctx.vaceContextScaleSlider.localValue}
+                    onValueChange={ctx.vaceContextScaleSlider.handleValueChange}
+                    onValueCommit={ctx.vaceContextScaleSlider.handleValueCommit}
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    incrementAmount={0.1}
+                    valueFormatter={ctx.vaceContextScaleSlider.formatValue}
+                    inputParser={v => parseFloat(v) || 1.0}
+                  />
+                </MIDIMappable>
               </div>
             </div>
           </div>
@@ -367,39 +395,47 @@ export function SchemaComplexField({
                 inputParser={v => parseFloat(v) || 1.0}
               />
             )}
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label={PARAMETER_METADATA.manageCache.label}
-                tooltip={PARAMETER_METADATA.manageCache.tooltip}
-                className="text-sm font-medium"
-              />
-              <Toggle
-                pressed={ctx.manageCache ?? true}
-                onPressedChange={ctx.onManageCacheChange ?? (() => {})}
-                variant="outline"
-                size="sm"
-                className="h-7"
-              >
-                {(ctx.manageCache ?? true) ? "ON" : "OFF"}
-              </Toggle>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label={PARAMETER_METADATA.resetCache.label}
-                tooltip={PARAMETER_METADATA.resetCache.tooltip}
-                className="text-sm font-medium"
-              />
-              <Button
-                type="button"
-                onClick={ctx.onResetCache ?? (() => {})}
-                disabled={ctx.manageCache}
-                variant="outline"
-                size="sm"
-                className="h-7 w-7 p-0"
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-              </Button>
-            </div>
+            <MIDIMappable parameterId="manage_cache" mappingType="toggle">
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.manageCache.label}
+                  tooltip={PARAMETER_METADATA.manageCache.tooltip}
+                  className="text-sm font-medium"
+                />
+                <Toggle
+                  pressed={ctx.manageCache ?? true}
+                  onPressedChange={ctx.onManageCacheChange ?? (() => {})}
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                >
+                  {(ctx.manageCache ?? true) ? "ON" : "OFF"}
+                </Toggle>
+              </div>
+            </MIDIMappable>
+            <MIDIMappable
+              actionId="reset_cache"
+              mappingType="trigger"
+              disabled={ctx.manageCache ?? true}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.resetCache.label}
+                  tooltip={PARAMETER_METADATA.resetCache.tooltip}
+                  className="text-sm font-medium"
+                />
+                <Button
+                  type="button"
+                  onClick={ctx.onResetCache ?? (() => {})}
+                  disabled={ctx.manageCache}
+                  variant="outline"
+                  size="sm"
+                  className="h-7 w-7 p-0"
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                </Button>
+              </div>
+            </MIDIMappable>
           </div>
         </div>
       </div>
@@ -427,40 +463,51 @@ export function SchemaComplexField({
       <div key="noise" className="space-y-4">
         <div className="space-y-2">
           <div className="space-y-2 pt-2">
-            <div className="flex items-center justify-between gap-2">
-              <LabelWithTooltip
-                label={PARAMETER_METADATA.noiseController.label}
-                tooltip={PARAMETER_METADATA.noiseController.tooltip}
-                className="text-sm font-medium"
-              />
-              <Toggle
-                pressed={ctx.noiseController ?? true}
-                onPressedChange={ctx.onNoiseControllerChange ?? (() => {})}
-                disabled={ctx.isStreaming}
-                variant="outline"
-                size="sm"
-                className="h-7"
-              >
-                {(ctx.noiseController ?? true) ? "ON" : "OFF"}
-              </Toggle>
-            </div>
+            <MIDIMappable
+              parameterId="noise_controller"
+              mappingType="toggle"
+              disabled={ctx.isStreaming}
+            >
+              <div className="flex items-center justify-between gap-2">
+                <LabelWithTooltip
+                  label={PARAMETER_METADATA.noiseController.label}
+                  tooltip={PARAMETER_METADATA.noiseController.tooltip}
+                  className="text-sm font-medium"
+                />
+                <Toggle
+                  pressed={ctx.noiseController ?? true}
+                  onPressedChange={ctx.onNoiseControllerChange ?? (() => {})}
+                  disabled={ctx.isStreaming}
+                  variant="outline"
+                  size="sm"
+                  className="h-7"
+                >
+                  {(ctx.noiseController ?? true) ? "ON" : "OFF"}
+                </Toggle>
+              </div>
+            </MIDIMappable>
           </div>
           {ctx.noiseScaleSlider && (
-            <SliderWithInput
-              label={PARAMETER_METADATA.noiseScale.label}
-              tooltip={PARAMETER_METADATA.noiseScale.tooltip}
-              value={ctx.noiseScaleSlider.localValue}
-              onValueChange={ctx.noiseScaleSlider.handleValueChange}
-              onValueCommit={ctx.noiseScaleSlider.handleValueCommit}
-              min={0.0}
-              max={1.0}
-              step={0.01}
-              incrementAmount={0.01}
+            <MIDIMappable
+              parameterId="noise_scale"
               disabled={ctx.noiseController}
-              labelClassName="text-sm font-medium w-20"
-              valueFormatter={ctx.noiseScaleSlider.formatValue}
-              inputParser={v => parseFloat(v) || 0.0}
-            />
+            >
+              <SliderWithInput
+                label={PARAMETER_METADATA.noiseScale.label}
+                tooltip={PARAMETER_METADATA.noiseScale.tooltip}
+                value={ctx.noiseScaleSlider.localValue}
+                onValueChange={ctx.noiseScaleSlider.handleValueChange}
+                onValueCommit={ctx.noiseScaleSlider.handleValueCommit}
+                min={0.0}
+                max={1.0}
+                step={0.01}
+                incrementAmount={0.01}
+                disabled={ctx.noiseController}
+                labelClassName="text-sm font-medium w-20"
+                valueFormatter={ctx.noiseScaleSlider.formatValue}
+                inputParser={v => parseFloat(v) || 0.0}
+              />
+            </MIDIMappable>
           )}
         </div>
       </div>

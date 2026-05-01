@@ -16,94 +16,134 @@ on:
     tags:
       - 'v*'
 
+# Permissions for the reusable workflow jobs
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
+  issues: write
+
 jobs:
-  build-and-push:
+  # Cloud image - faster, used for PR deploys
+  build-cloud:
+    uses: ./.github/workflows/docker-build-image.yml
+    with:
+      variant: cloud
+      suffix: '-cloud'
+      dockerfile: Dockerfile.cloud
+      description: Daydream Scope (Cloud)
+    secrets: inherit
+
+  # Standard image - slower, not needed for PR deploys
+  build-standard:
+    uses: ./.github/workflows/docker-build-image.yml
+    with:
+      variant: standard
+      suffix: ''
+      dockerfile: Dockerfile
+      description: Daydream Scope
+    secrets: inherit
+
+  # PR deploy - only waits for cloud build
+  deploy-pr:
+    needs: build-cloud
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
+
+    outputs:
+      livepeer_fal_app_id: ${{ steps.deploy_livepeer.outputs.livepeer_fal_app_id }}
+      livepeer_fal_ws_url: ${{ steps.deploy_livepeer.outputs.livepeer_fal_ws_url }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.head.sha || github.ref }}
+          ref: ${{ github.event.pull_request.head.sha }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
 
-      - name: Clean up before build
+      - name: Install fal
+        run: pip install fal
+
+      - name: Deploy Livepeer runner to fal (PR environment)
+        id: deploy_livepeer
+        env:
+          FAL_KEY: ${{ secrets.FAL_KEY }}
         run: |
-          # Clean up unused packages to avoid disk space issues
-          sudo rm -rf /usr/local/.ghcup
-          sudo rm -rf /opt/hostedtoolcache/CodeQL
-          sudo rm -rf /usr/local/lib/android/sdk/ndk
-          sudo rm -rf /usr/share/dotnet
-          sudo rm -rf /opt/ghc
-          sudo rm -rf /usr/local/share/boost
+          set -euo pipefail
 
-          # Show disk usage before build
-          echo "Disk usage before build:"
-          df -h
+          PR_NUMBER="${{ needs.build-cloud.outputs.pr_number }}"
 
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
+          APP_NAME="scope-livepeer-pr-${PR_NUMBER}"
+
+          echo "Deploying Livepeer runner for PR #${PR_NUMBER} to fal as ${APP_NAME}"
+
+          fal deploy \
+            --app-name "$APP_NAME" \
+            --env preview \
+            --auth private \
+            src/scope/cloud/livepeer_fal_app.py 2>&1 | tee deploy_livepeer_output.txt
+
+          LIVEPEER_FAL_APP_ID="daydream/${APP_NAME}--preview"
+          LIVEPEER_FAL_WS_URL="wss://fal.run/${LIVEPEER_FAL_APP_ID}/ws"
+
+          echo "livepeer_fal_app_id=${LIVEPEER_FAL_APP_ID}" >> $GITHUB_OUTPUT
+          echo "livepeer_fal_ws_url=${LIVEPEER_FAL_WS_URL}" >> $GITHUB_OUTPUT
+
+          echo "Deployed Livepeer runner to: ${LIVEPEER_FAL_APP_ID}"
+          echo "Livepeer WebSocket URL: ${LIVEPEER_FAL_WS_URL}"
+
+      - name: Comment on PR with deployment info
+        uses: actions/github-script@v7
         with:
-          username: daydreamlive
-          password: ${{ secrets.DOCKER_HUB_TOKEN }}
+          script: |
+            const prNumber = ${{ github.event.pull_request.number }};
+            const livepeerFalAppId = '${{ steps.deploy_livepeer.outputs.livepeer_fal_app_id }}';
+            const livepeerFalWsUrl = '${{ steps.deploy_livepeer.outputs.livepeer_fal_ws_url }}';
+            const shortSha = '${{ needs.build-cloud.outputs.short_sha }}';
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+            const body = `## 🚀 fal.ai Preview Deployment
 
-      - name: Set image tag
-        id: tag
-        run: |
-          DOCKERHUB="daydreamlive/scope"
-          GHCR="ghcr.io/daydreamlive/scope"
+            | | |
+            |---|---|
+            | **Commit** | \`${shortSha}\` |
+            | **App ID** | \`${livepeerFalAppId}\` |
+            | **WebSocket** | \`${livepeerFalWsUrl}\` |
 
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            # Manual dispatch: use provided version + latest
-            VERSION="${{ github.event.inputs.version }}"
-            TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
-            TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
-          elif [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            # Git tag: extract version (e.g., v0.1.0 -> 0.1.0) + latest
-            VERSION_TAG="${{ github.ref_name }}"
-            VERSION="${VERSION_TAG#v}"  # Remove 'v' prefix if present
-            TAGS="$DOCKERHUB:$VERSION,$DOCKERHUB:latest"
-            TAGS="$TAGS,$GHCR:$VERSION,$GHCR:latest"
-          elif [ "${{ github.ref }}" == "refs/heads/main" ]; then
-            # Main branch
-            SHORT_SHA=$(echo "${{ github.sha }}" | cut -c1-7)
-            TAGS="$DOCKERHUB:main,$DOCKERHUB:$SHORT_SHA"
-            TAGS="$TAGS,$GHCR:main,$GHCR:$SHORT_SHA"
-          elif [ "${{ github.ref }}" == "refs/heads/runpod-serverless" ]; then
-            # Runpod serverless branch
-            TAGS="$DOCKERHUB:runpod-serverless"
-            TAGS="$TAGS,$GHCR:runpod-serverless"
-          elif [ "${{ github.event_name }}" == "pull_request" ]; then
-            # Pull request: use sanitized branch name + short SHA
-            BRANCH_TAG=$(echo "${{ github.head_ref }}" | sed 's/\//-/g')
-            SHORT_SHA=$(echo "${{ github.event.pull_request.head.sha }}" | cut -c1-7)
-            TAGS="$DOCKERHUB:$BRANCH_TAG,$DOCKERHUB:$SHORT_SHA"
-            TAGS="$TAGS,$GHCR:$BRANCH_TAG,$GHCR:$SHORT_SHA"
-          fi
-          echo "tags=$TAGS" >> $GITHUB_OUTPUT
+            ### Testing on Cloud
+            \`\`\`
+            SCOPE_CLOUD_APP_ID="${livepeerFalAppId}/ws" uv run daydream-scope
+            \`\`\`
 
-      - name: Build and push Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.tag.outputs.tags }}
-          labels: |
-            org.opencontainers.image.source=https://github.com/daydreamlive/scope
-            org.opencontainers.image.description=Daydream Scope
-            org.opencontainers.image.licenses=MIT
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            `;
+
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber
+            });
+
+            const existingComment = comments.find(c =>
+              c.user.type === 'Bot' &&
+              c.body.includes('fal.ai Preview Deployment')
+            );
+
+            if (existingComment) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existingComment.id,
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body
+              });
+            }
+

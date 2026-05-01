@@ -1,17 +1,17 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Dialog, DialogContent } from "./ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import { PluginsTab } from "./settings/PluginsTab";
 import { DiscoverTab } from "./settings/DiscoverTab";
+import { WorkflowsTab } from "./settings/WorkflowsTab";
 import { usePipelinesContext } from "@/contexts/PipelinesContext";
+import { usePluginsContext } from "@/contexts/PluginsContext";
 import type { InstalledPlugin } from "@/types/settings";
 import {
-  listPlugins,
   installPlugin,
   uninstallPlugin,
   restartServer,
   waitForServer,
-  type FailedPluginInfo,
 } from "@/lib/api";
 import { toast } from "sonner";
 
@@ -19,6 +19,12 @@ interface PluginsDialogProps {
   open: boolean;
   onClose: () => void;
   initialPluginPath?: string;
+  /** Open directly to a specific tab (e.g. "workflows"). */
+  initialTab?: string;
+  disabled?: boolean;
+  cloudConnected?: boolean;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onLoadWorkflow?: (workflowData: Record<string, any>) => void;
 }
 
 const isLocalPath = (spec: string): boolean => {
@@ -38,15 +44,41 @@ export function PluginsDialog({
   open,
   onClose,
   initialPluginPath = "",
+  initialTab,
+  disabled = false,
+  cloudConnected = false,
+  onLoadWorkflow,
 }: PluginsDialogProps) {
   const { refetch: refetchPipelines } = usePipelinesContext();
+  const {
+    plugins: pluginInfos,
+    failedPlugins,
+    isLoading: isLoadingPlugins,
+    refresh: refreshPlugins,
+  } = usePluginsContext();
   const [pluginInstallPath, setPluginInstallPath] = useState(initialPluginPath);
-  const [plugins, setPlugins] = useState<InstalledPlugin[]>([]);
-  const [failedPlugins, setFailedPlugins] = useState<FailedPluginInfo[]>([]);
-  const [isLoadingPlugins, setIsLoadingPlugins] = useState(false);
   const [isInstalling, setIsInstalling] = useState(false);
   const [activeTab, setActiveTab] = useState("installed");
   const isModifyingPluginsRef = useRef(false);
+
+  const plugins: InstalledPlugin[] = useMemo(
+    () =>
+      pluginInfos.map(p => ({
+        name: p.name,
+        version: p.version,
+        author: p.author,
+        description: p.description,
+        source: p.source,
+        editable: p.editable,
+        latest_version: p.latest_version,
+        update_available: p.update_available,
+        package_spec: p.package_spec,
+        bundled: p.bundled,
+        kind: p.kind,
+        origin: p.origin,
+      })),
+    [pluginInfos]
+  );
 
   useEffect(() => {
     if (open && initialPluginPath) {
@@ -54,39 +86,17 @@ export function PluginsDialog({
     }
   }, [open, initialPluginPath]);
 
-  const fetchPlugins = useCallback(async () => {
-    setIsLoadingPlugins(true);
-    try {
-      const response = await listPlugins();
-      setPlugins(
-        response.plugins.map(p => ({
-          name: p.name,
-          version: p.version,
-          author: p.author,
-          description: p.description,
-          source: p.source,
-          editable: p.editable,
-          latest_version: p.latest_version,
-          update_available: p.update_available,
-          package_spec: p.package_spec,
-        }))
-      );
-      setFailedPlugins(response.failed_plugins ?? []);
-    } catch (error) {
-      console.error("Failed to fetch plugins:", error);
-      if (!isModifyingPluginsRef.current) {
-        toast.error("Failed to load plugins");
-      }
-    } finally {
-      setIsLoadingPlugins(false);
+  useEffect(() => {
+    if (open && initialTab) {
+      setActiveTab(initialTab);
     }
-  }, []);
+  }, [open, initialTab]);
 
   useEffect(() => {
     if (open) {
-      fetchPlugins();
+      refreshPlugins();
     }
-  }, [open, fetchPlugins]);
+  }, [open, refreshPlugins]);
 
   const handleBrowseLocalPlugin = async () => {
     if (window.scope?.browseDirectory) {
@@ -97,9 +107,32 @@ export function PluginsDialog({
     }
   };
 
+  // Restart the server and refresh plugins+pipelines. Refresh runs even
+  // if the restart wait times out (e.g. the cloud's restart took longer
+  // than the local poll budget) — the install/uninstall/reload itself
+  // already succeeded server-side, so the UI should pick up the new
+  // state regardless. Returns a label for the toast.
+  const restartAndRefresh = async (
+    successLabel: string,
+    fallbackLabel: string
+  ): Promise<string> => {
+    let label = successLabel;
+    try {
+      const oldStartTime = await restartServer();
+      await waitForServer(oldStartTime);
+    } catch (e) {
+      console.warn("Server restart wait did not complete:", e);
+      label = fallbackLabel;
+    }
+    await refreshPlugins();
+    await refetchPipelines();
+    return label;
+  };
+
   const handleInstallPlugin = async (packageSpec: string) => {
     setIsInstalling(true);
     isModifyingPluginsRef.current = true;
+    const toastId = toast.loading("Installing node...");
     try {
       const response = await installPlugin({
         package: packageSpec,
@@ -107,39 +140,24 @@ export function PluginsDialog({
       });
       if (response.success) {
         const pluginName = response.plugin?.name || packageSpec;
-        toast.success(`Installed ${pluginName}. Restarting server...`);
+        toast.loading(`Installed ${pluginName}. Restarting server...`, {
+          id: toastId,
+        });
         setPluginInstallPath("");
 
-        if (response.plugin) {
-          setPlugins(prev => [
-            ...prev,
-            {
-              name: response.plugin!.name,
-              version: response.plugin!.version,
-              author: response.plugin!.author,
-              description: response.plugin!.description,
-              source: response.plugin!.source,
-              editable: response.plugin!.editable,
-              latest_version: response.plugin!.latest_version,
-              update_available: response.plugin!.update_available,
-              package_spec: response.plugin!.package_spec,
-            },
-          ]);
-        }
-
-        const oldStartTime = await restartServer();
-        await waitForServer(oldStartTime);
-        toast.success("Server restarted");
-
-        await fetchPlugins();
-        await refetchPipelines();
+        const label = await restartAndRefresh(
+          "Server restarted",
+          `Installed ${pluginName}`
+        );
+        toast.success(label, { id: toastId });
       } else {
-        toast.error(response.message);
+        toast.error(response.message, { id: toastId });
       }
     } catch (error) {
       console.error("Failed to install plugin:", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to install plugin"
+        error instanceof Error ? error.message : "Failed to install node",
+        { id: toastId }
       );
     } finally {
       setIsInstalling(false);
@@ -153,47 +171,29 @@ export function PluginsDialog({
   ) => {
     setIsInstalling(true);
     isModifyingPluginsRef.current = true;
+    const toastId = toast.loading(`Updating ${pluginName}...`);
     try {
       const response = await installPlugin({
         package: packageSpec,
         upgrade: true,
       });
       if (response.success) {
-        toast.success(`Updated ${pluginName}. Restarting server...`);
-
-        if (response.plugin) {
-          setPlugins(prev =>
-            prev.map(p =>
-              p.name === pluginName
-                ? {
-                    name: response.plugin!.name,
-                    version: response.plugin!.version,
-                    author: response.plugin!.author,
-                    description: response.plugin!.description,
-                    source: response.plugin!.source,
-                    editable: response.plugin!.editable,
-                    latest_version: response.plugin!.latest_version,
-                    update_available: response.plugin!.update_available,
-                    package_spec: response.plugin!.package_spec,
-                  }
-                : p
-            )
-          );
-        }
-
-        const oldStartTime = await restartServer();
-        await waitForServer(oldStartTime);
-        toast.success("Server restarted");
-
-        await fetchPlugins();
-        await refetchPipelines();
+        toast.loading(`Updated ${pluginName}. Restarting server...`, {
+          id: toastId,
+        });
+        const label = await restartAndRefresh(
+          "Server restarted",
+          `Updated ${pluginName}`
+        );
+        toast.success(label, { id: toastId });
       } else {
-        toast.error(response.message);
+        toast.error(response.message, { id: toastId });
       }
     } catch (error) {
       console.error("Failed to update plugin:", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to update plugin"
+        error instanceof Error ? error.message : "Failed to update node",
+        { id: toastId }
       );
     } finally {
       setIsInstalling(false);
@@ -203,29 +203,26 @@ export function PluginsDialog({
 
   const handleDeletePlugin = async (pluginName: string) => {
     isModifyingPluginsRef.current = true;
+    const toastId = toast.loading(`Uninstalling ${pluginName}...`);
     try {
       const response = await uninstallPlugin(pluginName);
       if (response.success) {
-        toast.success(`Uninstalled ${pluginName}. Restarting server...`);
-
-        setPlugins(prev => prev.filter(p => p.name !== pluginName));
-        setFailedPlugins(prev =>
-          prev.filter(fp => fp.package_name !== pluginName)
+        toast.loading(`Uninstalled ${pluginName}. Restarting server...`, {
+          id: toastId,
+        });
+        const label = await restartAndRefresh(
+          "Server restarted",
+          `Uninstalled ${pluginName}`
         );
-
-        const oldStartTime = await restartServer();
-        await waitForServer(oldStartTime);
-        toast.success("Server restarted");
-
-        await fetchPlugins();
-        await refetchPipelines();
+        toast.success(label, { id: toastId });
       } else {
-        toast.error(response.message);
+        toast.error(response.message, { id: toastId });
       }
     } catch (error) {
       console.error("Failed to uninstall plugin:", error);
       toast.error(
-        error instanceof Error ? error.message : "Failed to uninstall plugin"
+        error instanceof Error ? error.message : "Failed to uninstall node",
+        { id: toastId }
       );
     } finally {
       isModifyingPluginsRef.current = false;
@@ -236,14 +233,14 @@ export function PluginsDialog({
     isModifyingPluginsRef.current = true;
     try {
       toast.info(`Reloading ${pluginName}. Restarting server...`);
-      const oldStartTime = await restartServer();
-      await waitForServer(oldStartTime);
-      toast.success("Server restarted");
-      await fetchPlugins();
-      await refetchPipelines();
+      const label = await restartAndRefresh(
+        "Server restarted",
+        `Reloaded ${pluginName}`
+      );
+      toast.success(label);
     } catch (error) {
       toast.error(
-        error instanceof Error ? error.message : "Failed to reload plugin"
+        error instanceof Error ? error.message : "Failed to reload node"
       );
     } finally {
       isModifyingPluginsRef.current = false;
@@ -267,10 +264,16 @@ export function PluginsDialog({
               Installed
             </TabsTrigger>
             <TabsTrigger
+              value="workflows"
+              className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
+            >
+              Workflows
+            </TabsTrigger>
+            <TabsTrigger
               value="discover"
               className="w-full justify-start px-3 py-2 hover:bg-muted/50 data-[state=active]:bg-muted"
             >
-              Discover
+              Nodes
             </TabsTrigger>
           </TabsList>
           <div className="w-px bg-border self-stretch" />
@@ -288,6 +291,16 @@ export function PluginsDialog({
                 onReload={handleReloadPlugin}
                 isLoading={isLoadingPlugins}
                 isInstalling={isInstalling}
+                disabled={disabled}
+                hideInstall={cloudConnected}
+              />
+            </TabsContent>
+            <TabsContent value="workflows" className="mt-0">
+              <WorkflowsTab
+                onLoad={data => {
+                  onLoadWorkflow?.(data);
+                  onClose();
+                }}
               />
             </TabsContent>
             <TabsContent value="discover" className="mt-0">
@@ -297,6 +310,8 @@ export function PluginsDialog({
                   .map(p => p.package_spec)
                   .filter((s): s is string => !!s)}
                 isInstalling={isInstalling}
+                disabled={disabled}
+                cloudConnected={cloudConnected}
               />
             </TabsContent>
           </div>

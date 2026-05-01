@@ -47,10 +47,27 @@ class PipelineManager:
         self._error_message = None
         self._lock = threading.RLock()  # Single reentrant lock for all access
 
-        # Support for multiple pipelines (for pipeline chaining)
-        self._pipelines: dict[str, Any] = {}  # pipeline_id -> pipeline instance
-        self._pipeline_statuses: dict[str, PipelineStatus] = {}  # pipeline_id -> status
-        self._pipeline_load_params: dict[str, dict] = {}  # pipeline_id -> load_params
+        # Support for multiple pipelines (for pipeline chaining / graph)
+        # Keyed by instance_key (e.g. "longlive", "longlive:1" for duplicates)
+        self._pipelines: dict[str, Any] = {}  # instance_key -> pipeline instance
+        self._pipeline_statuses: dict[
+            str, PipelineStatus
+        ] = {}  # instance_key -> status
+        self._pipeline_load_params: dict[str, dict] = {}  # instance_key -> load_params
+        self._pipeline_registry_ids: dict[
+            str, str
+        ] = {}  # instance_key -> pipeline_id (registry key)
+        self._load_events: dict[
+            str, threading.Event
+        ] = {}  # instance_key -> load completion event
+
+        # Loading stage for frontend display (e.g., "Loading diffusion model...")
+        self._loading_stage: str | None = None
+
+    def set_loading_stage(self, stage: str | None) -> None:
+        """Set the current loading stage (thread-safe)."""
+        with self._lock:
+            self._loading_stage = stage
 
     @property
     def status(self) -> PipelineStatus:
@@ -80,6 +97,15 @@ class PipelineManager:
                 )
             return self._pipeline
 
+    def get_loaded_pipeline_ids(self) -> list[str]:
+        """Return the IDs of all currently loaded pipelines (thread-safe)."""
+        with self._lock:
+            return [
+                pid
+                for pid, status in self._pipeline_statuses.items()
+                if status == PipelineStatus.LOADED
+            ]
+
     def get_pipeline_by_id(self, pipeline_id: str):
         """Get a pipeline instance by ID (thread-safe).
 
@@ -103,6 +129,41 @@ class PipelineManager:
                     f"Pipeline {pipeline_id} not available. Status: {status.value}"
                 )
             return self._pipelines[pipeline_id]
+
+    def alias_pipeline(self, alias_key: str, pipeline_id: str) -> bool:
+        """Register an existing pipeline under an additional key.
+
+        Returns True if the alias was created, False if *pipeline_id* is not loaded.
+        """
+        with self._lock:
+            # Graph loads already register each pipeline under the node id
+            # (instance_key). Do not replace that entry with whatever is keyed by
+            # the bare registry name (e.g. "passthrough") — that can be a stale
+            # singleton and would make multiple graph nodes share the wrong
+            # pipeline instance.
+            if alias_key in self._pipelines:
+                return True
+            existing = self._pipelines.get(pipeline_id)
+            if alias_key in self._pipelines:
+                return self._pipelines[alias_key] is existing
+            if existing is None:
+                return False
+            self._pipelines[alias_key] = existing
+            self._pipeline_statuses[alias_key] = self._pipeline_statuses.get(
+                pipeline_id, PipelineStatus.LOADED
+            )
+            return True
+
+    def set_pipeline_instance(self, key: str, pipeline_instance: Any) -> None:
+        """Force-register a pipeline instance under the given key.
+
+        Unlike ``alias_pipeline``, this always overwrites any existing entry,
+        which is needed when a graph node ID collides with a loaded pipeline ID
+        but refers to a different pipeline type.
+        """
+        with self._lock:
+            self._pipelines[key] = pipeline_instance
+            self._pipeline_statuses[key] = PipelineStatus.LOADED
 
     async def _load_pipeline_by_id(
         self,
@@ -142,18 +203,28 @@ class PipelineManager:
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
         user_id: str | None = None,
+        instance_key: str | None = None,
     ) -> bool:
-        """Synchronous wrapper for loading a pipeline by ID."""
+        """Synchronous wrapper for loading a pipeline by ID.
+
+        Args:
+            pipeline_id: Registry key used to look up the pipeline class.
+            load_params: Parameters for pipeline initialization.
+            instance_key: Unique storage key. Defaults to ``pipeline_id``
+                when there is only one instance of a given pipeline.
+        """
+        key = instance_key or pipeline_id
         with self._lock:
             # Check if already loaded with same params
-            current_params = self._pipeline_load_params.get(pipeline_id, {})
+            current_params = self._pipeline_load_params.get(key, {})
             new_params = load_params or {}
 
             # Check if pipeline is already loaded (either in _pipelines or as main pipeline)
             is_loaded = False
-            if pipeline_id in self._pipelines:
+            if key in self._pipelines:
                 if (
-                    self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADED
+                    self._pipeline_statuses.get(key) == PipelineStatus.LOADED
+                    and self._pipeline_registry_ids.get(key) == pipeline_id
                     and current_params == new_params
                 ):
                     is_loaded = True
@@ -166,27 +237,54 @@ class PipelineManager:
                 if current_main_params == new_params:
                     # Main pipeline is loaded, register it in _pipelines for chaining
                     if self._pipeline is not None:
-                        self._pipelines[pipeline_id] = self._pipeline
-                        self._pipeline_load_params[pipeline_id] = current_main_params
-                        self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADED
+                        self._pipelines[key] = self._pipeline
+                        self._pipeline_load_params[key] = current_main_params
+                        self._pipeline_registry_ids[key] = pipeline_id
+                        self._pipeline_statuses[key] = PipelineStatus.LOADED
                         is_loaded = True
 
             if is_loaded:
-                logger.info(
-                    f"Pipeline {pipeline_id} already loaded with matching parameters"
-                )
+                logger.info(f"Pipeline {key} already loaded with matching parameters")
                 return True
 
-            # If already loading, wait
-            if self._pipeline_statuses.get(pipeline_id) == PipelineStatus.LOADING:
-                logger.info(f"Pipeline {pipeline_id} already loading by another thread")
-                return False
+            # If already loading, wait for it to complete
+            if self._pipeline_statuses.get(key) == PipelineStatus.LOADING:
+                logger.info(
+                    f"Pipeline {key} already loading by another thread, waiting..."
+                )
+                load_event = self._load_events.get(key)
+                if load_event:
+                    # Release lock while waiting
+                    self._lock.release()
+                    try:
+                        # Wait up to 5 minutes for load to complete
+                        load_event.wait(timeout=300)
+                    finally:
+                        self._lock.acquire()
 
-            # Mark as loading
-            self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADING
+                    # Check if pipeline is now loaded
+                    if self._pipeline_statuses.get(key) == PipelineStatus.LOADED:
+                        logger.info(f"Pipeline {key} loaded by another thread")
+                        return True
+                    else:
+                        logger.warning(
+                            f"Pipeline {key} load by another thread did not succeed, "
+                            f"status: {self._pipeline_statuses.get(key)}"
+                        )
+                        return False
+                else:
+                    # No event found (shouldn't happen), fall through to load
+                    logger.warning(
+                        f"Pipeline {key} marked as LOADING but no event found"
+                    )
+
+            # Mark as loading and create event for waiters
+            self._pipeline_statuses[key] = PipelineStatus.LOADING
+            load_event = threading.Event()
+            self._load_events[key] = load_event
 
         # Release lock during slow loading operation
-        logger.info(f"Loading pipeline: {pipeline_id}")
+        logger.info(f"Loading pipeline: {key} (registry: {pipeline_id})")
         logger.info("Initial load params: %s", load_params or {})
 
         # Publish pipeline_load_start event
@@ -202,15 +300,26 @@ class PipelineManager:
 
         try:
             # Load the pipeline synchronously
-            pipeline = self._load_pipeline_implementation(pipeline_id, load_params)
+            self.set_loading_stage("Initializing pipeline...")
+            pipeline = self._load_pipeline_implementation(
+                pipeline_id,
+                load_params,
+                stage_callback=self.set_loading_stage,
+                node_id=key,
+            )
 
             # Hold lock while updating state
+            self.set_loading_stage(None)
             with self._lock:
-                self._pipelines[pipeline_id] = pipeline
-                self._pipeline_load_params[pipeline_id] = load_params or {}
-                self._pipeline_statuses[pipeline_id] = PipelineStatus.LOADED
+                self._pipelines[key] = pipeline
+                self._pipeline_load_params[key] = load_params or {}
+                self._pipeline_registry_ids[key] = pipeline_id
+                self._pipeline_statuses[key] = PipelineStatus.LOADED
+                # Signal waiters that load is complete
+                if key in self._load_events:
+                    self._load_events[key].set()
 
-            logger.info(f"Pipeline {pipeline_id} loaded successfully")
+            logger.info(f"Pipeline {key} loaded successfully")
 
             # Publish pipeline_loaded event with load duration
             load_duration_ms = int((time.monotonic() - load_start_time) * 1000)
@@ -231,10 +340,11 @@ class PipelineManager:
             return True
 
         except Exception as e:
+            self.set_loading_stage(None)
             from .models_config import get_models_dir
 
             models_dir = get_models_dir()
-            error_msg = f"Failed to load pipeline {pipeline_id}: {e}"
+            error_msg = f"Failed to load pipeline {key}: {e}"
             logger.error(
                 f"{error_msg}. If this error persists, consider removing the models "
                 f"directory '{models_dir}' and re-downloading models."
@@ -242,11 +352,16 @@ class PipelineManager:
 
             # Hold lock while updating state with error
             with self._lock:
-                self._pipeline_statuses[pipeline_id] = PipelineStatus.ERROR
-                if pipeline_id in self._pipelines:
-                    del self._pipelines[pipeline_id]
-                if pipeline_id in self._pipeline_load_params:
-                    del self._pipeline_load_params[pipeline_id]
+                self._pipeline_statuses[key] = PipelineStatus.ERROR
+                if key in self._pipelines:
+                    del self._pipelines[key]
+                if key in self._pipeline_load_params:
+                    del self._pipeline_load_params[key]
+                if key in self._pipeline_registry_ids:
+                    del self._pipeline_registry_ids[key]
+                # Signal waiters that load is complete (even though it failed)
+                if key in self._load_events:
+                    self._load_events[key].set()
 
             # Publish error event for pipeline load failure
             publish_event(
@@ -345,6 +460,17 @@ class PipelineManager:
             # The ERROR status is sufficient for the frontend
             combined_error = None
 
+            # Determine media modalities from the loaded node chain.
+            # Use registry IDs (not instance keys) so the lookup works in
+            # graph mode where instance keys are node IDs like "pipeline_1".
+            from scope.core.nodes.registry import NodeRegistry
+
+            registry_ids = [
+                self._pipeline_registry_ids.get(key, key) for key in self._pipelines
+            ]
+            produces_video = NodeRegistry.chain_produces_video(registry_ids)
+            produces_audio = NodeRegistry.chain_produces_audio(registry_ids)
+
             # Return the captured state (with error status if it was an error)
             return {
                 "status": current_status.value,
@@ -352,6 +478,9 @@ class PipelineManager:
                 "load_params": load_params,
                 "loaded_lora_adapters": loaded_lora_adapters,
                 "error": combined_error,
+                "loading_stage": self._loading_stage,
+                "produces_video": produces_video,
+                "produces_audio": produces_audio,
             }
 
     async def get_pipeline_async(self):
@@ -366,21 +495,21 @@ class PipelineManager:
 
     async def load_pipelines(
         self,
-        pipeline_ids: list[str],
-        load_params: dict | None = None,
+        pipelines: list[tuple[str, str, dict | None]],
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
         user_id: str | None = None,
     ) -> bool:
-        """
-        Load multiple pipelines asynchronously.
+        """Load multiple pipelines asynchronously.
 
         Args:
-            pipeline_ids: List of pipeline IDs to load
-            load_params: Pipeline-specific load parameters (applies to all pipelines)
-            connection_id: Optional connection ID from fal.ai WebSocket for event correlation
-            connection_info: Optional connection info (gpu_type, fal_host) for event correlation
-            user_id: Optional user ID for event correlation
+            pipelines: List of (node_id, pipeline_id, load_params) tuples.
+                node_id is the graph node ID used as the instance key.
+                The same pipeline_id may appear more than once; each entry
+                produces a separate instance keyed by its node_id.
+            connection_id: Optional connection ID for event correlation.
+            connection_info: Optional connection info for event correlation.
+            user_id: Optional user ID for event correlation.
 
         Returns:
             bool: True if all pipelines loaded successfully, False otherwise.
@@ -389,69 +518,164 @@ class PipelineManager:
         return await loop.run_in_executor(
             None,
             self._load_pipelines_sync,
-            pipeline_ids,
-            load_params,
+            pipelines,
             connection_id,
             connection_info,
             user_id,
         )
 
+    def _is_pipeline_loaded_with(
+        self, key: str, pipeline_id: str, params: dict
+    ) -> bool:
+        """Check if the pipeline at *key* is loaded and matches the given type and params.
+
+        Must be called with ``self._lock`` held.
+        """
+        return (
+            key in self._pipelines
+            and self._pipeline_statuses.get(key) == PipelineStatus.LOADED
+            and self._pipeline_registry_ids.get(key) == pipeline_id
+            and self._pipeline_load_params.get(key, {}) == params
+        )
+
+    def _rekey_pipeline(self, old_key: str, new_key: str) -> None:
+        """Move a pipeline instance from *old_key* to *new_key* in all tracking dicts.
+
+        Must be called with ``self._lock`` held.
+        """
+        self._pipelines[new_key] = self._pipelines.pop(old_key)
+        self._pipeline_load_params[new_key] = self._pipeline_load_params.pop(old_key)
+        self._pipeline_registry_ids[new_key] = self._pipeline_registry_ids.pop(old_key)
+        self._pipeline_statuses[new_key] = self._pipeline_statuses.pop(old_key)
+
+    def _find_reusable_pipeline(
+        self,
+        node_id: str,
+        pipeline_id: str,
+        params: dict,
+        claimed_keys: set[str],
+        reserved_keys: set[str],
+    ) -> str | None:
+        """Find an existing loaded pipeline that can be re-keyed to *node_id*.
+
+        Skips keys that are already claimed or reserved by other new entries
+        (to avoid stealing a key that another entry needs at that exact position).
+
+        Must be called with ``self._lock`` held.
+        """
+        for old_key in self._pipelines:
+            if old_key in claimed_keys:
+                continue
+            if old_key in reserved_keys and old_key != node_id:
+                continue
+            if self._is_pipeline_loaded_with(old_key, pipeline_id, params):
+                return old_key
+        return None
+
     def _load_pipelines_sync(
         self,
-        pipeline_ids: list[str],
-        load_params: dict | None = None,
+        pipelines: list[tuple[str, str, dict | None]],
         connection_id: str | None = None,
         connection_info: dict[str, Any] | None = None,
         user_id: str | None = None,
     ) -> bool:
         """Synchronous wrapper for loading multiple pipelines."""
-        if not pipeline_ids:
-            logger.error("No pipeline IDs provided")
+        if not pipelines:
+            logger.error("No pipelines provided")
             return False
 
-        logger.info(f"Loading {len(pipeline_ids)} pipeline(s): {pipeline_ids}")
+        node_ids = [node_id for node_id, _, _ in pipelines]
+        pipeline_ids = [pid for _, pid, _ in pipelines]
+        logger.info(
+            f"Loading {len(pipelines)} pipeline(s): {list(zip(node_ids, pipeline_ids, strict=True))}"
+        )
 
-        # Store load_params for use by frame processor
+        # Store first load_params for backward-compat status reporting
         with self._lock:
-            self._load_params = load_params
+            self._load_params = pipelines[0][2] if pipelines else None
 
-            # Clear stale statuses for pipelines not in the new load list
-            # This prevents ERROR statuses from a previous failed load from
-            # poisoning the overall status when loading new pipelines
-            new_pipeline_set = set(pipeline_ids)
-            for pid in list(self._pipeline_statuses.keys()):
-                if pid not in new_pipeline_set:
-                    del self._pipeline_statuses[pid]
+            new_key_set = set(node_ids)
 
-            # Identify pipelines that need to be unloaded:
-            # 1. Currently loaded but not in new list
-            # 2. In new list but with different load_params (e.g., different resolution)
-            currently_loaded = set(self._pipelines.keys())
-            # Also check main pipeline if it exists
-            if self._pipeline_id and self._pipeline_id not in currently_loaded:
-                currently_loaded.add(self._pipeline_id)
+            # --- Phase 1: Match requested pipelines to already-loaded instances ---
+            #
+            # Goal: avoid expensive unload + reload when we can reuse an
+            # existing pipeline instance.  Each requested entry is matched:
+            #
+            #   1. Exact match — same node_id already holds a compatible instance.
+            #   2. Re-key match — a compatible instance exists under a *different*
+            #      key; rename it to the new node_id (cheap vs. full reload).
+            #   3. No match — schedule a fresh load in Phase 3.
+            #
+            # NOTE: Even if two entries share the same pipeline_id and params,
+            # each gets its own instance because we don't yet support multiple
+            # graph nodes sharing a single pipeline instance.
 
-            new_params = load_params or {}
-            pipelines_to_unload = set()
+            claimed_old_keys: set[str] = set()
+            entries_needing_load: list[tuple[str, str, dict | None]] = []
 
-            for loaded_id in currently_loaded:
-                # Unload if pipeline not in new list or if load_params changed
-                current_params = self._pipeline_load_params.get(loaded_id, {})
-                if loaded_id not in pipeline_ids or current_params != new_params:
-                    pipelines_to_unload.add(loaded_id)
+            for node_id, pipeline_id, load_params in pipelines:
+                params = load_params or {}
 
-            # Unload pipelines that need to be unloaded
-            for pipeline_id_to_unload in pipelines_to_unload:
-                self._unload_pipeline_by_id_unsafe(
-                    pipeline_id_to_unload,
-                    connection_id=connection_id,
-                    connection_info=connection_info,
-                    user_id=user_id,
+                # 1. Exact match — same key, same pipeline type and params.
+                if self._is_pipeline_loaded_with(node_id, pipeline_id, params):
+                    claimed_old_keys.add(node_id)
+                    continue
+
+                # 2. Re-key match — find a compatible instance under a different key.
+                matched_key = self._find_reusable_pipeline(
+                    node_id, pipeline_id, params, claimed_old_keys, new_key_set
                 )
+                if matched_key is not None:
+                    logger.info(
+                        f"Re-keying pipeline {pipeline_id} "
+                        f"from '{matched_key}' to '{node_id}'"
+                    )
+                    self._rekey_pipeline(matched_key, node_id)
+                    claimed_old_keys.add(matched_key)
+                    continue
 
-        # Load all pipelines
+                # 3. No match — needs a fresh load.
+                entries_needing_load.append((node_id, pipeline_id, load_params))
+
+            # --- Phase 2: Unload stale pipelines ---
+            #
+            # Any old instance that wasn't claimed in Phase 1 and isn't in the
+            # new request set is no longer needed — free its resources.
+
+            for old_key in list(self._pipelines.keys()):
+                if old_key not in new_key_set and old_key not in claimed_old_keys:
+                    self._unload_pipeline_by_id_unsafe(
+                        old_key,
+                        connection_id=connection_id,
+                        connection_info=connection_info,
+                        user_id=user_id,
+                    )
+
+            # Clean up stale status entries (e.g. from previously errored loads).
+            for key in list(self._pipeline_statuses.keys()):
+                if key not in new_key_set:
+                    del self._pipeline_statuses[key]
+
+        # Phase 3: Load new entries.
+        # First, unload any stale instances that sit at keys scheduled for
+        # a fresh load.  Phase 2 skips these because the key IS in
+        # new_key_set, but the old instance has incompatible params (e.g.
+        # different resolution) and must be freed before the new one is
+        # created — otherwise the old GPU tensors remain allocated and the
+        # new load may OOM.
+        if entries_needing_load:
+            with self._lock:
+                for node_id, _pid, _lp in entries_needing_load:
+                    if node_id in self._pipelines:
+                        self._unload_pipeline_by_id_unsafe(
+                            node_id,
+                            connection_id=connection_id,
+                            connection_info=connection_info,
+                            user_id=user_id,
+                        )
+
         success = True
-        for pipeline_id in pipeline_ids:
+        for node_id, pipeline_id, load_params in entries_needing_load:
             try:
                 result = self._load_pipeline_by_id_sync(
                     pipeline_id,
@@ -459,12 +683,13 @@ class PipelineManager:
                     connection_id=connection_id,
                     connection_info=connection_info,
                     user_id=user_id,
+                    instance_key=node_id,
                 )
                 if not result:
-                    logger.error(f"Failed to load pipeline: {pipeline_id}")
+                    logger.error(f"Failed to load pipeline: {node_id}")
                     success = False
             except Exception as e:
-                logger.error(f"Error loading pipeline {pipeline_id}: {e}")
+                logger.error(f"Error loading pipeline {node_id}: {e}")
                 success = False
 
         if success:
@@ -503,12 +728,13 @@ class PipelineManager:
 
         # Extract VACE-specific parameters from load_params if present
         if load_params:
+            # Always apply vace_context_scale when provided (applies to both
+            # ref-image and input-video VACE modes)
+            config["vace_context_scale"] = load_params.get("vace_context_scale", 1.0)
+
             ref_images = load_params.get("ref_images", [])
             if ref_images:
                 config["ref_images"] = ref_images
-                config["vace_context_scale"] = load_params.get(
-                    "vace_context_scale", 1.0
-                )
                 logger.info(
                     f"_configure_vace: VACE parameters from load_params: "
                     f"ref_images count={len(ref_images)}, "
@@ -608,6 +834,10 @@ class PipelineManager:
             del self._pipeline_statuses[pipeline_id]
         if pipeline_id in self._pipeline_load_params:
             del self._pipeline_load_params[pipeline_id]
+        if pipeline_id in self._pipeline_registry_ids:
+            del self._pipeline_registry_ids[pipeline_id]
+        if pipeline_id in self._load_events:
+            del self._load_events[pipeline_id]
 
         # If this was the main pipeline, also clear main pipeline state
         if self._pipeline_id == pipeline_id:
@@ -637,13 +867,32 @@ class PipelineManager:
         )
 
     def _load_pipeline_implementation(
-        self, pipeline_id: str, load_params: dict | None = None
+        self,
+        pipeline_id: str,
+        load_params: dict | None = None,
+        stage_callback=None,
+        node_id: str | None = None,
     ):
-        """Synchronous pipeline loading (runs in thread executor)."""
-        from scope.core.pipelines.registry import PipelineRegistry
+        """Synchronous node/pipeline loading (runs in thread executor)."""
+        from scope.core.nodes.registry import NodeRegistry
 
-        # Check if pipeline is in registry
-        pipeline_class = PipelineRegistry.get(pipeline_id)
+        node_class = NodeRegistry.get(pipeline_id)
+        pipeline_class = (
+            node_class
+            if node_class is not None and node_class.get_config_class() is not None
+            else None
+        )
+
+        # Plain-node path: a node with artifacts but no config class.
+        # No Pydantic schema to merge — the node's own __init__ owns
+        # weight loading. Pass node_id through so logging, OSC routing,
+        # and parameters_updated payloads see the graph instance key
+        # rather than an empty string.
+        if pipeline_class is None and node_class is not None:
+            logger.info(f"Loading node: {pipeline_id}")
+            if stage_callback:
+                stage_callback("Initializing node...")
+            return node_class(node_id=node_id or pipeline_id)
 
         # List of built-in pipelines with custom initialization
         BUILTIN_PIPELINES = {
@@ -664,6 +913,8 @@ class PipelineManager:
         if pipeline_class is not None and pipeline_id not in BUILTIN_PIPELINES:
             # Plugin pipeline - use schema defaults merged with load_params
             logger.info(f"Loading plugin pipeline: {pipeline_id}")
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
             config_class = pipeline_class.get_config_class()
             # Get defaults from schema fields
             schema_defaults = {}
@@ -730,6 +981,7 @@ class PipelineManager:
                 quantization=quantization,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
+                stage_callback=stage_callback,
             )
             logger.info("StreamDiffusionV2 pipeline initialized")
             return pipeline
@@ -820,6 +1072,7 @@ class PipelineManager:
                 quantization=quantization,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
+                stage_callback=stage_callback,
             )
             logger.info("LongLive pipeline initialized")
             return pipeline
@@ -865,6 +1118,14 @@ class PipelineManager:
                 logger.debug(
                     f"Krea: Using 14B VACE checkpoint at {config['vace_path']}"
                 )
+                # Extract VACE parameters from load_params (mirrors _configure_vace)
+                if load_params:
+                    config["vace_context_scale"] = load_params.get(
+                        "vace_context_scale", 1.0
+                    )
+                    ref_images = load_params.get("ref_images", [])
+                    if ref_images:
+                        config["ref_images"] = ref_images
             else:
                 logger.info("VACE disabled by load_params, skipping VACE configuration")
 
@@ -890,6 +1151,7 @@ class PipelineManager:
                 ),
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
+                stage_callback=stage_callback,
             )
             logger.info("krea-realtime-video pipeline initialized")
             return pipeline
@@ -948,6 +1210,7 @@ class PipelineManager:
                 quantization=quantization,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
+                stage_callback=stage_callback,
             )
             logger.info("RewardForcing pipeline initialized")
             return pipeline
@@ -1003,12 +1266,16 @@ class PipelineManager:
                 quantization=quantization,
                 device=torch.device("cuda"),
                 dtype=torch.bfloat16,
+                stage_callback=stage_callback,
             )
             logger.info("MemFlow pipeline initialized")
             return pipeline
 
         elif pipeline_id == "video-depth-anything":
             from scope.core.pipelines import VideoDepthAnythingPipeline
+
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
 
             # Create config from load_params
             config = OmegaConf.create({})
@@ -1045,6 +1312,9 @@ class PipelineManager:
         elif pipeline_id == "controller-viz":
             from scope.core.pipelines import ControllerVisualizerPipeline
 
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
+
             # Use load parameters for resolution, default to 512x512
             height = 512
             width = 512
@@ -1062,6 +1332,9 @@ class PipelineManager:
             return pipeline
         elif pipeline_id == "rife":
             from scope.core.pipelines import RIFEPipeline
+
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
 
             # Create minimal config - RIFE pipeline handles its own model paths via artifacts
             config = OmegaConf.create({})
@@ -1085,6 +1358,9 @@ class PipelineManager:
         elif pipeline_id == "scribble":
             from scope.core.pipelines import ScribblePipeline
 
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
+
             pipeline = ScribblePipeline(
                 device=get_device(),
                 dtype=torch.float16,
@@ -1093,6 +1369,9 @@ class PipelineManager:
             return pipeline
         elif pipeline_id == "gray":
             from scope.core.pipelines import GrayPipeline
+
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
 
             pipeline = GrayPipeline(
                 device=get_device(),
@@ -1103,6 +1382,9 @@ class PipelineManager:
         elif pipeline_id == "optical-flow":
             from scope.core.pipelines import OpticalFlowPipeline
             from scope.core.pipelines.optical_flow.schema import OpticalFlowConfig
+
+            if stage_callback:
+                stage_callback("Initializing pipeline...")
 
             # Create config with schema defaults, overridden by load_params
             params = load_params or {}

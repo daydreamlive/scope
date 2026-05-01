@@ -11,8 +11,11 @@ from freezegun import freeze_time
 
 from scope.server.logs_config import (
     LOGS_DIR_ENV_VAR,
+    ScopeLogContextFilter,
     cleanup_old_logs,
+    get_connection_id,
     get_most_recent_log_file,
+    set_connection_id,
 )
 
 
@@ -310,3 +313,61 @@ class TestCleanupOldLogs:
         # New files should be kept
         assert new1.exists()
         assert new2.exists()
+
+
+class TestScopeLogContextFilter:
+    """Tests for correlation ID prefixes injected into log records."""
+
+    def setup_method(self):
+        set_connection_id(None)
+
+    def teardown_method(self):
+        set_connection_id(None)
+
+    def test_connection_id_prefix_is_empty_when_unset(self):
+        record = logging.LogRecord(
+            name="scope.test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="hello",
+            args=(),
+            exc_info=None,
+        )
+
+        ScopeLogContextFilter().filter(record)
+
+        assert record.connection_id == ""
+        assert get_connection_id() is None
+
+    def test_connection_id_prefix_is_injected_when_set(self):
+        set_connection_id("abc123")
+        record = logging.LogRecord(
+            name="scope.test",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="hello",
+            args=(),
+            exc_info=None,
+        )
+
+        ScopeLogContextFilter().filter(record)
+
+        assert record.connection_id == "[(abc123)] "
+
+    def test_connection_id_prefix_is_skipped_for_scope_cloud_logger(self):
+        set_connection_id("abc123")
+        record = logging.LogRecord(
+            name="scope.cloud",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="hello",
+            args=(),
+            exc_info=None,
+        )
+
+        ScopeLogContextFilter().filter(record)
+
+        assert record.connection_id == ""

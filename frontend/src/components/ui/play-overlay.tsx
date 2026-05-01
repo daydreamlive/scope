@@ -6,6 +6,9 @@ interface PlayOverlayProps {
   size?: "sm" | "md" | "lg";
   className?: string;
   variant?: "default" | "themed";
+  costLabel?: string;
+  "data-testid"?: string;
+  "aria-label"?: string;
 }
 
 const sizeClasses = {
@@ -32,19 +35,35 @@ export function PlayOverlay({
   size = "lg",
   className = "",
   variant = "default",
+  costLabel,
+  "data-testid": dataTestId,
+  "aria-label": ariaLabel,
 }: PlayOverlayProps) {
   const sizes = sizeClasses[size];
+  const a11yProps = {
+    role: onClick ? ("button" as const) : undefined,
+    "aria-label": ariaLabel ?? (isPlaying ? "Pause" : "Play"),
+    "data-testid": dataTestId,
+  };
 
   if (variant === "themed") {
     return (
-      <div
-        className={`${sizes.circle} rounded-full border-2 border-input bg-background hover:bg-accent transition-colors flex items-center justify-center cursor-pointer shadow-lg ${className}`}
-        onClick={onClick}
-      >
-        {isPlaying ? (
-          <Pause className={`${sizes.icon} text-foreground`} />
-        ) : (
-          <Play className={`${sizes.icon} text-foreground ml-0.5`} />
+      <div className={`flex flex-col items-center gap-2 ${className}`}>
+        <div
+          className={`${sizes.circle} rounded-full border-2 border-input bg-background hover:bg-accent transition-colors flex items-center justify-center cursor-pointer shadow-lg`}
+          onClick={onClick}
+          {...a11yProps}
+        >
+          {isPlaying ? (
+            <Pause className={`${sizes.icon} text-foreground`} />
+          ) : (
+            <Play className={`${sizes.icon} text-foreground ml-0.5`} />
+          )}
+        </div>
+        {costLabel && !isPlaying && (
+          <span className="text-xs text-muted-foreground font-medium">
+            {costLabel}
+          </span>
         )}
       </div>
     );
@@ -55,6 +74,7 @@ export function PlayOverlay({
     <div
       className={`bg-black/50 rounded-full ${sizes.padding} transition-colors hover:bg-black/60 cursor-pointer ${className}`}
       onClick={onClick}
+      {...a11yProps}
     >
       {isPlaying ? (
         <Pause className={`${sizes.icon} text-white`} />

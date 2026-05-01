@@ -21,18 +21,19 @@ from datetime import datetime
 from functools import wraps
 from typing import Any
 
+import aiohttp
 from fastapi import HTTPException, Request
 from fastapi.responses import Response
 
-from .cloud_connection import CloudConnectionManager
 from .models_config import get_assets_dir
-from .schema import AssetFileInfo, HardwareInfoResponse
+from .schema import AssetFileInfo, HardwareInfoResponse, IntegrationAvailability
+from .scope_cloud_types import ScopeCloudBackend
 
 logger = logging.getLogger(__name__)
 
 
 async def _proxy_to_cloud(
-    cloud_manager: CloudConnectionManager,
+    cloud_manager: ScopeCloudBackend,
     http_request: Request,
     path: str,
     method: str,
@@ -67,9 +68,11 @@ async def _proxy_to_cloud(
 
     status = response.get("status", 200)
     if status >= 400:
+        logger.error(f"Cloud proxy request failed: {response}")
         raise HTTPException(
             status_code=status,
-            detail=response.get("error", error_detail),
+            detail=response.get("data", {}).get("detail")
+            or response.get("error", error_detail),
         )
 
     # Binary response: cloud returned base64-encoded content (e.g. recording download)
@@ -90,20 +93,74 @@ async def _proxy_to_cloud(
     return response.get("data", {})
 
 
-PathResolver = Callable[[Request, CloudConnectionManager], str]
+PathResolver = Callable[[Request, ScopeCloudBackend], str]
 
 # When path is omitted, the request URL path is used when proxying (same as route).
 CLOUD_REQUEST_FAILED = "Cloud request failed"
 
 
+async def proxy_with_body(
+    cloud_manager: ScopeCloudBackend,
+    method: str,
+    path: str,
+    body: dict | None = None,
+    timeout: float = 30.0,
+) -> Any:
+    """Proxy a request to cloud with a pre-built body.
+
+    Use this instead of ``@cloud_proxy`` when the request body needs to be
+    modified before forwarding (e.g. injecting a locally-resolved token).
+    """
+    logger.info(f"Proxying to cloud: {method} {path}")
+    try:
+        response = await cloud_manager.api_request(
+            method=method,
+            path=path,
+            body=body,
+            timeout=timeout,
+        )
+    except Exception as e:
+        logger.error(f"Cloud proxy request failed: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"{CLOUD_REQUEST_FAILED}: {e}",
+        ) from e
+
+    status = response.get("status", 200)
+    if status >= 400:
+        logger.error(f"Cloud proxy request failed: {response}")
+        raise HTTPException(
+            status_code=status,
+            detail=response.get("data", {}).get("detail")
+            or response.get("error", CLOUD_REQUEST_FAILED),
+        )
+
+    if "_base64_content" in response:
+        content = base64.b64decode(response["_base64_content"])
+        media_type = response.get("media_type", "video/mp4")
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = response.get("filename", f"recording-{timestamp}.mp4")
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Content-Length": str(len(content)),
+            },
+        )
+
+    return response.get("data", {})
+
+
 async def get_hardware_info_from_cloud(
-    cloud_manager: CloudConnectionManager,
-    spout_available: bool,
-    ndi_available: bool = False,
+    cloud_manager: ScopeCloudBackend,
+    spout: IntegrationAvailability,
+    ndi: IntegrationAvailability | None = None,
+    syphon: IntegrationAvailability | None = None,
 ) -> HardwareInfoResponse:
     """Fetch hardware info from cloud and return with local output availability.
 
-    Spout/NDI availability is taken from the caller (local) because output
+    Spout/NDI/Syphon availability is taken from the caller (local) because output
     sink frames flow through the local backend.
     """
     logger.info("Proxying hardware info request to cloud")
@@ -130,39 +187,110 @@ async def get_hardware_info_from_cloud(
     data = response.get("data", {})
     return HardwareInfoResponse(
         vram_gb=data.get("vram_gb"),
-        spout_available=spout_available,
-        ndi_available=ndi_available,
+        spout=spout,
+        ndi=ndi or IntegrationAvailability(),
+        syphon=syphon or IntegrationAvailability(),
     )
 
 
+async def _upload_to_fal_cdn(
+    content: bytes,
+    filename: str,
+    content_type: str,
+    cdn_token: str,
+    token_type: str,
+    base_upload_url: str,
+) -> str:
+    """Upload file directly to fal CDN via REST API."""
+    logger.info(f"upload_to_fal_cdn: Uploading {len(content)} bytes ({filename})")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            upload_url = f"{base_upload_url}/files/upload"
+            upload_auth = f"{token_type} {cdn_token}"
+
+            async with session.post(
+                upload_url,
+                data=content,
+                headers={
+                    "Authorization": upload_auth,
+                    "Content-Type": content_type,
+                    "X-Fal-File-Name": filename,
+                    "Accept": "application/json",
+                },
+                timeout=aiohttp.ClientTimeout(total=120),
+            ) as upload_response:
+                if upload_response.status != 200:
+                    error_text = await upload_response.text()
+                    logger.error(f"upload_to_fal_cdn: Upload failed: {error_text}")
+                    raise HTTPException(
+                        status_code=502,
+                        detail=f"CDN upload failed: {upload_response.status}",
+                    )
+
+                upload_result = await upload_response.json()
+                cdn_url = upload_result.get("access_url") or upload_result.get("url")
+
+                if not cdn_url:
+                    logger.error(
+                        f"upload_to_fal_cdn: No URL in response: {upload_result}"
+                    )
+                    raise HTTPException(
+                        status_code=502,
+                        detail="CDN upload succeeded but no URL returned",
+                    )
+
+                logger.info(f"upload_to_fal_cdn: Success, URL: {cdn_url}")
+                return cdn_url
+
+    except aiohttp.ClientError as e:
+        logger.error(f"upload_to_fal_cdn: Network error: {e}")
+        raise HTTPException(
+            status_code=502,
+            detail=f"CDN upload network error: {e}",
+        ) from e
+
+
 async def upload_asset_to_cloud(
-    cloud_manager: CloudConnectionManager,
+    cloud_manager: ScopeCloudBackend,
     content: bytes,
     filename: str,
     content_type: str,
     asset_type: str,
+    fal_cdn_token: str | None = None,
+    fal_cdn_token_type: str | None = None,
+    fal_cdn_base_url: str | None = None,
 ) -> AssetFileInfo:
-    """Upload asset to cloud (POST with base64 body) and save a local copy for thumbnails.
-
-    Call when cloud_manager.is_connected; raises HTTPException on cloud errors.
-    """
+    """Upload asset to cloud and save a local copy for thumbnails."""
     logger.info(
-        f"upload_asset: Uploading {asset_type} to cloud and locally: {filename}"
+        f"upload_asset: Uploading {asset_type} to cloud and locally: {filename} ({len(content)} bytes)"
     )
 
-    # Save locally for thumbnail serving
     assets_dir = get_assets_dir()
     assets_dir.mkdir(parents=True, exist_ok=True)
     local_file_path = assets_dir / filename
     local_file_path.write_bytes(content)
     logger.info(f"upload_asset: Saved local copy for thumbnails: {local_file_path}")
 
-    base64_content = base64.b64encode(content).decode("utf-8")
+    if not fal_cdn_token or not fal_cdn_token_type or not fal_cdn_base_url:
+        raise HTTPException(
+            status_code=400,
+            detail="CDN token required for uploads (provide X-Fal-CDN-Token, X-Fal-CDN-Token-Type, X-Fal-CDN-Base-URL headers)",
+        )
+    cdn_url = await _upload_to_fal_cdn(
+        content,
+        filename,
+        content_type,
+        fal_cdn_token,
+        fal_cdn_token_type,
+        fal_cdn_base_url,
+    )
+
     response = await cloud_manager.api_request(
         method="POST",
         path=f"/api/v1/assets?filename={filename}",
         body={
-            "_base64_content": base64_content,
+            "_cdn_url": cdn_url,
             "_content_type": content_type,
         },
         timeout=60.0,
@@ -183,21 +311,6 @@ async def upload_asset_to_cloud(
     )
 
 
-def recording_download_cloud_path(
-    _http_request: Request,
-    cloud_manager: CloudConnectionManager,
-) -> str:
-    """Resolve cloud path for recording download (uses cloud session ID)."""
-    webrtc_client = getattr(cloud_manager, "_webrtc_client", None)
-    session_id = getattr(webrtc_client, "session_id", None) if webrtc_client else None
-    if not session_id:
-        raise HTTPException(
-            status_code=404,
-            detail="No active cloud session for recording download",
-        )
-    return f"/api/v1/recordings/{session_id}"
-
-
 def cloud_proxy(
     path: str | PathResolver | None = None,
     *,
@@ -206,7 +319,7 @@ def cloud_proxy(
     """Decorator: when cloud is connected, proxy the request to cloud; else run the handler.
 
     The wrapped handler must accept `http_request: Request` and
-    `cloud_manager: CloudConnectionManager` (e.g. via Depends) so the
+    `cloud_manager: ScopeCloudBackend` (e.g. via Depends) so the
     decorator can forward the request and check connection. Do not consume
     the request body before the decorator runs (the decorator only reads
     body when proxying).
@@ -226,7 +339,13 @@ def cloud_proxy(
             cloud_manager = kwargs.get("cloud_manager")
             http_request = kwargs.get("http_request")
 
-            if not isinstance(cloud_manager, CloudConnectionManager):
+            if not (
+                cloud_manager is not None
+                and hasattr(cloud_manager, "is_connected")
+                and hasattr(cloud_manager, "api_request")
+            ):
+                cloud_manager = None
+            if cloud_manager is None:
                 return await f(*args, **kwargs)
             if not cloud_manager.is_connected:
                 return await f(*args, **kwargs)

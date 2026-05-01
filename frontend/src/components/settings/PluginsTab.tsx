@@ -2,6 +2,7 @@ import {
   AlertTriangle,
   ArrowUpSquare,
   FolderOpen,
+  Info,
   RefreshCw,
   Trash2,
 } from "lucide-react";
@@ -22,12 +23,45 @@ interface PluginsTabProps {
   onReload: (pluginName: string) => void;
   isLoading?: boolean;
   isInstalling?: boolean;
+  disabled?: boolean;
+  hideInstall?: boolean;
 }
 
 // Check if running in Electron (file browsing supported)
 const isElectron =
   typeof window !== "undefined" &&
   navigator.userAgent.toLowerCase().includes("electron");
+
+const ORIGIN_BADGE_CLASSES =
+  "text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded";
+
+function OriginBadge({ plugin }: { plugin: InstalledPlugin }) {
+  if (plugin.origin === "local") {
+    return (
+      <span
+        className={`${ORIGIN_BADGE_CLASSES} bg-primary/15 text-primary`}
+        title={
+          plugin.kind === "source"
+            ? "Source-kind plugin: runs on this machine even in cloud mode"
+            : "Installed on this machine"
+        }
+      >
+        Local
+      </span>
+    );
+  }
+  if (plugin.origin === "cloud") {
+    return (
+      <span
+        className={`${ORIGIN_BADGE_CLASSES} bg-muted text-muted-foreground`}
+        title="Installed in the cloud-hosted backend"
+      >
+        Cloud
+      </span>
+    );
+  }
+  return null;
+}
 
 // Transform plain Git host URLs to git+ format on paste
 const transformGitUrl = (value: string): string => {
@@ -62,6 +96,8 @@ export function PluginsTab({
   onReload,
   isLoading = false,
   isInstalling = false,
+  disabled = false,
+  hideInstall = false,
 }: PluginsTabProps) {
   const handleInstall = () => {
     if (installPath.trim()) {
@@ -72,35 +108,45 @@ export function PluginsTab({
   return (
     <div className="space-y-4">
       {/* Install & Updates Section */}
-      <div className="rounded-lg bg-muted/50 p-4 space-y-4">
-        {/* Install Plugin */}
-        <div className="flex items-center gap-2">
-          <Input
-            value={installPath}
-            onChange={e => onInstallPathChange(e.target.value)}
-            placeholder="PyPI package name, Git URL or local path"
-            className="flex-1"
-          />
-          {isElectron && (
+      {!hideInstall ? (
+        <div className="rounded-lg bg-muted/50 p-4 space-y-4">
+          {/* Install Plugin */}
+          <div className="flex items-center gap-2">
+            <Input
+              value={installPath}
+              onChange={e => onInstallPathChange(e.target.value)}
+              placeholder="PyPI package name, Git URL or local path"
+              className="flex-1"
+            />
+            {isElectron && (
+              <Button
+                onClick={onBrowse}
+                variant="outline"
+                size="icon"
+                className="h-8 w-8"
+              >
+                <FolderOpen className="h-4 w-4" />
+              </Button>
+            )}
             <Button
-              onClick={onBrowse}
+              onClick={handleInstall}
               variant="outline"
-              size="icon"
-              className="h-8 w-8"
+              size="sm"
+              disabled={disabled || isInstalling || !installPath.trim()}
             >
-              <FolderOpen className="h-4 w-4" />
+              {isInstalling ? "Installing..." : "Install"}
             </Button>
-          )}
-          <Button
-            onClick={handleInstall}
-            variant="outline"
-            size="sm"
-            disabled={isInstalling || !installPath.trim()}
-          >
-            {isInstalling ? "Installing..." : "Install"}
-          </Button>
+          </div>
         </div>
-      </div>
+      ) : (
+        <div className="rounded-lg bg-muted/50 p-4 flex items-start gap-2">
+          <Info className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+          <p className="text-sm text-muted-foreground">
+            With remote inference enabled, nodes can only be installed from the
+            Nodes tab.
+          </p>
+        </div>
+      )}
 
       {/* Failed plugins warning */}
       {failedPlugins.length > 0 && (
@@ -108,22 +154,20 @@ export function PluginsTab({
           <AlertTriangle className="h-4 w-4 text-yellow-500 shrink-0 mt-0.5" />
           <p className="text-sm text-yellow-500">
             {failedPlugins.length === 1
-              ? "1 plugin failed to load."
-              : `${failedPlugins.length} plugins failed to load.`}{" "}
-            Contact the plugin developer for a fix, then reinstall.
+              ? "1 node failed to load."
+              : `${failedPlugins.length} nodes failed to load.`}{" "}
+            Contact the node developer for a fix, then reinstall.
           </p>
         </div>
       )}
 
       {/* Installed Plugins Section */}
       <div className="rounded-lg bg-muted/50 p-4 space-y-3">
-        <h3 className="text-sm font-medium text-foreground">
-          Installed Plugins
-        </h3>
+        <h3 className="text-sm font-medium text-foreground">Installed Nodes</h3>
         {isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading plugins...</p>
+          <p className="text-sm text-muted-foreground">Loading nodes...</p>
         ) : plugins.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No plugins installed</p>
+          <p className="text-sm text-muted-foreground">No nodes installed</p>
         ) : (
           <div className="space-y-3">
             {plugins.map(plugin => {
@@ -145,6 +189,7 @@ export function PluginsTab({
                           v{plugin.version}
                         </span>
                       )}
+                      <OriginBadge plugin={plugin} />
                     </div>
                     {plugin.author && (
                       <p className="text-xs text-muted-foreground">
@@ -177,7 +222,7 @@ export function PluginsTab({
                         }
                         variant="ghost"
                         size="icon"
-                        disabled={isInstalling}
+                        disabled={disabled || isInstalling}
                         title={
                           plugin.latest_version
                             ? `Update to ${plugin.latest_version}`
@@ -192,20 +237,23 @@ export function PluginsTab({
                         onClick={() => onReload(plugin.name)}
                         variant="ghost"
                         size="icon"
-                        disabled={isInstalling}
-                        title="Reload plugin (restarts server)"
+                        disabled={disabled || isInstalling}
+                        title="Reload node (restarts server)"
                       >
                         <RefreshCw className="h-4 w-4" />
                       </Button>
                     )}
-                    <Button
-                      onClick={() => onDelete(plugin.name)}
-                      variant="ghost"
-                      size="icon"
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                    {!plugin.bundled && (
+                      <Button
+                        onClick={() => onDelete(plugin.name)}
+                        variant="ghost"
+                        size="icon"
+                        disabled={disabled || isInstalling}
+                        className="text-destructive hover:text-destructive hover:bg-destructive/10"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    )}
                   </div>
                 </div>
               );

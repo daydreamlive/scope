@@ -8,6 +8,8 @@ from pydantic import BaseModel, ConfigDict, Field
 # Import enums from torch-free module to avoid loading torch at CLI startup
 from scope.core.pipelines.enums import Quantization, VaeType
 
+from .graph_schema import GraphConfig
+
 # Default values for pipeline load params (duplicated from pipeline configs to avoid
 # importing torch-dependent modules). These should match the defaults in:
 # - StreamDiffusionV2Config: height=512, width=512, base_seed=42
@@ -140,6 +142,11 @@ class Parameters(BaseModel):
         default=None,
         description="List of pipeline IDs to execute in a chain. If not provided, uses the currently loaded pipeline.",
     )
+    graph: GraphConfig | None = Field(
+        default=None,
+        description="Graph configuration (nodes + edges) for graph execution mode. "
+        "When provided, pipelines are wired according to the graph topology instead of a linear chain.",
+    )
     first_frame_image: str | None = Field(
         default=None,
         description="Path to first frame reference image for extension mode. When provided alone, enables 'firstframe' mode (reference at start, generate continuation). When provided with last_frame_image, enables 'firstlastframe' mode (references at both ends). Images should be located in the assets directory.",
@@ -155,6 +162,12 @@ class Parameters(BaseModel):
     recording: bool | None = Field(
         default=None,
         description="Enable recording for this session. When true, the backend records the stream. ",
+    )
+    node_id: str | None = Field(
+        default=None,
+        description="Target graph node ID for per-node parameter updates. "
+        "When set, parameters are routed to the specific pipeline node. "
+        "When None, parameters are broadcast to all processors (backward compat).",
     )
 
 
@@ -237,19 +250,39 @@ class ErrorResponse(BaseModel):
     detail: str = Field(None, description="Additional error details")
 
 
+class IntegrationAvailability(BaseModel):
+    """Availability + install guidance for an optional integration (SDK/library)."""
+
+    available: bool = Field(
+        default=False, description="Whether the integration is ready to use"
+    )
+    reason: str | None = Field(
+        default=None,
+        description="Short reason shown when unavailable (e.g. 'Spout is Windows-only')",
+    )
+    install_hint: str | None = Field(
+        default=None,
+        description="User-facing hint for how to make this integration available",
+    )
+
+
 class HardwareInfoResponse(BaseModel):
     """Hardware information response schema."""
 
     vram_gb: float | None = Field(
         default=None, description="Total VRAM in GB (None if CUDA not available)"
     )
-    spout_available: bool = Field(
-        default=False,
-        description="Whether Spout is available (Windows only, not WSL)",
+    spout: IntegrationAvailability = Field(
+        default_factory=IntegrationAvailability,
+        description="Spout video I/O (Windows only)",
     )
-    ndi_available: bool = Field(
-        default=False,
-        description="Whether NDI SDK is available for output",
+    ndi: IntegrationAvailability = Field(
+        default_factory=IntegrationAvailability,
+        description="NDI video I/O (all platforms, requires NDI SDK)",
+    )
+    syphon: IntegrationAvailability = Field(
+        default_factory=IntegrationAvailability,
+        description="Syphon video I/O (macOS only)",
     )
 
 
@@ -450,14 +483,41 @@ class KreaRealtimeVideoLoadParams(LoRAEnabledLoadParams):
     )
 
 
-class PipelineLoadRequest(BaseModel):
-    """Pipeline load request schema."""
+class PipelineLoadItem(BaseModel):
+    """A single pipeline with its load parameters."""
 
-    pipeline_ids: list[str] = Field(..., description="List of pipeline IDs to load")
+    node_id: str = Field(..., description="Graph node ID for this pipeline instance")
+    pipeline_id: str = Field(..., description="Pipeline ID to load")
     load_params: dict[str, Any] | None = Field(
         default=None,
-        description="Pipeline-specific load parameters (applies to all pipelines). "
-        "Accepts raw dict; keys match pipeline config (e.g. base_seed).",
+        description="Load parameters for this specific pipeline.",
+    )
+
+
+class PipelineLoadRequest(BaseModel):
+    """Pipeline load request schema.
+
+    Supports two formats:
+    - ``pipelines``: list of (pipeline_id, load_params) pairs, allowing
+      per-pipeline params and duplicate pipeline_ids.
+    - ``pipeline_ids`` + ``load_params``: legacy shorthand where the same
+      load_params apply to every pipeline.
+    """
+
+    pipelines: list[PipelineLoadItem] | None = Field(
+        default=None,
+        description="List of pipelines with per-pipeline load parameters. "
+        "Supports loading the same pipeline_id multiple times with different params.",
+    )
+    pipeline_ids: list[str] | None = Field(
+        default=None,
+        description="List of pipeline IDs to load (legacy). "
+        "Use 'pipelines' for per-pipeline load parameters.",
+    )
+    load_params: dict[str, Any] | None = Field(
+        default=None,
+        description="Load parameters applied to every pipeline (legacy). "
+        "Ignored when 'pipelines' is provided.",
     )
     connection_id: str | None = Field(
         default=None,
@@ -491,6 +551,18 @@ class PipelineStatusResponse(BaseModel):
     error: str | None = Field(
         default=None, description="Error message if status is error"
     )
+    loading_stage: str | None = Field(
+        default=None,
+        description="Current loading substage (e.g., 'Loading diffusion model...')",
+    )
+    produces_video: bool = Field(
+        default=True,
+        description="Whether the loaded pipeline chain produces video output",
+    )
+    produces_audio: bool = Field(
+        default=False,
+        description="Whether the loaded pipeline chain produces audio output",
+    )
 
 
 class PipelineSchemasResponse(BaseModel):
@@ -501,6 +573,18 @@ class PipelineSchemasResponse(BaseModel):
     """
 
     pipelines: dict = Field(..., description="Pipeline schemas keyed by pipeline ID")
+
+
+class NodeDefinitionsResponse(BaseModel):
+    """Response containing definitions for all registered node types.
+
+    Each entry is the ``model_dump()`` of a :class:`NodeDefinition`
+    (pipelines carry rich ``pipeline_meta``; plain nodes leave it null).
+    """
+
+    nodes: list[dict[str, Any]] = Field(
+        ..., description="Flat list of node definitions"
+    )
 
 
 class AssetFileInfo(BaseModel):
@@ -566,6 +650,26 @@ class PluginInfo(BaseModel):
     package_spec: str | None = Field(
         default=None,
         description="Package specifier for upgrades (git URL for git packages, name for PyPI)",
+    )
+    bundled: bool = Field(
+        default=False,
+        description="Whether this plugin is bundled and cannot be uninstalled",
+    )
+    kind: str | None = Field(
+        default=None,
+        description=(
+            "Plugin kind from the package's ``__scope_kind__`` attribute. "
+            '``"source"`` means the plugin must run on the local machine even in '
+            "cloud mode; ``None`` (default) is treated as a regular pipeline plugin."
+        ),
+    )
+    origin: Literal["local", "cloud"] | None = Field(
+        default=None,
+        description=(
+            "Where this plugin record came from. Set by the server when merging "
+            "local source-kind plugins with cloud plugins in cloud mode; ``None`` "
+            "in single-instance mode."
+        ),
     )
 
 
@@ -691,7 +795,7 @@ class CloudConnectRequest(BaseModel):
 
     app_id: str | None = Field(
         default=None,
-        description="The cloud app ID (e.g., 'username/scope-app'). Optional if set via CLI.",
+        description="The cloud app ID (e.g., 'daydream/scope-livepeer--prod/ws'). Optional if set via CLI.",
     )
     api_key: str | None = Field(
         default=None,
@@ -755,6 +859,10 @@ class CloudStatusResponse(BaseModel):
         default=None,
         description="Error message if the last connection attempt failed",
     )
+    connect_stage: str | None = Field(
+        default=None,
+        description="Current substage during connection (e.g., 'Connecting to cloud...')",
+    )
     webrtc_connected: bool = Field(
         default=False,
         description="Whether WebRTC media connection to cloud is active",
@@ -816,3 +924,61 @@ class ApiKeySetResponse(BaseModel):
 class ApiKeyDeleteResponse(BaseModel):
     success: bool
     message: str
+
+
+# =============================================================================
+# Tempo Sync Schemas
+# =============================================================================
+
+
+class TempoEnableRequest(BaseModel):
+    """Request to enable tempo synchronization."""
+
+    source: Literal["link", "midi_clock"] = Field(..., description="Tempo source type")
+    midi_device: str | None = Field(
+        default=None,
+        description="MIDI input device name (required when source is midi_clock)",
+    )
+    bpm: float = Field(
+        default=120.0,
+        ge=20.0,
+        le=300.0,
+        description="Initial BPM (used for Ableton Link)",
+    )
+    beats_per_bar: int = Field(
+        default=4, ge=1, le=16, description="Beats per bar (time signature numerator)"
+    )
+
+
+class TempoStatusResponse(BaseModel):
+    """Current tempo sync status."""
+
+    enabled: bool = Field(..., description="Whether tempo sync is active")
+    source: dict | None = Field(
+        default=None, description="Active source info (type, num_peers, etc.)"
+    )
+    beats_per_bar: int = Field(default=4, description="Beats per bar")
+    beat_state: dict | None = Field(
+        default=None,
+        description="Current beat state (bpm, beat_phase, bar_position, beat_count, is_playing, source)",
+    )
+
+
+class TempoSetTempoRequest(BaseModel):
+    """Request to change the session tempo."""
+
+    bpm: float = Field(
+        ...,
+        ge=20.0,
+        le=300.0,
+        description="Target BPM",
+    )
+
+
+class TempoSourcesResponse(BaseModel):
+    """Available tempo sources and their capabilities."""
+
+    sources: dict = Field(
+        ...,
+        description="Available sources keyed by type (link, midi_clock) with availability and device info",
+    )

@@ -1,0 +1,115 @@
+{
+  "name": "MIDI CC Scaler",
+  "description": "Three MIDI CC inputs scaled to useful parameter ranges — guidance (0–20), denoising (0–1000), and strength (0–1)",
+  "category": "Controls",
+  "color": "#06b6d4",
+  "thumbnail": null,
+  "nodes": [
+    {
+      "id": "midi",
+      "type": "midi",
+      "position": { "x": 0, "y": 0 },
+      "width": 289,
+      "data": {
+        "label": "MIDI",
+        "nodeType": "midi",
+        "midiChannels": [
+          {
+            "label": "Guidance",
+            "type": "cc",
+            "channel": 0,
+            "cc": 1,
+            "value": 0
+          },
+          {
+            "label": "Denoise",
+            "type": "cc",
+            "channel": 0,
+            "cc": 2,
+            "value": 0
+          },
+          {
+            "label": "Strength",
+            "type": "cc",
+            "channel": 0,
+            "cc": 3,
+            "value": 0
+          }
+        ],
+        "parameterOutputs": [
+          { "name": "midi_0", "type": "number", "defaultValue": 0 },
+          { "name": "midi_1", "type": "number", "defaultValue": 0 },
+          { "name": "midi_2", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    },
+    {
+      "id": "math_guidance",
+      "type": "math",
+      "position": { "x": 420, "y": 0 },
+      "width": 240,
+      "data": {
+        "label": "→ Guidance",
+        "nodeType": "math",
+        "mathOp": "multiply",
+        "mathDefaultB": 0.15748,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    },
+    {
+      "id": "math_denoise",
+      "type": "math",
+      "position": { "x": 420, "y": 200 },
+      "width": 240,
+      "data": {
+        "label": "→ Denoise",
+        "nodeType": "math",
+        "mathOp": "multiply",
+        "mathDefaultB": 7.874,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    },
+    {
+      "id": "math_strength",
+      "type": "math",
+      "position": { "x": 420, "y": 400 },
+      "width": 240,
+      "data": {
+        "label": "→ Strength",
+        "nodeType": "math",
+        "mathOp": "multiply",
+        "mathDefaultB": 0.00787,
+        "parameterOutputs": [
+          { "name": "value", "type": "number", "defaultValue": 0 }
+        ]
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e_midi_guidance",
+      "source": "midi",
+      "sourceHandle": "param:midi_0",
+      "target": "math_guidance",
+      "targetHandle": "param:a"
+    },
+    {
+      "id": "e_midi_denoise",
+      "source": "midi",
+      "sourceHandle": "param:midi_1",
+      "target": "math_denoise",
+      "targetHandle": "param:a"
+    },
+    {
+      "id": "e_midi_strength",
+      "source": "midi",
+      "sourceHandle": "param:midi_2",
+      "target": "math_strength",
+      "targetHandle": "param:a"
+    }
+  ]
+}

@@ -1,15 +1,19 @@
 """Recording-related utility functions for cleanup and download handling."""
 
+import asyncio
+import fractions
 import logging
 import os
 import shutil
 import tempfile
 import threading
-import time
 from pathlib import Path
+from typing import Any
 
 from aiortc import MediaStreamTrack
-from aiortc.contrib.media import MediaRecorder, MediaRelay
+from aiortc.contrib.media import MediaRelay
+from aiortc.mediastreams import MediaStreamError
+from av import AudioFrame, VideoFrame
 
 logger = logging.getLogger(__name__)
 
@@ -19,112 +23,42 @@ TEMP_FILE_PREFIXES = {
     "download": "scope_download_",
 }
 
-# Environment variables
-RECORDING_ENABLED = os.getenv("RECORDING_ENABLED", "false").lower() == "true"
-RECORDING_MAX_LENGTH_STR = os.getenv("RECORDING_MAX_LENGTH", "1h")
-RECORDING_STARTUP_CLEANUP_ENABLED = (
-    os.getenv("RECORDING_STARTUP_CLEANUP_ENABLED", "true").lower() == "true"
-)
-
 RECORDING_MAX_FPS = 30.0  # Must match MediaRecorder's hardcoded rate=30
 
 
-def _parse_time_duration(duration_str: str) -> float:
-    """
-    Parse a time duration string (e.g., '1h', '30m', '120s') to seconds.
+def ensure_even_video_frame(frame: VideoFrame) -> VideoFrame:
+    """Pad odd-dimension video frames so encoders like libx264 accept them."""
+    pts = frame.pts
+    time_base = frame.time_base
+    arr = frame.to_ndarray(format="rgb24")
+    h, w = arr.shape[:2]
+    pad_w = w % 2
+    pad_h = h % 2
+    if not (pad_w or pad_h):
+        return frame
 
-    Args:
-        duration_str: Duration string like '1h', '30m', '120s', or just a number (treated as seconds)
+    import numpy as np
 
-    Returns:
-        Duration in seconds
-    """
-    duration_str = duration_str.strip().lower()
-
-    if duration_str.endswith("h"):
-        return float(duration_str[:-1]) * 3600
-    elif duration_str.endswith("m"):
-        return float(duration_str[:-1]) * 60
-    elif duration_str.endswith("s"):
-        return float(duration_str[:-1])
-    else:
-        # Try to parse as seconds
-        try:
-            return float(duration_str)
-        except ValueError:
-            logger.warning(
-                f"Invalid duration format: {duration_str}, defaulting to 3600s (1h)"
-            )
-            return 3600.0
-
-
-RECORDING_MAX_LENGTH_SECONDS = _parse_time_duration(RECORDING_MAX_LENGTH_STR)
-
-
-class TimestampNormalizingTrack(MediaStreamTrack):
-    """Wraps a track and normalizes frame timestamps to start from 0.
-
-    This is needed because when starting a new recording, the source track's
-    frames have PTS values that continue from the previous recording. Without
-    normalization, the MP4 encoder interprets these high PTS values as
-    indicating the frame should appear later in the video, causing black
-    frames at the start.
-
-    Important: We must create a copy of the frame rather than modifying it
-    in place, because the relay shares frame objects across all subscribers.
-    Modifying in place would affect the WebRTC sender and cause encoding errors.
-    """
-
-    def __init__(self, source_track: MediaStreamTrack):
-        super().__init__()
-        self.kind = source_track.kind
-        self._source = source_track
-        self._base_pts = None  # Will be set on first frame
-        self._last_frame_time: float | None = None
-        self._min_frame_interval = 1.0 / RECORDING_MAX_FPS
-
-    async def recv(self):
-        import av
-
-        while True:
-            frame = await self._source.recv()
-
-            # Frame rate limiting - skip frames arriving faster than MAX_RECORDING_FPS
-            current_time = time.monotonic()
-            if self._last_frame_time is not None:
-                elapsed = current_time - self._last_frame_time
-                if elapsed < self._min_frame_interval:
-                    continue  # Skip this frame
-            self._last_frame_time = current_time
-
-            # Capture the first frame's PTS as our base
-            if self._base_pts is None:
-                self._base_pts = frame.pts
-
-            # Create a new frame with normalized timestamp
-            arr = frame.to_ndarray(format="rgb24")
-            new_frame = av.VideoFrame.from_ndarray(arr, format="rgb24")
-            new_frame.pts = frame.pts - self._base_pts
-            new_frame.time_base = frame.time_base
-            return new_frame
-
-    def stop(self):
-        self._source.stop()
-        super().stop()
+    padded = np.pad(arr, ((0, pad_h), (0, pad_w), (0, 0)), mode="edge")
+    even_frame = VideoFrame.from_ndarray(padded, format="rgb24")
+    even_frame.pts = pts
+    if time_base is not None:
+        even_frame.time_base = time_base
+    return even_frame
 
 
 class RecordingManager:
-    """Manages recording functionality for a video track."""
+    """Manages recording functionality for video and/or audio tracks."""
 
-    def __init__(self, video_track: MediaStreamTrack):
-        """
-        Initialize the recording manager.
-
-        Args:
-            video_track: The video track to record from
-        """
+    def __init__(
+        self,
+        video_track: MediaStreamTrack | None = None,
+        audio_track: MediaStreamTrack | None = None,
+    ):
         self.video_track = video_track
+        self.audio_track = audio_track
         self.relay = None
+        self.audio_relay = None
 
         # Recording state
         self.recording_file = None
@@ -132,14 +66,15 @@ class RecordingManager:
         self.recording_started = False
         self.recording_lock = threading.Lock()
         self.recording_track = None
-
-        # Max length tracking
-        self.first_recording_start_time = None
-        self.max_length_reached = False
+        self.audio_recording_track = None
 
     def set_relay(self, relay: MediaRelay):
-        """Set the MediaRelay instance for creating recording track."""
+        """Set the MediaRelay instance for creating video recording track."""
         self.relay = relay
+
+    def set_audio_relay(self, relay: MediaRelay):
+        """Set the MediaRelay instance for creating audio recording track."""
+        self.audio_relay = relay
 
     @staticmethod
     def _create_temp_file(suffix: str, prefix: str) -> str:
@@ -158,25 +93,27 @@ class RecordingManager:
             except Exception as e:
                 logger.warning(f"Error stopping recording track: {e}")
 
-    def _create_recording_track(self) -> MediaStreamTrack:
-        """Create a recording track from the video track.
-
-        The track is wrapped in TimestampNormalizingTrack to ensure frame
-        timestamps start from 0 for each new recording.
-        """
+    def _create_recording_track(self) -> MediaStreamTrack | None:
+        """Create a video recording track, preserving source timestamps."""
+        if self.video_track is None:
+            return None
         if self.relay:
-            relay_track = self.relay.subscribe(self.video_track)
-            return TimestampNormalizingTrack(relay_track)
-        else:
-            logger.warning("No relay available for recording, using track directly")
-            return TimestampNormalizingTrack(self.video_track)
+            return self.relay.subscribe(self.video_track)
+        logger.warning("No relay available for recording, using track directly")
+        return self.video_track
 
-    def _create_media_recorder(self, file_path: str) -> MediaRecorder:
-        """Create a MediaRecorder instance with standard settings."""
-        return MediaRecorder(
-            file_path,
-            format="mp4",
-        )
+    def _create_audio_recording_track(self) -> MediaStreamTrack | None:
+        """Create an audio recording track, preserving source timestamps."""
+        if self.audio_track is None:
+            return None
+        if self.audio_relay:
+            return self.audio_relay.subscribe(self.audio_track)
+        logger.warning("No audio relay available for recording, using track directly")
+        return self.audio_track
+
+    def _create_media_recorder(self, file_path: str) -> "ScopeMediaRecorder":
+        """Create a native PyAV media recorder with MP4 options."""
+        return ScopeMediaRecorder(file_path)
 
     async def start_recording(self):
         """Start recording frames to MP4 file using MediaRecorder."""
@@ -184,87 +121,60 @@ class RecordingManager:
             if self.recording_started:
                 return
 
-            # Check if max length has been reached
-            if self.max_length_reached:
-                return
-
         recording_file = None
         media_recorder = None
         recording_track = None
+        audio_recording_track = None
 
         try:
             recording_file = self._create_temp_file(
                 ".mp4", TEMP_FILE_PREFIXES["recording"]
             )
             media_recorder = self._create_media_recorder(recording_file)
+
             recording_track = self._create_recording_track()
-            media_recorder.addTrack(recording_track)
+            if recording_track is not None:
+                media_recorder.addTrack(recording_track)
+
+            audio_recording_track = self._create_audio_recording_track()
+            if audio_recording_track is not None:
+                media_recorder.addTrack(audio_recording_track)
+
             await media_recorder.start()
 
             with self.recording_lock:
                 if self.recording_started:
                     # Another thread started recording while we were doing I/O
                     await self._cleanup_recording(
-                        media_recorder, recording_track, recording_file
+                        media_recorder,
+                        recording_track,
+                        recording_file,
+                        audio_recording_track,
                     )
                     return
                 self.recording_file = recording_file
                 self.media_recorder = media_recorder
                 self.recording_track = recording_track
+                self.audio_recording_track = audio_recording_track
                 self.recording_started = True
-
-                # Track first recording start time
-                if self.first_recording_start_time is None:
-                    self.first_recording_start_time = time.time()
 
             logger.info(f"Started recording to {recording_file}")
         except Exception as e:
             logger.error(f"Error starting recording: {e}")
             await self._cleanup_recording(
-                media_recorder, recording_track, recording_file
+                media_recorder,
+                recording_track,
+                recording_file,
+                audio_recording_track,
             )
             raise
 
-    def check_max_length(self) -> bool:
-        """
-        Check if recording has exceeded max length and stop if necessary.
-        This should be called periodically during recording.
-
-        Returns:
-            True if max length was reached and recording should be stopped, False otherwise
-        """
-        if self.max_length_reached:
-            return False
-
-        with self.recording_lock:
-            if not self.recording_started:
-                return False
-
-            # Calculate total duration from start time
-            if self.first_recording_start_time is not None:
-                total_duration = time.time() - self.first_recording_start_time
-
-                if total_duration >= RECORDING_MAX_LENGTH_SECONDS:
-                    if not self.max_length_reached:
-                        # Only log once when max length is first reached
-                        logger.info(
-                            f"Recording max length reached (total: {total_duration:.2f}s, max: {RECORDING_MAX_LENGTH_SECONDS}s). Stopping recording."
-                        )
-                    self.max_length_reached = True
-                    return True
-
-        return False
-
-    async def stop_recording_if_max_length_reached(self):
-        """Stop current recording if max length has been reached."""
-        if self.max_length_reached and self.recording_started:
-            await self.stop_recording()
-
     async def _cleanup_recording(
         self,
-        media_recorder: MediaRecorder | None,
+        media_recorder: "ScopeMediaRecorder | None",
         recording_track: MediaStreamTrack | None,
         recording_file: str | None,
+        audio_recording_track: MediaStreamTrack | None = None,
     ) -> None:
         """Clean up recording resources."""
         if media_recorder:
@@ -273,6 +183,7 @@ class RecordingManager:
             except Exception as e:
                 logger.warning(f"Error stopping media recorder: {e}")
         self._stop_track_safe(recording_track)
+        self._stop_track_safe(audio_recording_track)
         if recording_file and os.path.exists(recording_file):
             try:
                 os.remove(recording_file)
@@ -283,23 +194,30 @@ class RecordingManager:
         """Extract and clear recording state, returning resources for cleanup."""
         with self.recording_lock:
             if not self.recording_started or not self.media_recorder:
-                return None, None, None
+                return None, None, None, None
 
             recording_file = self.recording_file
             media_recorder = self.media_recorder
             recording_track = self.recording_track
+            audio_recording_track = self.audio_recording_track
 
             self.media_recorder = None
             self.recording_track = None
+            self.audio_recording_track = None
             self.recording_started = False
             self.recording_file = None
 
-            return recording_file, media_recorder, recording_track
+            return (
+                recording_file,
+                media_recorder,
+                recording_track,
+                audio_recording_track,
+            )
 
     async def stop_recording(self):
         """Stop recording and close the output file."""
         try:
-            recording_file, media_recorder, recording_track = (
+            recording_file, media_recorder, recording_track, audio_recording_track = (
                 self._extract_recording_state()
             )
             if not recording_file:
@@ -307,6 +225,7 @@ class RecordingManager:
 
             await media_recorder.stop()
             self._stop_track_safe(recording_track)
+            self._stop_track_safe(audio_recording_track)
             logger.info(f"Stopped recording, saved to {recording_file}")
         except Exception as e:
             logger.error(f"Error stopping recording: {e}")
@@ -314,8 +233,13 @@ class RecordingManager:
                 self.media_recorder = None
                 self.recording_started = False
 
-    async def finalize_and_get_recording(self):
-        """Finalize the current recording and return a copy for download."""
+    async def finalize_and_get_recording(self, restart_after: bool = True):
+        """Finalize the current recording and return a copy for download.
+
+        When restart_after is True (session-level recording), a new recording
+        segment is started after the copy. Per-node queue-based recording
+        passes restart_after=False so the caller can replace the track.
+        """
         try:
             with self.recording_lock:
                 has_active_recording = self.recording_started and self.media_recorder
@@ -323,7 +247,7 @@ class RecordingManager:
             if not has_active_recording:
                 return None
 
-            recording_file, media_recorder, recording_track = (
+            recording_file, media_recorder, recording_track, audio_recording_track = (
                 self._extract_recording_state()
             )
 
@@ -332,17 +256,16 @@ class RecordingManager:
                 logger.info(f"Finalized recording: {recording_file}")
 
             self._stop_track_safe(recording_track)
+            self._stop_track_safe(audio_recording_track)
 
             if recording_file and os.path.exists(recording_file):
                 # Create a copy for download
                 download_file = self._copy_single_segment(recording_file)
 
-                # Continue recording if max length not reached
-                if not self.max_length_reached:
+                # Continue recording after download
+                if restart_after:
                     await self.start_recording()
                     logger.info("Continued recording after download")
-                else:
-                    logger.info("Skipped starting new recording (max length reached)")
 
                 return download_file
 
@@ -382,10 +305,11 @@ class RecordingManager:
         files_to_delete = []
         media_recorder = None
         recording_track = None
+        audio_recording_track = None
 
         try:
             # Extract recording state and stop the recorder before deleting
-            recording_file, media_recorder, recording_track = (
+            recording_file, media_recorder, recording_track, audio_recording_track = (
                 self._extract_recording_state()
             )
             if recording_file:
@@ -400,18 +324,15 @@ class RecordingManager:
             except Exception as e:
                 logger.warning(f"Error stopping media recorder during delete: {e}")
 
-        # Stop the recording track
+        # Stop the recording tracks
         self._stop_track_safe(recording_track)
+        self._stop_track_safe(audio_recording_track)
 
         # Now delete the file(s) - the file handle should be closed
         for file_path in files_to_delete:
             if file_path and os.path.exists(file_path):
                 self._safe_remove_file(file_path)
                 logger.info(f"Deleted recording file: {file_path}")
-
-    def get_recording_path(self):
-        """Get the path to the recording file."""
-        return Path(self.recording_file) if self.recording_file else None
 
     @property
     def is_recording_started(self):
@@ -424,12 +345,6 @@ def cleanup_recording_files():
     Clean up all recording files from previous sessions.
     This handles cases where the process crashed and files weren't cleaned up.
     """
-    if not RECORDING_STARTUP_CLEANUP_ENABLED:
-        logger.info(
-            "Recording startup cleanup disabled via RECORDING_STARTUP_CLEANUP_ENABLED"
-        )
-        return
-
     temp_dir = Path(tempfile.gettempdir())
     if not temp_dir.exists():
         return
@@ -467,3 +382,139 @@ def cleanup_temp_file(file_path: str):
     if os.path.exists(file_path):
         RecordingManager._safe_remove_file(file_path)
         logger.info(f"Cleaned up temporary download file: {file_path}")
+
+
+class _RecorderContext:
+    def __init__(self, track: MediaStreamTrack):
+        self.track = track
+        self.started = False
+        self.stream: Any | None = None
+        self.task: asyncio.Task[None] | None = None
+        self.codec_time_base_initialized = False
+
+
+class ScopeMediaRecorder:
+    """PyAV-based replacement for aiortc MediaRecorder.
+
+    Keeps the same high-level API surface used by RecordingManager
+    (`addTrack`, `start`, `stop`) while preserving incoming frame PTS/time_base.
+    """
+
+    def __init__(self, file_path: str):
+        import av
+
+        self._container = av.open(
+            file_path,
+            mode="w",
+            format="mp4",
+            options={
+                # Force timestamps to start at zero (disable edit list).
+                "use_editlist": "0",
+                # Allow playback before file is fully loaded, e.g. over HTTP.
+                "movflags": "+faststart",
+            },
+        )
+        self._contexts: dict[MediaStreamTrack, _RecorderContext] = {}
+
+    def addTrack(self, track: MediaStreamTrack) -> None:
+        context = _RecorderContext(track)
+        context.stream = self._create_stream(track.kind)
+        self._contexts[track] = context
+
+    async def start(self) -> None:
+        for context in self._contexts.values():
+            if context.task is None:
+                context.task = asyncio.create_task(self._run_track(context))
+
+    async def stop(self) -> None:
+        tasks: list[asyncio.Task[None]] = []
+        for ctx in self._contexts.values():
+            if ctx.task is not None:
+                ctx.task.cancel()
+                tasks.append(ctx.task)
+                ctx.task = None
+        task_errors: list[BaseException] = []
+        if tasks:
+            task_results = await asyncio.gather(*tasks, return_exceptions=True)
+            task_errors = [
+                result
+                for result in task_results
+                if isinstance(result, BaseException)
+                and not isinstance(result, asyncio.CancelledError)
+            ]
+            for error in task_errors:
+                logger.error(
+                    "Recording task failed",
+                    exc_info=(type(error), error, error.__traceback__),
+                )
+
+        if self._container is not None:
+            for context in self._contexts.values():
+                assert context.stream is not None
+                for packet in context.stream.encode(None):
+                    self._container.mux(packet)
+            self._container.close()
+            self._container = None
+
+        self._contexts = {}
+        if task_errors:
+            raise RuntimeError("Recording task failed") from task_errors[0]
+
+    async def _run_track(self, context: _RecorderContext) -> None:
+        while True:
+            try:
+                frame = await context.track.recv()
+            except asyncio.CancelledError:
+                return
+            except MediaStreamError:
+                return
+
+            if isinstance(frame, VideoFrame):
+                frame = ensure_even_video_frame(frame)
+            elif not isinstance(frame, AudioFrame):
+                raise TypeError("Only audio or video frames can be recorded")
+
+            if self._container is None:
+                return
+            if context.stream is None:
+                return
+
+            if isinstance(frame, VideoFrame) and not context.started:
+                context.stream.width = frame.width
+                context.stream.height = frame.height
+                context.started = True
+            elif isinstance(frame, AudioFrame) and not context.started:
+                try:
+                    context.stream.rate = frame.sample_rate or context.stream.rate
+                    context.stream.layout = frame.layout.name
+                except Exception:
+                    pass
+                context.started = True
+
+            self._initialize_codec_time_base(context, frame)
+            for packet in context.stream.encode(frame):
+                self._container.mux(packet)
+
+    def _create_stream(self, kind: str):
+        assert self._container is not None
+        if kind == "video":
+            stream = self._container.add_stream("libx264", rate=int(RECORDING_MAX_FPS))
+            stream.pix_fmt = "yuv420p"
+            return stream
+
+        return self._container.add_stream("aac")
+
+    @staticmethod
+    def _initialize_codec_time_base(
+        context: _RecorderContext, frame: AudioFrame | VideoFrame
+    ) -> None:
+        if context.codec_time_base_initialized:
+            return
+        if frame.time_base is None:
+            return
+        try:
+            context.stream.codec_context.time_base = fractions.Fraction(frame.time_base)
+            context.codec_time_base_initialized = True
+        except Exception:
+            # If the codec rejects this time base, keep encoder defaults.
+            return

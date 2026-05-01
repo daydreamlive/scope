@@ -106,6 +106,9 @@ def ui_field_config(
     is_load_param: bool = False,
     label: str | None = None,
     category: Literal["configuration", "input"] | None = None,
+    modulatable: bool = False,
+    modulatable_min: float | None = None,
+    modulatable_max: float | None = None,
 ) -> dict[str, Any]:
     """Build json_schema_extra for a field so the frontend renders it in Settings or Input & Controls.
 
@@ -128,6 +131,12 @@ def ui_field_config(
             the field label; description remains available as tooltip.
         category: "configuration" for Settings panel, "input" for Input & Controls
             (below Prompts). Omit to default to "configuration".
+        modulatable: If True, this field can be targeted by the beat-synced
+            modulation engine. Default False.
+        modulatable_min: Safe lower bound for modulation (can be tighter than the
+            field's validation range). Falls back to the field's ``minimum``.
+        modulatable_max: Safe upper bound for modulation. Falls back to the
+            field's ``maximum``.
 
     Returns:
         Dict to pass as json_schema_extra (produces "ui" key in JSON schema).
@@ -144,6 +153,12 @@ def ui_field_config(
         ui["modes"] = modes
     if label is not None:
         ui["label"] = label
+    if modulatable:
+        ui["modulatable"] = True
+    if modulatable_min is not None:
+        ui["modulatable_min"] = modulatable_min
+    if modulatable_max is not None:
+        ui["modulatable_max"] = modulatable_max
     return {"ui": ui}
 
 
@@ -229,6 +244,13 @@ class BasePipelineConfig(BaseModel):
     supports_vace: ClassVar[bool] = False
 
     # UI capability metadata - tells frontend what controls to show
+    # Whether this pipeline produces video output. Audio-only pipelines set this
+    # to False so the server can skip creating a video track.
+    produces_video: ClassVar[bool] = True
+    # Whether this pipeline produces audio output. When False (the default),
+    # the server skips creating an AudioProcessingTrack to avoid wasting CPU
+    # on silence frames.
+    produces_audio: ClassVar[bool] = False
     supports_cache_management: ClassVar[bool] = False
     supports_kv_cache_bias: ClassVar[bool] = False
     supports_quantization: ClassVar[bool] = False
@@ -244,6 +266,10 @@ class BasePipelineConfig(BaseModel):
     # Only preprocessors need to explicitly define usage = [UsageType.PREPROCESSOR]
     # to appear in the preprocessor dropdown.
     usage: ClassVar[list[UsageType]] = []
+
+    # Graph port declaration: which stream ports this pipeline exposes
+    inputs: ClassVar[list[str]] = ["video"]
+    outputs: ClassVar[list[str]] = ["video"]
 
     # Mode configuration - keys are mode names, values are ModeDefaults with field overrides
     # Use default=True to mark the default mode. Only include fields that differ from base.
@@ -380,8 +406,12 @@ class BasePipelineConfig(BaseModel):
             cls.recommended_quantization_vram_threshold
         )
         metadata["modified"] = cls.modified
+        metadata["produces_video"] = cls.produces_video
+        metadata["produces_audio"] = cls.produces_audio
         # Convert UsageType enum values to strings for JSON serialization
         metadata["usage"] = [usage.value for usage in cls.usage] if cls.usage else []
+        metadata["inputs"] = list(cls.inputs)
+        metadata["outputs"] = list(cls.outputs)
         metadata["config_schema"] = cls.model_json_schema()
 
         # Include mode-specific defaults (excluding None values and the "default" flag)

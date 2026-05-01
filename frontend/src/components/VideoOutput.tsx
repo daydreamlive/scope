@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState, useCallback } from "react";
+import { Volume2, VolumeX } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Spinner } from "./ui/spinner";
 import { PlayOverlay } from "./ui/play-overlay";
+import { useCloudStatus } from "../hooks/useCloudStatus";
+import { useBilling } from "../contexts/BillingContext";
 
 interface VideoOutputProps {
   className?: string;
@@ -10,6 +13,8 @@ interface VideoOutputProps {
   isCloudConnecting?: boolean;
   isConnecting?: boolean;
   pipelineError?: string | null;
+  cloudConnectStage?: string | null;
+  pipelineLoadingStage?: string | null;
   isPlaying?: boolean;
   isDownloading?: boolean;
   onPlayPauseToggle?: () => void;
@@ -32,6 +37,8 @@ export function VideoOutput({
   isCloudConnecting = false,
   isConnecting = false,
   pipelineError: _pipelineError = null,
+  cloudConnectStage = null,
+  pipelineLoadingStage = null,
   isPlaying = true,
   isDownloading = false,
   onPlayPauseToggle,
@@ -43,11 +50,20 @@ export function VideoOutput({
   videoContainerRef,
   videoScaleMode = "fit",
 }: VideoOutputProps) {
+  const { isConnected: isCloudActive } = useCloudStatus();
+  const billing = useBilling();
+
   const videoRef = useRef<HTMLVideoElement>(null);
   const internalContainerRef = useRef<HTMLDivElement>(null);
   const [showOverlay, setShowOverlay] = useState(false);
   const [isFadingOut, setIsFadingOut] = useState(false);
-  const overlayTimeoutRef = useRef<number | null>(null);
+  const overlayTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Audio state: start muted to comply with browser autoplay policy.
+  // User can click the speaker icon to unmute once the stream is playing.
+  const [isMuted, setIsMuted] = useState(true);
+  const [hasAudioTrack, setHasAudioTrack] = useState(false);
+  const [hasVideoTrack, setHasVideoTrack] = useState(false);
 
   // Use external ref if provided, otherwise use internal
   const containerRef = videoContainerRef || internalContainerRef;
@@ -55,8 +71,35 @@ export function VideoOutput({
   useEffect(() => {
     if (videoRef.current && remoteStream) {
       videoRef.current.srcObject = remoteStream;
+
+      // Check if the stream contains audio/video tracks
+      setHasAudioTrack(remoteStream.getAudioTracks().length > 0);
+      setHasVideoTrack(remoteStream.getVideoTracks().length > 0);
+
+      // Listen for tracks being added later (audio may arrive after video)
+      const handleTrackAdded = () => {
+        setHasAudioTrack(remoteStream.getAudioTracks().length > 0);
+        setHasVideoTrack(remoteStream.getVideoTracks().length > 0);
+      };
+      remoteStream.addEventListener("addtrack", handleTrackAdded);
+
+      return () => {
+        remoteStream.removeEventListener("addtrack", handleTrackAdded);
+      };
     }
   }, [remoteStream]);
+
+  // Sync muted state to the video element
+  useEffect(() => {
+    if (videoRef.current) {
+      videoRef.current.muted = isMuted;
+    }
+  }, [isMuted]);
+
+  const toggleMute = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation(); // Don't trigger play/pause or pointer lock
+    setIsMuted(prev => !prev);
+  }, []);
 
   // Listen for video playing event to notify parent
   useEffect(() => {
@@ -166,17 +209,42 @@ export function VideoOutput({
             className="relative w-full h-full cursor-pointer flex items-center justify-center"
             onClick={handleVideoClick}
           >
+            {/* Always render the video element (browsers won't play display:none media).
+                For audio-only streams it acts as an invisible audio sink. */}
             <video
               ref={videoRef}
               className={
-                videoScaleMode === "fit"
-                  ? "w-full h-full object-contain"
-                  : "max-w-full max-h-full object-contain"
+                hasVideoTrack
+                  ? videoScaleMode === "fit"
+                    ? "w-full h-full object-contain"
+                    : "max-w-full max-h-full object-contain"
+                  : "absolute w-0 h-0 overflow-hidden"
               }
               autoPlay
-              muted
+              muted={isMuted}
               playsInline
             />
+            {/* Audio-only visual indicator */}
+            {!hasVideoTrack && (
+              <div className="flex flex-col items-center gap-3 text-muted-foreground">
+                <Volume2 className="w-12 h-12" />
+                <p className="text-lg">Audio Only</p>
+              </div>
+            )}
+            {/* Audio mute/unmute toggle - only shown when stream has audio */}
+            {hasAudioTrack && (
+              <button
+                onClick={toggleMute}
+                className="absolute bottom-4 right-4 p-2 rounded-lg bg-black/60 hover:bg-black/80 text-white transition-colors z-10"
+                title={isMuted ? "Unmute audio" : "Mute audio"}
+              >
+                {isMuted ? (
+                  <VolumeX className="w-5 h-5" />
+                ) : (
+                  <Volume2 className="w-5 h-5" />
+                )}
+              </button>
+            )}
             {/* Play/Pause Overlay */}
             {showOverlay && (
               <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
@@ -206,12 +274,19 @@ export function VideoOutput({
         ) : isCloudConnecting ? (
           <div className="text-center text-muted-foreground text-lg">
             <Spinner size={24} className="mx-auto mb-3" />
-            <p>Connecting to cloud...</p>
+            <p key={cloudConnectStage} className="animate-fade-in">
+              {cloudConnectStage || "Connecting to cloud..."}
+            </p>
           </div>
         ) : isPipelineLoading ? (
-          <div className="text-center text-muted-foreground text-lg">
+          <div className="text-center text-muted-foreground">
             <Spinner size={24} className="mx-auto mb-3" />
-            <p>Loading...</p>
+            <p key={pipelineLoadingStage} className="animate-fade-in text-lg">
+              {pipelineLoadingStage || "Loading pipeline..."}
+            </p>
+            <p className="text-xs text-muted-foreground/80 mt-3 max-w-[280px] mx-auto leading-relaxed">
+              Models may take up to a minute to load, only on the first run.
+            </p>
           </div>
         ) : isConnecting ? (
           <div className="text-center text-muted-foreground text-lg">
@@ -226,6 +301,13 @@ export function VideoOutput({
               onClick={onStartStream}
               size="lg"
               variant="themed"
+              costLabel={
+                isCloudActive && billing.creditsPerMin > 0
+                  ? `Run for ${billing.creditsPerMin} credits/min`
+                  : undefined
+              }
+              data-testid="start-stream-button"
+              aria-label="Start stream"
             />
           </div>
         )}

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useApi } from "./useApi";
-import type { PipelineStatusResponse, PipelineLoadParams } from "../lib/api";
+import type { PipelineStatusResponse, PipelineLoadItem } from "../lib/api";
 import { toast } from "sonner";
 
 interface UsePipelineOptions {
@@ -16,13 +16,21 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
   const [status, setStatus] =
     useState<PipelineStatusResponse["status"]>("not_loaded");
-  const [pipelineInfo, setPipelineInfo] =
+  const [pipelineInfo, setPipelineInfoState] =
     useState<PipelineStatusResponse | null>(null);
+  // Ref mirrors pipelineInfo but updates synchronously, so code that
+  // runs right after loadPipeline resolves (same tick, before React
+  // re-renders) sees the latest values.
+  const pipelineInfoRef = useRef<PipelineStatusResponse | null>(null);
+  const setPipelineInfo = useCallback((info: PipelineStatusResponse) => {
+    pipelineInfoRef.current = info;
+    setPipelineInfoState(info);
+  }, []);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const pollTimeoutRef = useRef<number | null>(null);
-  const loadTimeoutRef = useRef<number | null>(null);
+  const loadTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isPollingRef = useRef(false);
   const shownErrorRef = useRef<string | null>(null); // Track which error we've shown
 
@@ -76,17 +84,14 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
   // Load pipeline
   const triggerLoad = useCallback(
-    async (
-      pipelineIds?: string[],
-      loadParams?: PipelineLoadParams
-    ): Promise<boolean> => {
+    async (items?: PipelineLoadItem[]): Promise<boolean> => {
       if (isLoading) {
         console.log("Pipeline already loading");
         return false;
       }
 
-      if (!pipelineIds || pipelineIds.length === 0) {
-        console.error("No pipeline IDs provided");
+      if (!items || items.length === 0) {
+        console.error("No pipeline load items provided");
         return false;
       }
 
@@ -97,8 +102,7 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
         // Start the load request
         await loadPipelineRequest({
-          pipeline_ids: pipelineIds,
-          load_params: loadParams,
+          pipelines: items,
         });
 
         // Set up timeout for the load operation
@@ -117,6 +121,10 @@ export function usePipeline(options: UsePipelineOptions = {}) {
           const checkComplete = async () => {
             try {
               const currentStatus = await getPipelineStatus();
+              // Keep hook state synchronized while polling so callers can
+              // reliably read fields like loaded_lora_adapters after load.
+              setStatus(currentStatus.status);
+              setPipelineInfo(currentStatus);
               if (currentStatus.status === "loaded") {
                 resolve(true);
               } else if (currentStatus.status === "error") {
@@ -191,12 +199,9 @@ export function usePipeline(options: UsePipelineOptions = {}) {
 
   // Load pipeline with proper state management
   const loadPipelineAsync = useCallback(
-    async (
-      pipelineIds?: string[],
-      loadParams?: PipelineLoadParams
-    ): Promise<boolean> => {
+    async (items?: PipelineLoadItem[]): Promise<boolean> => {
       // Always trigger load - let the backend decide if reload is needed
-      return await triggerLoad(pipelineIds, loadParams);
+      return await triggerLoad(items);
     },
     [triggerLoad]
   );
@@ -219,11 +224,13 @@ export function usePipeline(options: UsePipelineOptions = {}) {
   return {
     status,
     pipelineInfo,
+    pipelineInfoRef,
     isLoading,
     error,
     loadPipeline: loadPipelineAsync,
     checkStatus,
     isLoaded: status === "loaded",
     isError: status === "error",
+    loadingStage: pipelineInfo?.loading_stage ?? null,
   };
 }

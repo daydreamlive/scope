@@ -37,6 +37,7 @@ asar: false
 
 # Build hooks
 afterPack: build/afterPack.js
+afterSign: build/mac/notarize.js
 
 # Publishing configuration for auto-updates
 publish:
@@ -48,22 +49,23 @@ publish:
 # macOS configuration
 mac:
   category: public.app-category.utilities
-  icon: assets/icon.png
+  icon: assets/icon.icns
+  artifactName: DaydreamScope-${version}-${os}-${arch}.${ext}
   hardenedRuntime: true
   gatekeeperAssess: false
+  notarize: false # Handled by custom afterSign hook (build/mac/notarize.js)
   entitlements: build/mac/entitlements.mac.plist
   entitlementsInherit: build/mac/entitlements.mac.plist
   target:
     - target: dmg
       arch:
-        - x64
         - arm64
     - target: zip
       arch:
-        - x64
         - arm64
 
 dmg:
+  artifactName: DaydreamScope-${arch}.${ext}
   contents:
     - x: 130
       y: 220

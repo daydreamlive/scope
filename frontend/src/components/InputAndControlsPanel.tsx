@@ -11,7 +11,7 @@ import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group";
 import { Switch } from "./ui/switch";
 import { Badge } from "./ui/badge";
 import { Input } from "./ui/input";
-import { Upload, ArrowUp, RefreshCw } from "lucide-react";
+import { Upload, ArrowUp, RefreshCw, ArrowLeftRight } from "lucide-react";
 import { LabelWithTooltip } from "./ui/label-with-tooltip";
 import type { VideoSourceMode } from "../hooks/useVideoSource";
 import type {
@@ -24,6 +24,7 @@ import type { ExtensionMode, InputMode, PipelineInfo } from "../types";
 import { PromptInput } from "./PromptInput";
 import { TimelinePromptEditor } from "./TimelinePromptEditor";
 import type { TimelinePrompt } from "./PromptTimeline";
+import { AudioManager } from "./AudioManager";
 import { ImageManager } from "./ImageManager";
 import { Button } from "./ui/button";
 import {
@@ -34,7 +35,6 @@ import {
 } from "../lib/schemaSettings";
 import { SchemaPrimitiveField } from "./PrimitiveFields";
 import { useCloudStatus } from "../hooks/useCloudStatus";
-
 interface InputAndControlsPanelProps {
   className?: string;
   pipelines: Record<string, PipelineInfo> | null;
@@ -50,6 +50,7 @@ interface InputAndControlsPanelProps {
   onStartStream: () => void;
   onStopStream: () => void;
   onVideoFileUpload?: (file: File) => Promise<boolean>;
+  onCycleSampleVideo?: () => void;
   pipelineId: string;
   prompts: PromptItem[];
   onPromptsChange: (prompts: PromptItem[]) => void;
@@ -79,9 +80,16 @@ interface InputAndControlsPanelProps {
   spoutAvailable?: boolean;
   // Whether NDI is available (NDI SDK installed on server)
   ndiAvailable?: boolean;
+  // Whether Syphon is available (macOS only)
+  syphonAvailable?: boolean;
   // Currently selected NDI source identifier
   selectedNdiSource?: string;
   onNdiSourceChange?: (identifier: string) => void;
+  // Currently selected Syphon source identifier
+  selectedSyphonSource?: string;
+  onSyphonSourceChange?: (identifier: string) => void;
+  syphonFlipVertical?: boolean;
+  onSyphonFlipVerticalChange?: (enabled: boolean) => void;
   // VACE reference images (only shown when VACE is enabled)
   vaceEnabled?: boolean;
   refImages?: string[];
@@ -123,6 +131,7 @@ export function InputAndControlsPanel({
   onStartStream: _onStartStream,
   onStopStream: _onStopStream,
   onVideoFileUpload,
+  onCycleSampleVideo,
   pipelineId,
   prompts,
   onPromptsChange,
@@ -148,8 +157,13 @@ export function InputAndControlsPanel({
   onInputModeChange,
   spoutAvailable = false,
   ndiAvailable = false,
+  syphonAvailable = false,
   selectedNdiSource = "",
   onNdiSourceChange,
+  selectedSyphonSource = "",
+  onSyphonSourceChange,
+  syphonFlipVertical = false,
+  onSyphonFlipVerticalChange,
   vaceEnabled = true,
   refImages = [],
   onRefImagesChange,
@@ -196,6 +210,44 @@ export function InputAndControlsPanel({
   useEffect(() => {
     setIsStreamLoaded(false);
   }, [ndiStreamUrl]);
+
+  // Syphon source discovery
+  const [syphonSources, setSyphonSources] = useState<DiscoveredSource[]>([]);
+  const [isDiscoveringSyphon, setIsDiscoveringSyphon] = useState(false);
+
+  const discoverSyphonSources = useCallback(async () => {
+    setIsDiscoveringSyphon(true);
+    try {
+      const result = await getInputSourceSources("syphon");
+      setSyphonSources(result.sources);
+    } catch (e) {
+      console.error("Failed to discover Syphon sources:", e);
+      setSyphonSources([]);
+    } finally {
+      setIsDiscoveringSyphon(false);
+    }
+  }, []);
+
+  // Live MJPEG preview URL for Syphon (always shown when a source is selected)
+  // Use higher FPS for Syphon since it's local GPU sharing with minimal overhead
+  const syphonStreamUrl =
+    mode === "syphon" && selectedSyphonSource
+      ? getInputSourceStreamUrl("syphon", selectedSyphonSource, 15, {
+          flipVertical: syphonFlipVertical,
+        })
+      : null;
+  const [isSyphonStreamLoaded, setIsSyphonStreamLoaded] = useState(false);
+
+  useEffect(() => {
+    setIsSyphonStreamLoaded(false);
+  }, [syphonStreamUrl]);
+
+  // Auto-discover Syphon sources when switching to Syphon mode
+  useEffect(() => {
+    if (mode === "syphon" && syphonAvailable) {
+      discoverSyphonSources();
+    }
+  }, [mode, syphonAvailable, discoverSyphonSources]);
 
   // Auto-discover NDI sources when switching to NDI mode
   useEffect(() => {
@@ -269,13 +321,13 @@ export function InputAndControlsPanel({
   };
 
   return (
-    <Card className={`h-full flex flex-col ${className}`}>
-      <CardHeader className="flex-shrink-0">
+    <Card className={className}>
+      <CardHeader>
         <CardTitle className="text-base font-medium">
           Input & Controls
         </CardTitle>
       </CardHeader>
-      <CardContent className="space-y-4 overflow-y-auto flex-1 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-gray-300 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:transition-colors [&::-webkit-scrollbar-thumb:hover]:bg-gray-400">
+      <CardContent className="space-y-4">
         {/* Input Mode selector - only show for multi-mode pipelines */}
         {isMultiMode && (
           <div>
@@ -317,14 +369,14 @@ export function InputAndControlsPanel({
               <ToggleGroupItem
                 value="video"
                 aria-label="Video file"
-                disabled={isStreaming && mode === "ndi"}
+                disabled={isStreaming && (mode === "ndi" || mode === "syphon")}
               >
                 File
               </ToggleGroupItem>
               <ToggleGroupItem
                 value="camera"
                 aria-label="Camera"
-                disabled={isStreaming && mode === "ndi"}
+                disabled={isStreaming && (mode === "ndi" || mode === "syphon")}
               >
                 Camera
               </ToggleGroupItem>
@@ -332,7 +384,9 @@ export function InputAndControlsPanel({
                 <ToggleGroupItem
                   value="spout"
                   aria-label="Spout Receiver"
-                  disabled={isStreaming && mode === "ndi"}
+                  disabled={
+                    isStreaming && (mode === "ndi" || mode === "syphon")
+                  }
                 >
                   Spout
                 </ToggleGroupItem>
@@ -344,6 +398,15 @@ export function InputAndControlsPanel({
                   disabled={isStreaming && mode !== "ndi"}
                 >
                   NDI
+                </ToggleGroupItem>
+              )}
+              {syphonAvailable && (
+                <ToggleGroupItem
+                  value="syphon"
+                  aria-label="Syphon"
+                  disabled={isStreaming && mode !== "syphon"}
+                >
+                  Syphon
                 </ToggleGroupItem>
               )}
             </ToggleGroup>
@@ -453,6 +516,86 @@ export function InputAndControlsPanel({
                   placeholder="TDSyphonSpoutOut"
                 />
               </div>
+            ) : mode === "syphon" ? (
+              /* Syphon Source Picker */
+              <div className="space-y-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  <Select
+                    value={selectedSyphonSource}
+                    onValueChange={value => onSyphonSourceChange?.(value)}
+                    disabled={isStreaming || isDiscoveringSyphon}
+                  >
+                    <SelectTrigger className="flex-1 min-w-0 h-8 text-sm [&>span]:truncate">
+                      <SelectValue
+                        placeholder={
+                          isDiscoveringSyphon
+                            ? "Discovering..."
+                            : syphonSources.length === 0
+                              ? "No sources found"
+                              : "Select Syphon source"
+                        }
+                      />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {syphonSources.map(source => (
+                        <SelectItem
+                          key={source.identifier}
+                          value={source.identifier}
+                        >
+                          {source.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-8 w-8 shrink-0"
+                    onClick={discoverSyphonSources}
+                    disabled={isStreaming || isDiscoveringSyphon}
+                    title="Refresh Syphon sources"
+                  >
+                    <RefreshCw
+                      className={`h-3.5 w-3.5 ${isDiscoveringSyphon ? "animate-spin" : ""}`}
+                    />
+                  </Button>
+                </div>
+                {/* Live Syphon preview (MJPEG stream) */}
+                {selectedSyphonSource && (
+                  <div className="relative rounded-md overflow-hidden border border-border bg-muted min-w-0">
+                    {syphonStreamUrl ? (
+                      <img
+                        src={syphonStreamUrl}
+                        alt="Syphon source preview"
+                        className="block w-full h-auto object-contain"
+                        onLoad={() => setIsSyphonStreamLoaded(true)}
+                        onError={() => setIsSyphonStreamLoaded(false)}
+                      />
+                    ) : null}
+                    {!isSyphonStreamLoaded && (
+                      <div className="flex items-center justify-center h-20 text-xs text-muted-foreground">
+                        <RefreshCw className="h-4 w-4 animate-spin mr-1.5" />
+                        Connecting...
+                      </div>
+                    )}
+                  </div>
+                )}
+                <div className="flex items-center justify-between gap-3 rounded-md border border-border/60 bg-muted/30 px-3 py-2">
+                  <div className="min-w-0">
+                    <div className="text-sm">Flip Vertical</div>
+                    <div className="text-xs text-muted-foreground">
+                      Compensate for Syphon senders that arrive upside down.
+                    </div>
+                  </div>
+                  <Switch
+                    checked={syphonFlipVertical}
+                    onCheckedChange={checked =>
+                      onSyphonFlipVerticalChange?.(checked)
+                    }
+                    disabled={mode !== "syphon" || isStreaming}
+                  />
+                </div>
+              </div>
             ) : (
               /* Video/Camera Input Preview */
               <div className="rounded-lg flex items-center justify-center bg-muted/10 overflow-hidden relative">
@@ -485,28 +628,48 @@ export function InputAndControlsPanel({
                   </div>
                 )}
 
-                {/* Upload button - only show in video mode */}
-                {mode === "video" && onVideoFileUpload && (
-                  <>
-                    <input
-                      type="file"
-                      accept="video/*"
-                      onChange={handleFileUpload}
-                      className="hidden"
-                      id="video-upload"
-                      disabled={isStreaming || isConnecting}
-                    />
-                    <label
-                      htmlFor="video-upload"
-                      className={`absolute bottom-2 right-2 p-2 rounded-full bg-black/50 transition-colors ${
-                        isStreaming || isConnecting
-                          ? "opacity-50 cursor-not-allowed"
-                          : "hover:bg-black/70 cursor-pointer"
-                      }`}
-                    >
-                      <Upload className="h-4 w-4 text-white" />
-                    </label>
-                  </>
+                {/* Video file buttons - only show in video mode */}
+                {mode === "video" && (
+                  <div className="absolute bottom-2 right-2 flex gap-1.5">
+                    {onCycleSampleVideo && (
+                      <button
+                        type="button"
+                        onClick={onCycleSampleVideo}
+                        disabled={isStreaming || isConnecting}
+                        className={`p-2 rounded-full bg-black/50 transition-colors ${
+                          isStreaming || isConnecting
+                            ? "opacity-50 cursor-not-allowed"
+                            : "hover:bg-black/70 cursor-pointer"
+                        }`}
+                        title="Cycle sample video"
+                      >
+                        <ArrowLeftRight className="h-4 w-4 text-white" />
+                      </button>
+                    )}
+                    {onVideoFileUpload && (
+                      <>
+                        <input
+                          type="file"
+                          accept="video/*"
+                          onChange={handleFileUpload}
+                          className="hidden"
+                          id="video-upload"
+                          disabled={isStreaming || isConnecting}
+                        />
+                        <label
+                          htmlFor="video-upload"
+                          className={`p-2 rounded-full bg-black/50 transition-colors ${
+                            isStreaming || isConnecting
+                              ? "opacity-50 cursor-not-allowed"
+                              : "hover:bg-black/70 cursor-pointer"
+                          }`}
+                          title="Upload video file"
+                        >
+                          <Upload className="h-4 w-4 text-white" />
+                        </label>
+                      </>
+                    )}
+                  </div>
                 )}
               </div>
             )}
@@ -780,6 +943,30 @@ export function InputAndControlsPanel({
                       </div>
                     );
                   }
+                  if (comp === "audio") {
+                    const path = value == null ? null : String(value);
+                    return (
+                      <div key={key} className="space-y-1">
+                        {ui.label != null && (
+                          <span className="text-xs text-muted-foreground">
+                            {ui.label}
+                          </span>
+                        )}
+                        <AudioManager
+                          audioPath={path}
+                          onAudioChange={p =>
+                            onSchemaFieldOverrideChange?.(
+                              key,
+                              p,
+                              isRuntimeParam
+                            )
+                          }
+                          disabled={disabled}
+                          label={ui.label ?? "Audio Input"}
+                        />
+                      </div>
+                    );
+                  }
                   if (
                     comp &&
                     (COMPLEX_COMPONENTS as readonly string[]).includes(comp)
@@ -808,6 +995,7 @@ export function InputAndControlsPanel({
                       label={ui.label}
                       fieldType={primitiveType}
                       enumValues={enumValues}
+                      midiMappable={isRuntimeParam}
                     />
                   );
                 })}

@@ -4,6 +4,7 @@
  */
 const fs = require('fs-extra');
 const path = require('path');
+const { execSync } = require('child_process');
 
 exports.default = async function afterPack(context) {
   const { electronPlatformName, appOutDir } = context;
@@ -57,6 +58,19 @@ exports.default = async function afterPack(context) {
     } catch (err) {
       console.error(`✗ Failed to copy ${src} to ${dest}:`, err.message);
     }
+  }
+
+  // Bake the git commit hash into the bundled Python package so the backend
+  // can report it at runtime (the .git directory isn't shipped).
+  try {
+    const commit = execSync('git rev-parse --short HEAD', { cwd: projectRoot })
+      .toString()
+      .trim();
+    const commitFile = path.join(resourcesPath, 'src', 'scope', '_git_commit.txt');
+    await fs.writeFile(commitFile, commit);
+    console.log(`✓ Wrote git commit ${commit} to ${commitFile}`);
+  } catch (err) {
+    console.warn(`⚠ Failed to record git commit hash: ${err.message}`);
   }
 
   console.log('afterPack hook completed.');

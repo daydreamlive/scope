@@ -52,6 +52,12 @@ class SetTimestepsBlock(ModularPipelineBlocks):
                 type_hint=bool,
                 description="Whether to (re)initialize caches",
             ),
+            InputParam(
+                "_modulated_step_list",
+                default=False,
+                type_hint=bool,
+                description="Set by ModulationEngine to suppress cache reset on step list changes",
+            ),
         ]
 
     @property
@@ -85,7 +91,9 @@ class SetTimestepsBlock(ModularPipelineBlocks):
         ):
             block_state.current_denoising_step_list = denoising_step_list.clone()
 
-            if block_state.manage_cache:
+            # Skip cache reset when the step list is being continuously modulated
+            # by the beat-synced modulation engine.
+            if block_state.manage_cache and not block_state._modulated_step_list:
                 block_state.init_cache = True
 
         self.set_block_state(state, block_state)

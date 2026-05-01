@@ -32,6 +32,9 @@ ASSETS_DIR_ENV_VAR = "DAYDREAM_SCOPE_ASSETS_DIR"
 # Environment variable for overriding lora directory
 LORA_DIR_ENV_VAR = "DAYDREAM_SCOPE_LORA_DIR"
 
+# Environment variable for shared (persistent) lora directory (cloud mode)
+SHARED_LORA_DIR_ENV_VAR = "DAYDREAM_SCOPE_LORA_SHARED_DIR"
+
 # Environment variable for CivitAI API token
 CIVITAI_TOKEN_ENV_VAR = "CIVITAI_API_TOKEN"
 
@@ -136,6 +139,23 @@ def get_lora_dir() -> Path:
     return lora_dir
 
 
+def get_shared_lora_dir() -> Path | None:
+    """
+    Get the shared (persistent) LoRA directory path, if configured.
+
+    This is used in cloud mode to persist sample/onboarding LoRAs across
+    sessions while keeping user-downloaded LoRAs in the session-specific
+    directory.
+
+    Returns:
+        Path | None: Absolute path to the shared LoRA directory, or None
+    """
+    env_dir = os.environ.get(SHARED_LORA_DIR_ENV_VAR)
+    if env_dir:
+        return Path(env_dir).expanduser().resolve()
+    return None
+
+
 def ensure_lora_dir() -> Path:
     """
     Get the LoRA directory path and ensure it exists.
@@ -203,13 +223,13 @@ def get_required_model_files(pipeline_id: str | None = None) -> list[Path]:
 
 def models_are_downloaded(pipeline_id: str) -> bool:
     """
-    Check if all required model files are downloaded and non-empty.
+    Check if all required model files are downloaded.
 
     Args:
         pipeline_id: The pipeline ID to check models for.
 
     Returns:
-        bool: True if all required models are present and non-empty, False otherwise
+        bool: True if all required models are present, False otherwise
     """
     required_files = get_required_model_files(pipeline_id)
 
@@ -218,13 +238,8 @@ def models_are_downloaded(pipeline_id: str) -> bool:
         if not file_path.exists():
             return False
 
-        # If it's a file, check it's non-empty
-        if file_path.is_file():
-            if file_path.stat().st_size == 0:
-                return False
-
         # If it's a directory, check it's non-empty
-        elif file_path.is_dir():
+        if file_path.is_dir():
             if not any(file_path.iterdir()):
                 return False
 

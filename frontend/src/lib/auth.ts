@@ -66,6 +66,7 @@ interface DaydreamAuthData {
   apiKey: string;
   userId: string | null;
   displayName: string | null;
+  email: string | null;
   cohortParticipant: boolean;
   isAdmin: boolean;
 }
@@ -93,6 +94,7 @@ function setAuthData(data: DaydreamAuthData): void {
 
 interface UserProfile {
   displayName: string | null;
+  email: string | null;
   cohortParticipant: boolean;
   isAdmin: boolean;
 }
@@ -110,6 +112,7 @@ async function fetchUserProfile(apiKey: string): Promise<UserProfile> {
   const profile = await response.json();
   return {
     displayName: profile.email || profile.name || profile.username || null,
+    email: profile.email || null,
     cohortParticipant: profile.cohortParticipant === true,
     isAdmin: profile.isAdmin === true,
   };
@@ -145,6 +148,13 @@ export function getDaydreamUserDisplayName(): string | null {
 }
 
 /**
+ * Get the stored Daydream user email from localStorage
+ */
+export function getDaydreamUserEmail(): string | null {
+  return getAuthData()?.email ?? null;
+}
+
+/**
  * Save the Daydream auth credentials and profile to localStorage
  */
 export async function saveDaydreamAuth(
@@ -153,11 +163,12 @@ export async function saveDaydreamAuth(
 ): Promise<void> {
   try {
     const profile = await fetchUserProfile(apiKey);
-    setAuthData({
+    const authData = {
       apiKey,
       userId,
       ...profile,
-    });
+    };
+    setAuthData(authData);
   } catch (e) {
     // If profile fetch fails, save auth with defaults
     console.error("Failed to fetch user profile during auth:", e);
@@ -165,6 +176,7 @@ export async function saveDaydreamAuth(
       apiKey,
       userId,
       displayName: null,
+      email: null,
       cohortParticipant: false,
       isAdmin: false,
     });
@@ -202,6 +214,41 @@ export function isAuthenticated(): boolean {
 }
 
 /**
+ * Initialize auth from the VITE_DAYDREAM_API_KEY environment variable.
+ * Fetches the user profile and saves full auth data to localStorage so
+ * the rest of the app (isAuthenticated, getDaydreamUserId, etc.) works
+ * the same as after an OAuth login.
+ *
+ * No-ops if the env var is not set or auth data already matches.
+ */
+export async function initEnvKeyAuth(): Promise<boolean> {
+  const envKey = import.meta.env.VITE_DAYDREAM_API_KEY as string | undefined;
+  if (!envKey) return false;
+
+  const existing = getAuthData();
+  if (existing?.apiKey === envKey) return true;
+
+  const response = await fetch(`${DAYDREAM_API_BASE}/users/profile`, {
+    headers: { Authorization: `Bearer ${envKey}` },
+  });
+  if (!response.ok) {
+    throw new Error(
+      `Failed to fetch profile with env API key: ${response.status}`
+    );
+  }
+  const profile = await response.json();
+  setAuthData({
+    apiKey: envKey,
+    userId: profile.id || profile.userId || profile.user_id || null,
+    displayName: profile.email || profile.name || profile.username || null,
+    email: profile.email || null,
+    cohortParticipant: profile.cohortParticipant === true,
+    isAdmin: profile.isAdmin === true,
+  });
+  return true;
+}
+
+/**
  * Redirect to Daydream sign-in page
  * - In Electron: opens in system browser via IPC
  * - In browser: navigates directly
@@ -228,6 +275,29 @@ export function redirectToSignIn(): void {
     // Standard browser navigation
     window.location.href = authUrl;
   }
+}
+
+export interface FalCdnToken {
+  token: string;
+  token_type: string;
+  base_url: string;
+}
+
+/**
+ * Fetch a short-lived fal CDN upload token from the Daydream API
+ */
+export async function fetchFalCdnToken(): Promise<FalCdnToken> {
+  const apiKey = getDaydreamAPIKey();
+  if (!apiKey) {
+    throw new Error("Not authenticated: no API key available");
+  }
+  const response = await fetch(`${DAYDREAM_API_BASE}/auth/fal/cdn-token`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  if (!response.ok) {
+    throw new Error(`Failed to fetch fal CDN token: ${response.status}`);
+  }
+  return response.json() as Promise<FalCdnToken>;
 }
 
 /**

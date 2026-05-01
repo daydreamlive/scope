@@ -18,6 +18,20 @@ import SpoutGL
 
 logger = logging.getLogger(__name__)
 
+# OpenGL format constants — passed to SpoutGL.receiveImage so glReadPixels
+# unpacks the shared DirectX texture in the matching byte order.
+GL_RGBA = 0x1908
+GL_BGRA = 0x80E1
+
+# DXGI format codes returned by SpoutGL.getSenderFormat(). We match the
+# receive format to what the sender advertises so we don't rely on the GL
+# driver's BGRA↔RGBA swizzle, which has been observed to leave bytes in
+# B,G,R,A order on some Windows driver/GPU combos when GL_RGBA is requested
+# from a B8G8R8A8 source, producing a red/blue swap downstream.
+# https://learn.microsoft.com/en-us/windows/win32/api/dxgiformat/ne-dxgiformat-dxgi_format
+_DXGI_R8G8B8A8_UNORM = 28
+_DXGI_B8G8R8A8_UNORM = 87
+
 
 class SpoutReceiver:
     """
@@ -104,33 +118,50 @@ class SpoutReceiver:
             return None
 
         try:
-            # Python SpoutGL API signature:
+            # Pick the receive format based on what the sender actually
+            # provides (DXGI code via getSenderFormat()). We then swap to
+            # RGBA in numpy so callers always see RGBA layout regardless
+            # of the sender's native order.
+            #
+            # Python SpoutGL API:
             # receiveImage(buffer: Optional[Buffer], GL_format: int, invert: bool, hostFBO: int) -> bool
-            GL_RGBA = 0x1908  # OpenGL constant for RGBA format
+            sender_dxgi = 0
+            if hasattr(self.receiver, "getSenderFormat"):
+                try:
+                    sender_dxgi = int(self.receiver.getSenderFormat() or 0)
+                except Exception:
+                    sender_dxgi = 0
+
+            needs_bgra_swap = sender_dxgi == _DXGI_B8G8R8A8_UNORM
+            gl_format = GL_BGRA if needs_bgra_swap else GL_RGBA
 
             result = self.receiver.receiveImage(
                 self._buffer,  # numpy array as buffer
-                GL_RGBA,  # GL format constant (int)
+                gl_format,  # GL format matching the sender's byte order
                 False,  # invert (bool)
                 0,  # hostFBO (int)
             )
 
-            if result:
-                self._is_connected = True
+            if not result:
+                return None
 
-                # Check if we need to resize (sender may have different dimensions)
-                if hasattr(self.receiver, "isUpdated") and self.receiver.isUpdated():
-                    self._handle_size_update()
+            self._is_connected = True
 
-                self._frame_count += 1
+            # Check if we need to resize (sender may have different dimensions)
+            if hasattr(self.receiver, "isUpdated") and self.receiver.isUpdated():
+                self._handle_size_update()
 
-                if as_rgb:
-                    # Return RGB copy directly (more efficient than copy + slice)
-                    return np.ascontiguousarray(self._buffer[:, :, :3])
-                else:
-                    return self._buffer.copy()
+            self._frame_count += 1
 
-            return None
+            # Advanced indexing returns a fresh contiguous-after-ascontiguousarray
+            # array, leaving _buffer (the buffer SpoutGL writes into) intact.
+            buffer = (
+                self._buffer[:, :, [2, 1, 0, 3]] if needs_bgra_swap else self._buffer
+            )
+
+            if as_rgb:
+                return np.ascontiguousarray(buffer[:, :, :3])
+            return np.ascontiguousarray(buffer) if needs_bgra_swap else buffer.copy()
 
         except Exception as e:
             logger.error(f"Error receiving Spout frame: {e}")

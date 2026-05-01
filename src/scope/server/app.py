@@ -1,6 +1,7 @@
 import asyncio
 import contextlib
 import io
+import json
 import logging
 import os
 import subprocess
@@ -15,7 +16,7 @@ from functools import wraps
 from importlib.metadata import version
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import click
 import uvicorn
@@ -23,23 +24,39 @@ from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Req
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from .cloud_connection import CloudConnectionManager
+    from .livepeer import LivepeerConnection
     from .pipeline_manager import PipelineManager
     from .schema import PluginInfo
     from .webrtc import WebRTCManager
 
+from scope.core.config import get_base_dir
+from scope.core.lora.manifest import (
+    LoRAManifestEntry,
+    LoRAProvenance,
+    add_manifest_entry,
+    compute_sha256,
+    load_manifest,
+    save_manifest,
+)
+from scope.core.workflows.resolve import (
+    WorkflowRequest,
+    WorkflowResolutionPlan,
+    resolve_workflow,
+)
+
 from .cloud_proxy import (
     cloud_proxy,
     get_hardware_info_from_cloud,
-    recording_download_cloud_path,
+    proxy_with_body,
     upload_asset_to_cloud,
 )
 from .download_models import download_models
 from .download_progress_manager import download_progress_manager
 from .file_utils import (
+    AUDIO_EXTENSIONS,
     IMAGE_EXTENSIONS,
     LORA_EXTENSIONS,
     VIDEO_EXTENSIONS,
@@ -51,20 +68,26 @@ from .kafka_publisher import (
     set_kafka_publisher,
 )
 from .logs_config import (
+    LOG_FORMAT,
+    ScopeLogContextFilter,
     cleanup_old_logs,
     ensure_logs_dir,
     get_current_log_file,
     get_logs_dir,
     get_most_recent_log_file,
 )
+from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
+from .mcp_router import router as mcp_router
 from .models_config import (
     ensure_models_dir,
     get_assets_dir,
     get_lora_dir,
+    get_shared_lora_dir,
     models_are_downloaded,
 )
 from .pipeline_manager import PipelineManager
 from .recording import (
+    RecordingManager,
     cleanup_recording_files,
     cleanup_temp_file,
 )
@@ -83,12 +106,46 @@ from .schema import (
     IceCandidateRequest,
     IceServerConfig,
     IceServersResponse,
+    IntegrationAvailability,
+    NodeDefinitionsResponse,
     PipelineLoadRequest,
     PipelineSchemasResponse,
     PipelineStatusResponse,
     WebRTCOfferRequest,
     WebRTCOfferResponse,
 )
+from .scope_cloud_types import ScopeCloudBackend
+from .tempo_router import router as tempo_router
+
+# Cached responses for pipeline schemas, node definitions, and plugin list.
+# Invalidated by _invalidate_plugin_caches() on plugin install/uninstall and
+# on cloud connect/disconnect — the latter matters because cloud mode proxies
+# the schema/definition endpoints to the cloud backend, so the cached payload
+# depends on cloud-mode state and must be rebuilt when it flips.
+_pipeline_schemas_cache: PipelineSchemasResponse | None = None
+_node_definitions_cache: NodeDefinitionsResponse | None = None
+_plugins_list_cache: object | None = None
+
+
+def _invalidate_plugin_caches():
+    """Reset plugin, pipeline schema, and node definition caches.
+
+    Called on plugin install/uninstall and on cloud connect/disconnect so
+    that the next fetch rebuilds the payload from whichever registry is
+    authoritative for the current mode.
+    """
+    global _pipeline_schemas_cache, _node_definitions_cache, _plugins_list_cache
+    _pipeline_schemas_cache = None
+    _node_definitions_cache = None
+    _plugins_list_cache = None
+
+    # Also clear the plugin manager's per-plugin update check TTL cache
+    try:
+        from scope.core.plugins import get_plugin_manager
+
+        get_plugin_manager().clear_update_check_cache()
+    except Exception:
+        pass
 
 
 class STUNErrorFilter(logging.Filter):
@@ -101,52 +158,80 @@ class STUNErrorFilter(logging.Filter):
         return True
 
 
-# Ensure logs directory exists and clean up old logs
-logs_dir = ensure_logs_dir()
-cleanup_old_logs(max_age_days=1)  # Delete logs older than 1 day
-log_file = get_current_log_file()
+def _configure_logging():
+    """Set up file and console logging for the main server process.
 
-# Configure logging - set root to WARNING to keep non-app libraries quiet by default
-logging.basicConfig(
-    level=logging.WARNING, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-)
+    Called from run_server() rather than at module import time so that the MCP
+    subprocess (which also imports this module) doesn't create a competing log
+    file that shadows the real server logs.
+    """
+    # Ensure logs directory exists and clean up old logs
+    ensure_logs_dir()
+    cleanup_old_logs(max_age_days=1)
+    log_file = get_current_log_file()
 
-# Console handler handles INFO
-root_logger = logging.getLogger()
-for handler in root_logger.handlers:
-    if isinstance(handler, logging.StreamHandler) and not isinstance(
-        handler, RotatingFileHandler
-    ):
-        handler.setLevel(logging.INFO)
+    # Set root to WARNING to keep non-app libraries quiet by default
+    logging.basicConfig(level=logging.WARNING, format=LOG_FORMAT)
 
-# Add rotating file handler
-file_handler = RotatingFileHandler(
-    log_file,
-    maxBytes=5 * 1024 * 1024,  # 5 MB per file
-    backupCount=5,  # Keep 5 backup files
-)
-file_handler.setLevel(logging.INFO)
-file_handler.setFormatter(
-    logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-)
-root_logger.addHandler(file_handler)
+    # Install filter on every handler so %(connection_id)s is always populated
+    _fal_filter = ScopeLogContextFilter()
+    root_logger = logging.getLogger()
+    for handler in root_logger.handlers:
+        handler.addFilter(_fal_filter)
+        if isinstance(handler, logging.StreamHandler) and not isinstance(
+            handler, RotatingFileHandler
+        ):
+            handler.setLevel(logging.INFO)
 
-# Add the filter to suppress STUN/TURN errors
-stun_filter = STUNErrorFilter()
-logging.getLogger("asyncio").addFilter(stun_filter)
+    # Add rotating file handler
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=5 * 1024 * 1024,  # 5 MB per file
+        backupCount=5,  # Keep 5 backup files
+    )
+    file_handler.setLevel(logging.INFO)
+    file_handler.setFormatter(logging.Formatter(LOG_FORMAT))
+    file_handler.addFilter(_fal_filter)
+    root_logger.addHandler(file_handler)
 
-# Set INFO level for your app modules
-logging.getLogger("scope.server").setLevel(logging.INFO)
-logging.getLogger("scope.core").setLevel(logging.INFO)
+    # Add the filter to suppress STUN/TURN errors
+    stun_filter = STUNErrorFilter()
+    logging.getLogger("asyncio").addFilter(stun_filter)
 
-# Set INFO level for uvicorn
-logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+    # Set INFO level for app modules
+    logging.getLogger("scope.server").setLevel(logging.INFO)
+    logging.getLogger("scope.core").setLevel(logging.INFO)
 
-# Enable verbose logging for other libraries when needed
-if os.getenv("VERBOSE_LOGGING"):
-    logging.getLogger("uvicorn.access").setLevel(logging.INFO)
-    logging.getLogger("fastapi").setLevel(logging.INFO)
+    # Set INFO level for uvicorn
+    logging.getLogger("uvicorn.error").setLevel(logging.INFO)
+
+    # Enable verbose logging for other libraries when needed
+    if os.getenv("VERBOSE_LOGGING"):
+        logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+        logging.getLogger("fastapi").setLevel(logging.INFO)
     logging.getLogger("aiortc").setLevel(logging.INFO)
+
+    if os.getenv("LIVEPEER_DEBUG"):
+        logging.getLogger("livepeer_gateway").setLevel(logging.DEBUG)
+        logging.getLogger("scope.server.livepeer").setLevel(logging.DEBUG)
+        logging.getLogger("scope.server.livepeer_client").setLevel(logging.DEBUG)
+        for handler in logging.getLogger().handlers:
+            if isinstance(handler, logging.StreamHandler) and not isinstance(
+                handler, RotatingFileHandler
+            ):
+                handler.setLevel(logging.DEBUG)
+
+
+# Set INFO for the cloud log re-emitter so cloud lines reach console and file
+logging.getLogger("scope.cloud").setLevel(logging.INFO)
+
+# Allow suppressing noisy loggers via env var (comma-separated logger names)
+# e.g. SCOPE_LOG_QUIET_LOGGERS=scope.server.frame_processor,scope.core.pipelines.longlive
+_quiet_loggers = os.getenv("SCOPE_LOG_QUIET_LOGGERS", "")
+for _logger_name in _quiet_loggers.split(","):
+    _logger_name = _logger_name.strip()
+    if _logger_name:
+        logging.getLogger(_logger_name).setLevel(logging.WARNING)
 
 # Select pipeline depending on the "PIPELINE" environment variable
 PIPELINE = os.getenv("PIPELINE", None)
@@ -183,6 +268,18 @@ def get_git_commit_hash() -> str:
     Returns:
         Git commit hash if available, otherwise a fallback message.
     """
+    # Packaged distributions (e.g. the Electron app) don't ship the .git
+    # directory, so the build pipeline writes the short hash into a sibling
+    # file that we read here.
+    commit_file = Path(__file__).parent.parent / "_git_commit.txt"
+    try:
+        if commit_file.is_file():
+            baked = commit_file.read_text().strip()
+            if baked:
+                return baked
+    except OSError:
+        pass
+
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -234,21 +331,40 @@ webrtc_manager = None
 pipeline_manager = None
 # Server startup timestamp for detecting restarts
 server_start_time = time.time()
-# Global cloud connection manager instance
-cloud_connection_manager = None
+# Global Livepeer manager instance
+livepeer = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
 kafka_publisher = None
+# Global tempo sync manager instance
+tempo_sync = None
+# Global OSC server instance
+osc_server = None
+# Global DMX server instance
+dmx_server = None
 
 
 async def prewarm_pipeline(pipeline_id: str):
     """Background task to pre-warm the pipeline without blocking startup."""
     try:
         await asyncio.wait_for(
-            pipeline_manager.load_pipelines([pipeline_id]),
+            pipeline_manager.load_pipelines([(pipeline_id, pipeline_id, None)]),
             timeout=300,  # 5 minute timeout for pipeline loading
         )
     except Exception as e:
         logger.error(f"Error pre-warming pipeline {pipeline_id} in background: {e}")
+
+
+async def _prewarm_plugin_update_cache():
+    """Background task to warm the plugin update check cache at startup."""
+    try:
+        from scope.core.plugins import get_plugin_manager
+
+        pm = get_plugin_manager()
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, pm.list_plugins_sync)
+        logger.info("Plugin update check cache warmed")
+    except Exception as e:
+        logger.debug(f"Plugin update cache warm-up skipped: {e}")
 
 
 @asynccontextmanager
@@ -257,12 +373,20 @@ async def lifespan(app: FastAPI):
     # Lazy imports to avoid loading torch at CLI startup (fixes Windows DLL locking)
     import torch
 
-    from .cloud_connection import CloudConnectionManager
+    from .livepeer import LivepeerConnection
     from .pipeline_manager import PipelineManager
+    from .tempo_sync import TempoSync
     from .webrtc import WebRTCManager
 
     # Startup
-    global webrtc_manager, pipeline_manager, cloud_connection_manager, kafka_publisher
+    global \
+        webrtc_manager, \
+        pipeline_manager, \
+        kafka_publisher, \
+        livepeer, \
+        tempo_sync, \
+        osc_server, \
+        dmx_server
 
     # Check CUDA availability and warn if not available
     if not torch.cuda.is_available():
@@ -297,11 +421,19 @@ async def lifespan(app: FastAPI):
     if PIPELINE is not None:
         asyncio.create_task(prewarm_pipeline(PIPELINE))
 
+    # Pre-warm the plugin update check cache in the background so the first
+    # "Nodes" / resolve-workflow call doesn't block on PyPI lookups.
+    asyncio.create_task(_prewarm_plugin_update_cache())
+
     webrtc_manager = WebRTCManager()
     logger.info("WebRTC manager initialized")
 
-    cloud_connection_manager = CloudConnectionManager()
-    logger.info("Cloud connection manager initialized")
+    tempo_sync = TempoSync()
+    logger.info("Tempo sync manager initialized")
+
+    livepeer = LivepeerConnection()
+    livepeer.configure()
+    logger.info("Livepeer configured")
 
     # Initialize Kafka publisher if credentials are configured
     if is_kafka_enabled():
@@ -313,9 +445,59 @@ async def lifespan(app: FastAPI):
             kafka_publisher = None
             logger.warning("Kafka publisher failed to start")
 
+    # Start OSC UDP server on the same port as the HTTP API
+    from .osc_server import OSCServer
+
+    osc_host = os.getenv("SCOPE_HOST", "0.0.0.0")
+    osc_port = int(os.getenv("SCOPE_PORT", "8000"))
+    osc_server = OSCServer(osc_host, osc_port)
+    osc_server.set_managers(pipeline_manager, webrtc_manager)
+    await osc_server.start()
+
+    # Start DMX Art-Net server (loads config from disk for port + mappings)
+    from .dmx_config import load_config as load_dmx_config
+    from .dmx_config import mappings_to_dict
+    from .dmx_server import DMXServer
+
+    dmx_cfg = load_dmx_config()
+    dmx_host = os.getenv("SCOPE_HOST", "0.0.0.0")
+    dmx_server = DMXServer(dmx_host, dmx_cfg.get("preferred_port", 6454))
+    dmx_server.set_managers(pipeline_manager, webrtc_manager)
+    dmx_server.log_all_messages = dmx_cfg.get("log_all_messages", False)
+    dmx_server.set_mappings(mappings_to_dict(dmx_cfg.get("mappings", [])))
+    dmx_server.enabled = dmx_cfg.get("enabled", False)
+    if dmx_server.enabled:
+        await dmx_server.start()
+
+    # Syphon server discovery (macOS only): create the ObjC singleton and do
+    # an initial NSRunLoop pump so servers are available when the UI first loads.
+    # Subsequent refreshes pump on demand in the list_input_sources endpoint.
+    if sys.platform == "darwin":
+        try:
+            from .syphon.receiver import (
+                drain_notifications,
+                ensure_directory_initialized,
+            )
+
+            ensure_directory_initialized()
+            drain_notifications(0.1)
+            logger.info("Syphon directory initialized")
+        except Exception:
+            logger.debug("Syphon not available, skipping directory init")
+
     yield
 
     # Shutdown
+    if dmx_server:
+        logger.info("Shutting down DMX server...")
+        await dmx_server.stop()
+        logger.info("DMX server shutdown complete")
+
+    if osc_server:
+        logger.info("Shutting down OSC server...")
+        await osc_server.stop()
+        logger.info("OSC server shutdown complete")
+
     if webrtc_manager:
         logger.info("Shutting down WebRTC manager...")
         await webrtc_manager.stop()
@@ -326,10 +508,15 @@ async def lifespan(app: FastAPI):
         pipeline_manager.unload_all_pipelines()
         logger.info("Pipeline manager shutdown complete")
 
-    if cloud_connection_manager and cloud_connection_manager.is_connected:
-        logger.info("Shutting down cloud connection...")
-        await cloud_connection_manager.disconnect()
-        logger.info("Cloud connection shutdown complete")
+    if tempo_sync:
+        logger.info("Shutting down tempo sync...")
+        await tempo_sync.stop()
+        logger.info("Tempo sync shutdown complete")
+
+    if livepeer and livepeer.is_connected:
+        logger.info("Shutting down Livepeer connection...")
+        await livepeer.disconnect()
+        logger.info("Livepeer connection shutdown complete")
 
     if kafka_publisher:
         logger.info("Shutting down Kafka publisher...")
@@ -348,9 +535,31 @@ def get_pipeline_manager() -> "PipelineManager":
     return pipeline_manager
 
 
-def get_cloud_connection_manager() -> "CloudConnectionManager":
-    """Dependency to get cloud connection manager instance."""
-    return cloud_connection_manager
+def get_osc_server():
+    """Dependency to get OSC server instance."""
+
+    return osc_server
+
+
+def get_livepeer() -> "LivepeerConnection":
+    """Dependency to get Livepeer manager instance."""
+    return livepeer
+
+
+def get_scope_cloud() -> ScopeCloudBackend:
+    """Dependency to get the selected remote backend.
+
+    Returns the backend object regardless of connection state so callers can
+    inspect status, including connecting/error states.  Callers that need an
+    *active* connection must check cloud_manager.is_connected themselves.
+    """
+    return livepeer
+
+
+def get_dmx_server():
+    """Dependency to get DMX server instance."""
+
+    return dmx_server
 
 
 app = FastAPI(
@@ -359,6 +568,11 @@ app = FastAPI(
     description="A tool for running and customizing real-time, interactive generative AI pipelines and models",
     version=version("daydream-scope"),
 )
+
+# MCP server endpoints (headless sessions, parameters, frame capture, etc.)
+app.include_router(mcp_router)
+# Tempo sync endpoints (enable/disable, status, sources, BPM control)
+app.include_router(tempo_router)
 
 # Add CORS middleware
 app.add_middleware(
@@ -371,7 +585,11 @@ app.add_middleware(
 
 
 @app.get("/health", response_model=HealthResponse)
-async def health_check():
+@cloud_proxy()
+async def health_check(
+    http_request: Request,
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+):
     """Health check endpoint."""
     return HealthResponse(
         status="healthy",
@@ -383,7 +601,11 @@ async def health_check():
 
 
 @app.post("/api/v1/restart")
-async def restart_server():
+@cloud_proxy(timeout=30.0)
+async def restart_server(
+    http_request: Request,
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+):
     """Restart the server process.
 
     This endpoint is called after plugin install/uninstall to ensure
@@ -488,7 +710,7 @@ async def load_pipeline(
     request: PipelineLoadRequest,
     http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Load one or more pipelines.
 
@@ -496,22 +718,32 @@ async def load_pipeline(
     cloud-hosted scope backend.
     """
     try:
-        # Get pipeline IDs to load
-        pipeline_ids = request.pipeline_ids
-        if not pipeline_ids:
+        # Normalize to list of (node_id, pipeline_id, load_params) tuples
+        if request.pipelines:
+            pipelines = [
+                (p.node_id, p.pipeline_id, p.load_params) for p in request.pipelines
+            ]
+        elif request.pipeline_ids:
+            # Legacy format: use pipeline_id as node_id
+            pipelines = [
+                (pid, pid, request.load_params) for pid in request.pipeline_ids
+            ]
+        else:
             raise HTTPException(
                 status_code=400,
-                detail="pipeline_ids must be provided and cannot be empty",
+                detail="Either 'pipelines' or 'pipeline_ids' must be provided",
             )
 
-        # load_params is already a dict (or None)
-        load_params_dict = request.load_params
+        # Pipeline active/available DMX path grouping can change after load/unload.
+        # Mark the DMX known-path cache stale so it is rebuilt once on next packet.
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
 
         # Local mode: start loading in background without blocking
         asyncio.create_task(
             pipeline_manager.load_pipelines(
-                pipeline_ids,
-                load_params_dict,
+                pipelines,
                 connection_id=request.connection_id,
                 connection_info=request.connection_info,
                 user_id=request.user_id,
@@ -530,7 +762,7 @@ async def load_pipeline(
 async def get_pipeline_status(
     http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Get current pipeline status.
 
@@ -551,66 +783,437 @@ async def get_pipeline_status(
 @cloud_proxy()
 async def get_pipeline_schemas(
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
-    """Get configuration schemas and defaults for all available pipelines.
+    """Compat alias for the pipeline-rich subset of the unified node catalog.
 
-    Returns the output of each pipeline's get_schema_with_metadata() method,
-    which includes:
-    - Pipeline metadata (id, name, description, version)
-    - supported_modes: List of supported input modes ("text", "video")
-    - default_mode: Default input mode for this pipeline
-    - mode_defaults: Mode-specific default overrides (if any)
-    - config_schema: Full JSON schema with defaults
+    Derives its response from the unified :class:`NodeRegistry` —
+    every entry whose :attr:`NodeDefinition.pipeline_meta` is set is a
+    pipeline, and ``pipeline_meta`` already holds the full output of
+    ``get_schema_with_metadata()`` (config_schema, mode_defaults,
+    supports_lora, supports_vace, etc.). Kept so existing frontend
+    callers in ``usePipelines.ts`` keep working without migration; new
+    code should read from ``GET /api/v1/nodes/definitions`` instead.
 
-    The frontend should use this as the source of truth for parameter defaults.
-
-    In cloud mode (when connected to cloud), this proxies the request to the
-    cloud-hosted scope backend to get the available pipelines there.
+    In cloud mode this proxies to the cloud-hosted scope backend.
     """
+    global _pipeline_schemas_cache
+    if _pipeline_schemas_cache is not None:
+        return _pipeline_schemas_cache
+
+    from scope.core.nodes.registry import NodeRegistry
     from scope.core.pipelines.registry import PipelineRegistry
     from scope.core.plugins import get_plugin_manager
 
     plugin_manager = get_plugin_manager()
     pipelines: dict = {}
 
-    for pipeline_id in PipelineRegistry.list_pipelines():
-        config_class = PipelineRegistry.get_config_class(pipeline_id)
-        if config_class:
-            # get_schema_with_metadata() includes supported_modes, default_mode,
-            # and mode_defaults directly from the config class
-            schema_data = config_class.get_schema_with_metadata()
-            schema_data["plugin_name"] = plugin_manager.get_plugin_for_pipeline(
-                pipeline_id
-            )
-            pipelines[pipeline_id] = schema_data
+    # Pipelines always appear — the set is ``PipelineRegistry.list_pipelines()``.
+    # ``pipeline_meta`` is either the full ``get_schema_with_metadata()`` output
+    # or a degraded identity-only stub with a ``schema_error`` field when that
+    # call failed (see ``Pipeline.get_definition``). Either way the pipeline
+    # stays visible in the UI; the legacy behaviour of 500-ing or silently
+    # disappearing on a broken plugin is gone.
+    pipeline_ids = set(PipelineRegistry.list_pipelines())
+    for definition in NodeRegistry.get_all_definitions():
+        if definition.node_type_id not in pipeline_ids:
+            continue
+        schema_data = dict(definition.pipeline_meta or {})
+        schema_data["plugin_name"] = plugin_manager.get_plugin_for_pipeline(
+            definition.node_type_id
+        )
+        pipelines[definition.node_type_id] = schema_data
 
-    return PipelineSchemasResponse(pipelines=pipelines)
+    response = PipelineSchemasResponse(pipelines=pipelines)
+    _pipeline_schemas_cache = response
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Node definitions
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/nodes/definitions", response_model=NodeDefinitionsResponse)
+@cloud_proxy()
+async def get_node_definitions(
+    http_request: Request,
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+):
+    """Return definitions for every registered node — pipelines included.
+
+    The unified discovery endpoint. Pipelines (Pipeline subclasses)
+    appear with ``pipeline_meta`` populated; plain custom nodes leave
+    ``pipeline_meta`` ``None``. Frontend consumers that only want plain
+    nodes filter on ``pipeline_meta == null`` client-side; consumers
+    that want rich pipeline data read from ``pipeline_meta`` directly.
+
+    Memoized in ``_node_definitions_cache`` and invalidated by
+    ``_invalidate_plugin_caches`` whenever a plugin is installed or
+    uninstalled, so the modal open / graph hydrate hot paths don't
+    rebuild the payload (including full ``pipeline_meta``) every call.
+
+    In cloud mode this proxies to the cloud-hosted scope backend so the
+    Add Node modal and graph hydrator see cloud-registered nodes (plain
+    and pipeline) rather than just the local set.
+    """
+    global _node_definitions_cache
+    if _node_definitions_cache is not None:
+        return _node_definitions_cache
+
+    from scope.core.nodes.registry import NodeRegistry
+    from scope.core.plugins import get_plugin_manager
+
+    plugin_manager = get_plugin_manager()
+
+    definitions = []
+    for d in NodeRegistry.get_all_definitions():
+        payload = d.model_dump()
+        payload["plugin_name"] = plugin_manager.get_plugin_for_type_id(d.node_type_id)
+        definitions.append(payload)
+
+    response = NodeDefinitionsResponse(nodes=definitions)
+    _node_definitions_cache = response
+    return response
+
+
+# ---------------------------------------------------------------------------
+# OSC endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/osc/status")
+async def osc_status():
+    """Return current OSC server status (port, listening state, logging mode)."""
+
+    srv = get_osc_server()
+    if srv is None:
+        return {
+            "enabled": False,
+            "listening": False,
+            "port": None,
+            "host": None,
+            "log_all_messages": False,
+        }
+    return srv.status()
+
+
+class OscSettingsRequest(BaseModel):
+    log_all_messages: bool
+
+
+@app.put("/api/v1/osc/settings")
+async def update_osc_settings(request: OscSettingsRequest):
+    """Update OSC server runtime settings (e.g. logging verbosity)."""
+
+    srv = get_osc_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="OSC server not running")
+    srv.log_all_messages = request.log_all_messages
+    return srv.status()
+
+
+@app.get("/api/v1/osc/paths")
+async def osc_paths(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Return all OSC paths split into active / available sections.
+
+    Includes the most recently registered graph inventory (see
+    ``POST /api/v1/osc/inventory``) so external clients can discover
+    user-curated node param paths alongside the registry-derived ones.
+    """
+    from .osc_docs import get_osc_paths
+
+    srv = get_osc_server()
+    graph_inventory = srv.graph_inventory if srv else None
+    return get_osc_paths(pm, graph_inventory)
+
+
+class OscInventoryEntry(BaseModel):
+    """One graph-supplied OSC path entry.
+
+    Mirrors the dict shape ``osc_docs._normalize_graph_entry`` expects.
+    Validated minimally: required fields are ``osc_address`` (must start
+    with ``/scope/`` or be coerced to it) and ``type``. Anything else
+    flows through as-is so the frontend can attach metadata (group,
+    description, etc.) without a backend schema bump.
+    """
+
+    osc_address: str
+    type: str
+    description: str | None = None
+    min: float | None = None
+    max: float | None = None
+    enum: list | None = None
+    default: Any | None = None
+    node_id: str | None = None
+    param: str | None = None
+    pipeline_id: str | None = None
+    group: str | None = None
+
+
+class OscInventoryRequest(BaseModel):
+    paths: list[OscInventoryEntry]
+
+
+@app.post("/api/v1/osc/inventory")
+async def set_osc_inventory(request: OscInventoryRequest):
+    """Replace the OSC server's per-graph inventory.
+
+    The frontend computes this list from each node's ``oscConfig`` overlay
+    and POSTs whenever the inventory changes (debounced). Empty list
+    clears the inventory and reverts behavior to registry-derived paths
+    only.
+    """
+    srv = get_osc_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="OSC server not running")
+    srv.set_graph_inventory([p.model_dump(exclude_none=True) for p in request.paths])
+    return {"count": len(request.paths)}
+
+
+@app.get("/api/v1/osc/stream")
+async def osc_sse_stream():
+    """Server-Sent Events stream that pushes OSC commands to the frontend in real time."""
+    srv = get_osc_server()
+    if srv is None:
+        return Response(content="OSC server not running", status_code=503)
+
+    q = srv.subscribe()
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except TimeoutError:
+                    # Keepalive comment — prevents proxy/browser timeout.
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            srv.unsubscribe(q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
+@app.get("/api/v1/osc/docs")
+async def osc_docs_page(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Serve a self-contained HTML reference page for OSC control."""
+    from .osc_docs import render_osc_docs_html
+
+    srv = get_osc_server()
+    port = srv.port if srv else 8000
+    graph_inventory = srv.graph_inventory if srv else None
+    html_content = render_osc_docs_html(pm, port, graph_inventory)
+    return Response(content=html_content, media_type="text/html")
+
+
+# ---------------------------------------------------------------------------
+# DMX endpoints
+# ---------------------------------------------------------------------------
+
+
+@app.get("/api/v1/dmx/status")
+async def dmx_status():
+    """Return current DMX Art-Net server status."""
+    srv = get_dmx_server()
+    if srv is None:
+        return {
+            "enabled": False,
+            "listening": False,
+            "port": None,
+            "preferred_port": 6454,
+            "host": None,
+            "log_all_messages": False,
+            "mapping_count": 0,
+        }
+    return srv.status()
+
+
+class DmxSettingsRequest(BaseModel):
+    enabled: bool | None = None
+    log_all_messages: bool | None = None
+    preferred_port: int | None = Field(None, ge=1024, le=65535)
+
+
+@app.put("/api/v1/dmx/settings")
+async def update_dmx_settings(request: DmxSettingsRequest):
+    """Update DMX server runtime settings (enabled, logging, preferred port)."""
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not initialized")
+
+    from .dmx_config import load_config, save_config
+
+    need_persist = False
+    cfg = load_config()
+
+    if request.enabled is not None:
+        cfg["enabled"] = request.enabled
+        srv.enabled = request.enabled
+        need_persist = True
+        if request.enabled and not srv.listening:
+            await srv.start()
+        elif not request.enabled and srv.listening:
+            await srv.stop()
+
+    if request.log_all_messages is not None:
+        srv.log_all_messages = request.log_all_messages
+        cfg["log_all_messages"] = request.log_all_messages
+        need_persist = True
+
+    if request.preferred_port is not None:
+        srv.preferred_port = request.preferred_port
+
+    if need_persist:
+        save_config(cfg)
+
+    return srv.status()
+
+
+class DmxRestartRequest(BaseModel):
+    preferred_port: int | None = Field(None, ge=1024, le=65535)
+
+
+@app.post("/api/v1/dmx/restart")
+async def dmx_restart(request: DmxRestartRequest):
+    """Restart the DMX server to apply a new port. Persists preferred_port to config."""
+    from .dmx_config import load_config, save_config
+
+    srv = get_dmx_server()
+    if srv is None:
+        raise HTTPException(status_code=503, detail="DMX server not running")
+
+    if request.preferred_port is not None:
+        srv.preferred_port = request.preferred_port
+        cfg = load_config()
+        cfg["preferred_port"] = request.preferred_port
+        save_config(cfg)
+
+    await srv.stop()
+    if srv.enabled:
+        await srv.start()
+    return srv.status()
+
+
+@app.get("/api/v1/dmx/paths")
+async def dmx_paths(
+    pm: "PipelineManager" = Depends(get_pipeline_manager),
+):
+    """Return numeric DMX-mappable paths split into active / available."""
+    from .dmx_paths import get_dmx_paths
+
+    return get_dmx_paths(pm)
+
+
+@app.get("/api/v1/dmx/config")
+async def dmx_get_config():
+    """Return the current persisted DMX mapping configuration."""
+    from .dmx_config import load_config
+
+    return load_config()
+
+
+class DmxConfigRequest(BaseModel):
+    enabled: bool | None = None
+    preferred_port: int | None = Field(None, ge=1024, le=65535)
+    log_all_messages: bool | None = None
+    mappings: list[dict] | None = None
+
+
+@app.put("/api/v1/dmx/config")
+async def dmx_put_config(request: DmxConfigRequest):
+    """Save / import a full DMX mapping configuration."""
+    from .dmx_config import (
+        load_config,
+        mappings_to_dict,
+        save_config,
+    )
+
+    cfg = load_config()
+    if request.enabled is not None:
+        cfg["enabled"] = request.enabled
+    if request.preferred_port is not None:
+        cfg["preferred_port"] = request.preferred_port
+    if request.log_all_messages is not None:
+        cfg["log_all_messages"] = request.log_all_messages
+    if request.mappings is not None:
+        normalized = mappings_to_dict(request.mappings)
+        # Store only the validated/cleaned mappings list
+        cfg["mappings"] = [
+            {"universe": u, "channel": c, "key": k} for (u, c), k in normalized.items()
+        ]
+    save_config(cfg)
+
+    # Hot-reload into the running server
+    srv = get_dmx_server()
+    if srv is not None:
+        srv.log_all_messages = cfg.get("log_all_messages", False)
+        srv.set_mappings(mappings_to_dict(cfg.get("mappings", [])))
+        if request.enabled is not None:
+            srv.enabled = cfg["enabled"]
+            if srv.enabled and not srv.listening:
+                await srv.start()
+            elif not srv.enabled and srv.listening:
+                await srv.stop()
+
+    return cfg
+
+
+@app.get("/api/v1/dmx/stream")
+async def dmx_sse_stream():
+    """Server-Sent Events stream pushing DMX commands to the frontend."""
+    srv = get_dmx_server()
+    if srv is None:
+        return Response(content="DMX server not running", status_code=503)
+
+    q = srv.subscribe()
+
+    async def event_generator():
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(q.get(), timeout=30.0)
+                    yield f"data: {json.dumps(event)}\n\n"
+                except TimeoutError:
+                    yield ": keepalive\n\n"
+        except asyncio.CancelledError:
+            pass
+        finally:
+            srv.unsubscribe(q)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.get("/api/v1/webrtc/ice-servers", response_model=IceServersResponse)
 async def get_ice_servers(
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
 ):
     """Return ICE server configuration for frontend WebRTC connection.
 
-    In cloud mode, this returns the ICE servers from the cloud-hosted scope backend.
+    Returns ICE configuration from the local backend.
     """
-    # If connected to cloud, get ICE servers from cloud
-    if cloud_manager.is_connected:
-        try:
-            cloud_ice_servers = await cloud_manager.webrtc_get_ice_servers()
-            return IceServersResponse(
-                iceServers=[
-                    IceServerConfig(**server)
-                    for server in cloud_ice_servers.get("iceServers", [])
-                ]
-            )
-        except Exception as e:
-            logger.warning(f"Failed to get ICE servers from cloud, using local: {e}")
-
-    # Local mode or fallback
     ice_servers = []
     for server in webrtc_manager.rtc_config.iceServers:
         ice_servers.append(
@@ -629,7 +1232,7 @@ async def handle_webrtc_offer(
     request: WebRTCOfferRequest,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Handle WebRTC offer and return answer.
 
@@ -644,20 +1247,42 @@ async def handle_webrtc_offer(
     try:
         # If connected to cloud, use cloud mode (video flows through backend)
         if cloud_manager.is_connected:
-            logger.info(
-                "[CLOUD] Using relay mode - video will flow through backend to cloud"
-            )
+            logger.info("Using relay mode - video will flow through backend to cloud")
             return await webrtc_manager.handle_offer_with_relay(request, cloud_manager)
 
-        # Local mode: ensure pipeline is loaded before proceeding
-        status_info = await pipeline_manager.get_status_info_async()
-        if status_info["status"] != "loaded":
-            raise HTTPException(
-                status_code=400,
-                detail="Pipeline not loaded. Please load pipeline first.",
+        # Local mode: ensure pipeline is loaded before proceeding.
+        # Node-only graphs (no pipeline nodes) skip this check — the graph
+        # executor handles custom nodes directly without loading pipelines.
+        # Mixed graphs (pipeline + custom node) still require loaded pipelines.
+        graph_data = (
+            request.initialParameters.graph if request.initialParameters else None
+        )
+        has_pipeline_nodes = False
+        if graph_data is not None:
+            nodes = (
+                graph_data.get("nodes", [])
+                if isinstance(graph_data, dict)
+                else getattr(graph_data, "nodes", [])
             )
+            has_pipeline_nodes = any(
+                (n.get("type") if isinstance(n, dict) else getattr(n, "type", None))
+                == "pipeline"
+                for n in nodes
+            )
+        # Skip the check only for node-only graphs (graph present, no pipeline
+        # nodes). When no graph is sent at all, fall back to the legacy check.
+        is_node_only_graph = graph_data is not None and not has_pipeline_nodes
+        if not is_node_only_graph:
+            status_info = await pipeline_manager.get_status_info_async()
+            if status_info["status"] != "loaded":
+                raise HTTPException(
+                    status_code=400,
+                    detail="Pipeline not loaded. Please load pipeline first.",
+                )
 
-        return await webrtc_manager.handle_offer(request, pipeline_manager)
+        return await webrtc_manager.handle_offer(
+            request, pipeline_manager, tempo_sync=tempo_sync
+        )
 
     except HTTPException:
         raise
@@ -711,20 +1336,49 @@ async def add_ice_candidate(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.delete(
+    "/api/v1/webrtc/offer/{session_id}", status_code=204, response_class=Response
+)
+async def close_webrtc_session(
+    session_id: str,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+):
+    """Close and remove a WebRTC session.
+
+    Used by the cloud proxy (fal_app) to tear down the WebRTC peer connection
+    when the signaling WebSocket closes (e.g. MAX_DURATION_EXCEEDED).
+    """
+    try:
+        await webrtc_manager.remove_session(session_id)
+        return Response(status_code=204)
+    except Exception as e:
+        logger.error(f"Error closing WebRTC session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+def _session_has_graph_record_nodes(session) -> bool:
+    """True when the session uses graph record-node queues (per-node MP4)."""
+    fp = session.frame_processor
+    if fp is None:
+        return False
+    return bool(fp.sink_manager.recording.get_node_ids())
+
+
 @app.get("/api/v1/recordings/{session_id}")
-@cloud_proxy(recording_download_cloud_path, timeout=120.0)
 async def download_recording(
-    http_request: Request,
     session_id: str,
     background_tasks: BackgroundTasks,
     webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    node_id: str | None = Query(
+        None,
+        description="Record node id for graph mode (per-node recording file)",
+    ),
 ):
     """Download the recording file for the specified session.
-    This will finalize the current recording and create a copy for download,
-    then continue recording with a new file.
 
-    In cloud mode, this proxies the download request to cloud.
+    Serves local recordings for the specified session.
+
+    When the graph has record nodes, pass ``node_id`` to download that node's file.
     """
     try:
         session = webrtc_manager.get_session(session_id)
@@ -734,38 +1388,193 @@ async def download_recording(
                 detail=f"Session {session_id} not found",
             )
 
-        # Check if session has a recording manager
-        if not session.recording_manager:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Recording not available for session {session_id}",
+        if node_id:
+            if not _session_has_graph_record_nodes(session):
+                raise HTTPException(
+                    status_code=400,
+                    detail="This session has no graph record nodes; omit node_id.",
+                )
+            coord = session.frame_processor.sink_manager.recording
+            if node_id not in coord.get_node_ids():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown record node {node_id!r}",
+                )
+            download_file = await coord.download_recording(node_id)
+            if not download_file or not Path(download_file).exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail="Recording file not available",
+                )
+            background_tasks.add_task(cleanup_temp_file, download_file)
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"recording-{node_id}-{timestamp}.mp4"
+            return FileResponse(
+                download_file,
+                media_type="video/mp4",
+                filename=filename,
             )
 
-        # Finalize the recording and get the download file
-        download_file = await session.recording_manager.finalize_and_get_recording()
-        if not download_file or not Path(download_file).exists():
+        if _session_has_graph_record_nodes(session):
             raise HTTPException(
-                status_code=404,
-                detail="Recording file not available",
+                status_code=400,
+                detail="This session uses graph record nodes; add ?node_id=<record node id>.",
             )
 
-        # Schedule cleanup of the temp file after download
-        background_tasks.add_task(cleanup_temp_file, download_file)
+        has_local_recording = session.recording_manager
 
-        # Generate filename with datetime
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"recording-{timestamp}.mp4"
+        if has_local_recording:
+            download_file = await session.recording_manager.finalize_and_get_recording()
+            if not download_file or not Path(download_file).exists():
+                raise HTTPException(
+                    status_code=404,
+                    detail="Recording file not available",
+                )
 
-        # Return the file for download
-        return FileResponse(
-            download_file,
-            media_type="video/mp4",
-            filename=filename,
+            background_tasks.add_task(cleanup_temp_file, download_file)
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"recording-{timestamp}.mp4"
+
+            return FileResponse(
+                download_file,
+                media_type="video/mp4",
+                filename=filename,
+            )
+
+        raise HTTPException(
+            status_code=404,
+            detail="No recording available for this session",
         )
     except HTTPException:
         raise
     except Exception as e:
         logger.error(f"Error downloading recording: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/recordings/{session_id}/start")
+async def start_recording(
+    session_id: str,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    node_id: str | None = Query(
+        None,
+        description="Record node id for graph mode (per-node recording)",
+    ),
+):
+    """Start recording for the specified session.
+
+    Creates a RecordingManager if one does not already exist (session-level).
+    For graph record nodes, pass ``node_id`` to record that node's feed.
+    """
+    try:
+        session = webrtc_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404, detail=f"Session {session_id} not found"
+            )
+
+        if node_id:
+            if not _session_has_graph_record_nodes(session):
+                raise HTTPException(
+                    status_code=400,
+                    detail="This session has no graph record nodes; omit node_id.",
+                )
+            coord = session.frame_processor.sink_manager.recording
+            if node_id not in coord.get_node_ids():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown record node {node_id!r}",
+                )
+            fps = session.frame_processor.get_fps()
+            ok = await coord.start_recording(node_id, fps)
+            if not ok:
+                raise HTTPException(
+                    status_code=500,
+                    detail=f"Failed to start recording for record node {node_id!r}",
+                )
+            return {"status": "started"}
+
+        if _session_has_graph_record_nodes(session):
+            raise HTTPException(
+                status_code=400,
+                detail="This session uses graph record nodes; pass node_id=<record node id>.",
+            )
+
+        if not session.recording_manager:
+            if not session.video_track:
+                raise HTTPException(
+                    status_code=400, detail="Session has no video track"
+                )
+            rm = RecordingManager(video_track=session.video_track)
+            if session.relay:
+                rm.set_relay(session.relay)
+            session.recording_manager = rm
+
+        if session.recording_manager.is_recording_started:
+            return {"status": "already_recording"}
+
+        await session.recording_manager.start_recording()
+        return {"status": "started"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error starting recording for session {session_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.post("/api/v1/recordings/{session_id}/stop")
+async def stop_recording(
+    session_id: str,
+    webrtc_manager: "WebRTCManager" = Depends(get_webrtc_manager),
+    node_id: str | None = Query(
+        None,
+        description="Record node id for graph mode (per-node recording)",
+    ),
+):
+    """Stop recording for the specified session without downloading."""
+    try:
+        session = webrtc_manager.get_session(session_id)
+        if not session:
+            raise HTTPException(
+                status_code=404, detail=f"Session {session_id} not found"
+            )
+
+        if node_id:
+            if not _session_has_graph_record_nodes(session):
+                raise HTTPException(
+                    status_code=400,
+                    detail="This session has no graph record nodes; omit node_id.",
+                )
+            coord = session.frame_processor.sink_manager.recording
+            if node_id not in coord.get_node_ids():
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Unknown record node {node_id!r}",
+                )
+            ok = await coord.stop_recording(node_id)
+            return {"status": "stopped" if ok else "not_recording"}
+
+        if _session_has_graph_record_nodes(session):
+            raise HTTPException(
+                status_code=400,
+                detail="This session uses graph record nodes; pass node_id=<record node id>.",
+            )
+
+        if not session.recording_manager:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Recording not available for session {session_id}",
+            )
+        if not session.recording_manager.is_recording_started:
+            return {"status": "not_recording"}
+
+        await session.recording_manager.stop_recording()
+        return {"status": "stopped"}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error stopping recording for session {session_id}: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
@@ -784,6 +1593,9 @@ class LoRAFileInfo(BaseModel):
     path: str
     size_mb: float
     folder: str | None = None
+    sha256: str | None = None
+    provenance: LoRAProvenance | None = None
+    read_only: bool = False
 
 
 class LoRAFilesResponse(BaseModel):
@@ -796,33 +1608,60 @@ class LoRAFilesResponse(BaseModel):
 @cloud_proxy()
 async def list_lora_files(
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """List available LoRA files in the models/lora directory and its subdirectories.
 
     When cloud mode is active, lists LoRA files from the cloud server instead.
     """
 
-    def process_lora_file(file_path: Path, lora_dir: Path) -> LoRAFileInfo:
+    def process_lora_file(
+        file_path: Path, lora_dir: Path, manifest_entries: dict
+    ) -> LoRAFileInfo:
         """Extract LoRA file metadata."""
         size_mb = file_path.stat().st_size / (1024 * 1024)
         relative_path = file_path.relative_to(lora_dir)
         folder = (
             str(relative_path.parent) if relative_path.parent != Path(".") else None
         )
+        rel_key = relative_path.as_posix()
+        entry = manifest_entries.get(rel_key)
         return LoRAFileInfo(
             name=file_path.stem,
             path=str(file_path),
             size_mb=round(size_mb, 2),
             folder=folder,
+            sha256=entry.sha256 if entry else None,
+            provenance=entry.provenance if entry else None,
         )
 
     try:
         lora_dir = get_lora_dir()
+        manifest = load_manifest(lora_dir)
         lora_files: list[LoRAFileInfo] = []
 
         for file_path in iter_files(lora_dir, LORA_EXTENSIONS):
-            lora_files.append(process_lora_file(file_path, lora_dir))
+            lora_files.append(process_lora_file(file_path, lora_dir, manifest.entries))
+
+        # Also include LoRAs from the shared (persistent) directory if set.
+        # This surfaces pre-cached sample LoRAs in cloud mode.
+        shared_dir = get_shared_lora_dir()
+        if shared_dir and shared_dir.is_dir():
+            shared_names = {f.stem for f in iter_files(shared_dir, LORA_EXTENSIONS)}
+            # Mark session-dir LoRAs as read_only if they also exist in
+            # the shared dir (i.e. they are sample/onboarding LoRAs).
+            for lf in lora_files:
+                if lf.name in shared_names:
+                    lf.read_only = True
+            seen = {lf.name for lf in lora_files}
+            shared_manifest = load_manifest(shared_dir)
+            for file_path in iter_files(shared_dir, LORA_EXTENSIONS):
+                if file_path.stem not in seen:
+                    info = process_lora_file(
+                        file_path, shared_dir, shared_manifest.entries
+                    )
+                    info.read_only = True
+                    lora_files.append(info)
 
         lora_files.sort(key=lambda x: (x.folder or "", x.name))
         return LoRAFilesResponse(lora_files=lora_files)
@@ -842,14 +1681,23 @@ class LoRAInstallResponse(BaseModel):
     file: LoRAFileInfo
 
 
-ALLOWED_LORA_HOSTS = {"civitai.com", "huggingface.co"}
+ALLOWED_LORA_HOSTS = {"civitai.com", "huggingface.co", "hf.co"}
+
+# Hosts that resolve to Hugging Face. `hf.co` is the official short
+# domain and redirects to huggingface.co. We treat both identically for
+# blob-vs-resolve detection and provenance tagging.
+_HUGGINGFACE_HOSTS = ("huggingface.co", "hf.co")
+
+
+def _is_huggingface_host(hostname: str) -> bool:
+    return any(hostname == h or hostname.endswith(f".{h}") for h in _HUGGINGFACE_HOSTS)
 
 
 @app.post("/api/v1/loras", response_model=LoRAInstallResponse)
 async def install_lora_file(
     request: LoRAInstallRequest,
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Install a LoRA file from a URL (e.g. HuggingFace, CivitAI).
 
@@ -865,6 +1713,23 @@ async def install_lora_file(
     parsed = urlparse(url)
     hostname = parsed.hostname or ""
     is_civitai = hostname == "civitai.com" or hostname.endswith(".civitai.com")
+    is_huggingface = _is_huggingface_host(hostname)
+
+    # Reject HuggingFace "blob" URLs — these point at the file's HTML preview
+    # page (e.g. /Repo/blob/main/file.safetensors), not the raw download.
+    # Pasting one would either 404 or save HTML as a .safetensors file. The
+    # correct URL uses /resolve/main/, which the HF "Copy download link"
+    # button on the file's page produces. Apply this *before* cloud proxying
+    # so users get the same friendly error in both local and cloud modes.
+    if is_huggingface and "/blob/" in parsed.path:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This is a Hugging Face file preview page, not a download link. "
+                'Open the file on the LoRA page and click "Copy download link" '
+                "(it will contain /resolve/main/ instead of /blob/main/)."
+            ),
+        )
 
     if is_civitai:
         query_params = parse_qs(parsed.query)
@@ -873,39 +1738,13 @@ async def install_lora_file(
             if stored_token:
                 separator = "&" if parsed.query else "?"
                 url = f"{url}{separator}token={stored_token}"
-            else:
-                raise HTTPException(
-                    status_code=400,
-                    detail="CivitAI requires an API token for programmatic downloads. "
-                    "Add your CivitAI API key in Settings > API Keys. "
-                    "Get your API key at https://civitai.com/user/account",
-                )
 
     # If connected to cloud, proxy with the (potentially modified) URL
     if cloud_manager.is_connected:
-        logger.info("Proxying LoRA install to cloud")
         body = {"url": url, "filename": request.filename}
-        try:
-            response = await cloud_manager.api_request(
-                method="POST",
-                path="/api/v1/loras",
-                body=body,
-                timeout=300.0,
-            )
-        except Exception as e:
-            logger.error(f"Cloud proxy request failed: {e}")
-            raise HTTPException(
-                status_code=502,
-                detail=f"Cloud request failed: {e}",
-            ) from e
-
-        status = response.get("status", 200)
-        if status >= 400:
-            raise HTTPException(
-                status_code=status,
-                detail=response.get("error", "Cloud request failed"),
-            )
-        return response.get("data", {})
+        return await proxy_with_body(
+            cloud_manager, "POST", "/api/v1/loras", body, timeout=300.0
+        )
 
     # Local installation
     import re
@@ -935,6 +1774,45 @@ async def install_lora_file(
         filename = request.filename
         if not filename:
             filename = unquote(parsed.path.split("/")[-1])
+
+        # For CivitAI URLs, extract version ID and resolve filename via API
+        version_id = None
+        civitai_token = None
+        if is_civitai:
+            # Extract version ID: check query param first, then path
+            query_params = parse_qs(parsed.query)
+            if "modelVersionId" in query_params:
+                version_id = query_params["modelVersionId"][0]
+            else:
+                # Fall back to last path segment (e.g. /api/download/models/<version_id>)
+                path_parts = parsed.path.rstrip("/").split("/")
+                candidate = path_parts[-1] if path_parts else None
+                if candidate and candidate.isdigit():
+                    version_id = candidate
+            civitai_token = query_params.get("token", [None])[0]
+            logger.info(
+                f"CivitAI resolve: version_id={version_id}, "
+                f"token_from_url={'yes' if civitai_token else 'no'}, "
+                f"filename={filename}"
+            )
+
+        if is_civitai and (not filename or "." not in filename):
+            if version_id:
+                try:
+                    from .lora_downloader import resolve_civitai_metadata
+
+                    dl_url, civitai_filename = resolve_civitai_metadata(
+                        version_id, token=civitai_token
+                    )
+                    if civitai_filename:
+                        filename = civitai_filename
+                    if dl_url:
+                        url = dl_url
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e)) from e
+                except Exception as e:
+                    logger.warning(f"Failed to resolve CivitAI metadata: {e}")
+
         # If still no filename (or it doesn't look like a file), try Content-Disposition
         if not filename or "." not in filename:
             # Use streaming GET instead of HEAD (some servers return 403 for HEAD)
@@ -980,7 +1858,9 @@ async def install_lora_file(
             )
 
         lora_dir = get_lora_dir()
-        dest_path = lora_dir / filename
+        dest_path = (lora_dir / filename).resolve()
+        if not dest_path.is_relative_to(lora_dir.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid filename")
 
         if dest_path.exists():
             raise HTTPException(
@@ -989,15 +1869,66 @@ async def install_lora_file(
             )
 
         # Install in a thread to avoid blocking the event loop
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, http_get, url, dest_path)
 
-        size_mb = dest_path.stat().st_size / (1024 * 1024)
+        # Update manifest with provenance
+        sha256 = await loop.run_in_executor(None, compute_sha256, dest_path)
+        size_bytes = dest_path.stat().st_size
+        relative_key = dest_path.relative_to(lora_dir).as_posix()
+
+        source: str
+        if is_civitai:
+            source = "civitai"
+        elif _is_huggingface_host(hostname):
+            source = "huggingface"
+        else:
+            source = "url"
+
+        # Strip sensitive query params (e.g. CivitAI API token) before persisting
+        from urllib.parse import urlencode, urlunparse
+        from urllib.parse import urlparse as _urlparse
+
+        _parsed = _urlparse(url)
+        clean_params = {
+            k: v for k, v in parse_qs(_parsed.query).items() if k.lower() != "token"
+        }
+        clean_url = urlunparse(
+            _parsed._replace(
+                query=urlencode(clean_params, doseq=True) if clean_params else ""
+            )
+        )
+
+        # Parse structured fields from URLs so downstream downloads can use
+        # authenticated paths (hf_hub_url for HF, version API for CivitAI).
+        extra: dict = {}
+        if source == "huggingface":
+            hf_parts = [p for p in _parsed.path.split("/") if p]
+            if len(hf_parts) >= 5 and hf_parts[2] in ("resolve", "blob"):
+                extra["repo_id"] = f"{hf_parts[0]}/{hf_parts[1]}"
+                extra["hf_filename"] = "/".join(hf_parts[4:])
+        elif source == "civitai":
+            civ_query = parse_qs(_parsed.query)
+            if "modelVersionId" in civ_query:
+                extra["version_id"] = civ_query["modelVersionId"][0]
+            else:
+                civ_parts = _parsed.path.rstrip("/").split("/")
+                if civ_parts and civ_parts[-1].isdigit():
+                    extra["version_id"] = civ_parts[-1]
+
+        provenance = LoRAProvenance(source=source, url=clean_url, **extra)
+        entry = add_manifest_entry(
+            lora_dir, relative_key, provenance, sha256, size_bytes
+        )
+
+        size_mb = size_bytes / (1024 * 1024)
         file_info = LoRAFileInfo(
             name=dest_path.stem,
             path=str(dest_path),
             size_mb=round(size_mb, 2),
             folder=None,
+            sha256=sha256,
+            provenance=entry.provenance,
         )
 
         return LoRAInstallResponse(
@@ -1022,7 +1953,7 @@ class LoRADeleteResponse(BaseModel):
 async def delete_lora_file(
     name: str,
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Delete a LoRA file by name."""
     try:
@@ -1054,9 +1985,25 @@ async def delete_lora_file(
                 detail=f"LoRA file '{name}' not found",
             )
 
+        # In cloud mode, prevent deletion of sample/onboarding LoRAs that
+        # are cached in the shared persistent directory.
+        shared_dir = get_shared_lora_dir()
+        if shared_dir and (shared_dir / found_path.name).is_file():
+            raise HTTPException(
+                status_code=403,
+                detail=f"'{name}' is a sample LoRA and cannot be removed in cloud mode",
+            )
+
         # Delete the file
         found_path.unlink()
         logger.info(f"Deleted LoRA file: {found_path}")
+
+        # Remove from manifest if present
+        manifest = load_manifest(lora_dir)
+        relative_key = found_path.relative_to(lora_dir).as_posix()
+        if relative_key in manifest.entries:
+            del manifest.entries[relative_key]
+            save_manifest(lora_dir, manifest)
 
         return LoRADeleteResponse(
             success=True,
@@ -1070,12 +2017,100 @@ async def delete_lora_file(
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.post("/api/v1/lora/download")
+async def download_lora_endpoint(
+    request: LoRADownloadRequest,
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+) -> LoRADownloadResult:
+    """Download a LoRA from HuggingFace, CivitAI, or a direct URL.
+
+    When cloud mode is active, the CivitAI token is resolved locally and
+    forwarded so the cloud worker can authenticate without its own token.
+    """
+    from .lora_downloader import download_lora
+    from .models_config import get_civitai_token
+
+    civitai_token = None
+    if request.source == "civitai":
+        civitai_token = get_civitai_token() or request.civitai_token
+
+    if cloud_manager.is_connected:
+        body = request.model_dump(exclude_none=True)
+        if civitai_token:
+            body["civitai_token"] = civitai_token
+        return await proxy_with_body(
+            cloud_manager, "POST", "/api/v1/lora/download", body, timeout=300.0
+        )
+
+    lora_dir = get_lora_dir()
+    try:
+        return await download_lora(request, lora_dir, civitai_token=civitai_token)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except Exception as e:
+        logger.error(f"download_lora: Error downloading LoRA: {e}")
+        raise HTTPException(status_code=500, detail=str(e)) from e
+
+
+@app.put("/api/v1/lora/{filename:path}/provenance")
+async def tag_lora_provenance(
+    filename: str,
+    provenance: LoRAProvenance,
+) -> LoRAManifestEntry:
+    """Retroactively tag a local LoRA with provenance info."""
+    lora_dir = get_lora_dir()
+    file_path = (lora_dir / filename).resolve()
+    if not file_path.is_relative_to(lora_dir.resolve()):
+        raise HTTPException(status_code=400, detail="Invalid filename")
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"LoRA file '{filename}' not found")
+
+    sha256 = compute_sha256(file_path)
+    size_bytes = file_path.stat().st_size
+
+    return add_manifest_entry(lora_dir, filename, provenance, sha256, size_bytes)
+
+
+# ---------------------------------------------------------------------------
+# Workflow resolve
+# ---------------------------------------------------------------------------
+
+
+@app.post("/api/v1/workflow/resolve", response_model=WorkflowResolutionPlan)
+@cloud_proxy()
+async def resolve_workflow_endpoint(
+    workflow: WorkflowRequest,
+    http_request: Request,
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+):
+    """Resolve workflow dependencies and return a resolution plan.
+
+    This is side-effect-free: no installs, no downloads.  The request
+    body uses ``extra="ignore"`` so the frontend can send the full
+    workflow JSON; the backend only reads the fields it needs.
+    """
+    from scope.core.plugins import get_plugin_manager
+
+    try:
+        plugin_manager = get_plugin_manager()
+        lora_dir = get_lora_dir()
+        shared_lora_dir = get_shared_lora_dir()
+
+        return resolve_workflow(workflow, plugin_manager, lora_dir, shared_lora_dir)
+    except Exception as e:
+        logger.error("Error resolving workflow: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error while resolving workflow dependencies",
+        ) from e
+
+
 @app.get("/api/v1/assets", response_model=AssetsResponse)
 @cloud_proxy()
 async def list_assets(
     http_request: Request,
     type: str | None = Query(None, description="Filter by asset type (image, video)"),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """List available asset files in the assets directory and its subdirectories.
 
@@ -1109,12 +2144,19 @@ async def list_assets(
             extensions = IMAGE_EXTENSIONS
         elif type == "video":
             extensions = VIDEO_EXTENSIONS
+        elif type == "audio":
+            extensions = AUDIO_EXTENSIONS
         else:
-            extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+            extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 
         for file_path in iter_files(assets_dir, extensions):
             ext = file_path.suffix.lower()
-            asset_type = "image" if ext in IMAGE_EXTENSIONS else "video"
+            if ext in IMAGE_EXTENSIONS:
+                asset_type = "image"
+            elif ext in AUDIO_EXTENSIONS:
+                asset_type = "audio"
+            else:
+                asset_type = "video"
             asset_files.append(process_asset_file(file_path, assets_dir, asset_type))
 
         # Sort by created_at (most recent first), then by folder and name
@@ -1130,16 +2172,15 @@ async def list_assets(
 async def upload_asset(
     request: Request,
     filename: str = Query(...),
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
-    """Upload an asset file (image or video) to the assets directory.
+    """Upload an asset file (image, video, or audio) to the assets directory.
 
     When cloud mode is active, the file is uploaded to the cloud server instead.
     """
 
     try:
-        # Validate file type - support both images and videos
-        allowed_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS
+        allowed_extensions = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 
         file_extension = Path(filename).suffix.lower()
         if file_extension not in allowed_extensions:
@@ -1148,7 +2189,6 @@ async def upload_asset(
                 detail=f"Invalid file type. Allowed types: {', '.join(allowed_extensions)}",
             )
 
-        # Determine asset type
         if file_extension in IMAGE_EXTENSIONS:
             asset_type = "image"
             content_type_map = {
@@ -1157,6 +2197,14 @@ async def upload_asset(
                 ".jpeg": "image/jpeg",
                 ".webp": "image/webp",
                 ".bmp": "image/bmp",
+            }
+        elif file_extension in AUDIO_EXTENSIONS:
+            asset_type = "audio"
+            content_type_map = {
+                ".wav": "audio/wav",
+                ".mp3": "audio/mpeg",
+                ".flac": "audio/flac",
+                ".ogg": "audio/ogg",
             }
         else:
             asset_type = "video"
@@ -1172,13 +2220,15 @@ async def upload_asset(
         # Read file content from request body
         content = await request.body()
 
-        # Validate file size (50MB limit)
-        max_size = 50 * 1024 * 1024  # 50MB
-        if len(content) > max_size:
-            raise HTTPException(
-                status_code=400,
-                detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
-            )
+        # Apply upload size validation only for cloud uploads.
+        # Local mode keeps files on the same machine, so no explicit cap is enforced.
+        if cloud_manager.is_connected:
+            max_size = 50 * 1024 * 1024  # 50MB
+            if len(content) > max_size:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"File size exceeds maximum of {max_size / (1024 * 1024):.0f}MB",
+                )
 
         # If cloud mode is active, upload to cloud AND save locally for thumbnails
         if cloud_manager.is_connected:
@@ -1188,14 +2238,19 @@ async def upload_asset(
                 filename,
                 content_type,
                 asset_type,
+                fal_cdn_token=request.headers.get("X-Fal-CDN-Token"),
+                fal_cdn_token_type=request.headers.get("X-Fal-CDN-Token-Type"),
+                fal_cdn_base_url=request.headers.get("X-Fal-CDN-Base-URL"),
             )
 
-        # Local mode: save to local assets directory
         assets_dir = get_assets_dir()
         assets_dir.mkdir(parents=True, exist_ok=True)
 
         # Save file to assets directory
-        file_path = assets_dir / filename
+        file_path = (assets_dir / filename).resolve()
+        if not file_path.is_relative_to(assets_dir.resolve()):
+            raise HTTPException(status_code=400, detail="Invalid filename")
+        file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_bytes(content)
 
         # Return file info matching AssetFileInfo structure
@@ -1287,7 +2342,7 @@ async def serve_asset(asset_path: str):
 async def get_model_status(
     http_request: Request,
     pipeline_id: str,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Check if models for a pipeline are downloaded and get download progress."""
     try:
@@ -1318,7 +2373,7 @@ async def get_model_status(
 async def download_pipeline_models(
     request: DownloadModelsRequest,
     http_request: Request,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Download models for a specific pipeline."""
     try:
@@ -1383,6 +2438,60 @@ def is_ndi_output_available() -> bool:
     return is_available()
 
 
+def is_syphon_output_available() -> bool:
+    """Check if Syphon is available for output."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        import syphon  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+def get_spout_availability() -> IntegrationAvailability:
+    if is_spout_available():
+        return IntegrationAvailability(available=True)
+    if sys.platform != "win32":
+        return IntegrationAvailability(
+            available=False,
+            reason="Spout is Windows-only",
+            install_hint="Run Scope on Windows to use Spout sources and sinks.",
+        )
+    return IntegrationAvailability(
+        available=False,
+        reason="Spout runtime not detected",
+        install_hint="Install Spout2 from https://spout.zeal.co and restart Scope.",
+    )
+
+
+def get_ndi_availability() -> IntegrationAvailability:
+    if is_ndi_output_available():
+        return IntegrationAvailability(available=True)
+    return IntegrationAvailability(
+        available=False,
+        reason="NDI SDK not found",
+        install_hint="Install the NDI SDK from https://ndi.video/tools and restart Scope.",
+    )
+
+
+def get_syphon_availability() -> IntegrationAvailability:
+    if is_syphon_output_available():
+        return IntegrationAvailability(available=True)
+    if sys.platform != "darwin":
+        return IntegrationAvailability(
+            available=False,
+            reason="Syphon is macOS-only",
+            install_hint="Run Scope on macOS to use Syphon sources and sinks.",
+        )
+    return IntegrationAvailability(
+        available=False,
+        reason="Syphon package not installed",
+        install_hint="Reinstall Scope dependencies with `uv sync` to enable Syphon.",
+    )
+
+
 _source_discovery_cache: dict[str, tuple[float, list]] = {}
 _SOURCE_DISCOVERY_TTL = 10  # seconds
 
@@ -1427,7 +2536,7 @@ async def list_input_source_types():
 
 
 @app.get("/api/v1/input-sources/{source_type}/sources")
-def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
+async def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
     """List discovered sources for a given input source type."""
     source_class = _resolve_input_source_class(source_type)
 
@@ -1438,11 +2547,23 @@ def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
         if time.monotonic() - ts < _SOURCE_DISCOVERY_TTL:
             return {"source_type": source_type, "sources": sources}
 
-    try:
+    # Syphon discovery requires pumping NSRunLoop on the main thread.
+    # async handlers run on the event-loop (main) thread, so pump here.
+    if source_type == "syphon" and sys.platform == "darwin":
+        try:
+            from .syphon.receiver import drain_notifications
+
+            drain_notifications(0.1)
+        except Exception:
+            logger.debug("Failed to pump Syphon run loop", exc_info=True)
+
+    event_loop = asyncio.get_event_loop()
+
+    def _discover():
         instance = source_class()
         try:
             discovered = instance.list_sources(timeout_ms=timeout_ms)
-            sources = [
+            return [
                 {
                     "name": s.name,
                     "identifier": s.identifier,
@@ -1450,10 +2571,13 @@ def list_input_sources(source_type: str, timeout_ms: int = Query(5000)):
                 }
                 for s in discovered
             ]
-            _source_discovery_cache[source_type] = (time.monotonic(), sources)
-            return {"source_type": source_type, "sources": sources}
         finally:
             instance.close()
+
+    try:
+        sources = await event_loop.run_in_executor(None, _discover)
+        _source_discovery_cache[source_type] = (time.monotonic(), sources)
+        return {"source_type": source_type, "sources": sources}
     except HTTPException:
         raise
     except Exception as e:
@@ -1493,7 +2617,10 @@ def get_input_source_resolution(
 
 @app.get("/api/v1/input-sources/{source_type}/sources/{identifier:path}/stream")
 async def stream_input_source_preview(
-    source_type: str, identifier: str, fps: int = Query(2, ge=1, le=30)
+    source_type: str,
+    identifier: str,
+    fps: int = Query(2, ge=1, le=30),
+    flip_vertical: bool = Query(False),
 ):
     """MJPEG stream of an input source for live preview."""
     source_class = _resolve_input_source_class(source_type)
@@ -1509,6 +2636,8 @@ async def stream_input_source_preview(
         try:
             # Create persistent receiver
             receiver = source_class()
+            if source_type == "syphon" and hasattr(receiver, "set_flip_vertical"):
+                receiver.set_flip_vertical(flip_vertical)
             connected = await loop.run_in_executor(None, receiver.connect, identifier)
             if not connected:
                 logger.warning(f"Preview stream: could not connect to '{identifier}'")
@@ -1555,7 +2684,7 @@ async def stream_input_source_preview(
 
 @app.get("/api/v1/hardware/info", response_model=HardwareInfoResponse)
 async def get_hardware_info(
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Get hardware information including available VRAM and Spout availability.
 
@@ -1563,12 +2692,13 @@ async def get_hardware_info(
     cloud-hosted scope backend to get the cloud GPU's hardware info.
     """
     try:
-        # If connected to cloud, proxy the request to get cloud's hardware info
+        #  If connected to cloud, proxy the request to get cloud's hardware info
         if cloud_manager.is_connected:
             return await get_hardware_info_from_cloud(
                 cloud_manager,
-                is_spout_available(),
-                is_ndi_output_available(),
+                get_spout_availability(),
+                get_ndi_availability(),
+                get_syphon_availability(),
             )
 
         # Local mode: get local hardware info
@@ -1583,8 +2713,9 @@ async def get_hardware_info(
 
         return HardwareInfoResponse(
             vram_gb=vram_gb,
-            spout_available=is_spout_available(),
-            ndi_available=is_ndi_output_available(),
+            spout=get_spout_availability(),
+            ndi=get_ndi_availability(),
+            syphon=get_syphon_availability(),
         )
     except HTTPException:
         raise
@@ -1742,7 +2873,63 @@ async def get_current_logs():
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+@app.get("/api/v1/logs/tail")
+async def tail_logs(
+    lines: int = Query(default=200, ge=1, le=1000),
+    since_offset: int = Query(default=0, ge=0),
+):
+    """Get recent log lines, optionally only new content since a byte offset.
+
+    Returns JSON with "lines" (list of strings) and "offset" (byte offset for next poll).
+    """
+    log_file_path = get_most_recent_log_file()
+    if log_file_path is None or not log_file_path.exists():
+        return {"lines": [], "offset": 0}
+
+    file_size = log_file_path.stat().st_size
+
+    if since_offset > 0 and since_offset >= file_size:
+        return {"lines": [], "offset": file_size}
+
+    if since_offset > 0 and since_offset < file_size:
+        # Read only new content since last offset
+        with open(log_file_path, encoding="utf-8", errors="replace") as f:
+            f.seek(since_offset)
+            new_content = f.read()
+            new_lines = [ln for ln in new_content.splitlines() if ln.strip()]
+            return {"lines": new_lines[-lines:], "offset": file_size}
+
+    # No offset or offset beyond file: return last N lines
+    with open(log_file_path, encoding="utf-8", errors="replace") as f:
+        all_lines = f.readlines()
+        tail = [ln.rstrip() for ln in all_lines[-lines:] if ln.strip()]
+        return {"lines": tail, "offset": file_size}
+
+
 # Plugin Management API Endpoints
+
+SOURCE_KIND = "source"
+
+
+def _cloud_is_connected(cloud_manager: ScopeCloudBackend | None) -> bool:
+    """Return True iff *cloud_manager* is set and currently connected."""
+    return cloud_manager is not None and getattr(cloud_manager, "is_connected", False)
+
+
+async def _is_locally_installed(name: str) -> bool:
+    """Return True if *name* is currently installed in the local venv.
+
+    Used in cloud mode to decide whether uninstall/reload should target
+    the local instance (for source-kind plugins) or be proxied to cloud.
+    """
+    from scope.core.plugins import get_plugin_manager
+
+    try:
+        plugins = await get_plugin_manager().list_plugins_async(skip_update_check=True)
+    except Exception as e:
+        logger.warning(f"Local plugin listing failed during routing decision: {e}")
+        return False
+    return any(p.get("name") == name for p in plugins)
 
 
 def _convert_plugin_dict_to_info(plugin_dict: dict) -> "PluginInfo":
@@ -1769,23 +2956,57 @@ def _convert_plugin_dict_to_info(plugin_dict: dict) -> "PluginInfo":
         latest_version=plugin_dict.get("latest_version"),
         update_available=plugin_dict.get("update_available"),
         package_spec=plugin_dict.get("package_spec"),
+        bundled=plugin_dict.get("bundled", False),
+        kind=plugin_dict.get("kind"),
+        origin=plugin_dict.get("origin"),
     )
 
 
 @app.get("/api/v1/plugins")
-async def list_plugins():
-    """List all installed plugins with metadata."""
+async def list_plugins(
+    http_request: Request,
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+):
+    """List all installed plugins with metadata.
+
+    In cloud mode the response merges plugins from the cloud-hosted scope
+    backend with any source-kind plugins installed locally. Each entry is
+    tagged with ``origin = "local" | "cloud"`` so the UI can distinguish
+    where each plugin runs.
+    """
     from scope.core.plugins import get_plugin_manager
 
     from .schema import FailedPluginInfoSchema, PluginListResponse
 
+    global _plugins_list_cache
+    if _plugins_list_cache is not None:
+        return _plugins_list_cache
+
     try:
         plugin_manager = get_plugin_manager()
-        plugins_data = await plugin_manager.list_plugins_async()
+        cloud_connected = _cloud_is_connected(cloud_manager)
 
-        plugins = [_convert_plugin_dict_to_info(p) for p in plugins_data]
+        if cloud_connected:
+            local_result, cloud_response = await asyncio.gather(
+                plugin_manager.list_plugins_async(),
+                _fetch_cloud_plugin_list(cloud_manager),
+                return_exceptions=True,
+            )
+            if isinstance(local_result, BaseException):
+                logger.warning(
+                    f"Local plugin listing failed in cloud mode; "
+                    f"returning cloud plugins only: {local_result}"
+                )
+                local_plugins_data = []
+            else:
+                local_plugins_data = local_result
+            if isinstance(cloud_response, BaseException):
+                cloud_response = None
+        else:
+            local_plugins_data = await plugin_manager.list_plugins_async()
+            cloud_response = None
 
-        failed = [
+        local_failed = [
             FailedPluginInfoSchema(
                 package_name=f.package_name,
                 entry_point_name=f.entry_point_name,
@@ -1795,32 +3016,112 @@ async def list_plugins():
             for f in plugin_manager.get_failed_plugins()
         ]
 
-        return PluginListResponse(
-            plugins=plugins, total=len(plugins), failed_plugins=failed
+        if cloud_connected:
+            # Only source-kind local plugins surface alongside cloud plugins;
+            # other local plugins are cloud-targeted and live under the cloud.
+            local_source_plugins = [
+                {**p, "origin": "local"}
+                for p in local_plugins_data
+                if p.get("kind") == SOURCE_KIND
+            ]
+            cloud_plugins_raw = [
+                {**p, "origin": "cloud"}
+                for p in (cloud_response or {}).get("plugins", [])
+            ]
+            combined = [
+                _convert_plugin_dict_to_info(p)
+                for p in (*local_source_plugins, *cloud_plugins_raw)
+            ]
+            cloud_failed = [
+                FailedPluginInfoSchema(**f)
+                for f in (cloud_response or {}).get("failed_plugins", [])
+            ]
+            response = PluginListResponse(
+                plugins=combined,
+                total=len(combined),
+                failed_plugins=[*local_failed, *cloud_failed],
+            )
+            _plugins_list_cache = response
+            return response
+
+        plugins = [_convert_plugin_dict_to_info(p) for p in local_plugins_data]
+        response = PluginListResponse(
+            plugins=plugins, total=len(plugins), failed_plugins=local_failed
         )
+        _plugins_list_cache = response
+        return response
     except Exception as e:
         logger.error(f"Error listing plugins: {e}")
         raise HTTPException(status_code=500, detail=str(e)) from e
 
 
+async def _fetch_cloud_plugin_list(
+    cloud_manager: ScopeCloudBackend,
+) -> dict[str, Any]:
+    """Fetch plugin list from cloud; return ``{"plugins": [], "failed_plugins": []}``
+    on failure so callers can merge unconditionally."""
+    try:
+        response = await proxy_with_body(
+            cloud_manager,
+            method="GET",
+            path="/api/v1/plugins",
+            body=None,
+            timeout=30.0,
+        )
+    except HTTPException as e:
+        logger.warning(f"Failed to fetch cloud plugin list: {e.detail}")
+        return {"plugins": [], "failed_plugins": []}
+    return (
+        response
+        if isinstance(response, dict)
+        else {"plugins": [], "failed_plugins": []}
+    )
+
+
 @app.post("/api/v1/plugins")
 async def install_plugin(
-    request: Request,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
-    """Install a plugin from PyPI, git URL, or local path."""
+    """Install a plugin from PyPI, git URL, or local path.
+
+    In cloud mode the request is proxied to the cloud-hosted scope backend
+    EXCEPT for source-kind plugins (declared via ``__scope_kind__`` in the
+    package's ``__init__.py``), which are always installed on the local
+    machine because their input frames originate locally.
+    """
     from scope.core.plugins import (
         PluginDependencyError,
         PluginInstallError,
         PluginNameCollisionError,
         get_plugin_manager,
+        probe_plugin_kind,
     )
 
     from .schema import PluginInstallRequest, PluginInstallResponse
 
-    # Parse request body
-    body = await request.json()
+    body = await http_request.json()
     install_request = PluginInstallRequest(**body)
+
+    if _cloud_is_connected(cloud_manager):
+        kind = probe_plugin_kind(install_request.package)
+        if kind != SOURCE_KIND:
+            logger.info(
+                f"Proxying plugin install to cloud "
+                f"(kind={kind!r}): {install_request.package}"
+            )
+            return await proxy_with_body(
+                cloud_manager,
+                method="POST",
+                path="/api/v1/plugins",
+                body=body,
+                timeout=60.0,
+            )
+        logger.info(
+            f"Installing source-kind plugin locally despite cloud mode: "
+            f"{install_request.package}"
+        )
 
     logger.info(f"Installing plugin: {install_request.package}")
     try:
@@ -1840,7 +3141,12 @@ async def install_plugin(
             plugin_info = _convert_plugin_dict_to_info(result["plugin"])
             plugin_name = plugin_info.name
 
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
+
         logger.info(f"Plugin installed: {plugin_name}")
+        _invalidate_plugin_caches()
         return PluginInstallResponse(
             success=result["success"],
             message=result["message"],
@@ -1889,9 +3195,16 @@ async def install_plugin(
 @app.delete("/api/v1/plugins/{name}")
 async def uninstall_plugin(
     name: str,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
-    """Uninstall a plugin, cleaning up loaded pipelines."""
+    """Uninstall a plugin, cleaning up loaded pipelines.
+
+    In cloud mode the request is proxied to the cloud-hosted scope backend
+    UNLESS the named plugin is installed locally (e.g. a source-kind
+    plugin), in which case it is uninstalled from the local venv.
+    """
     from scope.core.plugins import (
         PluginInstallError,
         PluginNotFoundError,
@@ -1899,6 +3212,16 @@ async def uninstall_plugin(
     )
 
     from .schema import PluginUninstallResponse
+
+    if _cloud_is_connected(cloud_manager) and not await _is_locally_installed(name):
+        logger.info(f"Proxying plugin uninstall to cloud: {name}")
+        return await proxy_with_body(
+            cloud_manager,
+            method="DELETE",
+            path=f"/api/v1/plugins/{name}",
+            body=None,
+            timeout=60.0,
+        )
 
     logger.info(f"Uninstalling plugin: {name}")
     try:
@@ -1909,7 +3232,12 @@ async def uninstall_plugin(
             pipeline_manager=pipeline_manager,
         )
 
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
+
         logger.info(f"Plugin uninstalled: {name}")
+        _invalidate_plugin_caches()
         return PluginUninstallResponse(
             success=result["success"],
             message=result["message"],
@@ -1939,10 +3267,16 @@ async def uninstall_plugin(
 @app.post("/api/v1/plugins/{name}/reload")
 async def reload_plugin(
     name: str,
-    request: Request,
+    http_request: Request,
     pipeline_manager: "PipelineManager" = Depends(get_pipeline_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
-    """Reload an editable plugin for development (without server restart)."""
+    """Reload an editable plugin for development (without server restart).
+
+    In cloud mode the request is proxied to the cloud-hosted scope backend
+    UNLESS the named plugin is installed locally, in which case it is
+    reloaded in the local venv.
+    """
     from scope.core.plugins import (
         PluginInUseError,
         PluginNotEditableError,
@@ -1953,8 +3287,18 @@ async def reload_plugin(
     from .schema import PluginReloadRequest, PluginReloadResponse
 
     # Parse request body
-    body = await request.json()
+    body = await http_request.json()
     reload_request = PluginReloadRequest(**body)
+
+    if _cloud_is_connected(cloud_manager) and not await _is_locally_installed(name):
+        logger.info(f"Proxying plugin reload to cloud: {name}")
+        return await proxy_with_body(
+            cloud_manager,
+            method="POST",
+            path=f"/api/v1/plugins/{name}/reload",
+            body=body,
+            timeout=60.0,
+        )
 
     try:
         plugin_manager = get_plugin_manager()
@@ -1964,6 +3308,12 @@ async def reload_plugin(
             force=reload_request.force,
             pipeline_manager=pipeline_manager,
         )
+
+        _invalidate_plugin_caches()
+
+        srv = get_dmx_server()
+        if srv is not None:
+            srv.invalidate_known_paths_cache()
 
         return PluginReloadResponse(
             success=result["success"],
@@ -2010,7 +3360,7 @@ async def reload_plugin(
 @app.post("/api/v1/cloud/connect", response_model=CloudStatusResponse)
 async def connect_to_cloud(
     request: CloudConnectRequest,
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Connect to cloud for remote GPU inference.
 
@@ -2034,18 +3384,23 @@ async def connect_to_cloud(
         # Use request body credentials if provided, otherwise fall back to CLI/env
         app_id = request.app_id or os.environ.get("SCOPE_CLOUD_APP_ID")
         api_key = request.api_key or os.environ.get("SCOPE_CLOUD_API_KEY")
-
-        if not app_id:
+        if not app_id and not api_key:
             raise HTTPException(
                 status_code=400,
-                detail="cloud credentials not configured. Use --cloud-app-id and --cloud-api-key CLI args, "
-                "or SCOPE_CLOUD_APP_ID and SCOPE_CLOUD_API_KEY environment variables.",
+                detail="cloud credentials not configured. Use --cloud-app-id or --cloud-api-key CLI args, "
+                "or SCOPE_CLOUD_APP_ID or SCOPE_CLOUD_API_KEY environment variables.",
             )
 
         logger.info(
             f"Connecting to cloud (background): {app_id} (user_id: {request.user_id})"
         )
         await cloud_manager.connect_background(app_id, api_key, request.user_id)
+
+        # Invalidate cached pipeline schemas so that when the cloud connection
+        # completes, subsequent requests either proxy to the cloud (returning
+        # cloud pipelines) or rebuild from the local registry instead of
+        # serving stale cached data from a previous local-only fetch.
+        _invalidate_plugin_caches()
 
         credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
         return CloudStatusResponse(
@@ -2062,7 +3417,7 @@ async def connect_to_cloud(
 
 @app.post("/api/v1/cloud/disconnect", response_model=CloudStatusResponse)
 async def disconnect_from_cloud(
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Disconnect from cloud.
 
@@ -2071,6 +3426,10 @@ async def disconnect_from_cloud(
     """
     try:
         await cloud_manager.disconnect()
+        # Invalidate cached pipeline schemas so that post-disconnect requests
+        # rebuild the list from the local registry instead of returning stale
+        # cloud-era data.
+        _invalidate_plugin_caches()
         credentials_configured = bool(os.environ.get("SCOPE_CLOUD_APP_ID"))
         return CloudStatusResponse(
             connected=False,
@@ -2085,7 +3444,7 @@ async def disconnect_from_cloud(
 
 @app.get("/api/v1/cloud/status", response_model=CloudStatusResponse)
 async def get_cloud_status(
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
 ):
     """Get current cloud connection status."""
     status = cloud_manager.get_status()
@@ -2094,25 +3453,71 @@ async def get_cloud_status(
     return CloudStatusResponse(**status, credentials_configured=credentials_configured)
 
 
-@app.get("/api/v1/cloud/stats")
-async def get_cloud_stats(
-    cloud_manager: "CloudConnectionManager" = Depends(get_cloud_connection_manager),
-):
-    """Get detailed cloud connection statistics.
+# ---------------------------------------------------------------------------
+# Onboarding
+# ---------------------------------------------------------------------------
 
-    Returns connection stats including:
-    - Uptime
-    - WebRTC offers sent/successful
-    - ICE candidates sent
-    - API requests sent/successful
 
-    Also prints stats to the server log for debugging.
-    """
-    # Print stats to log
-    cloud_manager.print_stats()
+def _get_onboarding_file() -> Path:
+    return get_base_dir() / "onboarding.json"
 
-    # Return full status with stats
-    return cloud_manager.get_status()
+
+class OnboardingStatusResponse(BaseModel):
+    completed: bool
+    inference_mode: str | None = None
+    onboarding_style: str | None = None
+    referral_source: str | None = None
+    use_case: str | None = None
+
+
+class OnboardingStatusUpdate(BaseModel):
+    completed: bool | None = None
+    inference_mode: str | None = None
+    onboarding_style: str | None = None
+    referral_source: str | None = None
+    use_case: str | None = None
+
+
+@app.get("/api/v1/onboarding/status", response_model=OnboardingStatusResponse)
+async def get_onboarding_status():
+    """Read onboarding completion state from onboarding.json."""
+    onboarding_file = _get_onboarding_file()
+    if onboarding_file.exists():
+        try:
+            data = json.loads(onboarding_file.read_text())
+            return OnboardingStatusResponse(
+                completed=data.get("completed", False),
+                inference_mode=data.get("inference_mode"),
+                onboarding_style=data.get("onboarding_style"),
+                referral_source=data.get("referral_source"),
+                use_case=data.get("use_case"),
+            )
+        except Exception:
+            pass
+    return OnboardingStatusResponse(completed=False)
+
+
+@app.put("/api/v1/onboarding/status", response_model=OnboardingStatusResponse)
+async def update_onboarding_status(body: OnboardingStatusUpdate):
+    """Write onboarding completion state to onboarding.json."""
+    onboarding_file = _get_onboarding_file()
+    onboarding_file.parent.mkdir(parents=True, exist_ok=True)
+    # Merge with existing data so we don't lose fields when partially updating
+    existing: dict = {}
+    if onboarding_file.exists():
+        try:
+            existing = json.loads(onboarding_file.read_text())
+        except Exception:
+            pass
+    existing.update(body.model_dump(exclude_none=True))
+    onboarding_file.write_text(json.dumps(existing))
+    return OnboardingStatusResponse(
+        completed=existing.get("completed", False),
+        inference_mode=existing.get("inference_mode"),
+        onboarding_style=existing.get("onboarding_style"),
+        referral_source=existing.get("referral_source"),
+        use_case=existing.get("use_case"),
+    )
 
 
 @app.get("/{path:path}")
@@ -2125,7 +3530,9 @@ async def serve_frontend(request: Request, path: str):
         raise HTTPException(status_code=404, detail="Frontend not built")
 
     # Check if requesting a specific file that exists
-    file_path = frontend_dist / path
+    file_path = (frontend_dist / path).resolve()
+    if not file_path.is_relative_to(frontend_dist.resolve()):
+        raise HTTPException(status_code=403, detail="Access denied")
     if file_path.exists() and file_path.is_file():
         # Determine media type based on extension to fix MIME type issues on Windows
         file_extension = file_path.suffix.lower()
@@ -2192,10 +3599,15 @@ def open_browser_when_ready(host: str, port: int, server):
 
 def run_server(reload: bool, host: str, port: int, no_browser: bool):
     """Run the Daydream Scope server."""
+    _configure_logging()
 
     from scope.core.pipelines.registry import (
         PipelineRegistry,  # noqa: F401 - imported for side effects (registry initialization)
     )
+
+    # Propagate host/port so lifespan can read them (e.g. for OSC UDP bind)
+    os.environ["SCOPE_HOST"] = host
+    os.environ["SCOPE_PORT"] = str(port)
 
     # Configure static file serving
     configure_static_files()
@@ -2212,6 +3624,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
             port=port,
             reload=reload,
             log_config=None,  # Use our logging config, don't override it
+            timeout_graceful_shutdown=1,
         )
         server = uvicorn.Server(config)
 
@@ -2239,6 +3652,7 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
             port=port,
             reload=reload,
             log_config=None,  # Use our logging config, don't override it
+            timeout_graceful_shutdown=1,
         )
 
 
@@ -2247,7 +3661,9 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
 @click.option(
     "--reload", is_flag=True, help="Enable auto-reload for development (default: False)"
 )
-@click.option("--host", default="0.0.0.0", help="Host to bind to (default: 0.0.0.0)")
+@click.option(
+    "--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)"
+)
 @click.option("--port", default=8000, help="Port to bind to (default: 8000)")
 @click.option(
     "-N",
@@ -2257,15 +3673,21 @@ def run_server(reload: bool, host: str, port: int, no_browser: bool):
 )
 @click.option(
     "--cloud-app-id",
-    default="Daydream/scope-app--prod/ws",
+    default=None,
     envvar="SCOPE_CLOUD_APP_ID",
-    help="Cloud app ID for cloud mode (e.g., 'username/scope-app')",
+    help="Cloud app ID for Livepeer mode (e.g., 'daydream/scope-livepeer--prod/ws')",
 )
 @click.option(
     "--cloud-api-key",
     default=None,
     envvar="SCOPE_CLOUD_API_KEY",
     help="Cloud API key for cloud mode",
+)
+@click.option(
+    "--mcp",
+    is_flag=True,
+    help="Run as an MCP (Model Context Protocol) server over stdio instead of the HTTP server. "
+    "Connects to a running Scope instance on --port.",
 )
 @click.pass_context
 def main(
@@ -2277,11 +3699,26 @@ def main(
     no_browser: bool,
     cloud_app_id: str | None,
     cloud_api_key: str | None,
+    mcp: bool,
 ):
     # Handle version flag
     if version:
         print_version_info()
         sys.exit(0)
+
+    # MCP mode: run the MCP stdio server instead of the HTTP server
+    if mcp:
+        import click.core
+
+        from .mcp_server import run_mcp_server
+
+        # Only pre-connect if --port was explicitly provided on the command line
+        source = ctx.get_parameter_source("port")
+        explicit_port = (
+            port if source == click.core.ParameterSource.COMMANDLINE else None
+        )
+        run_mcp_server(port=explicit_port)
+        return
 
     # Store cloud credentials in environment for app access
     if cloud_app_id:

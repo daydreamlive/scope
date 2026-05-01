@@ -1,5 +1,11 @@
-import { BookOpenText, Bug, Github } from "lucide-react";
+import { BookOpenText, Bug, Github, RotateCcw } from "lucide-react";
 import { Input } from "../ui/input";
+import { Button } from "../ui/button";
+import { Switch } from "../ui/switch";
+import { resetOnboarding } from "../../lib/onboardingStorage";
+import { toast } from "sonner";
+import { useTelemetry } from "../../contexts/TelemetryContext";
+import { isEnvTelemetryDisabled } from "../../lib/telemetry";
 
 interface GeneralTabProps {
   version: string;
@@ -21,7 +27,6 @@ export function GeneralTab({
   onReportBug,
 }: GeneralTabProps) {
   const handleDocsClick = () => {
-    console.log("Docs clicked");
     window.open(
       "https://docs.daydream.live/knowledge-hub/tutorials/scope",
       "_blank"
@@ -29,12 +34,10 @@ export function GeneralTab({
   };
 
   const handleDiscordClick = () => {
-    console.log("Discord clicked");
     window.open("https://discord.gg/mnfGR4Fjhp", "_blank");
   };
 
   const handleGithubClick = () => {
-    console.log("GitHub clicked");
     window.open("https://github.com/daydreamlive/scope", "_blank");
   };
 
@@ -146,6 +149,75 @@ export function GeneralTab({
             disabled
           />
         </div>
+      </div>
+
+      {/* Privacy */}
+      <PrivacySection />
+
+      {/* Advanced */}
+      <div className="rounded-lg bg-muted/50 p-4 space-y-4">
+        <h3 className="text-sm font-medium text-foreground">Advanced</h3>
+        <div className="flex items-center justify-between">
+          <div className="space-y-0.5">
+            <p className="text-sm text-foreground">Show onboarding again</p>
+            <p className="text-xs text-muted-foreground">
+              Re-run the welcome flow on next launch.
+            </p>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              resetOnboarding();
+              toast.success("Onboarding will show on next launch");
+            }}
+          >
+            <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+            Reset
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PrivacySection() {
+  const { isEnabled, setEnabled } = useTelemetry();
+  const envDisabled = isEnvTelemetryDisabled();
+
+  return (
+    <div className="rounded-lg bg-muted/50 p-4 space-y-4">
+      <h3 className="text-sm font-medium text-foreground">Privacy</h3>
+      <div className="flex items-center justify-between">
+        <div className="space-y-0.5 flex-1 mr-4">
+          <p className="text-sm text-foreground">
+            Help improve Scope by sending anonymous usage data
+          </p>
+          <p className="text-xs text-muted-foreground">
+            We track UI interactions and feature usage patterns, and we do not
+            collect prompts, parameters, file paths, videos, images, or session
+            replays.{" "}
+            <a
+              href="https://github.com/daydreamlive/scope/tree/main/docs/telemetry.md"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline hover:text-foreground transition-colors"
+            >
+              Learn more about our approach
+            </a>
+          </p>
+          {envDisabled && (
+            <p className="text-xs text-yellow-500">
+              Telemetry is disabled via environment variable
+              (SCOPE_TELEMETRY_DISABLED or DO_NOT_TRACK).
+            </p>
+          )}
+        </div>
+        <Switch
+          checked={isEnabled}
+          onCheckedChange={setEnabled}
+          disabled={envDisabled}
+        />
       </div>
     </div>
   );

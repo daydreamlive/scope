@@ -125,7 +125,7 @@ fi
 # Run uv sync to install Python dependencies
 echo "Installing Python dependencies (this may take a few minutes)..."
 if [ -f "$UV_DIR/uv" ] && [ -f "$PROJECT_DIR/pyproject.toml" ]; then
-    su - "$REAL_USER" -c "cd '$PROJECT_DIR' && '$UV_DIR/uv' sync" 2>/dev/null && {
+    su - "$REAL_USER" -c "cd '$PROJECT_DIR' && '$UV_DIR/uv' sync --extra link" 2>/dev/null && {
         echo "Python dependencies installed successfully"
     } || {
         echo "Warning: uv sync failed. Dependencies will be installed on first launch."

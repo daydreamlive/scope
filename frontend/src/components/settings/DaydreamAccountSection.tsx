@@ -15,10 +15,10 @@ import {
   isAuthenticated,
   redirectToSignIn,
   clearDaydreamAuth,
-  getDaydreamUserId,
   getDaydreamUserDisplayName,
   refreshUserProfile,
 } from "../../lib/auth";
+import { connectToCloud } from "../../lib/cloudApi";
 import { useCloudStatus } from "../../hooks/useCloudStatus";
 
 interface DaydreamAccountSectionProps {
@@ -32,9 +32,11 @@ export function DaydreamAccountSection({
   onPipelinesRefresh,
   disabled = false,
 }: DaydreamAccountSectionProps) {
-  // Auth state
-  const [isSignedIn, setIsSignedIn] = useState(false);
-  const [displayName, setDisplayName] = useState<string | null>(null);
+  // Auth state — initialise eagerly so the toggle is never briefly disabled on mount
+  const [isSignedIn, setIsSignedIn] = useState(() => isAuthenticated());
+  const [displayName, setDisplayName] = useState<string | null>(() =>
+    getDaydreamUserDisplayName()
+  );
 
   // Use shared cloud status hook - avoids redundant polling with Header
   const { status, refresh: refreshStatus } = useCloudStatus();
@@ -45,14 +47,15 @@ export function DaydreamAccountSection({
   const [copied, setCopied] = useState(false);
   const prevConnectedRef = useRef(false);
 
-  // Check auth on mount and listen for changes
+  // Keep auth state in sync with storage changes and ensure display name is populated
   useEffect(() => {
     const authed = isAuthenticated();
     const cachedName = getDaydreamUserDisplayName();
+    // Keep state consistent in case localStorage was updated since the lazy init
     setIsSignedIn(authed);
     setDisplayName(cachedName);
 
-    // If signed in but no display name cached, refresh the profile
+    // If signed in but no display name cached yet, kick off a profile refresh
     if (authed && !cachedName) {
       refreshUserProfile();
     }
@@ -98,16 +101,10 @@ export function DaydreamAccountSection({
     setError(null);
 
     try {
-      const userId = getDaydreamUserId();
+      const response = await connectToCloud();
 
-      const response = await fetch("/api/v1/cloud/connect", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_id: userId }),
-      });
-
-      if (!response.ok) {
-        const data = await response.json();
+      if (!response || !response.ok) {
+        const data = response ? await response.json() : {};
         throw new Error(data.detail || "Connection failed");
       }
 
@@ -209,15 +206,24 @@ export function DaydreamAccountSection({
             <span className="text-sm font-medium">Remote Inference</span>
           </div>
           <Switch
+            data-testid="cloud-toggle"
+            aria-label="Remote Inference"
             checked={status.connected || status.connecting}
             onCheckedChange={handleToggle}
-            disabled={disabled || !isSignedIn || isDisconnecting}
+            disabled={
+              disabled ||
+              isDisconnecting ||
+              // Sign-in is only required to *connect*; disconnecting is always allowed
+              (!(status.connected || status.connecting) && !isSignedIn)
+            }
             className="data-[state=unchecked]:bg-zinc-600 data-[state=checked]:bg-green-500"
           />
         </div>
         <p className="text-xs text-muted-foreground">
-          Use remote inference for running pipelines.
-          {!isSignedIn && " Log in required."}
+          Use Daydream Cloud inference for running workflows.
+          {!isSignedIn &&
+            !(status.connected || status.connecting) &&
+            " Log in required."}
         </p>
 
         {status.connected && status.connection_id && (

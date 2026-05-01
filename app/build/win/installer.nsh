@@ -257,7 +257,7 @@
     FileWrite $R9 "@echo off$\r$\n"
     FileWrite $R9 "cd /d $\"$1\python-project$\"$\r$\n"
     FileWrite $R9 "set $\"UV_PROJECT_ENVIRONMENT=$1\.venv$\"$\r$\n"
-    FileWrite $R9 "$\"$1\uv\uv.exe$\" sync --inexact >> $\"$R7$\" 2>&1$\r$\n"
+    FileWrite $R9 "$\"$1\uv\uv.exe$\" sync --inexact --extra link >> $\"$R7$\" 2>&1$\r$\n"
     FileWrite $R9 "exit /b %ERRORLEVEL%$\r$\n"
     FileClose $R9
 

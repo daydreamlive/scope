@@ -1,6 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { isBrowserSourceMode } from "../lib/graphUtils";
 
-export type VideoSourceMode = "video" | "camera" | "spout" | "ndi";
+/** Video source mode identifier.
+ *
+ * "video" (file upload) and "camera" are browser-driven and create a
+ * local MediaStream. Any other value — "spout", "ndi", "syphon", or any
+ * plugin-registered `source_id` like "youtube" — is handled server-side:
+ * no local stream, frames come from the backend's source_manager. */
+export type VideoSourceMode = string;
+
+export const SAMPLE_VIDEOS = [
+  "/assets/test.mp4",
+  "/assets/test1.mp4",
+  "/assets/test2.mp4",
+];
 
 interface UseVideoSourceProps {
   onStreamUpdate?: (stream: MediaStream) => Promise<boolean>;
@@ -24,6 +37,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
   const [isInitializing, setIsInitializing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [mode, setMode] = useState<VideoSourceMode>("video");
+  const modeRef = useRef<VideoSourceMode>("video");
   const [selectedVideoFile, setSelectedVideoFile] = useState<string | File>(
     "/assets/test.mp4"
   );
@@ -83,8 +97,23 @@ export function useVideoSource(props?: UseVideoSourceProps) {
             video
               .play()
               .then(() => {
-                // Draw video frame to canvas at original resolution
-                const drawFrame = () => {
+                // Use captureStream(0) for manual frame capture to avoid
+                // GPU stalls from automatic ReadPixels at mismatched rates.
+                // See: https://github.com/daydreamlive/scope/issues/509
+                const stream = canvas.captureStream(0);
+                const videoTrack = stream.getVideoTracks()[0];
+
+                // Draw video frames to canvas at the target FPS rate only,
+                // then manually request a frame capture. This avoids the
+                // "GPU stall due to ReadPixels" warning caused by drawing
+                // at ~60fps via requestAnimationFrame while capturing at a
+                // lower rate.
+                const intervalMs = 1000 / fps;
+                const intervalId = setInterval(() => {
+                  if (video.paused || video.ended) {
+                    clearInterval(intervalId);
+                    return;
+                  }
                   ctx.drawImage(
                     video,
                     0,
@@ -92,14 +121,24 @@ export function useVideoSource(props?: UseVideoSourceProps) {
                     detectedResolution.width,
                     detectedResolution.height
                   );
-                  if (!video.paused && !video.ended) {
-                    requestAnimationFrame(drawFrame);
+                  // Manually request frame capture from the stream
+                  if (
+                    videoTrack &&
+                    "requestFrame" in videoTrack &&
+                    videoTrack.readyState === "live"
+                  ) {
+                    (
+                      videoTrack as MediaStreamTrack & {
+                        requestFrame: () => void;
+                      }
+                    ).requestFrame();
                   }
-                };
-                drawFrame();
+                }, intervalMs);
 
-                // Capture stream from canvas at original resolution
-                const stream = canvas.captureStream(fps);
+                // Clean up interval when track ends
+                videoTrack?.addEventListener("ended", () => {
+                  clearInterval(intervalId);
+                });
 
                 resolve({ stream, resolution: detectedResolution });
               })
@@ -123,9 +162,9 @@ export function useVideoSource(props?: UseVideoSourceProps) {
   );
 
   const createVideoFileStream = useCallback(
-    async (fps: number) => {
+    async (fps: number, overrideSource?: string | File) => {
       const result = await createVideoFileStreamFromFile(
-        selectedVideoFile,
+        overrideSource ?? selectedVideoFile,
         fps
       );
       return result.stream;
@@ -163,17 +202,16 @@ export function useVideoSource(props?: UseVideoSourceProps) {
   }, []);
 
   const switchMode = useCallback(
-    async (newMode: VideoSourceMode) => {
-      // Don't switch modes if not enabled
-      if (!props?.enabled) {
-        return;
-      }
-
+    async (newMode: VideoSourceMode, file?: string | File) => {
+      modeRef.current = newMode;
       setMode(newMode);
       setError(null);
 
-      // Spout/NDI mode - no local stream needed, input comes from server-side receiver
-      if (newMode === "spout" || newMode === "ndi") {
+      // Server-side source modes (spout/ndi/syphon and any plugin-registered
+      // id like "youtube") don't need a local MediaStream — frames come from
+      // the backend's source_manager. Only "video" and "camera" are browser-
+      // driven.
+      if (!isBrowserSourceMode(newMode)) {
         if (localStream) {
           localStream.getTracks().forEach(track => track.stop());
         }
@@ -188,9 +226,15 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       let newStream: MediaStream | null = null;
 
       if (newMode === "video") {
-        // Create video file stream
+        // Create video file stream. When a file is provided, seed
+        // `selectedVideoFile` so subsequent calls (reinitialize, cycle index)
+        // see the right source. Pass it explicitly to createVideoFileStream to
+        // avoid the React render race where the setter hasn't flushed yet.
+        if (file !== undefined) {
+          setSelectedVideoFile(file);
+        }
         try {
-          newStream = await createVideoFileStream(FPS);
+          newStream = await createVideoFileStream(FPS, file);
         } catch (error) {
           console.error("Failed to create video file stream:", error);
           setError("Failed to load test video");
@@ -238,13 +282,6 @@ export function useVideoSource(props?: UseVideoSourceProps) {
 
   const handleVideoFileUpload = useCallback(
     async (file: File) => {
-      // Validate file size (10MB limit)
-      const maxSize = 10 * 1024 * 1024; // 10MB in bytes
-      if (file.size > maxSize) {
-        setError("File size must be less than 10MB");
-        return false;
-      }
-
       // Validate file type
       if (!file.type.startsWith("video/")) {
         setError("Please select a video file");
@@ -296,6 +333,38 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     [localStream, createVideoFileStreamFromFile, props]
   );
 
+  const cycleSampleVideo = useCallback(async () => {
+    const currentUrl =
+      typeof selectedVideoFile === "string" ? selectedVideoFile : null;
+    const currentIndex = currentUrl ? SAMPLE_VIDEOS.indexOf(currentUrl) : -1;
+    const nextUrl = SAMPLE_VIDEOS[(currentIndex + 1) % SAMPLE_VIDEOS.length];
+
+    setError(null);
+    setSelectedVideoFile(nextUrl);
+
+    if (localStream) {
+      localStream.getTracks().forEach(track => track.stop());
+    }
+    if (videoElementRef.current) {
+      videoElementRef.current.pause();
+      videoElementRef.current = null;
+    }
+
+    try {
+      setIsInitializing(true);
+      const { stream: newStream } = await createVideoFileStreamFromFile(
+        nextUrl,
+        FPS
+      );
+      setLocalStream(newStream);
+    } catch (error) {
+      console.error("Failed to cycle sample video:", error);
+      setError("Failed to load sample video");
+    } finally {
+      setIsInitializing(false);
+    }
+  }, [selectedVideoFile, localStream, createVideoFileStreamFromFile]);
+
   const stopVideo = useCallback(() => {
     if (localStream) {
       localStream.getTracks().forEach(track => track.stop());
@@ -312,7 +381,7 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     setIsInitializing(true);
     setError(null);
 
-    // Ensure we're in video mode when reinitializing
+    modeRef.current = "video";
     setMode("video");
 
     try {
@@ -351,10 +420,16 @@ export function useVideoSource(props?: UseVideoSourceProps) {
       setIsInitializing(true);
       try {
         const stream = await createVideoFileStream(FPS);
-        setLocalStream(stream);
+        if (modeRef.current === "video") {
+          setLocalStream(stream);
+        } else {
+          stream.getTracks().forEach(track => track.stop());
+        }
       } catch (error) {
-        console.error("Failed to create initial video file stream:", error);
-        setError("Failed to load test video");
+        if (modeRef.current === "video") {
+          console.error("Failed to create initial video file stream:", error);
+          setError("Failed to load test video");
+        }
       } finally {
         setIsInitializing(false);
       }
@@ -386,9 +461,12 @@ export function useVideoSource(props?: UseVideoSourceProps) {
     error,
     mode,
     videoResolution,
+    selectedVideoFile,
+    setSelectedVideoFile,
     switchMode,
     stopVideo,
     handleVideoFileUpload,
+    cycleSampleVideo,
     reinitializeVideoSource,
   };
 }

@@ -1,4 +1,4 @@
-"""Spout/Syphon output sink implementation."""
+"""Spout output sink implementation (Windows)."""
 
 import logging
 from typing import ClassVar
@@ -12,15 +12,15 @@ logger = logging.getLogger(__name__)
 
 
 class SpoutOutputSink(OutputSink):
-    """Output sink that sends video frames via Spout (Windows) or Syphon (macOS).
+    """Output sink that sends video frames via Spout on Windows.
 
     Wraps the existing SpoutSender from scope.server.spout.
     """
 
     source_id: ClassVar[str] = "spout"
-    source_name: ClassVar[str] = "Spout/Syphon"
+    source_name: ClassVar[str] = "Spout"
     source_description: ClassVar[str] = (
-        "Send video frames to Spout (Windows) or Syphon (macOS) receivers "
+        "Send video frames to Spout receivers on Windows "
         "like TouchDesigner, Resolume, OBS, etc."
     )
 

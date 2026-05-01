@@ -1,5 +1,6 @@
 import { app, ipcMain, nativeImage, dialog, session, shell } from 'electron';
 import path from 'path';
+import fs from 'fs';
 import { execSync } from 'child_process';
 import { autoUpdater } from 'electron-updater';
 import log from 'electron-log';
@@ -19,6 +20,7 @@ const PROTOCOL_SCHEME = 'daydream-scope';
  */
 type DeepLinkData =
   | { action: 'install-plugin'; package: string }
+  | { action: 'install-workflow'; id: string }
   | { action: 'auth-callback'; token: string; userId: string | null; state: string | null };
 
 // Store pending deep link for processing after frontend loads
@@ -34,7 +36,7 @@ autoUpdater.autoInstallOnAppQuit = true; // Install updates when app quits
 autoUpdater.disableDifferentialDownload = true; // Disable differential downloads (no blockmaps)
 
 // Auto-updater event handlers
-let updateDownloaded = false;
+let userInitiatedDownload = false;
 
 autoUpdater.on('checking-for-update', () => {
   logger.info('Checking for updates...');
@@ -54,7 +56,14 @@ autoUpdater.on('update-available', (info) => {
     cancelId: 1
   }).then(result => {
     if (result.response === 0) {
-      autoUpdater.downloadUpdate();
+      userInitiatedDownload = true;
+      autoUpdater.downloadUpdate().catch(err => {
+        logger.error('Failed to download update:', err);
+        dialog.showErrorBox(
+          'Update Download Failed',
+          `Failed to download the update: ${err.message}\n\nPlease try again later or download the update manually.`
+        );
+      });
     }
   });
 });
@@ -65,6 +74,14 @@ autoUpdater.on('update-not-available', (info) => {
 
 autoUpdater.on('error', (err) => {
   logger.error('Auto-updater error:', err);
+  // Only show error dialog if the user actively initiated the download,
+  // to avoid noisy popups from background update checks on flaky networks.
+  if (userInitiatedDownload) {
+    dialog.showErrorBox(
+      'Update Error',
+      `An error occurred during the update process: ${err.message}`
+    );
+  }
 });
 
 autoUpdater.on('download-progress', (progressObj) => {
@@ -73,7 +90,6 @@ autoUpdater.on('download-progress', (progressObj) => {
 
 autoUpdater.on('update-downloaded', (info) => {
   logger.info('Update downloaded:', info);
-  updateDownloaded = true;
 
   // Notify user that update is ready
   dialog.showMessageBox({
@@ -269,6 +285,13 @@ function parseDeepLinkUrl(url: string): DeepLinkData | null {
       }
     }
 
+    if (action === 'install-workflow') {
+      const workflowId = parsed.searchParams.get('id');
+      if (workflowId) {
+        return { action, id: decodeURIComponent(workflowId) };
+      }
+    }
+
     if (action === 'auth-callback') {
       const token = parsed.searchParams.get('token');
       if (token) {
@@ -303,6 +326,9 @@ function dispatchDeepLink(data: DeepLinkData): void {
     electronAppService.sendAuthCallback({ token: data.token, userId: data.userId, state: data.state });
   } else if (data.action === 'install-plugin') {
     electronAppService.sendDeepLinkAction({ action: data.action, package: data.package });
+  } else if (data.action === 'install-workflow') {
+    logger.info(`Received install-workflow deep link for Workflow ID: ${data.id}`);
+    electronAppService.sendDeepLinkAction({ action: data.action, id: data.id });
   }
 }
 
@@ -629,12 +655,59 @@ async function startServer(): Promise<void> {
 }
 
 /**
- * Configure session permissions
- * Shows user consent dialogs for permissions instead of denying all
+ * Persistent permission store.
+ *
+ * Reads/writes a JSON file in userData so that permission decisions survive
+ * app restarts.  The in-memory map (`grantedPermissions`) is the authority
+ * at runtime; the file is only read once at startup.
+ */
+const PERMISSIONS_FILE = path.join(app.getPath('userData'), 'permissions.json');
+const grantedPermissions = new Set<string>();
+
+function loadPersistedPermissions(): void {
+  try {
+    if (fs.existsSync(PERMISSIONS_FILE)) {
+      const data = JSON.parse(fs.readFileSync(PERMISSIONS_FILE, 'utf-8'));
+      if (Array.isArray(data)) {
+        for (const p of data) grantedPermissions.add(p);
+      }
+      logger.info(`Loaded ${grantedPermissions.size} persisted permission(s)`);
+    }
+  } catch (e) {
+    logger.warn('Failed to load persisted permissions:', e);
+  }
+}
+
+function persistPermissions(): void {
+  try {
+    fs.writeFileSync(
+      PERMISSIONS_FILE,
+      JSON.stringify([...grantedPermissions], null, 2),
+      'utf-8'
+    );
+  } catch (e) {
+    logger.warn('Failed to persist permissions:', e);
+  }
+}
+
+/**
+ * Configure session permissions.
+ *
+ * Previously-granted permissions are remembered (both in-memory for the
+ * current session AND on disk across restarts) so the user is only prompted
+ * once per permission type.
  */
 async function configureSessionPermissions(): Promise<void> {
-  // Set permission request handler - ask user for consent
-  session.defaultSession.setPermissionRequestHandler(async (webContents, permission, callback, details) => {
+  loadPersistedPermissions();
+
+  // Set permission request handler - auto-grant cached, prompt otherwise
+  session.defaultSession.setPermissionRequestHandler(async (_webContents, permission, callback) => {
+    // Fast path: permission was already granted
+    if (grantedPermissions.has(permission)) {
+      callback(true);
+      return;
+    }
+
     try {
       // Check if main window exists
       if (!appState.mainWindow || appState.mainWindow.isDestroyed()) {
@@ -660,51 +733,39 @@ async function configureSessionPermissions(): Promise<void> {
       };
 
       const description = permissionDescriptions[permission] || permissionDescriptions.unknown;
-      const requestingUrl = details.requestingUrl || 'Unknown source';
 
       // Show permission dialog to user
       const result = await dialog.showMessageBox(appState.mainWindow, {
         type: 'question',
         title: 'Permission Request',
         message: `Allow "${permission}" permission?`,
-        detail: `${description}\n\nRequested by: ${requestingUrl}`,
+        detail: description,
         buttons: ['Allow', 'Deny'],
         defaultId: 0,
         cancelId: 1,
-        checkboxLabel: 'Remember this decision',
-        checkboxChecked: false
       });
 
       const granted = result.response === 0;
-      const remember = result.checkboxChecked;
 
       if (granted) {
-        logger.info(`Permission granted: ${permission} (remember: ${remember})`);
-        if (remember) {
-          // TODO: Store permission decision persistently
-          logger.info(`Would persist permission grant for: ${permission}`);
-        }
+        grantedPermissions.add(permission);
+        persistPermissions();
+        logger.info(`Permission granted and persisted: ${permission}`);
       } else {
-        logger.info(`Permission denied: ${permission} (remember: ${remember})`);
-        if (remember) {
-          // TODO: Store permission denial persistently
-          logger.info(`Would persist permission denial for: ${permission}`);
-        }
+        logger.info(`Permission denied: ${permission}`);
       }
 
       callback(granted);
     } catch (error) {
       logger.error('Error handling permission request:', error);
-      // Deny permission on error for security
       callback(false);
     }
   });
 
-  // Set permission check handler - deny all by default for security
-  session.defaultSession.setPermissionCheckHandler(() => {
-    // Permission checks are handled by the request handler above
-    // This ensures no permissions are granted without user consent
-    return false;
+  // Return true for previously-granted permissions so Chromium doesn't
+  // trigger a new request handler call for synchronous permission checks.
+  session.defaultSession.setPermissionCheckHandler((_webContents, permission) => {
+    return grantedPermissions.has(permission);
   });
 
   // Disable cache in development mode to ensure fresh frontend code
@@ -723,7 +784,7 @@ async function configureSessionPermissions(): Promise<void> {
     logger.info('Cache disabled in development mode');
   }
 
-  logger.info('Session permissions configured with user consent dialogs');
+  logger.info('Session permissions configured with persistent caching');
 }
 
 /**
@@ -858,9 +919,9 @@ app.on('ready', async () => {
   if (process.platform === 'darwin') {
     let iconPath: string;
     if (app.isPackaged) {
-      iconPath = path.join(process.resourcesPath, 'app', 'assets', 'icon.png');
+      iconPath = path.join(process.resourcesPath, 'app', 'assets', 'icon.icns');
     } else {
-      iconPath = path.join(__dirname, '../../assets/icon.png');
+      iconPath = path.join(__dirname, '../../assets/icon.icns');
     }
     const icon = nativeImage.createFromPath(iconPath);
     if (!icon.isEmpty()) {

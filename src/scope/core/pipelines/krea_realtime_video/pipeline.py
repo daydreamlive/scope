@@ -48,6 +48,7 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         compile: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
+        stage_callback=None,
     ):
         from .modules.causal_model import CausalWanModel
 
@@ -70,6 +71,8 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         base_model_kwargs = getattr(model_config, "base_model_kwargs", {})
 
         # Load generator
+        if stage_callback:
+            stage_callback("Loading diffusion model...")
         start = time.time()
         generator = WanDiffusionWrapper(
             CausalWanModel,
@@ -85,6 +88,8 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
             block.self_attn.fuse_projections()
 
         # Load text encoder before VACE initialization
+        if stage_callback:
+            stage_callback("Loading text encoder...")
         start = time.time()
         text_encoder = WanTextEncoderWrapper(
             model_name=base_model_name,
@@ -144,6 +149,8 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         # Load VAE using create_vae factory (supports multiple VAE types)
         # Note: VAE is shared across all Wan model sizes, stored in Wan2.1-T2V-1.3B
         # By not sending model_name, create_vae will use the default "wan" VAE type.
+        if stage_callback:
+            stage_callback("Loading VAE...")
         vae_type = getattr(config, "vae_type", "wan")
         start = time.time()
         vae = create_vae(
@@ -156,6 +163,8 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         vae = vae.to(device=device, dtype=dtype)
 
         # Create components config
+        if stage_callback:
+            stage_callback("Initializing pipeline...")
         components_config = {}
         components_config.update(model_config)
         components_config["device"] = device
@@ -198,6 +207,8 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         num_frame_per_block = getattr(model_config, "num_frame_per_block", 3)
         warmup_runs = (local_attn_size // num_frame_per_block) + 1
 
+        if stage_callback:
+            stage_callback("Warming up model...")
         start = time.time()
         for i in range(warmup_runs):
             self._generate(

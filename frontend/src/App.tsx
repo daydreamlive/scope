@@ -3,18 +3,19 @@ import { StreamPage } from "./pages/StreamPage";
 import { Toaster } from "./components/ui/sonner";
 import { PipelinesProvider } from "./contexts/PipelinesContext";
 import { LoRAsProvider } from "./contexts/LoRAsContext";
-import { CloudProvider } from "./lib/cloudContext";
+import { PluginsProvider } from "./contexts/PluginsContext";
+import { ServerInfoProvider } from "./contexts/ServerInfoContext";
 import { CloudStatusProvider } from "./hooks/useCloudStatus";
-import { handleOAuthCallback, initElectronAuthListener } from "./lib/auth";
+import { OnboardingProvider } from "./contexts/OnboardingContext";
+import { BillingProvider } from "./contexts/BillingContext";
+import {
+  handleOAuthCallback,
+  initElectronAuthListener,
+  initEnvKeyAuth,
+} from "./lib/auth";
 import { toast } from "sonner";
+import { TelemetryProvider } from "./contexts/TelemetryContext";
 import "./index.css";
-
-// Get cloud WebSocket URL and API key from environment variables
-// Set VITE_CLOUD_WS_URL to enable cloud mode, e.g.:
-// VITE_CLOUD_WS_URL=wss://fal.run/your-username/scope-app/ws
-// VITE_CLOUD_KEY=your-cloud-api-key
-const CLOUD_WS_URL = import.meta.env.VITE_CLOUD_WS_URL as string | undefined;
-const CLOUD_KEY = import.meta.env.VITE_CLOUD_KEY as string | undefined;
 
 type AuthResult =
   | { type: "success" }
@@ -41,15 +42,18 @@ function App() {
       }
     );
 
-    // Handle OAuth callback on mount (for browser flow)
+    // Handle OAuth callback on mount (for browser flow), then try env key auth
     handleOAuthCallback()
-      .then(handled => {
+      .then(async handled => {
         if (handled) {
           setAuthResult({ type: "success" });
+          return;
         }
+        // No OAuth callback — bootstrap auth from env API key if set
+        await initEnvKeyAuth();
       })
       .catch(error => {
-        console.error("OAuth callback error:", error);
+        console.error("Auth initialization error:", error);
         setAuthResult({
           type: "error",
           message: error instanceof Error ? error.message : "Please try again.",
@@ -94,16 +98,24 @@ function App() {
   }
 
   return (
-    <CloudStatusProvider>
-      <PipelinesProvider>
-        <LoRAsProvider>
-          <CloudProvider wsUrl={CLOUD_WS_URL} apiKey={CLOUD_KEY}>
-            <StreamPage />
-          </CloudProvider>
-          <Toaster />
-        </LoRAsProvider>
-      </PipelinesProvider>
-    </CloudStatusProvider>
+    <TelemetryProvider>
+      <CloudStatusProvider>
+        <BillingProvider>
+          <PipelinesProvider>
+            <LoRAsProvider>
+              <PluginsProvider>
+                <ServerInfoProvider>
+                  <OnboardingProvider>
+                    <StreamPage />
+                  </OnboardingProvider>
+                </ServerInfoProvider>
+              </PluginsProvider>
+              <Toaster />
+            </LoRAsProvider>
+          </PipelinesProvider>
+        </BillingProvider>
+      </CloudStatusProvider>
+    </TelemetryProvider>
   );
 }
 

@@ -59,12 +59,16 @@ interface DiscoverTabProps {
   onInstall: (packageSpec: string) => void;
   installedRepoUrls: string[];
   isInstalling?: boolean;
+  disabled?: boolean;
+  cloudConnected?: boolean;
 }
 
 export function DiscoverTab({
   onInstall,
   installedRepoUrls,
   isInstalling = false,
+  disabled = false,
+  cloudConnected = false,
 }: DiscoverTabProps) {
   const [plugins, setPlugins] = useState<DaydreamPlugin[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -84,6 +88,7 @@ export function DiscoverTab({
       const params = new URLSearchParams({
         limit: "50",
         sortBy: "popularity",
+        remoteOnly: String(cloudConnected),
       });
       if (debouncedSearch) {
         params.set("search", debouncedSearch);
@@ -102,7 +107,7 @@ export function DiscoverTab({
     } finally {
       setIsLoading(false);
     }
-  }, [debouncedSearch]);
+  }, [debouncedSearch, cloudConnected]);
 
   useEffect(() => {
     fetchDiscoverPlugins();
@@ -117,7 +122,7 @@ export function DiscoverTab({
         <Input
           value={search}
           onChange={e => setSearch(e.target.value)}
-          placeholder="Search plugins..."
+          placeholder="Search nodes..."
           className="pl-9"
         />
       </div>
@@ -141,8 +146,8 @@ export function DiscoverTab({
       ) : plugins.length === 0 ? (
         <p className="text-sm text-muted-foreground text-center py-8">
           {debouncedSearch
-            ? "No plugins found matching your search."
-            : "No plugins available."}
+            ? "No nodes found matching your search."
+            : "No nodes available."}
         </p>
       ) : (
         <div className="space-y-3">
@@ -245,8 +250,10 @@ export function DiscoverTab({
                       size="icon"
                       className="h-8 w-8"
                       title={`Install ${plugin.name}`}
-                      disabled={isInstalling}
-                      onClick={() => onInstall(`git+${plugin.repositoryUrl}`)}
+                      disabled={disabled || isInstalling}
+                      onClick={() => {
+                        onInstall(`git+${plugin.repositoryUrl}`);
+                      }}
                     >
                       <Download className="h-4 w-4" />
                     </Button>
