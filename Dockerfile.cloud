@@ -45,6 +45,12 @@ RUN uv python install && \
 # Copy project files
 COPY src/ /app/src/
 
+# Pre-build the venv with the runtime extras the cloud wrapper invokes
+# (`uv run --extra livepeer --extra kafka livepeer-runner`). Without this
+# the first cold start has to fetch + install aiokafka, uvicorn[standard],
+# and re-resolve the entire dep graph at runtime — adds ~10s per cold start.
+RUN uv sync --extra livepeer --extra kafka --no-dev
+
 # Pre-install bundled plugins (cannot be removed by users)
 ENV DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE="/app/bundled-plugins.txt"
 RUN echo "git+https://github.com/daydreamlive/scope-ltx-2.git@d13b5f9d94130b975989cd820eedbef5b3a8f165" > /app/bundled-plugins.txt
