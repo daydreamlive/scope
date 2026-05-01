@@ -1546,6 +1546,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         if control_task is not None:
             await _shutdown_task(control_task, task_name="control_channel")
         _connection_active = False
+        logger.info("XXX: WebSocket client disconnected")
         set_connection_id(None)
 
 
