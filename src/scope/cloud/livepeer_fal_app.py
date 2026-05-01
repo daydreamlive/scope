@@ -392,11 +392,18 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
 
     image = custom_image
     machine_type = "GPU-H100"
-    # Empty `requirements` so fal isolate doesn't provision a SECOND venv
-    # alongside the image's pre-built one. websockets, httpx, and aiokafka
-    # are baked into the container image (httpx + websockets via base deps;
-    # aiokafka via the `kafka` extra installed in Dockerfile.cloud's uv sync).
-    requirements: list[str] = []
+    # These are required in fal isolate's runtime context (separate from
+    # the image's /app/.venv), where the App's setup() and websocket
+    # handler actually run. They're cheap — the real cold-start savings
+    # come from the image-level `uv sync --extra livepeer --extra kafka`
+    # in Dockerfile.cloud and the fal-side dockerfile_str re-sync, which
+    # together skip the ~10s `uv run --extra` resync that previously fired
+    # when the wrapper invoked `livepeer-runner`.
+    requirements = [
+        "websockets",
+        "httpx",
+        "aiokafka",
+    ]
 
     def setup(self):
         """Start the Livepeer runner as a background subprocess."""
