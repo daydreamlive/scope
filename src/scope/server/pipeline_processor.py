@@ -500,8 +500,15 @@ class PipelineProcessor:
             self._last_batch_time = None
             self.paused = paused
         if self.paused:
-            self.shutdown_event.wait(SLEEP_TIME)
-            return
+            # While paused, a one-shot `step: true` trigger advances the
+            # pipeline by exactly one chunk before falling back to paused.
+            # Used by frame-by-frame render drivers that clock the pipeline
+            # off-line — engines stay loaded, no separate session needed.
+            if self.parameters.pop("step", False):
+                pass  # fall through to process_chunk
+            else:
+                self.shutdown_event.wait(SLEEP_TIME)
+                return
 
         # Prepare pipeline
         reset_cache = self.parameters.pop("reset_cache", None)
