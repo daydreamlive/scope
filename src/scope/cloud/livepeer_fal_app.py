@@ -262,11 +262,17 @@ def _get_git_sha() -> str:
 
 GIT_SHA = _get_git_sha()
 DOCKER_IMAGE = f"daydreamlive/scope:{GIT_SHA}"
+# Re-sync after COPY so the daydream-scope editable install picks up the
+# freshly-copied src/ at image build time. Without this, the first `uv run`
+# at cold start sees a stale path source and rebuilds + reinstalls the
+# project (the ~10s "Built daydream-scope @ file:///app" + Uninstalled/Installed
+# block visible in cold-start logs).
 dockerfile_str = f"""
 FROM {DOCKER_IMAGE}
 WORKDIR /app
 COPY pyproject.toml uv.lock README.md patches.pth /app/
 COPY src/ /app/src/
+RUN uv sync --extra livepeer --extra kafka --no-dev
 """
 custom_image = ContainerImage.from_dockerfile_str(
     dockerfile_str,
@@ -386,6 +392,13 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
 
     image = custom_image
     machine_type = "GPU-H100"
+    # These are required in fal isolate's runtime context (separate from
+    # the image's /app/.venv), where the App's setup() and websocket
+    # handler actually run. They're cheap — the real cold-start savings
+    # come from the image-level `uv sync --extra livepeer --extra kafka`
+    # in Dockerfile.cloud and the fal-side dockerfile_str re-sync, which
+    # together skip the ~10s `uv run --extra` resync that previously fired
+    # when the wrapper invoked `livepeer-runner`.
     requirements = [
         "websockets",
         "httpx",
