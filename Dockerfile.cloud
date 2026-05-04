@@ -1,4 +1,7 @@
-FROM nvidia/cuda:12.8.0-cudnn-runtime-ubuntu24.04
+# Use the plain `runtime` variant (no cuDNN). pyproject.toml overrides
+# `nvidia-cudnn-cu12>=9.15` so cuDNN ships in the venv anyway, and the
+# base copy was dead weight (~700 MB).
+FROM nvidia/cuda:12.8.0-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 ENV PYTHONUNBUFFERED=1
@@ -55,6 +58,20 @@ RUN uv sync --extra livepeer --extra kafka --no-dev
 ENV DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE="/app/bundled-plugins.txt"
 RUN echo "git+https://github.com/daydreamlive/scope-ltx-2.git@d13b5f9d94130b975989cd820eedbef5b3a8f165" > /app/bundled-plugins.txt
 RUN uv run daydream-scope install git+https://github.com/daydreamlive/scope-ltx-2.git@d13b5f9d94130b975989cd820eedbef5b3a8f165
+
+# Strip never-at-runtime files from the venv to shrink the image.
+# Keep .pyc/__pycache__ so first import isn't slowed by recompilation.
+# Drop C/C++ headers/sources (only used at compile time), package
+# tests/ and docs/ directories, .pdb debug symbols, and the uv/apt
+# caches we don't need at runtime. Keep examples/ — some packages
+# import from it.
+RUN find /app/.venv -depth -type d \
+      \( -name 'tests' -o -name 'test' -o -name 'doc' -o -name 'docs' \) \
+      -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/.venv -type f \
+      \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.pdb' \) \
+      -delete 2>/dev/null || true && \
+    rm -rf /tmp/uv-cache /root/.cache /var/cache/apt/archives/*.deb
 
 # Expose port 8000 for RunPod HTTP proxy
 EXPOSE 8000
