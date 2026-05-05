@@ -78,9 +78,13 @@ WORKDIR /app
 
 # Runtime-only system libs (no build-essential / git / python3-dev — those
 # stayed in the builder stage). python3.12 is required for fal's image
-# check (`check_python.sh 3.12 python3.12` looks for it on PATH).
+# check (`check_python.sh 3.12 python3.12` looks for it on PATH). curl +
+# ca-certificates are needed by fal's `install_uv.sh` (it tries to
+# (re)install uv even though we already shipped one in the image).
 RUN apt-get update && apt-get install -y --no-install-recommends \
   python3.12 \
+  curl \
+  ca-certificates \
   libgl1 \
   libglib2.0-0 \
   libsm6 \
