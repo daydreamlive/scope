@@ -70,6 +70,12 @@ async def lifespan(_app: FastAPI):
     """Initialize embedded Scope app lifespan and ASGI client."""
     global scope_client
     async with scope_lifespan(scope_app):
+        # Pre-warm the pipeline registry so the import cascade
+        # (torch / diffusers / transformers / torchao / per-pipeline modules)
+        # runs at runner startup instead of on the first cloud-proxy request.
+        # Shaves the registry-init delay out of the user-perceived connect path.
+        import scope.core.pipelines.registry  # noqa: F401
+
         scope_client = httpx.AsyncClient(
             transport=httpx.ASGITransport(app=scope_app),
             base_url="http://runner",
@@ -1546,6 +1552,7 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         if control_task is not None:
             await _shutdown_task(control_task, task_name="control_channel")
         _connection_active = False
+        logger.info("XXX: WebSocket client disconnected")
         set_connection_id(None)
 
 
