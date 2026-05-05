@@ -1,6 +1,69 @@
-# Use the plain `runtime` variant (no cuDNN). pyproject.toml overrides
-# `nvidia-cudnn-cu12>=9.15` so cuDNN ships in the venv anyway, and the
-# base copy was dead weight (~700 MB).
+# --- Builder stage ---------------------------------------------------------
+# Build-only deps live here (build-essential, git, python3-dev, etc.) so the
+# final stage can drop them entirely.
+FROM nvidia/cuda:12.8.0-runtime-ubuntu24.04 AS builder
+
+ENV DEBIAN_FRONTEND=noninteractive
+ENV PYTHONUNBUFFERED=1
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  curl \
+  git \
+  build-essential \
+  software-properties-common \
+  python3-dev \
+  && rm -rf /var/lib/apt/lists/*
+
+ENV UV_INSTALL_DIR="/usr/local/bin"
+RUN curl -LsSf https://astral.sh/uv/0.9.11/install.sh | sh && \
+    mkdir -p /root/.local/bin && \
+    ln -s /usr/local/bin/uv /root/.local/bin/uv
+
+ENV UV_CACHE_DIR="/tmp/uv-cache"
+COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
+
+RUN uv python install && \
+    chmod -R a+rX /root/.local/share/uv
+
+COPY src/ /app/src/
+
+# Build the venv with all runtime extras the cloud wrapper invokes
+# (`uv run --extra livepeer --extra kafka livepeer-runner`).
+RUN uv sync --extra livepeer --extra kafka --no-dev
+
+# Pre-install bundled plugins (cannot be removed by users).
+ENV DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE="/app/bundled-plugins.txt"
+RUN echo "git+https://github.com/daydreamlive/scope-ltx-2.git@d13b5f9d94130b975989cd820eedbef5b3a8f165" > /app/bundled-plugins.txt
+RUN uv run daydream-scope install git+https://github.com/daydreamlive/scope-ltx-2.git@d13b5f9d94130b975989cd820eedbef5b3a8f165
+
+# Strip never-at-runtime files from the venv, plus duplicated CUDA libs that
+# the base image already ships under /usr/local/cuda/lib64. Keep cuDNN
+# (pyproject `override-dependencies` pins it newer than the base for a Conv3D
+# regression), cusparselt (not in base), nccl/cupti/nvtx/nvjitlink/nvshmem
+# (small or version-sensitive). Leave the dist-info directories so uv's later
+# `sync` (in the fal-side image extension) treats these packages as
+# installed and skips reinstall.
+RUN find /app/.venv -depth -type d \
+      \( -name 'tests' -o -name 'test' -o -name 'doc' -o -name 'docs' \) \
+      -exec rm -rf {} + 2>/dev/null || true && \
+    find /app/.venv -type f \
+      \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.pdb' \) \
+      -delete 2>/dev/null || true && \
+    rm -rf \
+      /app/.venv/lib/python3.12/site-packages/nvidia/cublas \
+      /app/.venv/lib/python3.12/site-packages/nvidia/cufft \
+      /app/.venv/lib/python3.12/site-packages/nvidia/curand \
+      /app/.venv/lib/python3.12/site-packages/nvidia/cusolver \
+      /app/.venv/lib/python3.12/site-packages/nvidia/cusparse \
+      /app/.venv/lib/python3.12/site-packages/nvidia/cuda_runtime \
+      /app/.venv/lib/python3.12/site-packages/nvidia/cuda_nvrtc && \
+    rm -rf /tmp/uv-cache /root/.cache /var/cache/apt/archives/*.deb
+
+
+# --- Runtime stage ---------------------------------------------------------
+# Minimal: copies the venv + uv-managed Python from the builder, no build deps.
 FROM nvidia/cuda:12.8.0-runtime-ubuntu24.04
 
 ENV DEBIAN_FRONTEND=noninteractive
@@ -13,68 +76,35 @@ ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
 
 WORKDIR /app
 
+# Runtime-only system libs (no build-essential / git / python3-dev — those
+# stayed in the builder stage).
 RUN apt-get update && apt-get install -y --no-install-recommends \
-  # System dependencies
-  curl \
-  git \
-  build-essential \
-  software-properties-common \
-  # Dependencies required for OpenCV
   libgl1 \
   libglib2.0-0 \
   libsm6 \
   libxext6 \
   libxrender-dev \
   libgomp1 \
-  python3-dev \
-  # Cleanup
   && rm -rf /var/lib/apt/lists/*
 
-# Install uv (Python package manager) to system-wide location
+# uv binary + uv-managed Python interpreter (the venv's bin/python is a
+# symlink into /root/.local/share/uv/python/...).
+COPY --from=builder /usr/local/bin/uv /usr/local/bin/uv
+COPY --from=builder /root/.local/share/uv /root/.local/share/uv
+RUN mkdir -p /root/.local/bin && ln -s /usr/local/bin/uv /root/.local/bin/uv
 ENV UV_INSTALL_DIR="/usr/local/bin"
-RUN curl -LsSf https://astral.sh/uv/0.9.11/install.sh | sh && \
-    # Create symlink for fal.ai deploy which hardcodes $HOME/.local/bin/uv
-    mkdir -p /root/.local/bin && \
-    ln -s /usr/local/bin/uv /root/.local/bin/uv
-
-# Python/uv configuration - use default location but make world-readable
 ENV UV_CACHE_DIR="/tmp/uv-cache"
-COPY pyproject.toml uv.lock README.md .python-version LICENSE.md patches.pth .
 
-# Pre-install Python to uv's default location and make it world-readable
-RUN uv python install && \
-    chmod -R a+rX /root/.local/share/uv
+# App + venv from the builder. .venv has stripped nvidia-* lib dirs whose
+# .so files now come from the base image's /usr/local/cuda/lib64.
+COPY --from=builder /app /app
 
-# Copy project files
-COPY src/ /app/src/
-
-# Pre-build the venv with the runtime extras the cloud wrapper invokes
-# (`uv run --extra livepeer --extra kafka livepeer-runner`). Without this
-# the first cold start has to fetch + install aiokafka, uvicorn[standard],
-# and re-resolve the entire dep graph at runtime — adds ~10s per cold start.
-RUN uv sync --extra livepeer --extra kafka --no-dev
-
-# Pre-install bundled plugins (cannot be removed by users)
 ENV DAYDREAM_SCOPE_BUNDLED_PLUGINS_FILE="/app/bundled-plugins.txt"
-RUN echo "git+https://github.com/daydreamlive/scope-ltx-2.git@d13b5f9d94130b975989cd820eedbef5b3a8f165" > /app/bundled-plugins.txt
-RUN uv run daydream-scope install git+https://github.com/daydreamlive/scope-ltx-2.git@d13b5f9d94130b975989cd820eedbef5b3a8f165
 
-# Strip never-at-runtime files from the venv to shrink the image.
-# Keep .pyc/__pycache__ so first import isn't slowed by recompilation.
-# Drop C/C++ headers/sources (only used at compile time), package
-# tests/ and docs/ directories, .pdb debug symbols, and the uv/apt
-# caches we don't need at runtime. Keep examples/ — some packages
-# import from it.
-RUN find /app/.venv -depth -type d \
-      \( -name 'tests' -o -name 'test' -o -name 'doc' -o -name 'docs' \) \
-      -exec rm -rf {} + 2>/dev/null || true && \
-    find /app/.venv -type f \
-      \( -name '*.h' -o -name '*.c' -o -name '*.cpp' -o -name '*.hpp' -o -name '*.pdb' \) \
-      -delete 2>/dev/null || true && \
-    rm -rf /tmp/uv-cache /root/.cache /var/cache/apt/archives/*.deb
+# Make torch find the base image's CUDA libs for the stripped deps. Keep
+# venv's cuDNN first so the override-pinned newer version wins.
+ENV LD_LIBRARY_PATH="/app/.venv/lib/python3.12/site-packages/nvidia/cudnn/lib:/usr/local/cuda/lib64"
 
-# Expose port 8000 for RunPod HTTP proxy
 EXPOSE 8000
 
-# Default command to run the application
 CMD ["uv", "run", "daydream-scope", "--host", "0.0.0.0", "--port", "8000"]
