@@ -77,8 +77,10 @@ ENV DAYDREAM_SCOPE_MODELS_DIR=/workspace/models
 WORKDIR /app
 
 # Runtime-only system libs (no build-essential / git / python3-dev — those
-# stayed in the builder stage).
+# stayed in the builder stage). python3.12 is required for fal's image
+# check (`check_python.sh 3.12 python3.12` looks for it on PATH).
 RUN apt-get update && apt-get install -y --no-install-recommends \
+  python3.12 \
   libgl1 \
   libglib2.0-0 \
   libsm6 \
