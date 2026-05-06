@@ -41,6 +41,14 @@ interface InitialParameters {
   graph?: GraphConfig;
 }
 
+export interface StreamError {
+  message: string;
+  pipelineId?: string;
+  nodeId?: string;
+  exceptionType?: string;
+  fatal: boolean;
+}
+
 interface UseUnifiedWebRTCOptions {
   /** Callback function called when the stream stops on the backend */
   onStreamStop?: () => void;
@@ -75,6 +83,8 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
     useState<RTCPeerConnectionState>("new");
   const [isConnecting, setIsConnecting] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [streamError, setStreamError] = useState<StreamError | null>(null);
+  const streamErrorShownRef = useRef(false);
 
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const dataChannelRef = useRef<RTCDataChannel | null>(null);
@@ -104,6 +114,11 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
     setRemoteStreams({});
     setConnectionState("new");
     setIsStreaming(false);
+  }, []);
+
+  const clearStreamError = useCallback(() => {
+    setStreamError(null);
+    streamErrorShownRef.current = false;
   }, []);
 
   // Helper to get ICE servers
@@ -158,6 +173,8 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
     ) => {
       if (isConnecting || peerConnectionRef.current) return;
 
+      setStreamError(null);
+      streamErrorShownRef.current = false;
       setIsConnecting(true);
 
       try {
@@ -194,7 +211,30 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
           try {
             const data = JSON.parse(event.data);
 
-            // Handle stream stop notification from backend
+            // Sent before stream_stopped so we can attribute the failure to
+            // a specific pipeline / sink instead of just blanking the video.
+            if (data.type === "pipeline_error") {
+              const message: string =
+                typeof data.message === "string" && data.message.length > 0
+                  ? data.message
+                  : "Pipeline error";
+              const label = data.node_id ?? data.pipeline_id;
+              setStreamError({
+                message,
+                pipelineId: data.pipeline_id,
+                nodeId: data.node_id,
+                exceptionType: data.exception_type,
+                fatal: data.fatal !== false,
+              });
+              if (!streamErrorShownRef.current) {
+                streamErrorShownRef.current = true;
+                toast.error(
+                  label ? `Pipeline Error (${label})` : "Pipeline Error",
+                  { description: message, duration: 8000 }
+                );
+              }
+            }
+
             if (data.type === "stream_stopped") {
               console.log("[UnifiedWebRTC] Stream stopped by backend");
               setIsStreaming(false);
@@ -202,10 +242,15 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
               setRemoteStream(null);
               setRemoteStreams({});
 
-              if (data.error_message) {
-                toast.error("Stream Error", {
+              if (data.error_message && !streamErrorShownRef.current) {
+                streamErrorShownRef.current = true;
+                setStreamError({
+                  message: data.error_message,
+                  fatal: true,
+                });
+                toast.error("Pipeline Error", {
                   description: data.error_message,
-                  duration: 5000,
+                  duration: 8000,
                 });
               }
 
@@ -732,6 +777,8 @@ export function useUnifiedWebRTC(options?: UseUnifiedWebRTCOptions) {
     connectionState,
     isConnecting,
     isStreaming,
+    streamError,
+    clearStreamError,
     peerConnectionRef,
     sinkNodeIdsRef,
     sinkMidMapRef,

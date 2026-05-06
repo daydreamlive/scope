@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Volume2, VolumeX } from "lucide-react";
+import { AlertTriangle, Volume2, VolumeX } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
+import type { StreamError } from "../hooks/useUnifiedWebRTC";
 import { Spinner } from "./ui/spinner";
 import { PlayOverlay } from "./ui/play-overlay";
 import { useCloudStatus } from "../hooks/useCloudStatus";
@@ -13,6 +14,8 @@ interface VideoOutputProps {
   isCloudConnecting?: boolean;
   isConnecting?: boolean;
   pipelineError?: string | null;
+  /** Active runtime stream error from the backend (overlay + replaces video) */
+  streamError?: StreamError | null;
   cloudConnectStage?: string | null;
   pipelineLoadingStage?: string | null;
   isPlaying?: boolean;
@@ -37,6 +40,7 @@ export function VideoOutput({
   isCloudConnecting = false,
   isConnecting = false,
   pipelineError: _pipelineError = null,
+  streamError = null,
   cloudConnectStage = null,
   pipelineLoadingStage = null,
   isPlaying = true,
@@ -203,7 +207,36 @@ export function VideoOutput({
         <CardTitle className="text-base font-medium">Video Output</CardTitle>
       </CardHeader>
       <CardContent className="flex-1 flex items-center justify-center min-h-0 p-4">
-        {remoteStream ? (
+        {streamError ? (
+          (() => {
+            const label = streamError.nodeId ?? streamError.pipelineId;
+            return (
+              <div className="flex flex-col items-center justify-center gap-3 text-center max-w-[480px] px-4">
+                <div className="rounded-full bg-red-500/15 p-3 ring-1 ring-red-500/40">
+                  <AlertTriangle className="w-8 h-8 text-red-400" />
+                </div>
+                <p className="text-base font-medium text-red-300">
+                  {label ? `Pipeline error (${label})` : "Pipeline error"}
+                </p>
+                <p className="text-sm text-red-200/80 break-words leading-relaxed">
+                  {streamError.message}
+                </p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Stream stopped. Check the logs and try again.
+                </p>
+                {onStartStream && (
+                  <button
+                    type="button"
+                    onClick={onStartStream}
+                    className="mt-2 px-3 py-1.5 text-xs rounded-md bg-red-500/20 hover:bg-red-500/30 text-red-100 ring-1 ring-red-500/40 transition-colors"
+                  >
+                    Retry
+                  </button>
+                )}
+              </div>
+            );
+          })()
+        ) : remoteStream ? (
           <div
             ref={containerRef}
             className="relative w-full h-full cursor-pointer flex items-center justify-center"

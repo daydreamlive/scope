@@ -316,7 +316,32 @@ class FrameProcessor:
             connection_info=self.connection_info,
         )
 
-    def stop(self, error_message: str = None):
+    def _handle_pipeline_fatal_error(
+        self, pipeline_id: str, node_id: str | None, message: str
+    ) -> None:
+        """Stop the stream after a pipeline reports a fatal error.
+
+        Dispatched on a fresh daemon thread so we don't try to join the
+        worker thread that's calling us — that would deadlock pipeline
+        shutdown.
+        """
+        if not self.running:
+            return
+        label = node_id or pipeline_id or "pipeline"
+        error_message = f"{label}: {message}"
+        logger.error(
+            "[FRAME-PROCESSOR] Fatal pipeline error from %s — stopping stream: %s",
+            label,
+            message,
+        )
+        threading.Thread(
+            target=self.stop,
+            kwargs={"error_message": error_message},
+            name=f"frame-processor-stop-{label}",
+            daemon=True,
+        ).start()
+
+    def stop(self, error_message: str | None = None):
         if not self.running:
             return
 
@@ -366,9 +391,10 @@ class FrameProcessor:
         # Notify callback that frame processor has stopped
         if self.notification_callback:
             try:
-                message = {"type": "stream_stopped"}
+                message: dict[str, Any] = {"type": "stream_stopped"}
                 if error_message:
                     message["error_message"] = error_message
+                    message["fatal"] = True
                 self.notification_callback(message)
             except Exception as e:
                 logger.error(f"Error in frame processor stop callback: {e}")
@@ -1004,6 +1030,7 @@ class FrameProcessor:
             tempo_sync=self.tempo_sync,
             modulation_engine=self.modulation_engine,
             notification_callback=self.notification_callback,
+            on_fatal_error=self._handle_pipeline_fatal_error,
         )
 
         self._sink_processor = graph_run.sink_processor

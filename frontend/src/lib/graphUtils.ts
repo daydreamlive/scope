@@ -276,6 +276,8 @@ export interface FlowNodeData {
   remoteStream?: MediaStream | null;
   /** For sink nodes: per-sink WebRTC stats (FPS, bitrate) */
   sinkStats?: { fps: number; bitrate: number };
+  /** For sink nodes: active backend stream error to show as an inline overlay */
+  streamError?: import("../hooks/useUnifiedWebRTC").StreamError | null;
   /** For pipeline nodes: whether the selected pipeline supports prompts */
   supportsPrompts?: boolean;
   /** For pipeline nodes: whether the selected pipeline supports cache management (shows Reset Cache button) */
@@ -1172,6 +1174,7 @@ const NON_SERIALIZABLE_KEYS = new Set<string>([
   "localStream",
   "remoteStream",
   "sinkStats",
+  "streamError",
   "onVideoFileUpload",
   "onSourceModeChange",
   "onSpoutSourceChange",

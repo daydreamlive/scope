@@ -2,6 +2,7 @@ import asyncio
 import json
 import logging
 import os
+import threading
 import uuid
 
 # Type checking imports
@@ -1334,14 +1335,29 @@ class WebRTCManager:
         Safe to call from worker threads: sends are marshalled onto the
         aiortc event loop through each session's :class:`NotificationSender`,
         which also buffers messages until the data channel is open.
+
+        When the message is fatal, also tear down the local relay session as
+        a safety net so it doesn't linger if the browser doesn't react.  We
+        deliberately don't pass ``error_message`` to ``FrameProcessor.stop``
+        — the upstream ``stream_stopped`` was already forwarded above and
+        would otherwise duplicate the toast.
         """
+        is_fatal = message.get("fatal") is True
+
         for session in self.sessions.values():
             if session.pc.connectionState in ("closed", "failed"):
                 continue
             sender = session.notification_sender
-            if sender is None:
-                continue
-            sender.call(message)
+            if sender is not None:
+                sender.call(message)
+            if is_fatal:
+                fp = getattr(session, "frame_processor", None)
+                if fp is not None and getattr(fp, "running", False):
+                    threading.Thread(
+                        target=fp.stop,
+                        name=f"webrtc-fatal-stop-{session.id}",
+                        daemon=True,
+                    ).start()
 
     async def stop(self):
         """Close and cleanup all sessions (WebRTC and headless)."""

@@ -69,6 +69,7 @@ def build_graph(
     tempo_sync: Any | None = None,
     modulation_engine: Any | None = None,
     notification_callback: Callable[[dict], None] | None = None,
+    on_fatal_error: Callable[[str, str, str], None] | None = None,
 ) -> GraphRun:
     """Build executable graph: create queues and processors, wire edges.
 
@@ -144,6 +145,7 @@ def build_graph(
                 modulation_engine=modulation_engine if node_gets_tempo else None,
                 node_id=node.id,
                 notification_callback=notification_callback,
+                on_fatal_error=on_fatal_error,
             )
             node_processors[node.id] = processor
             pipeline_ids.append(node.pipeline_id)

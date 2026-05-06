@@ -236,6 +236,7 @@ interface GraphEditorProps {
   remoteStream?: MediaStream | null;
   remoteStreams?: Record<string, MediaStream>;
   sinkStats?: Record<string, { fps: number; bitrate: number }>;
+  streamError?: import("../../hooks/useUnifiedWebRTC").StreamError | null;
   onVideoFileUpload?: (file: File, nodeId?: string) => Promise<boolean>;
   onCycleSampleVideo?: (nodeId?: string) => void;
   onInitSampleVideo?: (nodeId?: string) => void;
@@ -290,6 +291,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       remoteStream,
       remoteStreams,
       sinkStats,
+      streamError = null,
       onVideoFileUpload,
       onCycleSampleVideo,
       onInitSampleVideo,
@@ -396,6 +398,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
         remoteStream,
         remoteStreams,
         sinkStats,
+        streamError,
         isStreaming,
         isPlaying,
         onPlayPauseToggle,

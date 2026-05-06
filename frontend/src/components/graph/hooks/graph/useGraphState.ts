@@ -91,6 +91,7 @@ export interface GraphEditorStreams {
   remoteStream?: MediaStream | null;
   remoteStreams?: Record<string, MediaStream>;
   sinkStats?: Record<string, { fps: number; bitrate: number }>;
+  streamError?: import("../../../../hooks/useUnifiedWebRTC").StreamError | null;
   isStreaming: boolean;
   isLoading?: boolean;
   loadingStage?: string | null;
@@ -281,6 +282,7 @@ export function useGraphState(
     remoteStream: streams.remoteStream,
     remoteStreams: streams.remoteStreams,
     sinkStats: streams.sinkStats,
+    streamError: streams.streamError ?? null,
     onVideoFileUploadRef,
     onSourceModeChangeRef,
     onSpoutSourceChangeRef,
@@ -337,6 +339,7 @@ export function useGraphState(
     streams.remoteStream,
     streams.remoteStreams,
     streams.sinkStats,
+    streams.streamError,
     streams.isStreaming,
     streams.isLoading,
     streams.loadingStage,

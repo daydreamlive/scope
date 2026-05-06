@@ -40,6 +40,11 @@ MIN_FPS = 1.0  # Minimum FPS to prevent division by zero
 MAX_FPS = 60.0  # Maximum FPS cap
 BATCH_FPS_SAMPLE_SIZE = 10  # Number of batch-level samples for windowed averaging
 
+# A pipeline that throws every chunk would otherwise loop silently forever
+# and leave the user staring at a blank screen — escalate to a fatal error
+# after this many consecutive failures so the UI surfaces it.
+MAX_CONSECUTIVE_RECOVERABLE_ERRORS = 10
+
 
 class PipelineProcessor:
     """Processes frames through a single pipeline in a dedicated thread."""
@@ -57,6 +62,7 @@ class PipelineProcessor:
         modulation_engine: Any | None = None,
         node_id: str | None = None,
         notification_callback: Callable[[dict], None] | None = None,
+        on_fatal_error: Callable[[str, str, str], None] | None = None,
     ):
         """Initialize a pipeline processor.
 
@@ -72,6 +78,8 @@ class PipelineProcessor:
             modulation_engine: ModulationEngine for beat-synced param modulation
             node_id: Graph node ID (used for per-node parameter routing in graph mode)
             notification_callback: Lets consumers know of parameter updates etc
+            on_fatal_error: Invoked with (pipeline_id, node_id, error_message)
+                when this pipeline hits a fatal error and should stop the stream.
         """
         self.pipeline = pipeline
         self.pipeline_id = pipeline_id
@@ -83,6 +91,9 @@ class PipelineProcessor:
         self.tempo_sync = tempo_sync
         self.modulation_engine = modulation_engine
         self.notification_callback = notification_callback
+        self.on_fatal_error = on_fatal_error
+        self._consecutive_errors = 0
+        self._last_recoverable_error: tuple[str, str] | None = None
 
         # Port-based queues wired by graph_executor.build_graph()
         self.input_queues: dict[str, queue.Queue] = {}
@@ -338,6 +349,49 @@ class PipelineProcessor:
             )
             return False
 
+    def _trigger_fatal(self, message: str, exception_type: str) -> None:
+        """Notify frontend of a fatal pipeline error and request a stream stop."""
+        if self.notification_callback is not None:
+            try:
+                self.notification_callback(
+                    {
+                        "type": "pipeline_error",
+                        "pipeline_id": self.pipeline_id,
+                        "node_id": self.node_id,
+                        "message": message,
+                        "exception_type": exception_type,
+                        "fatal": True,
+                        "recoverable": False,
+                    }
+                )
+            except Exception:
+                logger.debug(
+                    "Failed to emit pipeline_error notification for %s",
+                    self.pipeline_id,
+                    exc_info=True,
+                )
+        publish_event(
+            event_type="error",
+            session_id=self.session_id,
+            connection_id=self.connection_id,
+            pipeline_ids=[self.pipeline_id],
+            user_id=self.user_id,
+            error={
+                "error_type": "pipeline_processing_failed",
+                "message": message,
+                "exception_type": exception_type,
+                "recoverable": False,
+            },
+            connection_info=self.connection_info,
+        )
+        if self.on_fatal_error is not None:
+            try:
+                self.on_fatal_error(self.pipeline_id, self.node_id, message)
+            except Exception:
+                logger.exception(
+                    "Error in on_fatal_error callback for %s", self.pipeline_id
+                )
+
     def worker_loop(self):
         """Main worker loop that processes frames."""
         logger.info(f"Worker thread started for pipeline: {self.pipeline_id}")
@@ -345,41 +399,34 @@ class PipelineProcessor:
         while self.running and not self.shutdown_event.is_set():
             try:
                 self.process_chunk()
-
             except PipelineNotAvailableException as e:
                 logger.debug(
                     f"Pipeline {self.pipeline_id} temporarily unavailable: {e}"
                 )
-                # Sleep briefly and continue
                 self.shutdown_event.wait(SLEEP_TIME)
                 continue
             except Exception as e:
-                if self._is_recoverable(e):
-                    logger.error(
-                        f"Error in worker loop for {self.pipeline_id}: {e}",
-                        exc_info=True,
-                    )
-                    continue
-                else:
-                    logger.error(
-                        f"Non-recoverable error in worker loop for {self.pipeline_id}: {e}, stopping"
-                    )
-                    # Publish error event for pipeline processing failure
-                    publish_event(
-                        event_type="error",
-                        session_id=self.session_id,
-                        connection_id=self.connection_id,
-                        pipeline_ids=[self.pipeline_id],
-                        user_id=self.user_id,
-                        error={
-                            "error_type": "pipeline_processing_failed",
-                            "message": str(e),
-                            "exception_type": type(e).__name__,
-                            "recoverable": False,
-                        },
-                        connection_info=self.connection_info,
-                    )
-                    break
+                logger.error(
+                    f"Non-recoverable error in worker loop for {self.pipeline_id}: {e}, stopping"
+                )
+                self._trigger_fatal(
+                    message=f"{type(e).__name__}: {e}",
+                    exception_type=type(e).__name__,
+                )
+                break
+
+            if self._consecutive_errors >= MAX_CONSECUTIVE_RECOVERABLE_ERRORS:
+                msg, exc_type = self._last_recoverable_error or (
+                    "Pipeline produced no output",
+                    "PipelineStallError",
+                )
+                logger.error(
+                    f"Pipeline {self.pipeline_id} hit "
+                    f"{self._consecutive_errors} consecutive errors with no "
+                    "output, escalating to fatal"
+                )
+                self._trigger_fatal(message=msg, exception_type=exc_type)
+                break
 
         logger.info(f"Worker thread stopped for pipeline: {self.pipeline_id}")
 
@@ -605,6 +652,8 @@ class PipelineProcessor:
             processing_start = time.time()
             output_dict = self.pipeline(**call_params)
             processing_time = time.time() - processing_start
+            self._consecutive_errors = 0
+            self._last_recoverable_error = None
 
             if not output_dict:
                 # 1) Some pipelines return {} when idle
@@ -761,8 +810,15 @@ class PipelineProcessor:
 
         except Exception as e:
             if self._is_recoverable(e):
+                self._consecutive_errors += 1
+                self._last_recoverable_error = (
+                    f"{type(e).__name__}: {e}",
+                    type(e).__name__,
+                )
                 logger.error(
-                    f"Error processing chunk for {self.pipeline_id}: {e}", exc_info=True
+                    f"Error processing chunk for {self.pipeline_id} "
+                    f"(consecutive={self._consecutive_errors}): {e}",
+                    exc_info=True,
                 )
             else:
                 raise e

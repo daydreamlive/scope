@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { Handle, Position } from "@xyflow/react";
 import type { NodeProps, Node } from "@xyflow/react";
 import {
+  AlertTriangle,
   Maximize2,
   Minimize2,
   Pause,
@@ -11,6 +12,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import type { FlowNodeData } from "../../../lib/graphUtils";
+import type { StreamError } from "../../../hooks/useUnifiedWebRTC";
 import { useNodeData } from "../hooks/node/useNodeData";
 import { useNodeCollapse } from "../hooks/node/useNodeCollapse";
 import { NodeCard, NodeHeader, collapsedHandleStyle } from "../ui";
@@ -28,6 +30,8 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
   const sinkStats = data.sinkStats as
     | { fps: number; bitrate: number }
     | undefined;
+  const streamError =
+    (data.streamError as StreamError | null | undefined) ?? null;
   const isPlaying = (data.isPlaying as boolean | undefined) ?? true;
   const onPlayPauseToggle = data.onPlayPauseToggle as (() => void) | undefined;
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -104,17 +108,34 @@ export function SinkNode({ id, data, selected }: NodeProps<SinkNodeType>) {
 
   const handleY = HEADER_H + BODY_PAD + PREVIEW_H / 2;
 
+  // Show the error on every sink (the toast already attributes it to a
+  // specific node) — sinks are where the user notices the blank screen.
   const videoContainer = (
     <div
       className={
         isFullscreen
           ? "fixed inset-0 z-[9999] bg-black"
-          : "relative rounded-md overflow-hidden bg-black/50 flex-1 min-h-[60px]"
+          : `relative rounded-md overflow-hidden bg-black/50 flex-1 min-h-[60px] ${
+              streamError ? "ring-2 ring-red-500/80" : ""
+            }`
       }
       onPointerDown={e => e.stopPropagation()}
       onWheel={isFullscreen ? e => e.stopPropagation() : undefined}
     >
-      {remoteStream ? (
+      {streamError ? (
+        <div className="flex flex-col items-center justify-center h-full gap-1.5 px-2 text-center">
+          <AlertTriangle className="h-5 w-5 text-red-400" />
+          <span className="text-[10px] font-medium text-red-300">
+            Pipeline error
+          </span>
+          <span
+            className="text-[9px] text-red-200/80 break-words leading-snug max-w-full"
+            title={streamError.message}
+          >
+            {streamError.message}
+          </span>
+        </div>
+      ) : remoteStream ? (
         <>
           <video
             ref={videoRef}

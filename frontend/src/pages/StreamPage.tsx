@@ -654,6 +654,7 @@ export function StreamPage() {
     remoteStreams,
     isStreaming,
     isConnecting,
+    streamError,
     peerConnectionRef,
     sinkNodeIdsRef,
     sinkMidMapRef,
@@ -3550,6 +3551,7 @@ export function StreamPage() {
             remoteStream={remoteStream}
             remoteStreams={remoteStreams}
             sinkStats={perSinkStats}
+            streamError={streamError}
             onVideoFileUpload={handlePerNodeVideoFileUpload}
             onCycleSampleVideo={handlePerNodeCycleSampleVideo}
             onInitSampleVideo={handlePerNodeInitSampleVideo}
@@ -3776,6 +3778,7 @@ export function StreamPage() {
                   isCloudConnecting={isCloudConnecting}
                   isConnecting={isConnecting}
                   pipelineError={pipelineError}
+                  streamError={streamError}
                   pipelineLoadingStage={pipelineLoadingStage}
                   cloudConnectStage={cloudConnectStage}
                   isPlaying={!settings.paused}

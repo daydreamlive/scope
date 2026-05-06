@@ -25,6 +25,8 @@ export interface EnrichNodesDeps {
   remoteStreams?: Record<string, MediaStream>;
   /** Per-sink-node WebRTC stats */
   sinkStats?: Record<string, { fps: number; bitrate: number }>;
+  /** Active stream error to surface inline on sink nodes */
+  streamError?: import("../../../hooks/useUnifiedWebRTC").StreamError | null;
   onVideoFileUploadRef: React.RefObject<
     ((file: File, nodeId?: string) => Promise<boolean>) | undefined
   >;
@@ -201,6 +203,7 @@ export function enrichNodes(
           ...n.data,
           remoteStream: nodeRemoteStream,
           sinkStats: nodeStats,
+          streamError: deps.streamError ?? null,
           isPlaying: deps.isPlaying,
           isLoading: deps.isLoading,
           loadingStage: deps.loadingStage,
