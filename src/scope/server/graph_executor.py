@@ -69,7 +69,7 @@ def build_graph(
     tempo_sync: Any | None = None,
     modulation_engine: Any | None = None,
     notification_callback: Callable[[dict], None] | None = None,
-    on_fatal_error: Callable[[str, str, str], None] | None = None,
+    on_fatal_error: Callable[[str, str | None, str], None] | None = None,
 ) -> GraphRun:
     """Build executable graph: create queues and processors, wire edges.
 

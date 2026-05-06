@@ -20,7 +20,6 @@ already covered by test_pipeline_error_notification.py.
 
 import time
 import types
-from unittest.mock import patch
 
 import pytest
 
@@ -170,21 +169,9 @@ def test_forward_runner_notification_routes_to_broadcast():
     fake_manager.broadcast_notification = lambda payload: fake_manager.received.append(
         payload
     )
-    fake_app = types.SimpleNamespace(webrtc_manager=fake_manager)
 
     payload = {"type": "pipeline_error", "fatal": True, "message": "x"}
-    with patch.dict(
-        "sys.modules",
-        {
-            "scope.server.app": fake_app,
-            "scope.server": types.ModuleType("scope.server"),
-        },
-    ):
-        # The function uses `from . import app as _app`; patch that lookup.
-        with patch("scope.server.livepeer_client._forward_runner_notification") as _:
-            pass
 
-    # Easier: directly substitute scope.server.app.webrtc_manager.
     import scope.server.app as real_app
 
     saved = getattr(real_app, "webrtc_manager", None)

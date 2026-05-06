@@ -62,7 +62,7 @@ class PipelineProcessor:
         modulation_engine: Any | None = None,
         node_id: str | None = None,
         notification_callback: Callable[[dict], None] | None = None,
-        on_fatal_error: Callable[[str, str, str], None] | None = None,
+        on_fatal_error: Callable[[str, str | None, str], None] | None = None,
     ):
         """Initialize a pipeline processor.
 
