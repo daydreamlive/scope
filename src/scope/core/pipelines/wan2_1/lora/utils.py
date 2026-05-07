@@ -434,20 +434,22 @@ def parse_lora_weights(
         # PEFT's later .data assignment will silently accept mismatched shapes
         # and only crash at the first forward pass with an opaque message; we
         # prefer to fail fast here with a hint about base-model mismatch.
+        # Restricted to 2D weights (Linear) to avoid false positives on Conv
+        # LoRAs whose A matrix may be flattened across kernel dims.
         target_shape = tuple(model_state[model_key].shape)
-        if len(target_shape) >= 2 and lora_A.dim() >= 2 and lora_B.dim() >= 2:
-            target_out_dim, target_in_dim = target_shape[0], target_shape[1]
+        if len(target_shape) == 2 and lora_A.dim() == 2 and lora_B.dim() == 2:
+            target_out_dim, target_in_dim = target_shape
             lora_in_dim = lora_A.shape[1]
             lora_out_dim = lora_B.shape[0]
             if lora_in_dim != target_in_dim or lora_out_dim != target_out_dim:
-                lora_label = f" '{lora_path}'" if lora_path else ""
+                lora_label = f" '{os.path.basename(lora_path)}'" if lora_path else ""
                 raise LoRAIncompatibleError(
                     f"LoRA{lora_label} is incompatible with this pipeline's base model: "
                     f"layer '{model_key}' expects shape "
                     f"({target_out_dim}, {target_in_dim}) but the LoRA provides "
                     f"({lora_out_dim}, {lora_in_dim}). "
                     f"This usually means the LoRA was trained on a different base model "
-                    f"(e.g. Wan 14B / 5120-dim vs. Wan 1.3B / 1536-dim). "
+                    f"(e.g. Wan 14B vs. Wan 1.3B have different hidden dims). "
                     f"Use a LoRA trained on a compatible base model."
                 )
 
