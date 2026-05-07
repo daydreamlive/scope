@@ -279,6 +279,120 @@ def test_round_trip_via_graph_ui_state(tmp_path: Path) -> None:
     assert Path(new_source_name).is_relative_to(target.resolve())
 
 
+def test_extract_does_not_rewrite_freeform_text_ending_in_extension(
+    tmp_path: Path,
+) -> None:
+    """A prompt or label that happens to end in ``cat.png`` (no path separator)
+    must not be rewritten to a local filesystem path on import. Only strings
+    that look path-shaped — contain ``/``/``\\`` or exactly equal an embedded
+    filename — are eligible for substitution.
+    """
+    png = _png_bytes()
+    target_assets = tmp_path / "target_assets"
+
+    workflow = {
+        "metadata": {"name": "t"},
+        "pipelines": [
+            {
+                "params": {
+                    "prompt": "an image of cat.png on a couch",
+                    "vace_ref_images": ["/old/cat.png"],
+                }
+            }
+        ],
+        "embedded_assets": [
+            {
+                "filename": "cat.png",
+                "mime_type": "image/png",
+                "size_bytes": len(png),
+                "sha256": hashlib.sha256(png).hexdigest(),
+                "data": base64.b64encode(png).decode("ascii"),
+            }
+        ],
+    }
+
+    result = extract_workflow_assets(workflow, target_assets)
+    # Path-shaped reference is rewritten to the new on-disk location.
+    new_ref = result["pipelines"][0]["params"]["vace_ref_images"][0]
+    assert Path(new_ref).name == "cat.png"
+    assert Path(new_ref).is_relative_to(target_assets.resolve())
+    # Free-form prompt is left alone.
+    assert (
+        result["pipelines"][0]["params"]["prompt"] == "an image of cat.png on a couch"
+    )
+
+
+def test_extract_rewrites_bare_basename_reference(tmp_path: Path) -> None:
+    """A workflow that references a file by bare basename (no separator) is a
+    known shape and must still be rewritten to the on-disk path so it
+    resolves at session-run time."""
+    png = _png_bytes()
+    target_assets = tmp_path / "target_assets"
+
+    workflow = {
+        "metadata": {"name": "t"},
+        "pipelines": [{"params": {"vace_ref_images": ["ref.png"]}}],
+        "embedded_assets": [
+            {
+                "filename": "ref.png",
+                "mime_type": "image/png",
+                "size_bytes": len(png),
+                "sha256": hashlib.sha256(png).hexdigest(),
+                "data": base64.b64encode(png).decode("ascii"),
+            }
+        ],
+    }
+
+    result = extract_workflow_assets(workflow, target_assets)
+    new_ref = result["pipelines"][0]["params"]["vace_ref_images"][0]
+    assert Path(new_ref).name == "ref.png"
+    assert Path(new_ref).exists()
+
+
+def test_extract_handles_windows_style_backslash_paths(tmp_path: Path) -> None:
+    """Workflows exported on Windows reference assets with ``\\`` separators.
+    On POSIX, ``Path(value).name`` would treat the whole string as a single
+    component. The basename extractor must normalize separators so the
+    rewrite still fires."""
+    png = _png_bytes()
+    target_assets = tmp_path / "target_assets"
+
+    workflow = {
+        "metadata": {"name": "t"},
+        "pipelines": [
+            {"params": {"vace_ref_images": ["C:\\Users\\Alice\\assets\\ref.png"]}}
+        ],
+        "embedded_assets": [
+            {
+                "filename": "ref.png",
+                "mime_type": "image/png",
+                "size_bytes": len(png),
+                "sha256": hashlib.sha256(png).hexdigest(),
+                "data": base64.b64encode(png).decode("ascii"),
+            }
+        ],
+    }
+
+    result = extract_workflow_assets(workflow, target_assets)
+    new_ref = result["pipelines"][0]["params"]["vace_ref_images"][0]
+    assert Path(new_ref).name == "ref.png"
+    assert Path(new_ref).exists()
+
+
+def test_embed_preserves_higher_format_version(tmp_path: Path) -> None:
+    """If a future workflow exports with a higher format_version, embedding
+    additional media must not silently downgrade the version."""
+    png = _png_bytes()
+    assets = _make_assets_dir(tmp_path, {"ref.png": png})
+    workflow = {
+        "format_version": "1.5",
+        "metadata": {"name": "t"},
+        "pipelines": [{"params": {"vace_ref_images": [str(assets / "ref.png")]}}],
+    }
+    result = embed_workflow_assets(workflow, assets)
+    assert result["format_version"] == "1.5"
+
+
 def test_extract_endpoint_in_cloud_mode_writes_local_copy_for_previews(
     tmp_path: Path, cloud_mock: MagicMock
 ) -> None:
@@ -339,3 +453,56 @@ def test_extract_endpoint_in_cloud_mode_writes_local_copy_for_previews(
         "local copy missing — frontend previews will show broken image"
     )
     assert local_copy.read_bytes() == png
+    # Happy path: no warning header when local materialization succeeds.
+    assert response.headers.get("X-Scope-Warning") is None
+
+
+def test_extract_endpoint_cloud_mode_surfaces_local_failure_via_header(
+    tmp_path: Path, cloud_mock: MagicMock
+) -> None:
+    """When the local materialization step in cloud mode fails (e.g. the
+    assets dir is unwritable), the frontend won't be able to render previews.
+    The endpoint must still proxy to cloud so workflow paths resolve at
+    session-run time, but it must surface the local failure via the
+    ``X-Scope-Warning`` response header so the import dialog can toast a
+    user-visible notice."""
+    png = _png_bytes()
+    local_assets = tmp_path / "local_assets"  # intentionally not created
+
+    workflow_with_embedded = {
+        "format": "scope-workflow",
+        "format_version": "1.1",
+        "metadata": {"name": "t"},
+        "pipelines": [
+            {"params": {"vace_ref_images": ["/some/origin/machine/ref.png"]}}
+        ],
+        "embedded_assets": [
+            {
+                "filename": "ref.png",
+                "mime_type": "image/png",
+                "size_bytes": len(png),
+                "sha256": hashlib.sha256(png).hexdigest(),
+                "data": base64.b64encode(png).decode("ascii"),
+            }
+        ],
+    }
+
+    def _raise(*_args: object, **_kwargs: object) -> None:
+        raise OSError("disk on fire")
+
+    with (
+        patch("scope.server.app.get_assets_dir", return_value=local_assets),
+        patch("scope.server.app.livepeer", cloud_mock),
+        patch("scope.server.app.extract_workflow_assets", side_effect=_raise),
+    ):
+        from scope.server.app import app
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post("/api/v1/workflow/extract", json=workflow_with_embedded)
+
+    assert response.status_code == 200, response.text
+    # Cloud was still called so the workflow's session-run paths resolve.
+    cloud_mock.api_request.assert_awaited_once()
+    # Frontend can read this header and toast the warning.
+    assert response.headers.get("X-Scope-Warning") is not None
+    assert "previews" in response.headers["X-Scope-Warning"].lower()

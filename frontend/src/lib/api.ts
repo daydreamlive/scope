@@ -1130,10 +1130,19 @@ export const embedWorkflowAssets = async (
 /**
  * Ask the backend to write each ``embedded_assets`` entry to the local
  * assets directory and rewrite path references in the workflow.
+ *
+ * Returns both the rewritten workflow and any non-fatal warning the backend
+ * surfaced (e.g. cloud mode where the local-copy step failed but the cloud
+ * extract succeeded — previews will be missing until the user re-uploads).
  */
+export interface ExtractWorkflowResult {
+  workflow: ScopeWorkflow;
+  warning: string | null;
+}
+
 export const extractWorkflowAssets = async (
   workflow: ScopeWorkflow
-): Promise<ScopeWorkflow> => {
+): Promise<ExtractWorkflowResult> => {
   const response = await fetch("/api/v1/workflow/extract", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1143,7 +1152,9 @@ export const extractWorkflowAssets = async (
     const detail = await extractErrorDetail(response);
     throw new Error(detail);
   }
-  return response.json();
+  const warning = response.headers.get("X-Scope-Warning");
+  const rewritten = (await response.json()) as ScopeWorkflow;
+  return { workflow: rewritten, warning };
 };
 
 export const downloadLoRA = async (

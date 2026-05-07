@@ -22,7 +22,12 @@ import click
 import uvicorn
 from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response, StreamingResponse
+from fastapi.responses import (
+    FileResponse,
+    JSONResponse,
+    Response,
+    StreamingResponse,
+)
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -2181,6 +2186,7 @@ async def workflow_extract_endpoint(
         # assets dir by basename). The rewritten workflow we get back here
         # is discarded; we use cloud's response so workflow paths resolve
         # at session-run time on the cloud server.
+        local_materialization_warning: str | None = None
         try:
             extract_workflow_assets(body, get_assets_dir())
         except Exception as e:
@@ -2189,13 +2195,26 @@ async def workflow_extract_endpoint(
                 "still attempted): %s",
                 e,
             )
-        return await proxy_with_body(
+            local_materialization_warning = (
+                "Local asset materialization failed; embedded media previews "
+                "may not render until the assets are uploaded again."
+            )
+        cloud_response = await proxy_with_body(
             cloud_manager,
             method="POST",
             path="/api/v1/workflow/extract",
             body=body,
             timeout=_WORKFLOW_ASSET_PROXY_TIMEOUT,
         )
+        # Surface the warning to the client via a response header so the
+        # frontend can toast a user-visible notice. The body is the cloud's
+        # rewritten workflow (paths point at cloud's filesystem).
+        headers = (
+            {"X-Scope-Warning": local_materialization_warning}
+            if local_materialization_warning
+            else None
+        )
+        return JSONResponse(content=cloud_response, headers=headers)
 
     try:
         return extract_workflow_assets(body, get_assets_dir())

@@ -34,9 +34,11 @@ export function GraphWorkflowExportDialog({
       const baseWorkflow = buildWorkflow(name);
 
       let workflow = baseWorkflow;
+      let embedFailed = false;
       try {
         workflow = await embedWorkflowAssets(baseWorkflow);
       } catch (err) {
+        embedFailed = true;
         console.warn("Workflow embed failed; exporting without embeds:", err);
       }
 
@@ -53,9 +55,16 @@ export function GraphWorkflowExportDialog({
       document.body.removeChild(link);
       URL.revokeObjectURL(url);
 
-      toast.success("Workflow exported", {
-        description: `"${name}" saved as .scope-workflow.json`,
-      });
+      if (embedFailed) {
+        toast.warning("Workflow exported without embedded media", {
+          description:
+            "Referenced images, audio, and video could not be bundled. Sharing this file may show missing assets on another machine.",
+        });
+      } else {
+        toast.success("Workflow exported", {
+          description: `"${name}" saved as .scope-workflow.json`,
+        });
+      }
       onClose();
     } catch (err) {
       console.error("Workflow export failed:", err);

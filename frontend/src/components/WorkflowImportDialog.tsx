@@ -252,6 +252,41 @@ export function WorkflowImportDialog({
   }, [onClose, resetLoras, resetPlugins]);
 
   // -----------------------------------------------------------------------
+  // Materialize embedded assets (shared by both file-pick and deeplink paths)
+  // -----------------------------------------------------------------------
+
+  /**
+   * If *wf* carries an ``embedded_assets`` array, ask the backend to write
+   * each entry to the local assets directory and rewrite path references.
+   * Returns the rewritten workflow, or ``null`` if extraction failed (a toast
+   * is shown in that case).
+   */
+  const materializeEmbeddedAssets = useCallback(
+    async (wf: ScopeWorkflow): Promise<ScopeWorkflow | null> => {
+      const hasEmbeds = Array.isArray(
+        (wf as unknown as { embedded_assets?: unknown[] }).embedded_assets
+      );
+      if (!hasEmbeds) return wf;
+      try {
+        const result = await extractWorkflowAssets(wf);
+        if (result.warning) {
+          toast.warning("Embedded media partially restored", {
+            description: result.warning,
+          });
+        }
+        return result.workflow;
+      } catch (err) {
+        console.error("Failed to extract embedded assets:", err);
+        toast.error("Failed to restore embedded media", {
+          description: err instanceof Error ? err.message : String(err),
+        });
+        return null;
+      }
+    },
+    []
+  );
+
+  // -----------------------------------------------------------------------
   // Auto-resolve when opened with a preloaded workflow (e.g. from deeplink)
   // -----------------------------------------------------------------------
 
@@ -262,23 +297,10 @@ export function WorkflowImportDialog({
     (async () => {
       try {
         setValidating(true);
-        let materialized: ScopeWorkflow = initialWorkflow;
-        if (
-          Array.isArray(
-            (initialWorkflow as unknown as { embedded_assets?: unknown[] })
-              .embedded_assets
-          )
-        ) {
-          try {
-            materialized = await extractWorkflowAssets(initialWorkflow);
-          } catch (err) {
-            console.error("Failed to extract embedded assets:", err);
-            toast.error("Failed to restore embedded media", {
-              description: err instanceof Error ? err.message : String(err),
-            });
-            handleClose();
-            return;
-          }
+        const materialized = await materializeEmbeddedAssets(initialWorkflow);
+        if (materialized === null) {
+          handleClose();
+          return;
         }
         if (cancelled) return;
         setWorkflow(materialized);
@@ -454,22 +476,9 @@ export function WorkflowImportDialog({
         // If the workflow embeds media files, materialize them into the
         // local assets directory and rewrite path references first. The
         // backend strips ``embedded_assets`` from the returned workflow.
-        if (
-          Array.isArray(
-            (parsed as unknown as { embedded_assets?: unknown[] })
-              .embedded_assets
-          )
-        ) {
-          try {
-            parsed = await extractWorkflowAssets(parsed);
-          } catch (err) {
-            console.error("Failed to extract embedded assets:", err);
-            toast.error("Failed to restore embedded media", {
-              description: err instanceof Error ? err.message : String(err),
-            });
-            return;
-          }
-        }
+        const materialized = await materializeEmbeddedAssets(parsed);
+        if (materialized === null) return;
+        parsed = materialized;
 
         setWorkflow(parsed);
 
@@ -513,7 +522,12 @@ export function WorkflowImportDialog({
         setValidating(false);
       }
     },
-    [initializeLoras, initializePlugins, loadWorkflowDirect]
+    [
+      initializeLoras,
+      initializePlugins,
+      loadWorkflowDirect,
+      materializeEmbeddedAssets,
+    ]
   );
 
   const handleDrop = useCallback(

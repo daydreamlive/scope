@@ -19,6 +19,7 @@ import type {
   WorkflowResolutionPlan,
 } from "../../../../lib/workflowApi";
 import { buildGraphWorkflow } from "../../../../lib/workflowSettings";
+import { toast } from "sonner";
 import { usePipelinesContext } from "../../../../contexts/PipelinesContext";
 import { usePluginsContext } from "../../../../contexts/PluginsContext";
 import { useLoRAsContext } from "../../../../contexts/LoRAsContext";
@@ -518,7 +519,13 @@ export function useGraphPersistence({
               )
             ) {
               try {
-                workflow = await extractWorkflowAssets(workflow);
+                const result = await extractWorkflowAssets(workflow);
+                workflow = result.workflow;
+                if (result.warning) {
+                  toast.warning("Embedded media partially restored", {
+                    description: result.warning,
+                  });
+                }
               } catch (err) {
                 console.error("Failed to extract embedded assets:", err);
                 setStatus("Import failed: could not restore embedded media");
@@ -635,9 +642,11 @@ export function useGraphPersistence({
     const baseWorkflow = buildCurrentWorkflow();
 
     let workflow = baseWorkflow;
+    let embedFailed = false;
     try {
       workflow = await embedWorkflowAssets(baseWorkflow);
     } catch (err) {
+      embedFailed = true;
       console.warn("Workflow embed failed; exporting without embeds:", err);
     }
 
@@ -654,7 +663,15 @@ export function useGraphPersistence({
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
-    setStatus("Graph exported");
+    if (embedFailed) {
+      setStatus("Graph exported without embedded media");
+      toast.warning("Graph exported without embedded media", {
+        description:
+          "Referenced images, audio, and video could not be bundled. Sharing this file may show missing assets on another machine.",
+      });
+    } else {
+      setStatus("Graph exported");
+    }
   }, [buildCurrentWorkflow]);
 
   const getCurrentGraphConfig = useCallback(() => {

@@ -62,13 +62,17 @@ export function WorkflowExportDialog({
         scopeVersion: scopeVersion ?? "unknown",
       });
 
-      // Ask the backend to embed referenced media files. If embedding fails
-      // (e.g. during testing without a backend), fall back to the un-embedded
-      // workflow so export still works.
+      // Ask the backend to embed referenced media files. If embedding fails,
+      // fall back to the un-embedded workflow and warn the user — without
+      // embeds, anyone who imports the file on another machine will see
+      // missing assets where the author had reference images, audio, or
+      // video files.
       let workflow = baseWorkflow;
+      let embedFailed = false;
       try {
         workflow = await embedWorkflowAssets(baseWorkflow);
       } catch (err) {
+        embedFailed = true;
         console.warn("Workflow embed failed; exporting without embeds:", err);
       }
 
@@ -90,9 +94,16 @@ export function WorkflowExportDialog({
         node_count: workflow.graph?.nodes?.length ?? workflow.pipelines.length,
         surface: "app_chrome",
       });
-      toast.success("Workflow exported", {
-        description: `"${name}" saved as .scope-workflow.json`,
-      });
+      if (embedFailed) {
+        toast.warning("Workflow exported without embedded media", {
+          description:
+            "Referenced images, audio, and video could not be bundled. Sharing this file may show missing assets on another machine.",
+        });
+      } else {
+        toast.success("Workflow exported", {
+          description: `"${name}" saved as .scope-workflow.json`,
+        });
+      }
       onClose();
     } catch (err) {
       console.error("Workflow export failed:", err);

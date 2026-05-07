@@ -33,6 +33,12 @@ VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 AUDIO_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg"}
 MEDIA_EXTENSIONS = IMAGE_EXTENSIONS | VIDEO_EXTENSIONS | AUDIO_EXTENSIONS
 
+CURRENT_FORMAT_VERSION = "1.1"
+
+# Cap on basename-collision rename attempts before we give up. Hitting more
+# than a handful means something is structurally wrong with the assets dir.
+_MAX_RENAME_ATTEMPTS = 1000
+
 _MIME_BY_EXT: dict[str, str] = {
     ".png": "image/png",
     ".jpg": "image/jpeg",
@@ -51,18 +57,43 @@ _MIME_BY_EXT: dict[str, str] = {
 }
 
 
-def _is_media_path(value: Any) -> bool:
-    """Heuristic: a string is a media path if it has a known media extension
-    AND looks pathy (contains a slash/backslash, or is a bare filename — but
-    only if the bare filename actually existed in the assets dir we'll
-    confirm at the call-site). We err on the permissive side here and let
-    file existence be the final filter on export.
+def _normalize_separators(value: str) -> str:
+    """Map Windows-style backslash separators to forward slashes so a single
+    POSIX-style ``Path`` can extract a basename regardless of the OS that
+    wrote the workflow. Only converts ``\\`` between path-like segments; leaves
+    free-form strings alone since the caller filters those out first."""
+    return value.replace("\\", "/")
+
+
+def _basename(value: str) -> str:
+    """Cross-OS basename: split on either separator and return the trailing
+    component. ``Path(value).name`` on POSIX would treat backslashes as
+    regular characters, which breaks Windows-exported workflows."""
+    return Path(_normalize_separators(value)).name
+
+
+def _looks_path_shaped(value: str, known_filenames: set[str]) -> bool:
+    """Stricter than ``_has_media_extension``: require the string to actually
+    look like a path. Either it contains a path separator (so it's clearly
+    addressing a file location), or its full content exactly equals a known
+    embedded filename (so a bare ``ref.png`` reference still gets rewritten).
+
+    This guards against rewriting prompt strings or other free-form text that
+    happens to end with a media extension (``"… see attached cat.png"``).
     """
+    if "/" in value or "\\" in value:
+        return True
+    return value in known_filenames
+
+
+def _has_media_extension(value: Any) -> bool:
+    """A string carries a media extension if its last path component ends in
+    one of our known media suffixes and it isn't a URL/data scheme."""
     if not isinstance(value, str) or not value:
         return False
     if value.startswith(("http://", "https://", "blob:", "data:")):
         return False
-    suffix = Path(value).suffix.lower()
+    suffix = Path(_normalize_separators(value)).suffix.lower()
     return suffix in MEDIA_EXTENSIONS
 
 
@@ -84,32 +115,46 @@ def _resolve_media_path(value: str, assets_dir: Path) -> Path | None:
 
     Tries the literal path first, then falls back to looking up the basename
     in ``assets_dir`` (handles workflows whose absolute paths point at a
-    different machine).
+    different machine, including Windows-style paths viewed from POSIX).
     """
     candidate = Path(value)
-    if candidate.is_absolute():
-        if candidate.is_file():
-            return candidate
-        # Absolute path from another machine — try basename in assets_dir.
-        basename_match = assets_dir / candidate.name
-        if basename_match.is_file():
-            return basename_match
-        return None
+    if candidate.is_absolute() and candidate.is_file():
+        return candidate
 
-    # Relative path: try assets_dir / value, then assets_dir / basename.
-    rel_match = assets_dir / value
-    if rel_match.is_file():
-        return rel_match
-    base_match = assets_dir / candidate.name
-    if base_match.is_file():
-        return base_match
+    # Either the absolute path doesn't exist locally, or the value is
+    # relative / Windows-style. Fall back to basename lookup in assets_dir.
+    base = _basename(value)
+    if base:
+        base_match = assets_dir / base
+        if base_match.is_file():
+            return base_match
+
+    if not candidate.is_absolute():
+        rel_match = assets_dir / value
+        if rel_match.is_file():
+            return rel_match
+
     return None
+
+
+def _next_higher_version(current: Any, minimum: str) -> str:
+    """Return the higher of *current* and *minimum* using a tuple-of-ints
+    compare. Falls back to *minimum* when *current* is missing or unparseable
+    so we don't silently downgrade unparseable values."""
+    if not isinstance(current, str):
+        return minimum
+    try:
+        cur_parts = tuple(int(p) for p in current.split("."))
+        min_parts = tuple(int(p) for p in minimum.split("."))
+    except ValueError:
+        return minimum
+    return current if cur_parts >= min_parts else minimum
 
 
 def embed_workflow_assets(workflow: dict[str, Any], assets_dir: Path) -> dict[str, Any]:
     """Walk *workflow*, base64-encode every referenced media file that exists
     on disk into a new top-level ``embedded_assets`` list, and bump
-    ``format_version`` to ``"1.1"``.
+    ``format_version`` to ``"1.1"`` (preserving any higher value already set).
 
     Returns a new dict; *workflow* is not mutated.
 
@@ -130,7 +175,7 @@ def embed_workflow_assets(workflow: dict[str, Any], assets_dir: Path) -> dict[st
     embedded: dict[str, dict[str, Any]] = {}
 
     def visit(value: str) -> str:
-        if not _is_media_path(value):
+        if not _has_media_extension(value):
             return value
         resolved = _resolve_media_path(value, assets_dir)
         if resolved is None:
@@ -168,7 +213,9 @@ def embed_workflow_assets(workflow: dict[str, Any], assets_dir: Path) -> dict[st
             if isinstance(entry, dict) and isinstance(entry.get("filename"), str):
                 embedded.setdefault(entry["filename"], entry)
     result["embedded_assets"] = list(embedded.values())
-    result["format_version"] = "1.1"
+    result["format_version"] = _next_higher_version(
+        result.get("format_version"), CURRENT_FORMAT_VERSION
+    )
     return result
 
 
@@ -176,9 +223,14 @@ def extract_workflow_assets(
     workflow: dict[str, Any], assets_dir: Path
 ) -> dict[str, Any]:
     """Write each ``embedded_assets`` entry to *assets_dir*, then rewrite
-    every path reference in *workflow* whose basename matches an embedded
-    filename to point at the resulting on-disk path. Strips
+    every path-shaped reference in *workflow* whose basename matches an
+    embedded filename to point at the resulting on-disk path. Strips
     ``embedded_assets`` from the returned workflow.
+
+    Path rewriting only fires for strings that look path-shaped (contain a
+    separator, or exactly match an embedded filename). Free-form strings that
+    happen to end with a media extension — e.g. a prompt mentioning
+    ``cat.png`` — are left alone.
 
     Idempotent: if an existing file with matching SHA-256 is already present
     we reuse it. If a different file with the same basename exists we save
@@ -192,6 +244,15 @@ def extract_workflow_assets(
         return workflow
 
     assets_dir.mkdir(parents=True, exist_ok=True)
+    assets_dir_resolved = assets_dir.resolve()
+
+    def _confine(target: Path, label: str) -> Path | None:
+        """Reject paths that escape assets_dir after symlink resolution."""
+        resolved = target.resolve()
+        if not resolved.is_relative_to(assets_dir_resolved):
+            logger.warning("extract: refusing to write outside assets dir: %s", label)
+            return None
+        return resolved
 
     written: dict[str, str] = {}  # original filename -> resolved path
     for entry in embedded:
@@ -209,12 +270,8 @@ def extract_workflow_assets(
             logger.warning("extract: invalid base64 for %s: %s", filename, exc)
             continue
 
-        target = (assets_dir / filename).resolve()
-        # Confine writes to the assets directory.
-        if not target.is_relative_to(assets_dir.resolve()):
-            logger.warning(
-                "extract: refusing to write outside assets dir: %s", filename
-            )
+        target = _confine(assets_dir / filename, filename)
+        if target is None:
             continue
 
         if target.exists():
@@ -225,16 +282,29 @@ def extract_workflow_assets(
             if existing_sha and existing_sha == expected_sha:
                 written[filename] = str(target)
                 continue
-            # Same name, different content — pick a non-conflicting name.
+            # Same name, different content — pick a non-conflicting name and
+            # re-validate confinement on every attempt so the safety check is
+            # local to each write.
             stem, suffix = target.stem, target.suffix
             counter = 1
-            while target.exists():
-                target = (assets_dir / f"{stem}_imported{counter}{suffix}").resolve()
+            while True:
+                candidate = _confine(
+                    assets_dir / f"{stem}_imported{counter}{suffix}",
+                    f"{filename} (rename #{counter})",
+                )
+                if candidate is None:
+                    target = None
+                    break
+                if not candidate.exists():
+                    target = candidate
+                    break
                 counter += 1
-                if counter > 10_000:
+                if counter > _MAX_RENAME_ATTEMPTS:
                     raise RuntimeError(
                         f"Could not find non-conflicting name for {filename}"
                     )
+            if target is None:
+                continue
 
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
@@ -245,10 +315,14 @@ def extract_workflow_assets(
         result.pop("embedded_assets", None)
         return result
 
+    known_filenames = set(written.keys())
+
     def visit(value: str) -> str:
-        if not _is_media_path(value):
+        if not _has_media_extension(value):
             return value
-        basename = Path(value).name
+        if not _looks_path_shaped(value, known_filenames):
+            return value
+        basename = _basename(value)
         if basename in written:
             return written[basename]
         return value
