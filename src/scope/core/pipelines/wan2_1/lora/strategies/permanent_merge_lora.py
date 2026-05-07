@@ -10,7 +10,7 @@ from typing import Any
 
 import torch
 
-from ..utils import standardize_lora_for_peft
+from ..utils import LoRAIncompatibleError, standardize_lora_for_peft
 from .peft_lora import PeftLoRAStrategy
 
 __all__ = ["PermanentMergeLoRAStrategy"]
@@ -63,7 +63,9 @@ class PermanentMergeLoRAStrategy:
         # Parse the converted state dict through PeftLoRAStrategy
         # to inject LoRA layers (this handles the PEFT wrapping)
         model_state = model.state_dict()
-        lora_mapping = parse_lora_weights(converted_state, model_state)
+        lora_mapping = parse_lora_weights(
+            converted_state, model_state, lora_path=lora_path
+        )
 
         # Inject PEFT LoRA layers
         PeftLoRAStrategy._inject_lora_layers(
@@ -197,6 +199,9 @@ class PermanentMergeLoRAStrategy:
                     f"{logger_prefix}LoRA loading failed. File not found: {lora_path}. "
                     f"Ensure the file exists in the models/lora/ directory."
                 ) from e
+            except LoRAIncompatibleError:
+                # Preserve the typed exception so the UI gets a specific error.
+                raise
             except Exception as e:
                 raise RuntimeError(
                     f"{logger_prefix}LoRA loading failed. Pipeline cannot start without all configured LoRAs. "

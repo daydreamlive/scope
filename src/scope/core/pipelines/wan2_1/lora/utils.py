@@ -15,6 +15,15 @@ from safetensors.torch import load_file
 logger = logging.getLogger(__name__)
 
 
+class LoRAIncompatibleError(RuntimeError):
+    """Raised when a LoRA's tensor shapes do not match the target model.
+
+    The most common cause is loading a LoRA trained on one base model
+    (e.g. Wan 14B, hidden_dim=5120) into a pipeline using a different
+    base model (e.g. Wan 1.3B, hidden_dim=1536).
+    """
+
+
 def sanitize_adapter_name(adapter_name: str) -> str:
     """
     Sanitize adapter name to be valid for PyTorch module names.
@@ -318,10 +327,21 @@ def build_key_map(model_state_dict: dict[str, torch.Tensor]) -> dict[str, str]:
 
 
 def parse_lora_weights(
-    lora_state: dict[str, torch.Tensor], model_state: dict[str, torch.Tensor]
+    lora_state: dict[str, torch.Tensor],
+    model_state: dict[str, torch.Tensor],
+    lora_path: str | None = None,
 ) -> dict[str, dict[str, Any]]:
     """
     Parse LoRA weights and match them to model parameters.
+
+    Args:
+        lora_state: LoRA state dictionary
+        model_state: Target model state dictionary
+        lora_path: Optional source path, used only to enrich error messages
+
+    Raises:
+        LoRAIncompatibleError: If a matched LoRA tensor's shape does not match
+            the target model parameter (e.g. wrong base model dimension).
 
     Returns:
         Dict mapping model parameter names to LoRA info:
@@ -409,6 +429,27 @@ def parse_lora_weights(
             logger.debug(
                 f"parse_lora_weights: Matched base_key='{base_key}' -> model_key='{model_key}'"
             )
+
+        # Validate dimensions against the target weight before injection.
+        # PEFT's later .data assignment will silently accept mismatched shapes
+        # and only crash at the first forward pass with an opaque message; we
+        # prefer to fail fast here with a hint about base-model mismatch.
+        target_shape = tuple(model_state[model_key].shape)
+        if len(target_shape) >= 2 and lora_A.dim() >= 2 and lora_B.dim() >= 2:
+            target_out_dim, target_in_dim = target_shape[0], target_shape[1]
+            lora_in_dim = lora_A.shape[1]
+            lora_out_dim = lora_B.shape[0]
+            if lora_in_dim != target_in_dim or lora_out_dim != target_out_dim:
+                lora_label = f" '{lora_path}'" if lora_path else ""
+                raise LoRAIncompatibleError(
+                    f"LoRA{lora_label} is incompatible with this pipeline's base model: "
+                    f"layer '{model_key}' expects shape "
+                    f"({target_out_dim}, {target_in_dim}) but the LoRA provides "
+                    f"({lora_out_dim}, {lora_in_dim}). "
+                    f"This usually means the LoRA was trained on a different base model "
+                    f"(e.g. Wan 14B / 5120-dim vs. Wan 1.3B / 1536-dim). "
+                    f"Use a LoRA trained on a compatible base model."
+                )
 
         # Extract alpha and rank
         alpha = None

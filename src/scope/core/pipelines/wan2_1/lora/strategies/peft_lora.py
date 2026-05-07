@@ -17,6 +17,7 @@ import torch
 import torch.nn as nn
 
 from ..utils import (
+    LoRAIncompatibleError,
     find_lora_pair,
     load_lora_weights,
     normalize_lora_key,
@@ -427,7 +428,7 @@ class PeftLoRAStrategy:
 
         # Parse and map LoRA weights to model parameters
         # Returns keys matching model_state (PEFT keys if model is PEFT-wrapped)
-        lora_mapping = parse_lora_weights(lora_state, model_state)
+        lora_mapping = parse_lora_weights(lora_state, model_state, lora_path=lora_path)
         logger.info(
             f"load_adapter: Mapped {len(lora_mapping)} LoRA layers to model parameters"
         )
@@ -521,6 +522,9 @@ class PeftLoRAStrategy:
                 raise RuntimeError(
                     f"{logger_prefix}LoRA loading failed. File not found: {lora_path}"
                 ) from e
+            except LoRAIncompatibleError:
+                # Preserve the typed exception so the UI gets a specific error.
+                raise
             except Exception as e:
                 logger.error(f"{logger_prefix}Failed to load LoRA: {e}", exc_info=True)
                 raise RuntimeError(f"{logger_prefix}LoRA loading failed: {e}") from e
