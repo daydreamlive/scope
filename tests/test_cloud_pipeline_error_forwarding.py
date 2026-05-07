@@ -174,12 +174,13 @@ def test_forward_runner_notification_routes_to_broadcast():
 
     import scope.server.app as real_app
 
-    saved = getattr(real_app, "webrtc_manager", None)
+    _missing = object()
+    saved = getattr(real_app, "webrtc_manager", _missing)
     try:
         real_app.webrtc_manager = fake_manager
         _forward_runner_notification(payload)
     finally:
-        if saved is None:
+        if saved is _missing:
             delattr(real_app, "webrtc_manager")
         else:
             real_app.webrtc_manager = saved
