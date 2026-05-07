@@ -139,8 +139,8 @@ def _resolve_media_path(value: str, assets_dir: Path) -> Path | None:
 
 def _next_higher_version(current: Any, minimum: str) -> str:
     """Return the higher of *current* and *minimum* using a tuple-of-ints
-    compare. Falls back to *minimum* when *current* is missing or unparseable
-    so we don't silently downgrade unparseable values."""
+    compare. When *current* is missing or unparseable we substitute *minimum*
+    so embedded files always carry a version we recognize."""
     if not isinstance(current, str):
         return minimum
     try:
