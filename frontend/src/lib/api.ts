@@ -1107,6 +1107,45 @@ export const resolveWorkflow = async (
   return response.json();
 };
 
+/**
+ * Ask the backend to embed every referenced media file into the workflow as
+ * a top-level ``embedded_assets`` array. Returns the workflow unchanged if
+ * no referenced files exist on disk.
+ */
+export const embedWorkflowAssets = async (
+  workflow: ScopeWorkflow
+): Promise<ScopeWorkflow> => {
+  const response = await fetch("/api/v1/workflow/embed", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(workflow),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
+/**
+ * Ask the backend to write each ``embedded_assets`` entry to the local
+ * assets directory and rewrite path references in the workflow.
+ */
+export const extractWorkflowAssets = async (
+  workflow: ScopeWorkflow
+): Promise<ScopeWorkflow> => {
+  const response = await fetch("/api/v1/workflow/extract", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(workflow),
+  });
+  if (!response.ok) {
+    const detail = await extractErrorDetail(response);
+    throw new Error(detail);
+  }
+  return response.json();
+};
+
 export const downloadLoRA = async (
   request: LoRADownloadRequest
 ): Promise<LoRADownloadResult> => {

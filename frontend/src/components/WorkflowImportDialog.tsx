@@ -30,7 +30,12 @@ import {
 } from "./ui/alert-dialog";
 import { toast } from "sonner";
 import type { ScopeWorkflow, WorkflowResolutionPlan } from "../lib/workflowApi";
-import { resolveWorkflow, getApiKeys, setApiKey } from "../lib/api";
+import {
+  resolveWorkflow,
+  extractWorkflowAssets,
+  getApiKeys,
+  setApiKey,
+} from "../lib/api";
 import type { ApiKeyInfo } from "../lib/api";
 import {
   statusIcon,
@@ -257,9 +262,28 @@ export function WorkflowImportDialog({
     (async () => {
       try {
         setValidating(true);
-        setWorkflow(initialWorkflow);
+        let materialized: ScopeWorkflow = initialWorkflow;
+        if (
+          Array.isArray(
+            (initialWorkflow as unknown as { embedded_assets?: unknown[] })
+              .embedded_assets
+          )
+        ) {
+          try {
+            materialized = await extractWorkflowAssets(initialWorkflow);
+          } catch (err) {
+            console.error("Failed to extract embedded assets:", err);
+            toast.error("Failed to restore embedded media", {
+              description: err instanceof Error ? err.message : String(err),
+            });
+            handleClose();
+            return;
+          }
+        }
+        if (cancelled) return;
+        setWorkflow(materialized);
 
-        const resolution = await resolveWorkflow(initialWorkflow);
+        const resolution = await resolveWorkflow(materialized);
         if (cancelled) return;
 
         // If all dependencies are already resolved, skip the review dialog
@@ -267,7 +291,7 @@ export function WorkflowImportDialog({
           resolution.items.every(i => i.status === "ok") &&
           resolution.warnings.length === 0
         ) {
-          await loadWorkflowDirect(initialWorkflow);
+          await loadWorkflowDirect(materialized);
           return;
         }
 
@@ -425,6 +449,26 @@ export function WorkflowImportDialog({
             description: "Missing required fields: metadata or pipelines",
           });
           return;
+        }
+
+        // If the workflow embeds media files, materialize them into the
+        // local assets directory and rewrite path references first. The
+        // backend strips ``embedded_assets`` from the returned workflow.
+        if (
+          Array.isArray(
+            (parsed as unknown as { embedded_assets?: unknown[] })
+              .embedded_assets
+          )
+        ) {
+          try {
+            parsed = await extractWorkflowAssets(parsed);
+          } catch (err) {
+            console.error("Failed to extract embedded assets:", err);
+            toast.error("Failed to restore embedded media", {
+              description: err instanceof Error ? err.message : String(err),
+            });
+            return;
+          }
         }
 
         setWorkflow(parsed);

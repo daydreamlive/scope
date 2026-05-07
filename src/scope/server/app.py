@@ -41,6 +41,10 @@ from scope.core.lora.manifest import (
     load_manifest,
     save_manifest,
 )
+from scope.core.workflows import (
+    embed_workflow_assets,
+    extract_workflow_assets,
+)
 from scope.core.workflows.resolve import (
     WorkflowRequest,
     WorkflowResolutionPlan,
@@ -2102,6 +2106,80 @@ async def resolve_workflow_endpoint(
         raise HTTPException(
             status_code=500,
             detail="Internal error while resolving workflow dependencies",
+        ) from e
+
+
+# Embedding/extracting can ship multi-MB bodies (a workflow with embedded
+# video files quickly grows past plain JSON sizes). Bump the proxy timeout
+# from the 30s default so the cloud round-trip has time to read/write files.
+_WORKFLOW_ASSET_PROXY_TIMEOUT = 120.0
+
+
+@app.post("/api/v1/workflow/embed")
+@cloud_proxy(timeout=_WORKFLOW_ASSET_PROXY_TIMEOUT)
+async def workflow_embed_endpoint(
+    http_request: Request,
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+):
+    """Embed referenced media files into a workflow JSON.
+
+    Accepts the full workflow JSON in the request body, walks string fields
+    for media paths, and base64-encodes every existing file into a top-level
+    ``embedded_assets`` list. Returns the resulting workflow.
+
+    In cloud mode this is proxied to the cloud server because the actual
+    asset files live on its disk; reading them locally would silently embed
+    nothing.
+    """
+    try:
+        body = await http_request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400, detail="Workflow body must be a JSON object"
+        )
+    try:
+        return embed_workflow_assets(body, get_assets_dir())
+    except Exception as e:
+        logger.error("Error embedding workflow assets: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error while embedding workflow assets",
+        ) from e
+
+
+@app.post("/api/v1/workflow/extract")
+@cloud_proxy(timeout=_WORKFLOW_ASSET_PROXY_TIMEOUT)
+async def workflow_extract_endpoint(
+    http_request: Request,
+    cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
+):
+    """Extract embedded media from a workflow JSON.
+
+    Writes each ``embedded_assets`` entry to the local assets directory
+    (idempotent via SHA-256), rewrites path references in the workflow to
+    the resulting on-disk paths, strips ``embedded_assets``, and returns
+    the rewritten workflow.
+
+    In cloud mode this is proxied to the cloud server so the assets land
+    where the session that consumes them will run.
+    """
+    try:
+        body = await http_request.json()
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid JSON body") from exc
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=400, detail="Workflow body must be a JSON object"
+        )
+    try:
+        return extract_workflow_assets(body, get_assets_dir())
+    except Exception as e:
+        logger.error("Error extracting workflow assets: %s", e, exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="Internal error while extracting workflow assets",
         ) from e
 
 

@@ -15,7 +15,7 @@ import type { SettingsState } from "../types";
 import type { TimelinePrompt } from "./PromptTimeline";
 import type { WorkflowPromptState } from "../lib/workflowSettings";
 import { buildScopeWorkflow } from "../lib/workflowSettings";
-import type { PluginInfo } from "../lib/api";
+import { embedWorkflowAssets, type PluginInfo } from "../lib/api";
 import { usePipelinesContext } from "../contexts/PipelinesContext";
 import { useLoRAsContext } from "../contexts/LoRAsContext";
 import { usePluginsContext } from "../contexts/PluginsContext";
@@ -44,14 +44,14 @@ export function WorkflowExportDialog({
   const { plugins } = usePluginsContext();
   const { version: scopeVersion } = useServerInfoContext();
 
-  const handleExport = () => {
+  const handleExport = async () => {
     setExporting(true);
     try {
       const pluginInfoMap = new Map<string, PluginInfo>(
         plugins.map(p => [p.name, p])
       );
 
-      const workflow = buildScopeWorkflow({
+      const baseWorkflow = buildScopeWorkflow({
         name,
         settings,
         timelinePrompts,
@@ -61,6 +61,16 @@ export function WorkflowExportDialog({
         pluginInfoMap,
         scopeVersion: scopeVersion ?? "unknown",
       });
+
+      // Ask the backend to embed referenced media files. If embedding fails
+      // (e.g. during testing without a backend), fall back to the un-embedded
+      // workflow so export still works.
+      let workflow = baseWorkflow;
+      try {
+        workflow = await embedWorkflowAssets(baseWorkflow);
+      } catch (err) {
+        console.warn("Workflow embed failed; exporting without embeds:", err);
+      }
 
       // Download as JSON file
       const blob = new Blob([JSON.stringify(workflow, null, 2)], {

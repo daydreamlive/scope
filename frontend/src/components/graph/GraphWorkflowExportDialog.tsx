@@ -12,6 +12,7 @@ import {
 } from "../ui/dialog";
 import { toast } from "sonner";
 import type { ScopeWorkflow } from "../../lib/workflowApi";
+import { embedWorkflowAssets } from "../../lib/api";
 
 interface GraphWorkflowExportDialogProps {
   open: boolean;
@@ -27,10 +28,17 @@ export function GraphWorkflowExportDialog({
   const [name, setName] = useState("Untitled Workflow");
   const [exporting, setExporting] = useState(false);
 
-  const handleExport = () => {
+  const handleExport = async () => {
     setExporting(true);
     try {
-      const workflow = buildWorkflow(name);
+      const baseWorkflow = buildWorkflow(name);
+
+      let workflow = baseWorkflow;
+      try {
+        workflow = await embedWorkflowAssets(baseWorkflow);
+      } catch (err) {
+        console.warn("Workflow embed failed; exporting without embeds:", err);
+      }
 
       const blob = new Blob([JSON.stringify(workflow, null, 2)], {
         type: "application/json",

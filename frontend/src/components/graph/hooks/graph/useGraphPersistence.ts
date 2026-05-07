@@ -8,7 +8,12 @@ import {
 } from "../../../../lib/graphUtils";
 import type { FlowNodeData } from "../../../../lib/graphUtils";
 import type { PluginInfo, NodeDefinitionDto } from "../../../../lib/api";
-import { resolveWorkflow, fetchNodeDefinitions } from "../../../../lib/api";
+import {
+  resolveWorkflow,
+  fetchNodeDefinitions,
+  embedWorkflowAssets,
+  extractWorkflowAssets,
+} from "../../../../lib/api";
 import type {
   ScopeWorkflow,
   WorkflowResolutionPlan,
@@ -505,7 +510,21 @@ export function useGraphPersistence({
             parsed.format === "scope-workflow" &&
             Array.isArray(parsed.pipelines)
           ) {
-            const workflow = parsed as ScopeWorkflow;
+            let workflow = parsed as ScopeWorkflow;
+            if (
+              Array.isArray(
+                (workflow as unknown as { embedded_assets?: unknown[] })
+                  .embedded_assets
+              )
+            ) {
+              try {
+                workflow = await extractWorkflowAssets(workflow);
+              } catch (err) {
+                console.error("Failed to extract embedded assets:", err);
+                setStatus("Import failed: could not restore embedded media");
+                return;
+              }
+            }
             setPendingImportWorkflow(workflow);
             setPendingImportResolving(true);
             try {
@@ -612,8 +631,15 @@ export function useGraphPersistence({
     ]
   );
 
-  const handleExport = useCallback(() => {
-    const workflow = buildCurrentWorkflow();
+  const handleExport = useCallback(async () => {
+    const baseWorkflow = buildCurrentWorkflow();
+
+    let workflow = baseWorkflow;
+    try {
+      workflow = await embedWorkflowAssets(baseWorkflow);
+    } catch (err) {
+      console.warn("Workflow embed failed; exporting without embeds:", err);
+    }
 
     const dataStr = JSON.stringify(workflow, null, 2);
     const blob = new Blob([dataStr], { type: "application/json" });
