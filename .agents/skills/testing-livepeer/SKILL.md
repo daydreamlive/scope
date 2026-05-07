@@ -79,18 +79,22 @@ The `url` points to the local `livepeer-runner` websocket endpoint, not the Scop
 
 ## Start The Local Stack
 
-Kill old processes on the relevant ports first:
+**Port selection — check first, do not blind-kill.** Cursor (and other IDEs) commonly hold ports `8935` and `8022` on macOS via remote-tunnel/extension hosts. Never kill processes you didn't start; pick free ports instead. The doc's defaults below assume the canonical ports — if any are taken, pick the next free one and adjust `LIVEPEER_ORCH_URL` and Scope's `--port` accordingly. Before starting, run:
 
 ```bash
-lsof -ti:8001 -ti:8022 -ti:8935 | xargs kill -9 2>/dev/null
-lsof -tiUDP:9001 | xargs kill -9 2>/dev/null
+lsof -i :8001 -i :8022 -i :8935 2>/dev/null
+lsof -iUDP:9001 2>/dev/null
 ```
+
+A common alternate set when 8022/8935 are taken: orchestrator `8936`, Scope `8023`, runner `8001` (rarely conflicts), OSC UDP `9001`.
 
 **Orchestrator:**
 
 ```bash
 ./livepeer -orchestrator -aiWorker -aiServerless -aiModels serverless.json -serviceAddr localhost:8935
 ```
+
+If `flag provided but not defined: -aiServerless`, the local binary predates the `ja/serverless` PR. Download the artifact (see "Artifact Discovery"), save it as `livepeer-serverless` next to the existing one, and use that. Do not overwrite the user's existing `livepeer` binary.
 
 **Runner** (`SCOPE_PORT=9001` prevents OSC port collision with the main Scope server; `LIVEPEER_DEV_MODE=1` skips auth for local testing):
 
@@ -115,6 +119,15 @@ uv run daydream-scope --no-browser --port 8022
 ```
 
 Wait for health: `curl -s http://localhost:8022/health`
+
+**Connect to cloud (Livepeer mode).** As of 2026-05, `POST /api/v1/cloud/connect` requires a non-empty `app_id` ending in `/ws` even in Livepeer dev mode (the value is parsed into a `wss://fal.run/<app_id>` URL but auth is skipped). Empty body returns 400. Use:
+
+```bash
+curl -s -X POST http://localhost:<scope-port>/api/v1/cloud/connect \
+  -H 'Content-Type: application/json' -d '{"app_id": "livepeer/dev/ws"}'
+# poll status (connecting → connected: true within ~5s)
+curl -s http://localhost:<scope-port>/api/v1/cloud/status
+```
 
 For MCP-driven testing after Scope is healthy, follow the `testing-scope-mcp` skill to start the MCP server and connect to port `8022`.
 
@@ -159,7 +172,7 @@ HTTP API fallbacks useful during Livepeer testing (when MCP is unavailable):
 
 | Operation | Endpoint |
 |-----------|----------|
-| Cloud connect | `POST /api/v1/cloud/connect` body: `{}` |
+| Cloud connect | `POST /api/v1/cloud/connect` body: `{"app_id": "livepeer/dev/ws"}` (must end in `/ws`) |
 | Cloud disconnect | `POST /api/v1/cloud/disconnect` |
 | Cloud status | `GET /api/v1/cloud/status` |
 | Load pipeline | `POST /api/v1/pipeline/load` body: `{"pipeline_ids": ["name"]}` |
