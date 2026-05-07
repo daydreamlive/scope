@@ -53,6 +53,9 @@ class PipelineManager:
         self._pipeline_statuses: dict[
             str, PipelineStatus
         ] = {}  # instance_key -> status
+        self._pipeline_errors: dict[
+            str, str
+        ] = {}  # instance_key -> last error message (only populated on ERROR)
         self._pipeline_load_params: dict[str, dict] = {}  # instance_key -> load_params
         self._pipeline_registry_ids: dict[
             str, str
@@ -315,6 +318,7 @@ class PipelineManager:
                 self._pipeline_load_params[key] = load_params or {}
                 self._pipeline_registry_ids[key] = pipeline_id
                 self._pipeline_statuses[key] = PipelineStatus.LOADED
+                self._pipeline_errors.pop(key, None)
                 # Signal waiters that load is complete
                 if key in self._load_events:
                     self._load_events[key].set()
@@ -353,6 +357,7 @@ class PipelineManager:
             # Hold lock while updating state with error
             with self._lock:
                 self._pipeline_statuses[key] = PipelineStatus.ERROR
+                self._pipeline_errors[key] = str(e)
                 if key in self._pipelines:
                     del self._pipelines[key]
                 if key in self._pipeline_load_params:
@@ -448,17 +453,24 @@ class PipelineManager:
                 if all_adapters:
                     loaded_lora_adapters = all_adapters
 
-            # If there's an error, clear error statuses after capturing them
-            # This ensures errors don't persist across page reloads
+            # If there's an error, capture the per-pipeline messages, then
+            # clear both the ERROR statuses and stored messages so they don't
+            # persist across page reloads.
+            combined_error = None
             if overall_status == PipelineStatus.ERROR:
-                # Clear error statuses from tracked pipelines
+                error_messages = [
+                    self._pipeline_errors[pid]
+                    for pid in self._pipeline_statuses
+                    if self._pipeline_statuses[pid] == PipelineStatus.ERROR
+                    and pid in self._pipeline_errors
+                ]
+                if error_messages:
+                    combined_error = "\n".join(error_messages)
+
                 for pid in list(self._pipeline_statuses.keys()):
                     if self._pipeline_statuses[pid] == PipelineStatus.ERROR:
                         self._pipeline_statuses[pid] = PipelineStatus.NOT_LOADED
-
-            # Error messages are logged but not tracked per-pipeline
-            # The ERROR status is sufficient for the frontend
-            combined_error = None
+                        self._pipeline_errors.pop(pid, None)
 
             # Determine media modalities from the loaded node chain.
             # Use registry IDs (not instance keys) so the lookup works in
@@ -655,6 +667,7 @@ class PipelineManager:
             for key in list(self._pipeline_statuses.keys()):
                 if key not in new_key_set:
                     del self._pipeline_statuses[key]
+                    self._pipeline_errors.pop(key, None)
 
         # Phase 3: Load new entries.
         # First, unload any stale instances that sit at keys scheduled for
@@ -832,6 +845,7 @@ class PipelineManager:
             del self._pipelines[pipeline_id]
         if pipeline_id in self._pipeline_statuses:
             del self._pipeline_statuses[pipeline_id]
+        self._pipeline_errors.pop(pipeline_id, None)
         if pipeline_id in self._pipeline_load_params:
             del self._pipeline_load_params[pipeline_id]
         if pipeline_id in self._pipeline_registry_ids:

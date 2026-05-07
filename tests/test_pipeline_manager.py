@@ -341,3 +341,48 @@ class TestHelperMethods:
             "node_a", "longlive", {}, claimed_keys=set(), reserved_keys={"node_a"}
         )
         assert result == "node_a"
+
+
+class TestErrorPropagation:
+    """Load failures should surface their message via get_status_info exactly
+    once, then clear so the error doesn't stick across page reloads."""
+
+    def test_status_info_returns_load_error_message(self):
+        manager = _make_manager()
+        manager._pipeline_statuses["node_a"] = PipelineStatus.ERROR
+        manager._pipeline_errors["node_a"] = (
+            "LoRA 'foo.safetensors' is incompatible with this pipeline's base model"
+        )
+
+        info = manager.get_status_info()
+
+        assert info["status"] == "error"
+        assert info["error"] is not None
+        assert "incompatible" in info["error"]
+
+    def test_status_info_clears_error_after_capture(self):
+        manager = _make_manager()
+        manager._pipeline_statuses["node_a"] = PipelineStatus.ERROR
+        manager._pipeline_errors["node_a"] = "boom"
+
+        first = manager.get_status_info()
+        second = manager.get_status_info()
+
+        assert first["error"] == "boom"
+        # After the first capture, status reverts to NOT_LOADED and the
+        # message is dropped, so the next call doesn't re-surface it.
+        assert second["error"] is None
+        assert manager._pipeline_errors == {}
+
+    def test_status_info_joins_multiple_errors(self):
+        manager = _make_manager()
+        manager._pipeline_statuses["node_a"] = PipelineStatus.ERROR
+        manager._pipeline_statuses["node_b"] = PipelineStatus.ERROR
+        manager._pipeline_errors["node_a"] = "first"
+        manager._pipeline_errors["node_b"] = "second"
+
+        info = manager.get_status_info()
+
+        assert info["status"] == "error"
+        assert "first" in info["error"]
+        assert "second" in info["error"]
