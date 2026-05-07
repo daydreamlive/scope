@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { ChevronRight, ChevronDown } from "lucide-react";
+import { ChevronRight, ChevronDown, AlertTriangle } from "lucide-react";
 import { cn } from "../../lib/utils";
 
 export interface FileInfo {
@@ -16,6 +16,10 @@ interface FilePickerProps {
   disabled?: boolean;
   placeholder?: string;
   emptyMessage?: string;
+  /** When true, don't flag a non-matching value as missing — files are still loading. */
+  isLoading?: boolean;
+  /** Hover text shown when the configured value isn't in `files`. */
+  missingTooltip?: string;
 }
 
 export function FilePicker({
@@ -25,6 +29,8 @@ export function FilePicker({
   disabled,
   placeholder = "Select file",
   emptyMessage = "No files found",
+  isLoading = false,
+  missingTooltip = "This file isn't available on the active backend. Install or upload it before starting the pipeline.",
 }: FilePickerProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [expandedFolders, setExpandedFolders] = useState<Set<string>>(
@@ -51,6 +57,13 @@ export function FilePicker({
   }, [files]);
 
   const selectedFile = files.find(f => f.path === value);
+  const isMissing = !!value && !selectedFile && !isLoading;
+  const missingLabel = useMemo(() => {
+    if (!isMissing) return "";
+    // Handle both Windows ("C:\Users\...") and Unix ("/Users/...") paths.
+    const parts = value.split(/[\\/]/).filter(Boolean);
+    return parts[parts.length - 1] || value;
+  }, [isMissing, value]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -92,14 +105,25 @@ export function FilePicker({
         type="button"
         onClick={() => !disabled && setIsOpen(!isOpen)}
         disabled={disabled}
+        title={isMissing ? `${missingTooltip} (${value})` : undefined}
         className={cn(
           "flex h-7 w-full items-center justify-between rounded-md border border-input bg-background px-2 text-xs",
           "hover:bg-accent hover:text-accent-foreground",
-          "disabled:cursor-not-allowed disabled:opacity-50"
+          "disabled:cursor-not-allowed disabled:opacity-50",
+          isMissing && "border-amber-500/60 text-amber-500"
         )}
       >
-        <span className="truncate">
-          {selectedFile ? selectedFile.name : placeholder}
+        <span className="flex min-w-0 items-center gap-1">
+          {isMissing && (
+            <AlertTriangle className="h-3 w-3 shrink-0" aria-hidden="true" />
+          )}
+          <span className="truncate">
+            {selectedFile
+              ? selectedFile.name
+              : isMissing
+                ? missingLabel
+                : placeholder}
+          </span>
         </span>
         <ChevronDown className="h-3 w-3 ml-1 shrink-0" />
       </button>

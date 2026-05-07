@@ -33,7 +33,8 @@ export function LoRAManager({
   loraMergeStrategy = "permanent_merge",
   onOpenLoRAsSettings,
 }: LoRAManagerProps) {
-  const { loraFiles: availableLoRAs } = useLoRAsContext();
+  const { loraFiles: availableLoRAs, isLoading: isLoadingLoRAs } =
+    useLoRAsContext();
   const { isConnected: isCloudConnected } = useCloudStatus();
   const [localScales, setLocalScales] = useState<Record<string, number>>({});
 
@@ -166,6 +167,12 @@ export function LoRAManager({
                   disabled={disabled || isStreaming}
                   placeholder="Select LoRA file"
                   emptyMessage="No LoRA files found"
+                  isLoading={isLoadingLoRAs}
+                  missingTooltip={
+                    isCloudConnected
+                      ? "This LoRA isn't available on the cloud runner. Upload it to your library or pick another file — the pipeline will fail to load otherwise."
+                      : "This LoRA isn't in your local library. Install it or pick another file — the pipeline will fail to load otherwise."
+                  }
                 />
               </div>
               <Button
