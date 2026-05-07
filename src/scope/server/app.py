@@ -2150,7 +2150,6 @@ async def workflow_embed_endpoint(
 
 
 @app.post("/api/v1/workflow/extract")
-@cloud_proxy(timeout=_WORKFLOW_ASSET_PROXY_TIMEOUT)
 async def workflow_extract_endpoint(
     http_request: Request,
     cloud_manager: ScopeCloudBackend = Depends(get_scope_cloud),
@@ -2162,8 +2161,10 @@ async def workflow_extract_endpoint(
     the resulting on-disk paths, strips ``embedded_assets``, and returns
     the rewritten workflow.
 
-    In cloud mode this is proxied to the cloud server so the assets land
-    where the session that consumes them will run.
+    In cloud mode the assets are also materialized locally — sessions resolve
+    paths on the cloud server, but the local frontend serves preview thumbnails
+    from the local assets directory by basename, so a local copy is required
+    for ``<img>``/``<video>`` previews to render after import.
     """
     try:
         body = await http_request.json()
@@ -2173,6 +2174,29 @@ async def workflow_extract_endpoint(
         raise HTTPException(
             status_code=400, detail="Workflow body must be a JSON object"
         )
+
+    if cloud_manager.is_connected:
+        # Materialize a local copy of every embedded asset so the frontend
+        # can render previews (its thumbnail endpoint reads from the local
+        # assets dir by basename). The rewritten workflow we get back here
+        # is discarded; we use cloud's response so workflow paths resolve
+        # at session-run time on the cloud server.
+        try:
+            extract_workflow_assets(body, get_assets_dir())
+        except Exception as e:
+            logger.warning(
+                "extract: local asset materialization failed (cloud copy "
+                "still attempted): %s",
+                e,
+            )
+        return await proxy_with_body(
+            cloud_manager,
+            method="POST",
+            path="/api/v1/workflow/extract",
+            body=body,
+            timeout=_WORKFLOW_ASSET_PROXY_TIMEOUT,
+        )
+
     try:
         return extract_workflow_assets(body, get_assets_dir())
     except Exception as e:

@@ -5,11 +5,40 @@ from __future__ import annotations
 import base64
 import hashlib
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
+from fastapi.testclient import TestClient
 
 from scope.core.workflows.embed import (
     embed_workflow_assets,
     extract_workflow_assets,
 )
+
+
+@pytest.fixture
+def cloud_mock():
+    """Mock cloud backend that reports connected and records api_request calls."""
+    mock = MagicMock()
+    mock.is_connected = True
+    # Mirror the real cloud's response shape: cloud-side path is returned in
+    # the workflow it sends back. Tests can override via .api_request.return_value.
+    mock.api_request = AsyncMock(
+        return_value={
+            "status": 200,
+            "data": {
+                "metadata": {"name": "t"},
+                "pipelines": [
+                    {
+                        "params": {
+                            "vace_ref_images": ["/root/.daydream-scope/assets/ref.png"]
+                        }
+                    }
+                ],
+            },
+        }
+    )
+    return mock
 
 
 def _png_bytes() -> bytes:
@@ -248,3 +277,65 @@ def test_round_trip_via_graph_ui_state(tmp_path: Path) -> None:
     assert Path(new_source_name).read_bytes() == png
     assert Path(new_image_path).read_bytes() == png
     assert Path(new_source_name).is_relative_to(target.resolve())
+
+
+def test_extract_endpoint_in_cloud_mode_writes_local_copy_for_previews(
+    tmp_path: Path, cloud_mock: MagicMock
+) -> None:
+    """In cloud mode the extract endpoint must still materialize embedded
+    assets locally, otherwise the frontend's ``<img>``/``<video>`` previews
+    (which load from ``/api/v1/assets/{basename}``, a local-only endpoint)
+    show as broken images after import.
+
+    Regression test for the case where importing a workflow with
+    ``embedded_assets`` while connected to the cloud left the local assets
+    dir untouched, so previews 404'd.
+    """
+    png = _png_bytes()
+    local_assets = tmp_path / "local_assets"
+    local_assets.mkdir()
+
+    workflow_with_embedded = {
+        "format": "scope-workflow",
+        "format_version": "1.1",
+        "metadata": {"name": "t"},
+        "pipelines": [
+            {"params": {"vace_ref_images": ["/some/origin/machine/ref.png"]}}
+        ],
+        "embedded_assets": [
+            {
+                "filename": "ref.png",
+                "mime_type": "image/png",
+                "size_bytes": len(png),
+                "sha256": hashlib.sha256(png).hexdigest(),
+                "data": base64.b64encode(png).decode("ascii"),
+            }
+        ],
+    }
+
+    with (
+        patch("scope.server.app.get_assets_dir", return_value=local_assets),
+        patch("scope.server.app.livepeer", cloud_mock),
+    ):
+        from scope.server.app import app
+
+        client = TestClient(app, raise_server_exceptions=False)
+        response = client.post("/api/v1/workflow/extract", json=workflow_with_embedded)
+
+    assert response.status_code == 200, response.text
+    # Cloud's response is what the client sees — paths point at the cloud's
+    # filesystem so sessions resolve them on the cloud worker.
+    body = response.json()
+    assert (
+        body["pipelines"][0]["params"]["vace_ref_images"][0]
+        == "/root/.daydream-scope/assets/ref.png"
+    )
+    # And the cloud was actually called.
+    cloud_mock.api_request.assert_awaited_once()
+    # The fix: a local copy must exist so the preview thumbnail endpoint
+    # (which strips the path to its basename) can serve it.
+    local_copy = local_assets / "ref.png"
+    assert local_copy.exists(), (
+        "local copy missing — frontend previews will show broken image"
+    )
+    assert local_copy.read_bytes() == png
