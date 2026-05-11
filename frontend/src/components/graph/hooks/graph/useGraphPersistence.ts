@@ -32,6 +32,7 @@ import {
   extractNodeParams,
 } from "../../utils/nodeEnrichment";
 import type { EnrichNodesDeps } from "../../utils/nodeEnrichment";
+import { getAnyValueFromNode } from "../../utils/getValueFromNode";
 
 // Re-export for backwards compatibility with existing consumers
 export {
@@ -679,16 +680,43 @@ export function useGraphPersistence({
       nodesRef.current,
       edgesRef.current
     );
+    // Pre-resolve `param:` edges into per-pipeline overrides. The RAF loop in
+    // useValueForwarding writes node.data.parameterValues only while streaming,
+    // so at session-start time the connected source value (e.g. an image
+    // node's imagePath wired to a pipeline's i2v_image param) isn't yet in
+    // parameterValues and the stale default would be sent in the initial
+    // payload. Walk param edges synchronously here so the first generation
+    // already uses the connected value.
+    const fromParamEdges: Record<string, Record<string, unknown>> = {};
+    for (const edge of root.edges) {
+      const src = parseHandleId(edge.sourceHandle);
+      const dst = parseHandleId(edge.targetHandle);
+      if (!src || !dst) continue;
+      if (src.kind !== "param" || dst.kind !== "param") continue;
+      const sourceNode = root.nodes.find(n => n.id === edge.source);
+      const targetNode = root.nodes.find(n => n.id === edge.target);
+      if (!sourceNode || !targetNode) continue;
+      if (targetNode.data.nodeType !== "pipeline") continue;
+      const value = getAnyValueFromNode(sourceNode, edge.sourceHandle);
+      if (value === null || value === undefined || value === "") continue;
+      fromParamEdges[edge.target] ??= {};
+      fromParamEdges[edge.target][dst.name] = value;
+    }
     // Merge parameterValues from node data (graph connections written by the
-    // RAF loop in useValueForwarding) with nodeParams (manual edits).  Manual
-    // edits take precedence so explicit user changes aren't overwritten.
+    // RAF loop in useValueForwarding), pre-resolved param edges, and
+    // nodeParams. A connected param edge wins over both nodeParams and the
+    // RAF-loop value: when an edge is wired, the UI disables manual editing
+    // of that key so any value in nodeParams for that key is the stale
+    // workflow default. Other keys keep the original precedence
+    // (parameterValues < nodeParams) so unrelated manual edits still apply.
     const mergedParams: Record<string, Record<string, unknown>> = {};
     for (const node of root.nodes) {
       if (node.data.nodeType !== "pipeline") continue;
       const fromData =
         (node.data.parameterValues as Record<string, unknown>) ?? {};
+      const fromEdges = fromParamEdges[node.id] ?? {};
       const fromState = nodeParamsRef.current[node.id] ?? {};
-      const merged = { ...fromData, ...fromState };
+      const merged = { ...fromData, ...fromState, ...fromEdges };
       if (Object.keys(merged).length > 0) {
         mergedParams[node.id] = merged;
       }
