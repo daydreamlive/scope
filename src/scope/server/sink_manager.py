@@ -345,7 +345,10 @@ class SinkManager:
             sink_name = node.sink_name or ""
             node_id = node.id
 
-            if node_id not in self._sink_queues_by_node:
+            if (
+                node_id not in self._sink_queues_by_node
+                and node_id not in self._sink_hardware_queues_by_node
+            ):
                 continue
 
             sink_class = sink_classes.get(node.sink_mode)
@@ -440,7 +443,22 @@ class SinkManager:
     def put_to_record(self, node_id: str, frame) -> None:
         """Convert a VideoFrame to tensor and put it into a record node's queue."""
         rec_q = self._recording._record_queues.get(node_id)
-        if rec_q is None:
+        self._enqueue_video_frame(rec_q, frame, node_id=node_id, kind="record")
+
+    @staticmethod
+    def _enqueue_video_frame(
+        target_queue: "queue.Queue | None",
+        frame,
+        *,
+        node_id: str,
+        kind: str,
+    ) -> None:
+        """Convert *frame* (VideoFrame) to a VideoPacket and enqueue it.
+
+        Drops the oldest packet if the queue is full. Used by both record
+        and hardware-sink fan-out paths.
+        """
+        if target_queue is None:
             return
         try:
             frame_np = frame.to_ndarray(format="rgb24")
@@ -456,15 +474,15 @@ class SinkManager:
                 )
             packet = VideoPacket(tensor=t, timestamp=timestamp)
             try:
-                rec_q.put_nowait(packet)
+                target_queue.put_nowait(packet)
             except queue.Full:
                 try:
-                    rec_q.get_nowait()
-                    rec_q.put_nowait(packet)
+                    target_queue.get_nowait()
+                    target_queue.put_nowait(packet)
                 except queue.Empty:
                     pass
         except Exception as e:
-            logger.error(f"Error in put_to_record for node {node_id}: {e}")
+            logger.error(f"Error enqueueing {kind} frame for node {node_id}: {e}")
 
     @property
     def recording(self) -> RecordingCoordinator:
@@ -513,11 +531,7 @@ class SinkManager:
                 continue
             if node.id in self._sink_hardware_queues_by_node:
                 continue
-            hw_queue: queue.Queue = queue.Queue(maxsize=30)
-            self._sink_hardware_queues_by_node[node.id] = hw_queue
-            # Populate sink_queues_by_node too so setup_multi_sinks' presence
-            # check passes (it gates sender creation on a queue being present).
-            self._sink_queues_by_node.setdefault(node.id, hw_queue)
+            self._sink_hardware_queues_by_node[node.id] = queue.Queue(maxsize=30)
 
         self.setup_multi_sinks(graph, dimensions)
 
@@ -529,31 +543,7 @@ class SinkManager:
         tees frames into record-node queues.
         """
         sink_q = self._sink_hardware_queues_by_node.get(node_id)
-        if sink_q is None:
-            return
-        try:
-            frame_np = frame.to_ndarray(format="rgb24")
-            t = torch.as_tensor(frame_np, dtype=torch.uint8).unsqueeze(0)
-            timestamp = MediaTimestamp()
-            if (
-                getattr(frame, "pts", None) is not None
-                and getattr(frame, "time_base", None) is not None
-            ):
-                timestamp = MediaTimestamp(
-                    pts=frame.pts,
-                    time_base=Fraction(frame.time_base),
-                )
-            packet = VideoPacket(tensor=t, timestamp=timestamp)
-            try:
-                sink_q.put_nowait(packet)
-            except queue.Full:
-                try:
-                    sink_q.get_nowait()
-                    sink_q.put_nowait(packet)
-                except queue.Empty:
-                    pass
-        except Exception as e:
-            logger.error(f"Error in put_to_sink for node {node_id}: {e}")
+        self._enqueue_video_frame(sink_q, frame, node_id=node_id, kind="hardware sink")
 
     # ------------------------------------------------------------------
     # Lifecycle

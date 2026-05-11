@@ -142,25 +142,32 @@ def _parse_graph_node_ids(
     )
 
 
-def _compute_hardware_sink_routes(
+def _build_cloud_output_taps(
+    *,
     initial_parameters: dict,
     all_sink_node_ids: list[str],
-) -> list[tuple[int, str]]:
-    """Map each hardware sink to the cloud output handler that should feed it.
+    record_node_ids: list[str],
+    frame_processor: "FrameProcessor | None",
+) -> list[tuple[int, Callable]]:
+    """Build the list of ``(handler_index, callback)`` taps for cloud relay.
 
-    Cloud-relay mode strips hardware sinks (Syphon/NDI/Spout) from the graph
-    before sending it to the cloud runner, so the runner produces output
-    tracks only for webrtc sinks. Each hardware sink is teed from the cloud
-    output handler of the webrtc sink that shares its upstream pipeline node,
-    so the local sender receives the same frames the browser sees.
+    Two consumers fan out off cloud output handlers:
 
-    Returns a list of ``(handler_index, hardware_sink_node_id)`` pairs.
-    ``handler_index`` is the index into ``webrtc_client.output_handlers``:
-    0 is the primary CloudTrack output, 1+ are extra-sink tracks.
+    1. Record nodes — handler indices come after the webrtc sinks
+       (primary + extras), so handler N = num_webrtc_sinks + record_pos.
+    2. Hardware sinks (Syphon/NDI/Spout) — handler N = the cloud output
+       handler of the webrtc sink that shares this sink's upstream
+       pipeline, so the local sender mirrors what the browser sees.
 
-    If a hardware sink has no buddy webrtc sink with the same upstream, falls
-    back to handler 0 (the primary) and logs a warning.
+    Hardware sinks are stripped from the graph before it reaches the
+    cloud runner, so the runner only allocates output handlers for
+    webrtc sinks and remote record nodes. Orphan hardware sinks (no
+    buddy webrtc sink on the same pipeline) are dropped with a warning
+    rather than silently mis-routed.
     """
+    if frame_processor is None:
+        return []
+
     graph_data = initial_parameters.get("graph")
     if not isinstance(graph_data, dict):
         return []
@@ -173,29 +180,23 @@ def _compute_hardware_sink_routes(
         if isinstance(n, dict) and n.get("type") == "sink":
             sink_modes[n.get("id")] = n.get("sink_mode")
 
-    hardware_sink_ids = [
-        sid
-        for sid in all_sink_node_ids
-        if sink_modes.get(sid) in ("spout", "ndi", "syphon")
-    ]
-    if not hardware_sink_ids:
-        return []
-
     webrtc_sink_ids = [
         sid
         for sid in all_sink_node_ids
         if sink_modes.get(sid) not in ("spout", "ndi", "syphon")
     ]
+    hardware_sink_ids = [
+        sid
+        for sid in all_sink_node_ids
+        if sink_modes.get(sid) in ("spout", "ndi", "syphon")
+    ]
 
     def _upstream_of(sink_id: str) -> str | None:
         for e in edges:
-            if not isinstance(e, dict):
+            if not isinstance(e, dict) or e.get("kind") != "stream":
                 continue
-            if e.get("kind") != "stream":
-                continue
-            if e.get("to_node") != sink_id:
-                continue
-            return e.get("from_node") or e.get("from")
+            if e.get("to_node") == sink_id:
+                return e.get("from_node") or e.get("from")
         return None
 
     upstream_to_handler: dict[str, int] = {}
@@ -204,27 +205,51 @@ def _compute_hardware_sink_routes(
         if up and up not in upstream_to_handler:
             upstream_to_handler[up] = idx
 
-    routes: list[tuple[int, str]] = []
+    fp = frame_processor
+    taps: list[tuple[int, Callable]] = []
+
+    # Hardware sinks: handler N = buddy webrtc sink's index.
     for hw_id in hardware_sink_ids:
         up = _upstream_of(hw_id)
         handler_index = upstream_to_handler.get(up) if up else None
         if handler_index is None:
-            if webrtc_sink_ids:
-                logger.warning(
-                    f"Hardware sink {hw_id!r} has no webrtc sink sharing its "
-                    f"upstream pipeline {up!r}; falling back to primary "
-                    "cloud output (frames may not match expected pipeline)"
-                )
-                handler_index = 0
-            else:
-                logger.warning(
-                    f"Hardware sink {hw_id!r} cannot be wired: no webrtc sink "
-                    "exists in this graph to provide cloud frames"
-                )
-                continue
-        routes.append((handler_index, hw_id))
+            # Silently routing to handler 0 would deliver wrong-pipeline
+            # frames to Syphon — worse than no output. Skip and warn so
+            # the user notices.
+            logger.warning(
+                f"Hardware sink {hw_id!r} not wired: no webrtc sink shares "
+                f"its upstream pipeline {up!r}. The sink will receive no "
+                "frames; add a webrtc sink fed from the same pipeline to "
+                "enable it in cloud mode."
+            )
+            continue
+        taps.append((handler_index, _make_put_to_sink_cb(fp, hw_id)))
 
-    return routes
+    # Record nodes: placed after webrtc sinks in the cloud output mapping.
+    num_webrtc_sinks = len(webrtc_sink_ids)
+    for rec_pos, rec_id in enumerate(record_node_ids):
+        taps.append(
+            (
+                num_webrtc_sinks + rec_pos,
+                _make_put_to_record_cb(fp, rec_id),
+            )
+        )
+
+    return taps
+
+
+def _make_put_to_record_cb(frame_processor: "FrameProcessor", node_id: str) -> Callable:
+    def _cb(frame) -> None:
+        frame_processor.sink_manager.put_to_record(node_id, frame)
+
+    return _cb
+
+
+def _make_put_to_sink_cb(frame_processor: "FrameProcessor", node_id: str) -> Callable:
+    def _cb(frame) -> None:
+        frame_processor.sink_manager.put_to_sink(node_id, frame)
+
+    return _cb
 
 
 class Session:
@@ -1211,45 +1236,24 @@ class WebRTCManager:
                 # Tell CloudTrack to wire these after cloud connection starts
                 cloud_track.set_extra_sink_tracks(extra_sink_tracks)
 
-            # Set up record node callbacks so cloud record frames are
-            # received locally and fed into frame_processor record queues.
-            # Record tracks are NOT relayed to the browser — they stay
-            # server-side for local recording.
-            if record_node_ids and cloud_track is not None:
-                record_callbacks: list[tuple[str, Callable]] = []
-                for rec_id in record_node_ids:
-
-                    def _make_record_cb(node_id: str, fp: FrameProcessor) -> Callable:
-                        def _cb(frame) -> None:
-                            fp.sink_manager.put_to_record(node_id, frame)
-
-                        return _cb
-
-                    record_callbacks.append(
-                        (rec_id, _make_record_cb(rec_id, frame_processor))
-                    )
-                cloud_track.set_record_callbacks(record_callbacks)
-                logger.info(
-                    f"Cloud relay: registered {len(record_callbacks)} "
-                    f"record callback(s)"
-                )
-
-            # Set up hardware sink (Syphon/NDI/Spout) routes. Hardware sinks
-            # always run on the local machine; the cloud relay strips them
-            # from the graph before sending to the runner. Tee frames from
-            # the cloud output handler of a webrtc sink that shares the same
-            # upstream pipeline into the local sender's queue, so Syphon
-            # receives the same frames the browser sees.
+            # Build cloud-output-handler taps: extra fan-out callbacks the
+            # cloud relay should invoke when frames arrive on a given
+            # handler index. Two consumers today:
+            # - record nodes: handler N = num_extra_sinks + 1 + record_pos
+            #   (placed after primary + extra webrtc sinks)
+            # - hardware sinks (Syphon/NDI/Spout): handler N = the cloud
+            #   output handler of the webrtc sink that shares this sink's
+            #   upstream pipeline (so Syphon mirrors what the browser sees)
             if cloud_track is not None:
-                hardware_sink_routes = _compute_hardware_sink_routes(
-                    initial_parameters, sink_node_ids
+                taps = _build_cloud_output_taps(
+                    initial_parameters=initial_parameters,
+                    all_sink_node_ids=sink_node_ids,
+                    record_node_ids=record_node_ids,
+                    frame_processor=frame_processor,
                 )
-                if hardware_sink_routes:
-                    cloud_track.set_hardware_sink_routes(hardware_sink_routes)
-                    logger.info(
-                        f"Cloud relay: registered {len(hardware_sink_routes)} "
-                        f"hardware sink route(s)"
-                    )
+                if taps:
+                    cloud_track.set_output_taps(taps)
+                    logger.info(f"Cloud relay: registered {len(taps)} output tap(s)")
 
             # Create answer
             answer = await pc.createAnswer()

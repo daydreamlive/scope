@@ -95,13 +95,13 @@ class CloudTrack(MediaStreamTrack):
         self._pending_extra_sources: list[tuple[str, MediaStreamTrack]] = []
         self._extra_sink_tracks: list[CloudSinkOutputTrack] = []
         self._extra_input_handlers: list[CloudSourceInputHandler] = []
-        self._record_callbacks: list[tuple[str, Callable]] = []
-        # Hardware sink routes: (output_handler_index, hardware_sink_node_id).
-        # Each entry tees frames from the given cloud output handler into the
-        # named local hardware sink (Syphon/NDI/Spout) via the FrameProcessor's
-        # SinkManager.put_to_sink — same pattern as record_callbacks but the
-        # destination is a local hardware sender thread, not a recorder queue.
-        self._hardware_sink_routes: list[tuple[int, str]] = []
+        # Output taps: (output_handler_index, callback) pairs. Each entry
+        # registers an additional callback on the named cloud output handler
+        # so the same frame can be fanned out to record queues, local
+        # hardware sinks (Syphon/NDI/Spout), or any other consumer the
+        # offer-handler wires up. handle_offer_with_relay computes the
+        # handler indices from the graph structure.
+        self._output_taps: list[tuple[int, Callable]] = []
 
     def set_source_track(self, track: MediaStreamTrack) -> None:
         """Set the source track for input frames (from browser)."""
@@ -187,43 +187,16 @@ class CloudTrack(MediaStreamTrack):
                     )
                     logger.info(f"Wired extra sink track {i} to cloud output")
 
-            # Wire record node output callbacks (placed after sink tracks)
-            num_extra_sinks = len(self._extra_sink_tracks)
-            for i, (rec_id, callback) in enumerate(self._record_callbacks):
-                handler_index = num_extra_sinks + 1 + i
-                if handler_index < len(webrtc_client.output_handlers):
+            # Wire output taps: callbacks registered against specific cloud
+            # output handler indices. Used for record nodes and local
+            # hardware sinks (Syphon/NDI/Spout).
+            for handler_index, callback in self._output_taps:
+                if 0 <= handler_index < len(webrtc_client.output_handlers):
                     webrtc_client.output_handlers[handler_index].add_callback(callback)
-                    logger.info(f"Wired record node {rec_id} to cloud output")
-
-            # Wire hardware sinks (Syphon/NDI/Spout). Each route tees frames
-            # from an existing cloud output handler into a local hardware
-            # sender. The handler index is computed by handle_offer_with_relay
-            # based on which webrtc sink shares the same upstream pipeline.
-            if self.frame_processor is not None and self._hardware_sink_routes:
-                fp = self.frame_processor
-                for handler_index, hw_node_id in self._hardware_sink_routes:
-                    if handler_index < 0 or handler_index >= len(
-                        webrtc_client.output_handlers
-                    ):
-                        logger.warning(
-                            f"Cannot wire hardware sink {hw_node_id!r}: cloud "
-                            f"output handler index {handler_index} out of range "
-                            f"(have {len(webrtc_client.output_handlers)})"
-                        )
-                        continue
-
-                    def _make_hw_cb(node_id: str) -> Callable:
-                        def _cb(frame) -> None:
-                            fp.sink_manager.put_to_sink(node_id, frame)
-
-                        return _cb
-
-                    webrtc_client.output_handlers[handler_index].add_callback(
-                        _make_hw_cb(hw_node_id)
-                    )
-                    logger.info(
-                        f"Wired hardware sink {hw_node_id!r} to cloud output "
-                        f"handler {handler_index}"
+                else:
+                    logger.warning(
+                        f"Output tap on cloud handler {handler_index} skipped: "
+                        f"out of range (have {len(webrtc_client.output_handlers)})"
                     )
 
         logger.info("Relay started")
@@ -432,24 +405,17 @@ class CloudTrack(MediaStreamTrack):
         """Register extra sink output tracks that need cloud callbacks."""
         self._extra_sink_tracks = list(tracks)
 
-    def set_record_callbacks(self, callbacks: list[tuple[str, Callable]]) -> None:
-        """Register callbacks for record node outputs from cloud.
+    def set_output_taps(self, taps: list[tuple[int, Callable]]) -> None:
+        """Register fan-out callbacks on cloud output handlers.
 
-        Each entry is (record_node_id, callback) where callback receives a
-        VideoFrame and pushes it into the frame_processor's record queue.
+        Each entry is ``(handler_index, callback)``. Once the cloud relay
+        starts, every frame received on
+        ``webrtc_client.output_handlers[handler_index]`` is also delivered
+        to ``callback`` (in addition to whatever else is wired to that
+        handler). Used to feed record-node queues and local hardware sinks
+        from cloud-produced frames.
         """
-        self._record_callbacks = list(callbacks)
-
-    def set_hardware_sink_routes(self, routes: list[tuple[int, str]]) -> None:
-        """Register hardware sink routes from cloud output handlers.
-
-        Each entry is ``(handler_index, hardware_sink_node_id)``. After the
-        cloud relay starts, every frame received on
-        ``webrtc_client.output_handlers[handler_index]`` is teed into the
-        local SinkManager's queue for ``hardware_sink_node_id``, where a
-        per-node sender thread (Syphon/NDI/Spout) pushes it out.
-        """
-        self._hardware_sink_routes = list(routes)
+        self._output_taps = list(taps)
 
     def get_stats(self) -> dict:
         """Get relay statistics."""
