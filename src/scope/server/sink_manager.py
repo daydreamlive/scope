@@ -487,6 +487,74 @@ class SinkManager:
         if record_node_ids:
             self._recording.setup_queues(record_node_ids)
 
+    def setup_cloud_hardware_sinks(
+        self, graph: Any, dimensions: tuple[int, int]
+    ) -> None:
+        """Set up local hardware output sinks (Syphon/NDI/Spout) in cloud mode.
+
+        Hardware sinks always run on the local machine (Syphon is macOS-only,
+        NDI/Spout require local network/hardware access) even when pipeline
+        execution is offloaded to the cloud. This method allocates the
+        per-node hardware queues and sender threads that ``put_to_sink``
+        feeds from frames received from the cloud relay.
+
+        In local mode the queues are wired by ``graph_executor`` via
+        ``setup_graph_queues``; this is the cloud-mode equivalent.
+        """
+        from .graph_schema import GraphConfig
+
+        if not isinstance(graph, GraphConfig):
+            return
+
+        for node in graph.nodes:
+            if node.type != "sink":
+                continue
+            if node.sink_mode not in ("spout", "ndi", "syphon"):
+                continue
+            if node.id in self._sink_hardware_queues_by_node:
+                continue
+            hw_queue: queue.Queue = queue.Queue(maxsize=30)
+            self._sink_hardware_queues_by_node[node.id] = hw_queue
+            # Populate sink_queues_by_node too so setup_multi_sinks' presence
+            # check passes (it gates sender creation on a queue being present).
+            self._sink_queues_by_node.setdefault(node.id, hw_queue)
+
+        self.setup_multi_sinks(graph, dimensions)
+
+    def put_to_sink(self, node_id: str, frame) -> None:
+        """Push a VideoFrame into a hardware sink's queue (cloud relay path).
+
+        Used by the cloud-relay wiring to tee cloud-produced frames into a
+        local Syphon/NDI/Spout sender, mirroring how ``put_to_record``
+        tees frames into record-node queues.
+        """
+        sink_q = self._sink_hardware_queues_by_node.get(node_id)
+        if sink_q is None:
+            return
+        try:
+            frame_np = frame.to_ndarray(format="rgb24")
+            t = torch.as_tensor(frame_np, dtype=torch.uint8).unsqueeze(0)
+            timestamp = MediaTimestamp()
+            if (
+                getattr(frame, "pts", None) is not None
+                and getattr(frame, "time_base", None) is not None
+            ):
+                timestamp = MediaTimestamp(
+                    pts=frame.pts,
+                    time_base=Fraction(frame.time_base),
+                )
+            packet = VideoPacket(tensor=t, timestamp=timestamp)
+            try:
+                sink_q.put_nowait(packet)
+            except queue.Full:
+                try:
+                    sink_q.get_nowait()
+                    sink_q.put_nowait(packet)
+                except queue.Empty:
+                    pass
+        except Exception as e:
+            logger.error(f"Error in put_to_sink for node {node_id}: {e}")
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------

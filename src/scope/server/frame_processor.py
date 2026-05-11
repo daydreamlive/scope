@@ -225,6 +225,15 @@ class FrameProcessor:
                 graph = GraphConfig(**graph_data)
                 self._source_manager.setup_multi_sources(graph)
                 self.sink_manager.setup_cloud_graph(graph)
+                # Hardware sinks (Syphon/NDI/Spout) always run on the local
+                # machine even when the pipeline executes on cloud. The cloud
+                # relay tees its received frames into these local senders.
+                # Use the pipeline-provided dimensions if available; the
+                # SyphonSender (and others) auto-resize on first frame so a
+                # placeholder is safe.
+                self.sink_manager.setup_cloud_hardware_sinks(
+                    graph, self._get_cloud_sink_dimensions()
+                )
 
             logger.info("[FRAME-PROCESSOR] Started in cloud mode")
 
@@ -886,6 +895,22 @@ class FrameProcessor:
             return width, height
         except Exception as e:
             logger.warning(f"Could not get pipeline dimensions: {e}")
+            return 512, 512
+
+    def _get_cloud_sink_dimensions(self) -> tuple[int, int]:
+        """Initial dimensions for hardware sinks created in cloud mode.
+
+        In cloud mode there is no local ``pipeline_manager`` so we fall back
+        to ``width``/``height`` from initial parameters if present, otherwise
+        a safe default. SyphonSender (and other hardware senders) auto-resize
+        on first frame, so the placeholder doesn't have to match cloud output.
+        """
+        params = self.parameters or {}
+        width = params.get("width") or 512
+        height = params.get("height") or 512
+        try:
+            return int(width), int(height)
+        except (TypeError, ValueError):
             return 512, 512
 
     def schedule_quantized_update(self, params: dict):

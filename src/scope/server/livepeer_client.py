@@ -421,22 +421,41 @@ class LivepeerClient:
         initial_parameters: dict[str, Any] | None,
         parsed: _BrowserGraphInfo,
     ) -> dict[str, Any]:
-        """Deep-copy params and drop sink-attached record nodes.
+        """Deep-copy params, drop sink-teed records and hardware sinks.
 
-        The runner creates a dedicated output for every record node it sees, so
-        removing sink-attached records avoids redundant remote outputs whose
-        frames are identical to the parent sink.
+        Two transformations are applied:
+        - Sink-attached record nodes are removed: the runner creates a
+          dedicated output for every record node, but sink-teed records are
+          mirrored locally from their parent sink so the remote duplicate
+          would be wasteful.
+        - Hardware sink nodes (Syphon/NDI/Spout) are removed: these always
+          run on the local machine, where the cloud relay tees frames into
+          them from the corresponding webrtc sink. Sending them to the
+          runner would only produce noisy "syphon-python not available"
+          errors on the Linux GPU host.
         """
         if not initial_parameters:
             return {}
-        if not parsed.sink_teed_records:
-            return copy.deepcopy(initial_parameters)
-        collapsed = {rid for rid, _ in parsed.sink_teed_records}
         params = copy.deepcopy(initial_parameters)
         graph = params.get("graph")
         if not isinstance(graph, dict):
             return params
+
+        collapsed = {rid for rid, _ in parsed.sink_teed_records}
         nodes = graph.get("nodes")
+        if isinstance(nodes, list):
+            for n in nodes:
+                if not isinstance(n, dict):
+                    continue
+                if n.get("type") == "sink" and n.get("sink_mode") in (
+                    "spout",
+                    "ndi",
+                    "syphon",
+                ):
+                    collapsed.add(n.get("id"))
+        if not collapsed:
+            return params
+
         if isinstance(nodes, list):
             graph["nodes"] = [
                 n for n in nodes if isinstance(n, dict) and n.get("id") not in collapsed
@@ -449,6 +468,7 @@ class LivepeerClient:
                 if isinstance(e, dict)
                 and e.get("to_node") not in collapsed
                 and e.get("from") not in collapsed
+                and e.get("from_node") not in collapsed
             ]
         return params
 

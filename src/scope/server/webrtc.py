@@ -142,6 +142,91 @@ def _parse_graph_node_ids(
     )
 
 
+def _compute_hardware_sink_routes(
+    initial_parameters: dict,
+    all_sink_node_ids: list[str],
+) -> list[tuple[int, str]]:
+    """Map each hardware sink to the cloud output handler that should feed it.
+
+    Cloud-relay mode strips hardware sinks (Syphon/NDI/Spout) from the graph
+    before sending it to the cloud runner, so the runner produces output
+    tracks only for webrtc sinks. Each hardware sink is teed from the cloud
+    output handler of the webrtc sink that shares its upstream pipeline node,
+    so the local sender receives the same frames the browser sees.
+
+    Returns a list of ``(handler_index, hardware_sink_node_id)`` pairs.
+    ``handler_index`` is the index into ``webrtc_client.output_handlers``:
+    0 is the primary CloudTrack output, 1+ are extra-sink tracks.
+
+    If a hardware sink has no buddy webrtc sink with the same upstream, falls
+    back to handler 0 (the primary) and logs a warning.
+    """
+    graph_data = initial_parameters.get("graph")
+    if not isinstance(graph_data, dict):
+        return []
+
+    nodes = graph_data.get("nodes", []) or []
+    edges = graph_data.get("edges", []) or []
+
+    sink_modes: dict[str, str | None] = {}
+    for n in nodes:
+        if isinstance(n, dict) and n.get("type") == "sink":
+            sink_modes[n.get("id")] = n.get("sink_mode")
+
+    hardware_sink_ids = [
+        sid
+        for sid in all_sink_node_ids
+        if sink_modes.get(sid) in ("spout", "ndi", "syphon")
+    ]
+    if not hardware_sink_ids:
+        return []
+
+    webrtc_sink_ids = [
+        sid
+        for sid in all_sink_node_ids
+        if sink_modes.get(sid) not in ("spout", "ndi", "syphon")
+    ]
+
+    def _upstream_of(sink_id: str) -> str | None:
+        for e in edges:
+            if not isinstance(e, dict):
+                continue
+            if e.get("kind") != "stream":
+                continue
+            if e.get("to_node") != sink_id:
+                continue
+            return e.get("from_node") or e.get("from")
+        return None
+
+    upstream_to_handler: dict[str, int] = {}
+    for idx, sid in enumerate(webrtc_sink_ids):
+        up = _upstream_of(sid)
+        if up and up not in upstream_to_handler:
+            upstream_to_handler[up] = idx
+
+    routes: list[tuple[int, str]] = []
+    for hw_id in hardware_sink_ids:
+        up = _upstream_of(hw_id)
+        handler_index = upstream_to_handler.get(up) if up else None
+        if handler_index is None:
+            if webrtc_sink_ids:
+                logger.warning(
+                    f"Hardware sink {hw_id!r} has no webrtc sink sharing its "
+                    f"upstream pipeline {up!r}; falling back to primary "
+                    "cloud output (frames may not match expected pipeline)"
+                )
+                handler_index = 0
+            else:
+                logger.warning(
+                    f"Hardware sink {hw_id!r} cannot be wired: no webrtc sink "
+                    "exists in this graph to provide cloud frames"
+                )
+                continue
+        routes.append((handler_index, hw_id))
+
+    return routes
+
+
 class Session:
     """WebRTC Session containing peer connection and associated tracks."""
 
@@ -1073,8 +1158,22 @@ class WebRTCManager:
 
             # Attach extra sink video tracks to the browser's recvonly
             # transceivers (same pattern as the local-mode handler).
+            # Hardware sinks (Syphon/NDI/Spout) are skipped here: they are
+            # stripped from the graph sent to the cloud runner, so the cloud
+            # produces no output track for them. Their frames are teed from
+            # a webrtc sink's cloud output handler via hardware_sink_routes
+            # (see below), and the browser's recv-only transceiver for the
+            # hardware sink stays unattached (the browser never displays
+            # frames for a Syphon/NDI/Spout-only sink).
             if len(sink_node_ids) > 1 and cloud_track is not None and relay is not None:
                 from .cloud_track import CloudSinkOutputTrack
+
+                hw_sink_modes: dict[str, str | None] = {}
+                _graph = initial_parameters.get("graph")
+                if isinstance(_graph, dict):
+                    for _n in _graph.get("nodes", []) or []:
+                        if isinstance(_n, dict) and _n.get("type") == "sink":
+                            hw_sink_modes[_n.get("id")] = _n.get("sink_mode")
 
                 extra_sink_tracks: list[CloudSinkOutputTrack] = []
                 recv_only_video = [
@@ -1089,6 +1188,12 @@ class WebRTCManager:
                     f"transceivers for {len(sink_node_ids) - 1} extra sink(s)"
                 )
                 for i, sink_id in enumerate(sink_node_ids[1:]):
+                    if hw_sink_modes.get(sink_id) in ("spout", "ndi", "syphon"):
+                        logger.info(
+                            f"Cloud relay: skipping browser delivery for "
+                            f"hardware sink {sink_id!r} (handled locally)"
+                        )
+                        continue
                     extra_track = CloudSinkOutputTrack(frame_processor=frame_processor)
                     extra_sink_tracks.append(extra_track)
                     session.additional_tracks.append(extra_track)
@@ -1128,6 +1233,23 @@ class WebRTCManager:
                     f"Cloud relay: registered {len(record_callbacks)} "
                     f"record callback(s)"
                 )
+
+            # Set up hardware sink (Syphon/NDI/Spout) routes. Hardware sinks
+            # always run on the local machine; the cloud relay strips them
+            # from the graph before sending to the runner. Tee frames from
+            # the cloud output handler of a webrtc sink that shares the same
+            # upstream pipeline into the local sender's queue, so Syphon
+            # receives the same frames the browser sees.
+            if cloud_track is not None:
+                hardware_sink_routes = _compute_hardware_sink_routes(
+                    initial_parameters, sink_node_ids
+                )
+                if hardware_sink_routes:
+                    cloud_track.set_hardware_sink_routes(hardware_sink_routes)
+                    logger.info(
+                        f"Cloud relay: registered {len(hardware_sink_routes)} "
+                        f"hardware sink route(s)"
+                    )
 
             # Create answer
             answer = await pc.createAnswer()
