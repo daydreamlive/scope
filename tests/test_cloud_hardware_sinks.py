@@ -7,34 +7,8 @@ feed it — typically the handler of a webrtc sink that shares the same
 upstream pipeline.
 """
 
-from unittest.mock import MagicMock
-
 from scope.server.livepeer_client import LivepeerClient, _BrowserGraphInfo
-from scope.server.webrtc import _build_cloud_output_taps
-
-
-def _hw_routes(taps):
-    """Filter tap list down to the (handler_index, node_id) pairs we can
-    inspect for hardware sinks. We recover node_id by inspecting the
-    closure of each callback (set up via _make_put_to_sink_cb)."""
-    routes = []
-    for handler_index, callback in taps:
-        # Hardware-sink callbacks call sink_manager.put_to_sink(node_id, frame);
-        # record callbacks call put_to_record. We can't easily distinguish
-        # them from the outside, but in tests we register a MagicMock as the
-        # frame_processor so any captured node_id is in cell_contents.
-        cells = callback.__closure__ or ()
-        node_id = next(
-            (c.cell_contents for c in cells if isinstance(c.cell_contents, str)),
-            None,
-        )
-        routes.append((handler_index, node_id))
-    return routes
-
-
-def _fake_fp():
-    """A frame_processor stand-in whose sink_manager just records calls."""
-    return MagicMock()
+from scope.server.webrtc import _compute_hardware_sink_routes
 
 
 def test_single_pipeline_webrtc_plus_syphon():
@@ -59,13 +33,8 @@ def test_single_pipeline_webrtc_plus_syphon():
             ],
         }
     }
-    taps = _build_cloud_output_taps(
-        initial_parameters=params,
-        all_sink_node_ids=["output", "output_sink"],
-        record_node_ids=[],
-        frame_processor=_fake_fp(),
-    )
-    assert _hw_routes(taps) == [(0, "output_sink")]
+    routes = _compute_hardware_sink_routes(params, ["output", "output_sink"])
+    assert routes == [(0, "output_sink")]
 
 
 def test_no_hardware_sinks_returns_empty():
@@ -78,13 +47,7 @@ def test_no_hardware_sinks_returns_empty():
             "edges": [_edge("input", "output")],
         }
     }
-    taps = _build_cloud_output_taps(
-        initial_parameters=params,
-        all_sink_node_ids=["output"],
-        record_node_ids=[],
-        frame_processor=_fake_fp(),
-    )
-    assert taps == []
+    assert _compute_hardware_sink_routes(params, ["output"]) == []
 
 
 def test_multi_pipeline_hw_sink_routes_to_buddy_webrtc_sink():
@@ -125,15 +88,12 @@ def test_multi_pipeline_hw_sink_routes_to_buddy_webrtc_sink():
             ],
         }
     }
-    taps = _build_cloud_output_taps(
-        initial_parameters=params,
-        all_sink_node_ids=["out_a", "out_b", "syphon_a", "syphon_b"],
-        record_node_ids=[],
-        frame_processor=_fake_fp(),
+    routes = _compute_hardware_sink_routes(
+        params, ["out_a", "out_b", "syphon_a", "syphon_b"]
     )
     # syphon_a shares pipeline_a with out_a (handler 0).
     # syphon_b shares pipeline_b with out_b (handler 1).
-    assert sorted(_hw_routes(taps)) == [(0, "syphon_a"), (1, "syphon_b")]
+    assert sorted(routes) == [(0, "syphon_a"), (1, "syphon_b")]
 
 
 def test_spout_and_ndi_treated_as_hardware():
@@ -154,13 +114,8 @@ def test_spout_and_ndi_treated_as_hardware():
             ],
         }
     }
-    taps = _build_cloud_output_taps(
-        initial_parameters=params,
-        all_sink_node_ids=["browser", "spout", "ndi"],
-        record_node_ids=[],
-        frame_processor=_fake_fp(),
-    )
-    assert sorted(_hw_routes(taps)) == [(0, "ndi"), (0, "spout")]
+    routes = _compute_hardware_sink_routes(params, ["browser", "spout", "ndi"])
+    assert sorted(routes) == [(0, "ndi"), (0, "spout")]
 
 
 def test_orphan_hardware_sink_is_dropped_not_silently_mis_routed(caplog):
@@ -191,45 +146,10 @@ def test_orphan_hardware_sink_is_dropped_not_silently_mis_routed(caplog):
         }
     }
     with caplog.at_level("WARNING"):
-        taps = _build_cloud_output_taps(
-            initial_parameters=params,
-            all_sink_node_ids=["out_a", "syphon_orphan"],
-            record_node_ids=[],
-            frame_processor=_fake_fp(),
-        )
-    assert taps == []
+        routes = _compute_hardware_sink_routes(params, ["out_a", "syphon_orphan"])
+    assert routes == []
     assert "syphon_orphan" in caplog.text
     assert "no webrtc sink shares" in caplog.text
-
-
-def test_record_nodes_get_taps_after_webrtc_sinks():
-    """Record-node taps come after the webrtc sinks in the output handler
-    index space."""
-    params = {
-        "graph": {
-            "nodes": [
-                {"id": "input", "type": "source", "source_mode": "camera"},
-                {"id": "pipe", "type": "pipeline", "pipeline_id": "passthrough"},
-                {"id": "out_a", "type": "sink"},
-                {"id": "out_b", "type": "sink"},
-                {"id": "rec", "type": "record"},
-            ],
-            "edges": [
-                _edge("input", "pipe"),
-                _edge("pipe", "out_a"),
-                _edge("pipe", "out_b"),
-            ],
-        }
-    }
-    taps = _build_cloud_output_taps(
-        initial_parameters=params,
-        all_sink_node_ids=["out_a", "out_b"],
-        record_node_ids=["rec"],
-        frame_processor=_fake_fp(),
-    )
-    # 2 webrtc sinks → record tap should land at handler 2.
-    handler_indices = [t[0] for t in taps]
-    assert handler_indices == [2]
 
 
 def test_filter_runner_params_strips_hardware_sinks():
