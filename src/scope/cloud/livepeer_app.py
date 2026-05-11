@@ -41,6 +41,7 @@ from livepeer_gateway.media_publish import (
 from pydantic import BaseModel
 
 import scope.server.app as scope_app_module
+from scope.core.outputs import HARDWARE_SINK_MODES
 from scope.server.app import app as scope_app
 from scope.server.app import lifespan as scope_lifespan
 from scope.server.frame_processor import FrameProcessor
@@ -210,7 +211,7 @@ def _parse_browser_graph_routes(
                 source_ids.append(node_id)
             elif node_type == "sink":
                 sink_mode = node.get("sink_mode")
-                if sink_mode not in ("spout", "ndi", "syphon"):
+                if sink_mode not in HARDWARE_SINK_MODES:
                     sink_ids.append(node_id)
             elif node_type == "record":
                 record_ids.append(node_id)

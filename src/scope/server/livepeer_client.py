@@ -30,6 +30,7 @@ from livepeer_gateway.media_publish import (
 )
 from livepeer_gateway.scope import StartJobRequest, start_scope
 
+from scope.core.outputs import HARDWARE_SINK_MODES
 from scope.core.pacing import (
     MediaPacingDecision,
     MediaPacingState,
@@ -371,7 +372,7 @@ class LivepeerClient:
                 src_count += 1
             elif node_type == "sink":
                 sink_mode = node.get("sink_mode")
-                if sink_mode not in ("spout", "ndi", "syphon"):
+                if sink_mode not in HARDWARE_SINK_MODES:
                     sink_node_ids.append(node_id)
             elif node_type == "record":
                 record_node_ids.append(node_id)
@@ -447,10 +448,9 @@ class LivepeerClient:
             for n in nodes:
                 if not isinstance(n, dict):
                     continue
-                if n.get("type") == "sink" and n.get("sink_mode") in (
-                    "spout",
-                    "ndi",
-                    "syphon",
+                if (
+                    n.get("type") == "sink"
+                    and n.get("sink_mode") in HARDWARE_SINK_MODES
                 ):
                     collapsed.add(n.get("id"))
         if not collapsed:

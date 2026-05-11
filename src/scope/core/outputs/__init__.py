@@ -5,7 +5,19 @@ Output sinks send processed video frames to external destinations like Spout, ND
 
 from .interface import OutputSink
 
-__all__ = ["OutputSink", "get_output_sink_classes", "get_available_output_sinks"]
+# Sink modes that publish frames to local OS-level IPC (Spout on Windows,
+# NDI on the LAN, Syphon on macOS) rather than the WebRTC peer connection.
+# These always run on the user's machine, even when the pipeline executes
+# on a cloud runner — so the cloud-relay code strips them from the graph
+# sent to the runner and re-creates the senders locally.
+HARDWARE_SINK_MODES: frozenset[str] = frozenset({"spout", "ndi", "syphon"})
+
+__all__ = [
+    "HARDWARE_SINK_MODES",
+    "OutputSink",
+    "get_available_output_sinks",
+    "get_output_sink_classes",
+]
 
 
 def get_output_sink_classes() -> dict[str, type[OutputSink]]:

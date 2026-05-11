@@ -22,6 +22,7 @@ from aiortc.contrib.media import MediaRelay
 from aiortc.sdp import candidate_from_sdp
 
 from scope.core.nodes.registry import NodeRegistry
+from scope.core.outputs import HARDWARE_SINK_MODES
 
 from .audio_track import AudioProcessingTrack
 from .cloud_track import CloudTrack
@@ -121,7 +122,7 @@ def _parse_graph_node_ids(
             if node.get("type") == "sink":
                 all_sink_node_ids.append(node["id"])
                 sm = node.get("sink_mode")
-                if sm not in ("spout", "ndi", "syphon"):
+                if sm not in HARDWARE_SINK_MODES:
                     webrtc_sink_node_ids.append(node["id"])
             elif node.get("type") == "source":
                 all_source_node_ids.append(node["id"])
@@ -183,12 +184,10 @@ def _build_cloud_output_taps(
     webrtc_sink_ids = [
         sid
         for sid in all_sink_node_ids
-        if sink_modes.get(sid) not in ("spout", "ndi", "syphon")
+        if sink_modes.get(sid) not in HARDWARE_SINK_MODES
     ]
     hardware_sink_ids = [
-        sid
-        for sid in all_sink_node_ids
-        if sink_modes.get(sid) in ("spout", "ndi", "syphon")
+        sid for sid in all_sink_node_ids if sink_modes.get(sid) in HARDWARE_SINK_MODES
     ]
 
     def _upstream_of(sink_id: str) -> str | None:
@@ -1213,7 +1212,7 @@ class WebRTCManager:
                     f"transceivers for {len(sink_node_ids) - 1} extra sink(s)"
                 )
                 for i, sink_id in enumerate(sink_node_ids[1:]):
-                    if hw_sink_modes.get(sink_id) in ("spout", "ndi", "syphon"):
+                    if hw_sink_modes.get(sink_id) in HARDWARE_SINK_MODES:
                         logger.info(
                             f"Cloud relay: skipping browser delivery for "
                             f"hardware sink {sink_id!r} (handled locally)"

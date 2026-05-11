@@ -16,6 +16,8 @@ from typing import TYPE_CHECKING, Any
 import numpy as np
 import torch
 
+from scope.core.outputs import HARDWARE_SINK_MODES
+
 from .media_packets import MediaTimestamp, VideoPacket, ensure_video_packet
 from .recording_coordinator import RecordingCoordinator
 
@@ -340,7 +342,7 @@ class SinkManager:
         for node in graph.nodes:
             if node.type != "sink":
                 continue
-            if node.sink_mode not in ("spout", "ndi", "syphon"):
+            if node.sink_mode not in HARDWARE_SINK_MODES:
                 continue
             sink_name = node.sink_name or ""
             node_id = node.id
@@ -530,7 +532,7 @@ class SinkManager:
         for node in graph.nodes:
             if node.type != "sink":
                 continue
-            if node.sink_mode not in ("spout", "ndi", "syphon"):
+            if node.sink_mode not in HARDWARE_SINK_MODES:
                 continue
             if node.id in self._sink_hardware_queues_by_node:
                 continue
