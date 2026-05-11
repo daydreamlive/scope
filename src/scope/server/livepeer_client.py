@@ -403,21 +403,7 @@ class LivepeerClient:
                         (rec_id, sink_node_ids.index(inbound_from))
                     )
                 else:
-                    # Record reads from a hardware sink (Syphon/NDI/Spout).
-                    # In cloud mode the hardware sink is stripped from the
-                    # runner graph, so a remote output for this record would
-                    # never receive frames. Warn and still register it as a
-                    # remote record so handler-index alignment in
-                    # _build_cloud_output_taps stays correct — the user will
-                    # see the warning and re-wire the record from the
-                    # buddy webrtc sink or directly from the pipeline.
-                    logger.warning(
-                        f"Record node {rec_id!r} reads from hardware sink "
-                        f"{inbound_from!r}; in cloud mode the hardware sink "
-                        "is local-only, so this record will receive no "
-                        "frames. Rewire the record from a WebRTC sink or "
-                        "from the upstream pipeline."
-                    )
+                    # Hardware sink excluded from WebRTC sink list — needs remote output.
                     remote_record_node_ids.append(rec_id)
             else:
                 remote_record_node_ids.append(rec_id)
