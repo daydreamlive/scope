@@ -351,6 +351,9 @@ class SinkManager:
             ):
                 continue
 
+            if node_id in self._sinks_by_node:
+                continue
+
             sink_class = sink_classes.get(node.sink_mode)
             if sink_class is None:
                 logger.warning(
@@ -572,6 +575,7 @@ class SinkManager:
             except Exception as e:
                 logger.error(f"Error closing output sink for node {node_id}: {e}")
         self._sinks_by_node.clear()
+        self._sink_hardware_queues_by_node.clear()
 
         # Recording
         self._recording.cleanup()

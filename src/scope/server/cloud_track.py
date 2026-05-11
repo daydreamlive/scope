@@ -326,7 +326,7 @@ class CloudTrack(MediaStreamTrack):
             await handler.stop()
         self._extra_input_handlers.clear()
         self._extra_sink_tracks.clear()
-        self._record_callbacks.clear()
+        self._output_taps.clear()
         self._pending_extra_sources.clear()
 
         if self._input_task:
