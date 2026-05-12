@@ -40,6 +40,10 @@ function getPortColorHex(portName: string): string {
 
 function getParamPortColor(param: ParameterPortDef): string {
   if (param.component === "audio") return COLOR_AUDIO;
+  // Video-path fields (e.g. LTX-2's idle_loop_path) are still string-typed
+  // params underneath, but pair with Media-video nodes whose output is
+  // COLOR_STREAM. Match that here so the handles look like compatible types.
+  if (param.component === "video") return PARAM_TYPE_COLORS["video_path"];
   return PARAM_TYPE_COLORS[param.type] || COLOR_DEFAULT;
 }
 
