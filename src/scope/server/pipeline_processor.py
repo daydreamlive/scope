@@ -335,6 +335,21 @@ class PipelineProcessor:
         except queue.Full:
             pass
 
+    def _flush_video_output_queues(self):
+        """Drop any frames still queued on every output port.
+
+        Used alongside ``_flush_audio`` when a pipeline signals a timeline
+        discontinuity so video frames still buffered from the previous
+        segment don't push the new segment out of sync with its audio.
+        """
+        for port_queues in self.output_queues.values():
+            for q in port_queues:
+                while not q.empty():
+                    try:
+                        q.get_nowait()
+                    except queue.Empty:
+                        break
+
     def _should_flush_audio_on_prompt_change(self) -> bool:
         """Only flush prompt audio when it cannot desync queued video."""
         return not self.output_queues.get("video")
@@ -662,6 +677,14 @@ class PipelineProcessor:
                 self.shutdown_event.wait(SLEEP_TIME)
                 return
 
+            # Pipelines can flag a chunk as a timeline discontinuity (e.g. LTX-2
+            # emitting the first real chunk after a sequence of hold-last-frame
+            # silence chunks).  Drop everything still queued in the audio and
+            # video buffers so the new chunk lands fresh and A/V stay locked.
+            if output_dict.get("discontinuity"):
+                self._flush_audio()
+                self._flush_video_output_queues()
+
             # Pass audio to output queue regardless of whether video exists.
             # This ensures audio-only pipelines can deliver audio.
             audio_output = output_dict.get("audio")
@@ -796,7 +819,7 @@ class PipelineProcessor:
                 k: v
                 for k, v in output_dict.items()
                 if k not in self.output_queues
-                and k not in {"video_timestamps", "audio_timestamps"}
+                and k not in {"video_timestamps", "audio_timestamps", "discontinuity"}
                 and not k.endswith("_timestamps")
             }
             if extra_params and self.output_consumers:
