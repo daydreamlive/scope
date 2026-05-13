@@ -28,6 +28,7 @@ from .audio_track import AudioProcessingTrack
 from .cloud_track import CloudTrack
 from .credentials import get_turn_credentials
 from .frame_processor import FrameProcessor
+from .graph_schema import GraphConfig
 from .headless import HeadlessSession
 from .kafka_publisher import publish_event
 from .livepeer import LivepeerConnection
@@ -141,40 +142,6 @@ def _parse_graph_node_ids(
         record_node_ids,
         has_non_webrtc_sources,
     )
-
-
-def _graph_sink_modalities(initial_parameters: dict) -> tuple[bool, bool] | None:
-    """Inspect graph sink edges; return (has_video, has_audio) or None.
-
-    Returns ``None`` when no graph or no sinks are present (caller should
-    fall back to pipeline-id-derived modalities). Otherwise returns what
-    the graph actually emits to its sinks — authoritative over stale
-    ``pipeline_ids`` that may linger from a previous workflow.
-    """
-    graph_data = initial_parameters.get("graph")
-    if not isinstance(graph_data, dict):
-        return None
-    sink_ids = {
-        n.get("id")
-        for n in graph_data.get("nodes", []) or []
-        if n.get("type") == "sink"
-    }
-    if not sink_ids:
-        return None
-    has_video = False
-    has_audio = False
-    for e in graph_data.get("edges", []) or []:
-        if e.get("kind", "stream") != "stream":
-            continue
-        if e.get("to_node") not in sink_ids:
-            continue
-        from_port = e.get("from_port")
-        to_port = e.get("to_port")
-        if from_port == "audio" or to_port == "audio":
-            has_audio = True
-        elif from_port == "video" or to_port == "video":
-            has_video = True
-    return (has_video, has_audio)
 
 
 def _compute_hardware_sink_routes(
@@ -469,9 +436,14 @@ class WebRTCManager:
             # may be stale from a previous workflow load (e.g. lingering
             # ``longlive`` while the current graph is audio-only DEMON).
             pipeline_ids = initial_parameters.get("pipeline_ids", [])
-            graph_modalities = _graph_sink_modalities(initial_parameters)
-            if graph_modalities is not None:
-                produces_video, produces_audio = graph_modalities
+            graph_data = initial_parameters.get("graph")
+            graph_config = (
+                GraphConfig.model_validate(graph_data)
+                if isinstance(graph_data, dict)
+                else None
+            )
+            if graph_config is not None and graph_config.get_sink_node_ids():
+                produces_video, produces_audio = graph_config.get_sink_modalities()
             else:
                 produces_video = NodeRegistry.chain_produces_video(pipeline_ids)
                 produces_audio = NodeRegistry.chain_produces_audio(pipeline_ids)

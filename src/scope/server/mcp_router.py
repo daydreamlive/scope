@@ -40,39 +40,6 @@ def _get_pipeline_manager() -> "PipelineManager":
     return pipeline_manager
 
 
-def _graph_has_video_to_sink(graph_config) -> bool:
-    """True when any video-typed edge feeds a sink — i.e. the graph is not audio-only."""
-    sink_ids = set(graph_config.get_sink_node_ids())
-    if not sink_ids:
-        return False
-    for e in graph_config.edges:
-        if e.kind != "stream" or e.to_node not in sink_ids:
-            continue
-        if e.from_port == "audio" or e.to_port == "audio":
-            continue
-        return True
-    return False
-
-
-def _graph_produces_audio(graph_config) -> bool:
-    """True when any audio-typed output port in the graph feeds a sink.
-
-    Covers plain-node graphs (DEMON, TTS) that don't have a config-driven
-    pipeline node declaring ``produces_audio=True``. Detection is purely
-    structural: an edge whose ``from_port`` / ``to_port`` is named
-    ``audio`` and whose target is a sink node.
-    """
-    sink_ids = set(graph_config.get_sink_node_ids())
-    if not sink_ids:
-        return False
-    for e in graph_config.edges:
-        if e.kind != "stream":
-            continue
-        if e.to_node in sink_ids and (e.from_port == "audio" or e.to_port == "audio"):
-            return True
-    return False
-
-
 # ---------------------------------------------------------------------------
 # Parameter Control
 # ---------------------------------------------------------------------------
@@ -370,12 +337,13 @@ async def start_stream(
         expect_video = True
         # Graph-only audio: when no config-driven pipeline declares audio
         # but the graph itself carries an audio edge into a sink (e.g. a
-        # DEMON node graph), the session still expects audio. The same
-        # check also tells us whether the graph is audio-only, in which
-        # case the headless TS streamer must skip the video track.
+        # DEMON node graph), the session still expects audio. When the
+        # graph carries audio but no video into any sink, the headless TS
+        # streamer must skip the video track entirely.
         if request.graph is not None:
-            graph_has_audio_sink = _graph_produces_audio(graph_config)
-            graph_has_video_sink = _graph_has_video_to_sink(graph_config)
+            graph_has_video_sink, graph_has_audio_sink = (
+                graph_config.get_sink_modalities()
+            )
             if graph_has_audio_sink:
                 expect_audio = True
             if graph_has_audio_sink and not graph_has_video_sink:

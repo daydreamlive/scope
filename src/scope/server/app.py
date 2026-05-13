@@ -211,9 +211,14 @@ def _configure_logging():
     logging.getLogger("scope.server").setLevel(logging.INFO)
     logging.getLogger("scope.core").setLevel(logging.INFO)
 
-    # Plugin-specific tracing knobs — opt-in via env var, off by default
-    # so the regular log stream stays clean for non-plugin sessions.
-    if os.getenv("ACESTEP_BRIDGE_TRACE", "").lower() in ("1", "true", "yes"):
+    # Plugin tracing — opt-in via env var, off by default so the regular
+    # log stream stays clean for non-plugin sessions. Honours both the
+    # generic ``SCOPE_PLUGIN_TRACE`` flag and any plugin-specific knob a
+    # plugin itself reads (e.g. DEMON's ``ACESTEP_BRIDGE_TRACE``) so a
+    # single env var enables both the plugin's verbose path and our log
+    # routing.
+    plugin_trace_vars = ("SCOPE_PLUGIN_TRACE", "ACESTEP_BRIDGE_TRACE")
+    if any(os.getenv(v, "").lower() in ("1", "true", "yes") for v in plugin_trace_vars):
         logging.getLogger("scope_plugin").setLevel(logging.INFO)
 
     # Set INFO level for uvicorn

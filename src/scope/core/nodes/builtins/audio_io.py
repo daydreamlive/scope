@@ -126,9 +126,9 @@ class AudioSourceNode(BaseNode):
         self._loaded_file: str = ""
         self._last_call_time: float | None = None
         # In mode=full we emit the entire clip once and then stay silent
-        # until the loaded file or mode changes. Otherwise every worker
-        # tick would re-push a multi-second clip and flood the graph.
-        self._full_emitted_key: tuple[str, str] | None = None
+        # until shutdown. Otherwise every worker tick would re-push a
+        # multi-second clip and flood the graph.
+        self._full_emitted = False
 
     def shutdown(self) -> None:
         # Per-session playback state must reset between sessions —
@@ -138,7 +138,7 @@ class AudioSourceNode(BaseNode):
         # left intact to avoid re-decoding the file on every restart.
         self._position = 0
         self._last_call_time = None
-        self._full_emitted_key = None
+        self._full_emitted = False
 
     @classmethod
     def get_definition(cls) -> NodeDefinition:
@@ -239,16 +239,14 @@ class AudioSourceNode(BaseNode):
             return {}
 
         if mode == "full":
-            # Emit the entire clip once per (file, mode) pair and then
-            # stay silent.
-            key = (self._loaded_file, "full")
-            if self._full_emitted_key == key:
+            # Emit the entire clip once and then stay silent.
+            if self._full_emitted:
                 return {}
-            self._full_emitted_key = key
+            self._full_emitted = True
             return self._emit_full()
         # Stream mode: clear the full-mode flag so switching back to full
         # later re-emits once.
-        self._full_emitted_key = None
+        self._full_emitted = False
         return self._emit_chunk(pacing=pacing)
 
     @staticmethod

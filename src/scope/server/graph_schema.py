@@ -125,6 +125,27 @@ class GraphConfig(BaseModel):
         """Return node ids that are record nodes."""
         return [n.id for n in self.nodes if n.type == "record"]
 
+    def get_sink_modalities(self) -> tuple[bool, bool]:
+        """Return ``(has_video, has_audio)`` from stream edges into sinks.
+
+        Authoritative for "what does this graph emit?" — used in place of
+        stale ``pipeline_ids`` declarations. Returns ``(False, False)`` when
+        the graph has no sinks.
+        """
+        sink_ids = set(self.get_sink_node_ids())
+        if not sink_ids:
+            return (False, False)
+        has_video = False
+        has_audio = False
+        for e in self.edges:
+            if e.kind != "stream" or e.to_node not in sink_ids:
+                continue
+            if e.from_port == "audio" or e.to_port == "audio":
+                has_audio = True
+            else:
+                has_video = True
+        return (has_video, has_audio)
+
     def get_backend_node_ids(self) -> list[str]:
         """Return node ids that are backend (custom) nodes."""
         return [n.id for n in self.nodes if n.type == "node"]

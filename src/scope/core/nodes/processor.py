@@ -5,7 +5,6 @@ interface (input/output queues, worker thread).
 """
 
 import logging
-import os
 import queue
 import threading
 from typing import Any
@@ -15,10 +14,6 @@ from .base import BaseNode
 logger = logging.getLogger(__name__)
 
 SLEEP_TIME = 0.01
-
-# Set SCOPE_NODE_TRACE=1 for per-node diagnostics: param updates,
-# route-outputs backpressure events. Off by default.
-_TRACE = os.environ.get("SCOPE_NODE_TRACE", "").lower() in ("1", "true", "yes")
 
 
 class NodeProcessor:
