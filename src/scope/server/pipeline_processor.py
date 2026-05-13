@@ -165,6 +165,11 @@ class PipelineProcessor:
             for p in self.pipeline.get_definition().inputs
             if p.port_type != "video"
         }
+        # Wired non-video ports that have produced at least one value.
+        # Used to gate the first pipeline call so an upstream node feeding
+        # e.g. the `prompts` port wins the race against a stale persisted
+        # initial value.
+        self._received_non_video_ports: set[str] = set()
 
     def _drain_non_video_inputs(self) -> None:
         """Drain scalar input queues into ``self.parameters`` and sync the UI.
@@ -198,6 +203,7 @@ class PipelineProcessor:
             if drained:
                 self.parameters[port] = latest
                 drained_values[port] = latest
+                self._received_non_video_ports.add(port)
         if not drained_values:
             return
         if self.notification_callback is None:
@@ -570,6 +576,24 @@ class PipelineProcessor:
         # upstream nodes — e.g. a PromptEnhancer feeding a string port — can
         # drive pipeline kwargs via graph edges.
         self._drain_non_video_inputs()
+
+        # Wait for every wired non-video input port to produce its first
+        # value before invoking the pipeline. Without this, a stale
+        # persisted initial value (e.g. the previously-emitted prompt
+        # restored from workflow JSON) wins the race against the upstream
+        # node that should be driving the port, and the first batch
+        # renders with the wrong value before the live one takes over.
+        with self.input_queue_lock:
+            wired_non_video_ports = {
+                port
+                for port in self.input_queues
+                if port in self._non_video_input_ports
+            }
+        if wired_non_video_ports and not wired_non_video_ports.issubset(
+            self._received_non_video_ports
+        ):
+            self.shutdown_event.wait(SLEEP_TIME)
+            return
 
         requirements = None
         if hasattr(self.pipeline, "prepare"):
