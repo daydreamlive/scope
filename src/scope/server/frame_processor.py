@@ -130,6 +130,10 @@ class FrameProcessor:
         self._pending_node_params: list[tuple[str, dict[str, Any]]] = []
         # The processor whose output we read in graph mode (legacy get() path)
         self._sink_processor: PipelineProcessor | None = None
+        # First graph sink node. Its WebRTC output is the canonical stream used
+        # for generic perform-mode output_sinks when perform mode runs as a
+        # generated linear graph.
+        self._primary_sink_node_id: str | None = None
 
         # Source manager (sources, source queues, hardware input)
         self._source_manager = SourceManager()
@@ -543,7 +547,10 @@ class FrameProcessor:
             return None
         packet = self.sink_manager.get_packet_from_sink(sink_node_id)
         if packet is not None:
-            self._frames_out += 1
+            if sink_node_id == self._primary_sink_node_id:
+                self._on_frame_output(packet)
+            else:
+                self._frames_out += 1
         return packet
 
     def get_from_sink(self, sink_node_id: str) -> torch.Tensor | None:
@@ -1007,6 +1014,9 @@ class FrameProcessor:
         )
 
         self._sink_processor = graph_run.sink_processor
+        self._primary_sink_node_id = (
+            graph_run.output_node_ids[0] if graph_run.output_node_ids else None
+        )
         self.pipeline_processors = graph_run.processors
         self.pipeline_ids = graph_run.pipeline_ids
 
