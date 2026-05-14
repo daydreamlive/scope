@@ -59,6 +59,11 @@ SHUTDOWN_TIMEOUT_S = 5.0
 TASK_DRAIN_TIMEOUT_S = 0.25
 RUNNER_RESTART_TIMEOUT_S = 30.0
 PAYMENT_SEND_INTERVAL_S = 10.0
+# Trickle segments carry proxied API responses; workflow imports can pack
+# embedded assets (base64-encoded images/video) into a single response and
+# easily blow past the 1 MiB library default, which would tear down the
+# events loop mid-import.
+MAX_EVENT_BYTES = 128 * 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -811,7 +816,9 @@ class LivepeerClient:
 
         unexpected_reason: str | None = None
         try:
-            async for event in JSONLReader(self._job.events_url)():
+            async for event in JSONLReader(self._job.events_url)(
+                max_event_bytes=MAX_EVENT_BYTES
+            ):
                 if not self._connected:
                     break
                 if not isinstance(event, dict):

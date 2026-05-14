@@ -61,6 +61,11 @@ _connection_count = 0
 STREAM_TASK_SHUTDOWN_GRACE_S = 1.0
 STREAM_TASK_CANCEL_TIMEOUT_S = 1.0
 MEDIA_STATS_INTERVAL_S = 10.0
+# Trickle segments carry proxied API requests; workflow imports can pack
+# embedded assets (base64-encoded images/video) into a single request and
+# easily blow past the 1 MiB library default, which would tear down the
+# control-channel reader mid-import.
+MAX_CONTROL_EVENT_BYTES = 128 * 1024 * 1024
 REMOTE_VIDEO_CLOCK_RATE = 90_000
 REMOTE_VIDEO_TIME_BASE = fractions.Fraction(1, REMOTE_VIDEO_CLOCK_RATE)
 ASSETS_DIR_PATH = os.getenv("DAYDREAM_SCOPE_ASSETS_DIR", "/tmp/.daydream-scope/assets")
@@ -1279,7 +1284,9 @@ async def _subscribe_control(
                 "runner_job_id": os.getenv("FAL_JOB_ID") or os.getenv("FAL_RUNNER_ID"),
             }
         )
-        async for message in JSONLReader(control_url)():
+        async for message in JSONLReader(control_url)(
+            max_event_bytes=MAX_CONTROL_EVENT_BYTES
+        ):
             if stop_event.is_set():
                 break
             if not isinstance(message, dict):
