@@ -65,7 +65,7 @@ MEDIA_STATS_INTERVAL_S = 10.0
 # embedded assets (base64-encoded images/video) into a single request and
 # easily blow past the 1 MiB library default, which would tear down the
 # control-channel reader mid-import.
-MAX_CONTROL_EVENT_BYTES = 128 * 1024 * 1024
+MAX_CONTROL_EVENT_BYTES = 5 * 1024 * 1024
 REMOTE_VIDEO_CLOCK_RATE = 90_000
 REMOTE_VIDEO_TIME_BASE = fractions.Fraction(1, REMOTE_VIDEO_CLOCK_RATE)
 ASSETS_DIR_PATH = os.getenv("DAYDREAM_SCOPE_ASSETS_DIR", "/tmp/.daydream-scope/assets")

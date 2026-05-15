@@ -63,7 +63,7 @@ PAYMENT_SEND_INTERVAL_S = 10.0
 # embedded assets (base64-encoded images/video) into a single response and
 # easily blow past the 1 MiB library default, which would tear down the
 # events loop mid-import.
-MAX_EVENT_BYTES = 128 * 1024 * 1024
+MAX_EVENT_BYTES = 5 * 1024 * 1024
 
 
 @dataclass(slots=True)
