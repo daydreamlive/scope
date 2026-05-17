@@ -182,6 +182,17 @@ class VACEEnabledPipeline:
                     "_init_vace: Could not import Quantization, skipping quantization check"
                 )
 
+        # Swap flex_attention for flash_attention on VACE blocks.
+        # VACE blocks don't use KV cache, causal masking, or block_mask, so a direct
+        # flash_attention call is correct and avoids the flex_attention compile path
+        # entirely. This eliminates the Inductor max-autotune NoValidChoicesError
+        # crash on the ref-image encoding shape (e.g. [1, 12, 4736, 128]) seen on
+        # H100/5090, where flex_attention's autotune candidate set is empty for
+        # Wan's 12-head/head_dim=128 layout at that padded seq_len.
+        from .models.attention_blocks import swap_vace_self_attention
+
+        swap_vace_self_attention(vace_wrapped_model.vace_blocks)
+
         self.vace_enabled = True
         logger.info("_init_vace: VACE enabled successfully")
 
