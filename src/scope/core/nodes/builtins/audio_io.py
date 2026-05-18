@@ -1,4 +1,4 @@
-"""Built-in audio I/O nodes: AudioSource (WAV file → audio stream).
+"""Built-in audio I/O nodes: AudioSource (load a WAV file once).
 
 Terminal audio output is handled by the regular Sink node: audio edges
 into a Sink are routed straight to the WebRTC audio track via the
@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 import struct
-import time
+from pathlib import Path
 from typing import Any, ClassVar
 
 import numpy as np
@@ -21,8 +21,6 @@ from ..base import BaseNode, NodeDefinition, NodeParam, NodePort
 logger = logging.getLogger(__name__)
 
 SAMPLE_RATE = 48000
-CHUNK_DURATION = 0.1  # 100ms chunks for streaming
-CHUNK_SAMPLES = int(SAMPLE_RATE * CHUNK_DURATION)
 
 
 def _read_wav_float32(path: str) -> tuple[np.ndarray, int]:
@@ -115,30 +113,15 @@ def _read_wav_float32(path: str) -> tuple[np.ndarray, int]:
 
 
 class AudioSourceNode(BaseNode):
-    """Load audio from a WAV file and stream it in 100ms chunks."""
+    """Load an audio file and emit the entire clip once per (file_id, duration)."""
 
     node_type_id: ClassVar[str] = "audio.AudioSource"
 
     def __init__(self, node_id: str, config: dict[str, Any] | None = None):
         super().__init__(node_id, config)
         self._audio_data: np.ndarray | None = None
-        self._position = 0
         self._loaded_file: str = ""
-        self._last_call_time: float | None = None
-        # In mode=full we emit the entire clip once and then stay silent
-        # until shutdown. Otherwise every worker tick would re-push a
-        # multi-second clip and flood the graph.
-        self._full_emitted = False
-
-    def shutdown(self) -> None:
-        # Per-session playback state must reset between sessions —
-        # PipelineManager caches node instances across Run/Stop cycles, so
-        # without this the next session would see the "already emitted"
-        # latch from the previous run and stay silent. Audio buffer is
-        # left intact to avoid re-decoding the file on every restart.
-        self._position = 0
-        self._last_call_time = None
-        self._full_emitted = False
+        self._loaded_duration: float = 0.0
 
     @classmethod
     def get_definition(cls) -> NodeDefinition:
@@ -147,7 +130,11 @@ class AudioSourceNode(BaseNode):
             display_name="Audio Source",
             category="audio",
             description="Load audio from a WAV file at 48kHz stereo.",
-            continuous=True,
+            # continuous=False so NodeProcessor only re-runs us when a
+            # parameter actually changes; otherwise the worker would call
+            # execute() every tick and either flood the graph (on success)
+            # or flood the log (on missing-file).
+            continuous=False,
             inputs=[],
             outputs=[
                 NodePort(name="audio", port_type="audio", description="Audio waveform"),
@@ -165,20 +152,6 @@ class AudioSourceNode(BaseNode):
                     default=15.0,
                     description="Duration (s)",
                     ui={"min": 1, "max": 600, "step": 1},
-                ),
-                NodeParam(
-                    name="mode",
-                    param_type="select",
-                    default="full",
-                    description="Output mode",
-                    ui={"options": ["full", "stream"]},
-                ),
-                NodeParam(
-                    name="pacing",
-                    param_type="select",
-                    default="realtime",
-                    description="Pacing",
-                    ui={"options": ["realtime", "downstream"]},
                 ),
             ],
         )
@@ -207,8 +180,8 @@ class AudioSourceNode(BaseNode):
             data = data[:, :max_samples]
 
         self._audio_data = data
-        self._position = 0
         self._loaded_file = file_path
+        self._loaded_duration = duration
         logger.info(
             "AudioSource loaded: %s (%.1fs)",
             file_path,
@@ -217,86 +190,33 @@ class AudioSourceNode(BaseNode):
 
     def execute(self, inputs: dict[str, Any], **kwargs) -> dict[str, Any]:
         file_id = kwargs.get("file_id", "")
+        if not file_id:
+            return {}
+        resolved = self._resolve_path(file_id)
+        if not resolved:
+            return {}
+
         duration = float(kwargs.get("duration", 15.0))
-        # "full" = emit entire clip once (for batch DAGs); "stream" = 100ms chunks
-        mode = kwargs.get("mode", "stream")
-        pacing = kwargs.get("pacing", "realtime")
-
-        if not file_id:
-            return {}
-        file_id = self._resolve_path(file_id)
-        if not file_id:
-            return {}
-
-        if file_id != self._loaded_file:
+        # Cache key includes duration: a duration change must re-trim
+        # (or re-decode if duration grows past the current clip).
+        if resolved != self._loaded_file or duration != self._loaded_duration:
             try:
-                self._load_audio(file_id, duration)
+                self._load_audio(resolved, duration)
             except Exception as e:
-                logger.error("AudioSourceNode failed to load %s: %s", file_id, e)
+                logger.error("AudioSourceNode failed to load %s: %s", resolved, e)
                 return {}
 
         if self._audio_data is None or self._audio_data.shape[1] == 0:
             return {}
-
-        if mode == "full":
-            # Emit the entire clip once and then stay silent.
-            if self._full_emitted:
-                return {}
-            self._full_emitted = True
-            return self._emit_full()
-        # Stream mode: clear the full-mode flag so switching back to full
-        # later re-emits once.
-        self._full_emitted = False
-        return self._emit_chunk(pacing=pacing)
+        return {"audio": (torch.from_numpy(self._audio_data), SAMPLE_RATE)}
 
     @staticmethod
     def _resolve_path(file_id: str) -> str | None:
-        """Resolve a file path. Absolute → cwd → ~/.daydream-scope/assets."""
-        if os.path.isabs(file_id) and os.path.exists(file_id):
-            return file_id
+        """Resolve a file path; falls back to ``~/.daydream-scope/assets``."""
         if os.path.exists(file_id):
             return os.path.abspath(file_id)
-        from pathlib import Path
-
         candidate = Path.home() / ".daydream-scope" / "assets" / file_id
         if candidate.exists():
             return str(candidate)
         logger.warning("AudioSource: file not found: %s", file_id)
         return None
-
-    def _emit_full(self) -> dict[str, Any]:
-        return {"audio": (torch.from_numpy(self._audio_data.copy()), SAMPLE_RATE)}
-
-    def _emit_chunk(self, pacing: str = "realtime") -> dict[str, Any]:
-        # Pace to real-time unless downstream-paced — in that mode the
-        # maxsize=1 edge queues handle rate limiting via backpressure.
-        if pacing != "downstream":
-            now = time.monotonic()
-            if self._last_call_time is not None:
-                elapsed = now - self._last_call_time
-                if elapsed < CHUNK_DURATION * 0.8:
-                    time.sleep(CHUNK_DURATION - elapsed)
-            self._last_call_time = time.monotonic()
-        else:
-            self._last_call_time = None
-
-        total = self._audio_data.shape[1]
-        if self._position >= total:
-            return {}
-
-        chunk = np.zeros((self._audio_data.shape[0], CHUNK_SAMPLES), dtype=np.float32)
-        remaining = CHUNK_SAMPLES
-        offset = 0
-        while remaining > 0:
-            avail = min(remaining, total - self._position)
-            if avail <= 0:
-                # Stop at end of clip; emit a partial chunk (remaining
-                # samples stay zero-padded).
-                break
-            chunk[:, offset : offset + avail] = self._audio_data[
-                :, self._position : self._position + avail
-            ]
-            self._position += avail
-            offset += avail
-            remaining -= avail
-        return {"audio": (torch.from_numpy(chunk), SAMPLE_RATE)}

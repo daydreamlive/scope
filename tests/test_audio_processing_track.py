@@ -362,3 +362,83 @@ class TestRecv:
 
         # After cap-trimming and consuming one 20ms frame, must be under the cap
         assert track._buffered_samples <= max_interleaved
+
+
+# ---------------------------------------------------------------------------
+# Overlap-trim — streaming VAE decoders (ACEStep StreamVAEDecode +
+# follow_playhead) re-emit windows whose start_sample retreats into already
+# buffered territory; the track must drop the duplicate prefix.
+# ---------------------------------------------------------------------------
+
+
+class TestOverlapTrim:
+    def _packet(self, start_sample: int, n_samples: int) -> AudioPacket:
+        return AudioPacket(
+            audio=torch.ones(2, n_samples),
+            sample_rate=48000,
+            timestamp=MediaTimestamp(
+                pts=start_sample, time_base=fractions.Fraction(1, 48000)
+            ),
+        )
+
+    def test_trims_partial_overlap(self):
+        """Second window starts 100 samples before the first one ended;
+        those 100 samples (× 2 channels) are dropped from the front."""
+        track = _make_track()
+        first = self._packet(start_sample=0, n_samples=500)
+        # Next chunk overlaps last 100 samples of `first`.
+        second = self._packet(start_sample=400, n_samples=500)
+
+        chunks = iter([first, second, None])
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=lambda: next(chunks, None)
+        )
+        track._drain_audio_packets()
+
+        # First chunk: 500 × 2 = 1000 samples, pts 0.
+        # Second chunk: trimmed by 100 samples × 2 channels = 200 → 800 samples,
+        # pts advances to 500 (the next expected sample after the first chunk).
+        assert len(track._chunks) == 2
+        first_buf, first_pts = track._chunks[0]
+        second_buf, second_pts = track._chunks[1]
+        assert len(first_buf) == 1000
+        assert first_pts == 0
+        assert len(second_buf) == 800
+        assert second_pts == 500
+        assert track._buffered_samples == 1800
+
+    def test_drops_chunk_entirely_in_past(self):
+        """Window whose end lies before the current expected PTS is dropped."""
+        track = _make_track()
+        first = self._packet(start_sample=0, n_samples=500)
+        # Entirely behind the playhead: start=0, end=100 < expected 500.
+        stale = self._packet(start_sample=0, n_samples=100)
+
+        chunks = iter([first, stale, None])
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=lambda: next(chunks, None)
+        )
+        track._drain_audio_packets()
+
+        assert len(track._chunks) == 1
+        assert track._chunks[0][1] == 0
+        # _next_expected_pts is still the end of the first chunk: 500.
+        assert track._next_expected_pts == 500
+
+    def test_contiguous_chunks_not_trimmed(self):
+        """Back-to-back windows (no overlap) flow through untouched."""
+        track = _make_track()
+        first = self._packet(start_sample=0, n_samples=500)
+        second = self._packet(start_sample=500, n_samples=500)
+
+        chunks = iter([first, second, None])
+        track.frame_processor.get_audio_packet = MagicMock(
+            side_effect=lambda: next(chunks, None)
+        )
+        track._drain_audio_packets()
+
+        assert len(track._chunks) == 2
+        assert len(track._chunks[0][0]) == 1000
+        assert len(track._chunks[1][0]) == 1000
+        assert track._chunks[1][1] == 500
+        assert track._next_expected_pts == 1000

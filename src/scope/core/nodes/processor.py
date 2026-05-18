@@ -240,21 +240,20 @@ class NodeProcessor:
             if value is None:
                 continue
 
-            # Audio outputs also feed FrameProcessor's audio path — but
-            # only for ports that graph_executor wired to a sink. An
-            # intermediate audio-producing node (AudioSource → encoder)
-            # must NOT push to audio_output_queue: with maxsize=1 +
-            # blocking put, nothing drains it and the worker would
-            # deadlock after the second emission.
+            # Audio outputs only push to audio_output_queue for ports
+            # graph_executor wired to a sink — an intermediate audio port
+            # (e.g. AudioSource → VAEEncodeAudio) has no drainer, and the
+            # maxsize=1 blocking put would deadlock after the second emit.
+            # The fan-out below still runs so non-sink consumers receive
+            # the value via the normal output_queues path; sink consumers
+            # are not registered in output_queues, so the fan-out is a
+            # no-op for them.
             if port_name in self.audio_sink_ports:
                 self._route_audio(value)
-                # When this audio output also routes to a sink, don't
-                # also fan it out as a generic stream queue: the sink
-                # only consumes via audio_output_queue.
 
-            # Fan out to all downstream queues on this port. Block briefly
-            # when queues are full so producers throttle to consumer pace
-            # and GPU tensors don't pile up in memory.
+            # Fan out to downstream node queues. Block briefly when a queue
+            # is full so producers throttle to consumer pace and GPU tensors
+            # don't accumulate in memory.
             out_queues = self.output_queues.get(port_name)
             if out_queues:
                 for oq in out_queues:
@@ -267,6 +266,9 @@ class NodeProcessor:
 
     def _route_audio(self, value: Any) -> None:
         """Extract audio tensor and push to audio_output_queue for WebRTC."""
+        # Lazy imports: pulling torch/MediaTimestamp at module scope would
+        # also pull ``scope.server.media_packets`` into ``scope.core``,
+        # which the project layout disallows.
         from fractions import Fraction
 
         import torch
@@ -300,11 +302,11 @@ class NodeProcessor:
             if audio_tensor.dtype in (torch.bfloat16, torch.float16):
                 audio_tensor = audio_tensor.float()
 
-        timestamp = MediaTimestamp()
-        if start_sample is not None and audio_sr:
-            timestamp = MediaTimestamp(
-                pts=int(start_sample), time_base=Fraction(1, int(audio_sr))
-            )
+        timestamp = (
+            MediaTimestamp(pts=int(start_sample), time_base=Fraction(1, int(audio_sr)))
+            if start_sample is not None and audio_sr
+            else MediaTimestamp()
+        )
         packet = AudioPacket(
             audio=audio_tensor, sample_rate=int(audio_sr), timestamp=timestamp
         )
