@@ -431,11 +431,15 @@ class WebRTCManager:
             # Create NotificationSender for this session to send notifications to the frontend
             notification_sender = NotificationSender()
 
-            # Determine media modalities. When a graph is present with at least
-            # one sink, the graph's sink edges are authoritative — pipeline_ids
-            # may be stale from a previous workflow load (e.g. lingering
-            # ``longlive`` while the current graph is audio-only DEMON).
+            # Determine media modalities. Start from the registry (pipelines
+            # like LTX-2 produce audio internally without exposing a graph
+            # port). When a graph is present, add anything the graph declares
+            # via sink edges, and drop video only if the graph is explicitly
+            # audio-only — that's the DEMON case where ``pipeline_ids`` can
+            # be a stale ``longlive`` from a previous workflow load.
             pipeline_ids = initial_parameters.get("pipeline_ids", [])
+            produces_video = NodeRegistry.chain_produces_video(pipeline_ids)
+            produces_audio = NodeRegistry.chain_produces_audio(pipeline_ids)
             graph_data = initial_parameters.get("graph")
             graph_config = (
                 GraphConfig.model_validate(graph_data)
@@ -443,10 +447,12 @@ class WebRTCManager:
                 else None
             )
             if graph_config is not None and graph_config.get_sink_node_ids():
-                produces_video, produces_audio = graph_config.get_sink_modalities()
-            else:
-                produces_video = NodeRegistry.chain_produces_video(pipeline_ids)
-                produces_audio = NodeRegistry.chain_produces_audio(pipeline_ids)
+                graph_video, graph_audio = graph_config.get_sink_modalities()
+                produces_audio = produces_audio or graph_audio
+                if graph_audio and not graph_video:
+                    produces_video = False
+                else:
+                    produces_video = produces_video or graph_video
 
             # Parse graph from initial parameters to find sink/source/record node IDs
             (
