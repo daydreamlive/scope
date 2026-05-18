@@ -217,43 +217,14 @@ class NodeProcessor:
                             continue
 
     def _route_audio(self, value: Any) -> None:
-        """Extract audio tensor and push to audio_output_queue for WebRTC."""
-        # Lazy imports keep ``scope.core`` from reaching back into
+        """Convert a node output value and push it to audio_output_queue."""
+        # Lazy import keeps ``scope.core`` from reaching back into
         # ``scope.server`` at module load (disallowed by the project layout).
-        from fractions import Fraction
+        from scope.server.media_packets import audio_packet_from_node_output
 
-        import torch
-
-        from scope.server.media_packets import AudioPacket, MediaTimestamp
-
-        start_sample: int | None = None
-        if isinstance(value, tuple) and len(value) == 2:
-            audio_tensor, audio_sr = value
-        else:
-            audio_tensor = getattr(value, "waveform", None)
-            audio_sr = getattr(value, "sample_rate", 48000)
-            # ACEStep StreamVAEDecode tags each window with start_sample so
-            # AudioProcessingTrack can trim overlapping windows downstream.
-            start_sample = getattr(value, "start_sample", None)
-        if audio_tensor is None:
+        packet = audio_packet_from_node_output(value)
+        if packet is None:
             return
-        if isinstance(audio_tensor, torch.Tensor):
-            if audio_tensor.is_cuda:
-                audio_tensor = audio_tensor.detach().cpu()
-            # VAE decoders return (1, C, T); the audio track expects (C, T).
-            if audio_tensor.dim() == 3 and audio_tensor.shape[0] == 1:
-                audio_tensor = audio_tensor.squeeze(0)
-            if audio_tensor.dtype in (torch.bfloat16, torch.float16):
-                audio_tensor = audio_tensor.float()
-
-        timestamp = (
-            MediaTimestamp(pts=int(start_sample), time_base=Fraction(1, int(audio_sr)))
-            if start_sample is not None and audio_sr
-            else MediaTimestamp()
-        )
-        packet = AudioPacket(
-            audio=audio_tensor, sample_rate=int(audio_sr), timestamp=timestamp
-        )
         # Blocking put with retry: stalls the worker when the audio track
         # hasn't drained the previous chunk — this is the backpressure.
         while not self.shutdown_event.is_set():
