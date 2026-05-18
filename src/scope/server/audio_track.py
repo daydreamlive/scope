@@ -2,9 +2,7 @@ import asyncio
 import collections
 import fractions
 import logging
-import threading
 import time
-import weakref
 
 import numpy as np
 from aiortc import MediaStreamTrack
@@ -27,25 +25,23 @@ AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
 AUDIO_MAX_BUFFER_SAMPLES = AUDIO_CLOCK_RATE * 60
 
 
-# Registry of live audio tracks so graph nodes that need the playhead (e.g.
-# DEMON's StreamVAEDecode skip gate, which mirrors the realtime demo's
-# ``audio_eng.position / SAMPLE_RATE``) can query it without a hard
-# dependency on FrameProcessor. Weak refs so closed tracks drop out.
-_PLAYHEAD_LOCK = threading.Lock()
-_PLAYHEAD_TRACKS: "weakref.WeakSet[AudioProcessingTrack]" = weakref.WeakSet()
+# Playhead handle for graph nodes that need the current audio position
+# (e.g. DEMON's StreamVAEDecode skip gate, which mirrors the realtime
+# demo's ``audio_eng.position / SAMPLE_RATE``). Scope serves one session
+# at a time, so a single optional reference is enough — each new
+# AudioProcessingTrack overwrites it during __init__.
+_current_track: "AudioProcessingTrack | None" = None
 
 
 def get_current_playhead_seconds() -> float | None:
-    """Return the playhead position of the first live audio track, in seconds.
+    """Playhead of the live audio track in seconds, or None if none is live.
 
-    Returns None if no track is registered yet or none are live. Callers
-    should treat None as "skip gate disabled this tick".
+    Callers should treat None as "skip gate disabled this tick".
     """
-    with _PLAYHEAD_LOCK:
-        for track in _PLAYHEAD_TRACKS:
-            if track.readyState == "live":
-                return track.playhead_seconds
-    return None
+    track = _current_track
+    if track is None or track.readyState != "live":
+        return None
+    return track.playhead_seconds
 
 
 class AudioProcessingTrack(MediaStreamTrack):
@@ -86,8 +82,8 @@ class AudioProcessingTrack(MediaStreamTrack):
         # means "no PTS reference yet" — the next valid PTS sets it.
         self._next_expected_pts: int | None = None
 
-        with _PLAYHEAD_LOCK:
-            _PLAYHEAD_TRACKS.add(self)
+        global _current_track
+        _current_track = self
 
     @property
     def playhead_seconds(self) -> float:
