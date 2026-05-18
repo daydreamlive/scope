@@ -21,8 +21,8 @@ class NodeProcessor:
     output queues fan out its results to downstream nodes.
 
     Source nodes (no inputs) execute once by default; nodes marked
-    ``continuous=True`` in their definition re-execute on every tick, which
-    is how streaming sources (audio) and sinks (audio loop) stay alive.
+    ``continuous=True`` in their definition re-execute on every tick so
+    streaming sources and sinks stay alive.
     """
 
     def __init__(
@@ -43,23 +43,17 @@ class NodeProcessor:
 
         definition = node.get_definition()
 
-        # Output ports wired to a sink node via graph_executor. Only these
-        # route through ``audio_output_queue`` → FrameProcessor.get_audio().
-        # A node whose audio output feeds another node (e.g. AudioSource →
-        # VAEEncodeAudio) must NOT push to audio_output_queue: with
-        # maxsize=1 + blocking put, nothing would ever drain it and the
-        # worker would deadlock after the second emission.
+        # Output ports wired straight to a sink; populated by graph_executor.
+        # Values on these ports are routed to ``audio_output_queue`` for
+        # FrameProcessor.get_audio_packet() to drain.
         self.audio_sink_ports: set[str] = set()
-        # Names of parameters this node declares. Global param updates
-        # (no node_id) are broadcast to every processor; this filter
-        # keeps a graph-level tweak from spuriously marking every custom
-        # node for re-execution.
+        # Parameter names this node declares — used to ignore broadcast
+        # updates aimed at other nodes.
         self._declared_param_names: set[str] = {p.name for p in definition.params}
 
-        # Audio output queue consumed by FrameProcessor.get_audio() on the
-        # sink. Size 1 + blocking producer (see _route_audio) gives us
-        # backpressure: the audio decoder stalls until AudioProcessingTrack
-        # has served enough of the current chunk to pull a new one.
+        # Consumed by FrameProcessor.get_audio_packet() on the sink feeder.
+        # maxsize=1 + blocking put (see _route_audio) gives backpressure so
+        # batch decoders can't outrun real-time playback.
         self.audio_output_queue: queue.Queue = queue.Queue(maxsize=1)
 
         self.worker_thread: threading.Thread | None = None
@@ -70,15 +64,10 @@ class NodeProcessor:
         self._source_executed = False
         self._has_executed = False
         self._continuous = definition.continuous
-        # Cached inputs from the last successful run, replayed when
-        # parameters change or when a static upstream (one-shot model
-        # handle) never re-emits.
+        # Latch of last-seen inputs per port, so static upstreams (one-shot
+        # model/vae/clip handles) survive across param-triggered re-runs.
         self._last_inputs: dict[str, Any] = {}
         self._needs_rerun = False
-        # Fresh values drained from input queues while waiting for every
-        # port to catch up. Draining unblocks upstream producers without
-        # committing to a run yet.
-        self._pending_inputs: dict[str, Any] = {}
 
         # PipelineProcessor interface compatibility: graph_executor populates
         # this for every processor; kept as an empty dict so that write is safe.
@@ -114,18 +103,12 @@ class NodeProcessor:
         logger.info("NodeProcessor stopped: %s", self.node_id)
 
     def update_parameters(self, parameters: dict[str, Any]) -> None:
-        # Only mark the node dirty when the update actually touches a
-        # parameter this node declares AND the value differs from the
-        # current one. FrameProcessor.update_parameters broadcasts
-        # global updates (no node_id) to every processor, so without
-        # this guard a stream-level tweak would fire _needs_rerun on
-        # every custom node and cascade through the DAG.
-        changed = False
-        for key, value in parameters.items():
-            if key not in self._declared_param_names:
-                continue
-            if self.parameters.get(key) != value:
-                changed = True
+        # FrameProcessor broadcasts node-less updates to every processor;
+        # only mark ourselves dirty when a value we actually declare changes.
+        changed = any(
+            key in self._declared_param_names and self.parameters.get(key) != value
+            for key, value in parameters.items()
+        )
         self.parameters.update(parameters)
         if changed:
             self._needs_rerun = True
@@ -159,66 +142,44 @@ class NodeProcessor:
             all_queues = dict(self.input_queues)
 
         is_source_node = not all_queues
-        inputs: dict[str, Any] = {}
 
-        if is_source_node:
-            # Source nodes run once, then re-run only when params change
-            # (or every tick when continuous).
-            if self._source_executed and not self._continuous and not self._needs_rerun:
-                self.shutdown_event.wait(1.0)
-                return
-        elif self._continuous:
-            # Continuous nodes: pick up whatever's currently in the queues
-            # and run every tick. Latched values from prior ticks are
-            # merged in so static upstreams (model/vae/clip handles)
-            # persist across ticks.
+        # Source nodes execute once; continuous=True nodes re-execute every
+        # tick (for streaming I/O). A pending parameter change also re-wakes.
+        if (
+            is_source_node
+            and self._source_executed
+            and not self._continuous
+            and not self._needs_rerun
+        ):
+            self.shutdown_event.wait(1.0)
+            return
+
+        # Drain fresh values into the latch cache; ports whose upstream has
+        # already gone quiet (e.g. one-shot model handles) replay from cache.
+        fresh: dict[str, Any] = {}
+        inputs: dict[str, Any] = {}
+        if all_queues:
             for port_name, q in all_queues.items():
                 try:
-                    inputs[port_name] = q.get_nowait()
+                    fresh[port_name] = q.get_nowait()
                 except queue.Empty:
                     pass
-            # Wait until every port has been seen at least once.
-            if not self._has_executed and (
-                set(all_queues.keys()) - inputs.keys() - self._last_inputs.keys()
-            ):
-                # Cache what arrived so we don't lose it while waiting.
-                self._last_inputs.update(inputs)
+            self._last_inputs.update(fresh)
+            inputs = dict(self._last_inputs)
+            # First run: wait until every port has been seen at least once.
+            if not self._has_executed and set(all_queues.keys()) - inputs.keys():
                 self.shutdown_event.wait(SLEEP_TIME)
                 return
-            # Merge with latched: fresh values override cache.
-            merged = {**self._last_inputs, **inputs}
-            inputs = merged
-        else:
-            # Non-continuous node with inputs:
-            # - First run waits until every port has received data at least
-            #   once so the latch cache (_last_inputs) is populated.
-            # - Subsequent runs drain fresh values into _pending_inputs (to
-            #   unblock upstream producers) and fire when at least one
-            #   port has fresh data, OR when params change.
-            # - Static ports — upstreams that never re-emit, e.g.
-            #   MODEL/VAE handles — are latched from _last_inputs.
-            if not self._has_executed:
-                if any(q.empty() for q in all_queues.values()):
-                    self.shutdown_event.wait(SLEEP_TIME)
-                    return
-                inputs = {name: q.get_nowait() for name, q in all_queues.items()}
-            else:
-                for port_name, q in all_queues.items():
-                    try:
-                        self._pending_inputs[port_name] = q.get_nowait()
-                    except queue.Empty:
-                        pass
-                fire = self._needs_rerun or bool(self._pending_inputs)
-                if not fire:
-                    self.shutdown_event.wait(SLEEP_TIME)
-                    return
-                inputs = {}
-                for port_name in all_queues:
-                    if port_name in self._pending_inputs:
-                        inputs[port_name] = self._pending_inputs[port_name]
-                    elif port_name in self._last_inputs:
-                        inputs[port_name] = self._last_inputs[port_name]
-                self._pending_inputs.clear()
+
+        # Non-continuous nodes skip when nothing changed since last run.
+        if (
+            self._has_executed
+            and not self._continuous
+            and not fresh
+            and not self._needs_rerun
+        ):
+            self.shutdown_event.wait(SLEEP_TIME)
+            return
 
         outputs = self.node.execute(inputs, **self.parameters)
 
@@ -231,8 +192,6 @@ class NodeProcessor:
             return
 
         self._has_executed = True
-        if inputs:
-            self._last_inputs.update(inputs)
         self._route_outputs(outputs)
 
     def _route_outputs(self, outputs: dict[str, Any]) -> None:
@@ -240,20 +199,13 @@ class NodeProcessor:
             if value is None:
                 continue
 
-            # Audio outputs only push to audio_output_queue for ports
-            # graph_executor wired to a sink — an intermediate audio port
-            # (e.g. AudioSource → VAEEncodeAudio) has no drainer, and the
-            # maxsize=1 blocking put would deadlock after the second emit.
-            # The fan-out below still runs so non-sink consumers receive
-            # the value via the normal output_queues path; sink consumers
-            # are not registered in output_queues, so the fan-out is a
-            # no-op for them.
+            # Sink-bound audio also goes to audio_output_queue for WebRTC.
             if port_name in self.audio_sink_ports:
                 self._route_audio(value)
 
-            # Fan out to downstream node queues. Block briefly when a queue
-            # is full so producers throttle to consumer pace and GPU tensors
-            # don't accumulate in memory.
+            # Fan out to all downstream queues on this port. Block briefly
+            # when queues are full so producers throttle to consumer pace
+            # and GPU tensors don't pile up in memory.
             out_queues = self.output_queues.get(port_name)
             if out_queues:
                 for oq in out_queues:
@@ -266,9 +218,8 @@ class NodeProcessor:
 
     def _route_audio(self, value: Any) -> None:
         """Extract audio tensor and push to audio_output_queue for WebRTC."""
-        # Lazy imports: pulling torch/MediaTimestamp at module scope would
-        # also pull ``scope.server.media_packets`` into ``scope.core``,
-        # which the project layout disallows.
+        # Lazy imports keep ``scope.core`` from reaching back into
+        # ``scope.server`` at module load (disallowed by the project layout).
         from fractions import Fraction
 
         import torch
@@ -281,24 +232,17 @@ class NodeProcessor:
         else:
             audio_tensor = getattr(value, "waveform", None)
             audio_sr = getattr(value, "sample_rate", 48000)
-            # ACEStep StreamVAEDecode tags each window with a ``start_sample``
-            # offset (window t_start * sample_rate). Without this, overlapping
-            # windows produced by ``follow_playhead`` are appended back-to-back
-            # in AudioProcessingTrack and the overlapped region plays twice —
-            # heard as "parts repeated". Forward the offset as a PTS so the
-            # sink can detect and trim duplicates.
+            # ACEStep StreamVAEDecode tags each window with start_sample so
+            # AudioProcessingTrack can trim overlapping windows downstream.
             start_sample = getattr(value, "start_sample", None)
         if audio_tensor is None:
             return
         if isinstance(audio_tensor, torch.Tensor):
             if audio_tensor.is_cuda:
                 audio_tensor = audio_tensor.detach().cpu()
-            # VAE decoders (e.g. ACEStep) return (1, C, T); the audio
-            # track expects (C, T). Drop a leading singleton batch dim.
+            # VAE decoders return (1, C, T); the audio track expects (C, T).
             if audio_tensor.dim() == 3 and audio_tensor.shape[0] == 1:
                 audio_tensor = audio_tensor.squeeze(0)
-            # Upcast bfloat16/float16 to float32 before numpy conversion
-            # (AudioProcessingTrack calls .numpy() on the tensor).
             if audio_tensor.dtype in (torch.bfloat16, torch.float16):
                 audio_tensor = audio_tensor.float()
 
@@ -310,10 +254,8 @@ class NodeProcessor:
         packet = AudioPacket(
             audio=audio_tensor, sample_rate=int(audio_sr), timestamp=timestamp
         )
-        # Blocking-with-retry put. Stalls the worker thread when the audio
-        # track hasn't finished serving the previous chunk — this is the
-        # backpressure that rate-limits batch generators to real-time
-        # playback instead of silently dropping audio.
+        # Blocking put with retry: stalls the worker when the audio track
+        # hasn't drained the previous chunk — this is the backpressure.
         while not self.shutdown_event.is_set():
             try:
                 self.audio_output_queue.put(packet, timeout=0.1)
