@@ -70,8 +70,9 @@ class _TsStreamBuffer:
 class HeadlessTsStreamer(HeadlessMediaSink):
     """Streams headless output as MPEG-TS using PyAV."""
 
-    def __init__(self, expect_audio: bool):
+    def __init__(self, expect_audio: bool, expect_video: bool = True):
         self._expect_audio = expect_audio
+        self._expect_video = expect_video
         self._buffer = _TsStreamBuffer()
         self._container = None
         self._video_stream = None
@@ -86,12 +87,13 @@ class HeadlessTsStreamer(HeadlessMediaSink):
         import av
 
         self._container = av.open(self._buffer, "w", format="mpegts")
-        self._video_stream = self._container.add_stream(
-            "libx264", rate=int(RECORDING_MAX_FPS)
-        )
-        self._video_stream.width = width + (width % 2)
-        self._video_stream.height = height + (height % 2)
-        self._video_stream.pix_fmt = "yuv420p"
+        if self._expect_video:
+            self._video_stream = self._container.add_stream(
+                "libx264", rate=int(RECORDING_MAX_FPS)
+            )
+            self._video_stream.width = width + (width % 2)
+            self._video_stream.height = height + (height % 2)
+            self._video_stream.pix_fmt = "yuv420p"
         if self._expect_audio:
             self._audio_stream = self._container.add_stream(
                 "aac", rate=AUDIO_CLOCK_RATE
@@ -100,7 +102,7 @@ class HeadlessTsStreamer(HeadlessMediaSink):
         self._initialized = True
 
     def on_video_frame(self, video_frame) -> None:
-        if self._closed:
+        if self._closed or not self._expect_video:
             return
         import av
 
@@ -135,7 +137,17 @@ class HeadlessTsStreamer(HeadlessMediaSink):
         import numpy as np
 
         with self._lock:
-            if self._closed or not self._initialized or self._audio_stream is None:
+            if self._closed:
+                return
+            if not self._initialized:
+                # Audio-only graphs (e.g. DEMON music covers) never deliver
+                # a video frame to bootstrap the container, so init from
+                # the first audio chunk.
+                if not self._expect_video:
+                    self._init_container(0, 0)
+                else:
+                    return
+            if self._audio_stream is None:
                 return
             audio_np = audio_tensor.numpy()
             if audio_np.ndim == 1:
@@ -330,11 +342,13 @@ class HeadlessSession:
         self,
         frame_processor: "FrameProcessor",
         expect_audio: bool = False,
+        expect_video: bool = True,
     ):
         from .frame_processor import FrameProcessor
 
         self.frame_processor: FrameProcessor = frame_processor
         self.expect_audio = expect_audio
+        self.expect_video = expect_video
         # In graph mode this tracks the most recently consumed frame across all
         # sink queues, not a canonical sink. Callers that need stable per-sink
         # capture should pass sink_node_id to get_last_frame().
@@ -452,7 +466,10 @@ class HeadlessSession:
                 self._media_sinks.remove(sink)
 
     def create_ts_streamer(self) -> HeadlessTsStreamer:
-        streamer = HeadlessTsStreamer(expect_audio=self.expect_audio)
+        streamer = HeadlessTsStreamer(
+            expect_audio=self.expect_audio,
+            expect_video=self.expect_video,
+        )
         self.add_media_sink(streamer)
         return streamer
 

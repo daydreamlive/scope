@@ -8,7 +8,11 @@ from av import AudioFrame
 
 from scope.server.cloud_relay import CloudRelay
 from scope.server.frame_processor import FrameProcessor
-from scope.server.media_packets import AudioPacket, MediaTimestamp
+from scope.server.media_packets import (
+    AudioPacket,
+    MediaTimestamp,
+    audio_packet_from_node_output,
+)
 
 
 def _make_frame_processor_with_audio_queue(items):
@@ -82,3 +86,34 @@ def test_cloud_relay_audio_packet_preserves_timestamp():
     assert packet is not None
     assert packet.sample_rate == 48_000
     assert packet.timestamp == MediaTimestamp(pts=321, time_base=Fraction(1, 48_000))
+
+
+def test_audio_packet_from_tuple():
+    audio = torch.ones((2, 16))
+    packet = audio_packet_from_node_output((audio, 48_000))
+    assert packet == AudioPacket(audio=audio, sample_rate=48_000)
+
+
+def test_audio_packet_from_waveform_object_carries_pts():
+    """``start_sample`` flows through as PTS so AudioProcessingTrack can trim."""
+    audio = torch.zeros((2, 32))
+    value = SimpleNamespace(waveform=audio, sample_rate=48_000, start_sample=500)
+    packet = audio_packet_from_node_output(value)
+    assert packet is not None
+    assert packet.sample_rate == 48_000
+    assert packet.timestamp == MediaTimestamp(pts=500, time_base=Fraction(1, 48_000))
+
+
+def test_audio_packet_drops_cuda_batch_dim_and_upcasts_bfloat16():
+    # Skip CUDA-only steps; cover shape + dtype normalization (bf16 → fp32 +
+    # ``(1, C, T)`` squeeze) which AudioProcessingTrack.numpy() requires.
+    audio = torch.zeros((1, 2, 16), dtype=torch.bfloat16)
+    packet = audio_packet_from_node_output((audio, 48_000))
+    assert packet is not None
+    assert packet.audio.shape == (2, 16)
+    assert packet.audio.dtype == torch.float32
+
+
+def test_audio_packet_from_missing_waveform_is_none():
+    value = SimpleNamespace(something_else=True)
+    assert audio_packet_from_node_output(value) is None

@@ -333,9 +333,25 @@ async def start_stream(
                 detail="FrameProcessor failed to start (check logs for details)",
             )
 
+        expect_audio = NodeRegistry.chain_produces_audio(pipeline_id_list)
+        expect_video = True
+        # Graph-only audio: when no config-driven pipeline declares audio
+        # but the graph itself carries an audio edge into a sink (e.g. a
+        # DEMON node graph), the session still expects audio. When the
+        # graph carries audio but no video into any sink, the headless TS
+        # streamer must skip the video track entirely.
+        if request.graph is not None:
+            graph_has_video_sink, graph_has_audio_sink = (
+                graph_config.get_sink_modalities()
+            )
+            if graph_has_audio_sink:
+                expect_audio = True
+            if graph_has_audio_sink and not graph_has_video_sink:
+                expect_video = False
         session = HeadlessSession(
             frame_processor=frame_processor,
-            expect_audio=NodeRegistry.chain_produces_audio(pipeline_id_list),
+            expect_audio=expect_audio,
+            expect_video=expect_video,
         )
         session.start_frame_consumer()
         webrtc_manager.add_headless_session(session)

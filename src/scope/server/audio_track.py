@@ -25,6 +25,25 @@ AUDIO_TIME_BASE = fractions.Fraction(1, AUDIO_CLOCK_RATE)
 AUDIO_MAX_BUFFER_SAMPLES = AUDIO_CLOCK_RATE * 60
 
 
+# Playhead handle for graph nodes that need the current audio position
+# (e.g. DEMON's StreamVAEDecode skip gate, which mirrors the realtime
+# demo's ``audio_eng.position / SAMPLE_RATE``). Scope serves one session
+# at a time, so a single optional reference is enough — each new
+# AudioProcessingTrack overwrites it during __init__.
+_current_track: "AudioProcessingTrack | None" = None
+
+
+def get_current_playhead_seconds() -> float | None:
+    """Playhead of the live audio track in seconds, or None if none is live.
+
+    Callers should treat None as "skip gate disabled this tick".
+    """
+    track = _current_track
+    if track is None or track.readyState != "live":
+        return None
+    return track.playhead_seconds
+
+
 class AudioProcessingTrack(MediaStreamTrack):
     """WebRTC audio track that streams generated audio from the pipeline.
 
@@ -56,6 +75,24 @@ class AudioProcessingTrack(MediaStreamTrack):
         self._start: float | None = None
         self._timestamp: int = 0
         self._last_preserved_pts: int | None = None
+        # Per-channel sample index where the next contiguous chunk is
+        # expected to begin. Used to detect and trim overlap when a
+        # streaming decoder (e.g. ACEStep StreamVAEDecode with
+        # follow_playhead) emits windows that overlap in time. None
+        # means "no PTS reference yet" — the next valid PTS sets it.
+        self._next_expected_pts: int | None = None
+
+        global _current_track
+        _current_track = self
+
+    @property
+    def playhead_seconds(self) -> float:
+        """Current playback position in seconds (monotonic recv timestamp).
+
+        Mirrors DEMON's ``audio_eng.position / SAMPLE_RATE`` read. Value
+        is 0 before the first ``recv`` call.
+        """
+        return self._timestamp / AUDIO_CLOCK_RATE
 
     @staticmethod
     def _resample_audio(
@@ -224,8 +261,29 @@ class AudioProcessingTrack(MediaStreamTrack):
                     audio_packet.timestamp.time_base
                 )
                 chunk_pts = int(round(media_ts * AUDIO_CLOCK_RATE))
+
+            # Overlap trim: when a streaming decoder emits windows whose
+            # start_sample retreats into already-buffered territory (e.g.
+            # ACEStep StreamVAEDecode with vae_overlap > 0 + follow_playhead),
+            # drop the duplicate prefix so the listener hears each sample
+            # exactly once. Without this the overlap region plays twice.
+            if (
+                chunk_pts is not None
+                and self._next_expected_pts is not None
+                and chunk_pts < self._next_expected_pts
+            ):
+                overlap_per_ch = self._next_expected_pts - chunk_pts
+                trim_samples = overlap_per_ch * self.channels
+                if trim_samples >= len(interleaved):
+                    # Entire chunk lies in the past — drop it.
+                    continue
+                interleaved = interleaved[trim_samples:]
+                chunk_pts = self._next_expected_pts
+
             self._chunks.append((interleaved, chunk_pts))
             self._buffered_samples += len(interleaved)
+            if chunk_pts is not None:
+                self._next_expected_pts = chunk_pts + len(interleaved) // self.channels
 
     def _trim_buffer(self) -> None:
         # Cap buffer to prevent unbounded growth.

@@ -252,6 +252,22 @@ def build_graph(
         for e in graph.edges_to(sink_id):
             if e.kind == "stream":
                 feeder_proc = node_processors.get(e.from_node)
+                # Audio edges to sinks are served via audio_output_queue,
+                # not dedicated sink queues — skip queue allocation so the
+                # feeder isn't blocked on a queue nobody drains.
+                if e.from_port == "audio" or e.to_port == "audio":
+                    if feeder_proc is not None:
+                        sink_processors_by_node[sink_id] = feeder_proc
+                        sink_ports = getattr(feeder_proc, "audio_sink_ports", None)
+                        if sink_ports is not None:
+                            sink_ports.add(e.from_port)
+                        logger.info(
+                            "Sink %s: audio routed from %s port '%s' via audio_output_queue",
+                            sink_id,
+                            e.from_node,
+                            e.from_port,
+                        )
+                    break
                 sink_node = node_by_id[sink_id]
                 sink_mode = sink_node.sink_mode
                 # WebRTC preview reads sink_queues_by_node; NDI/Spout/Syphon threads

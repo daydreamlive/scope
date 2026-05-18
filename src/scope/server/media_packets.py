@@ -60,3 +60,47 @@ def ensure_audio_packet(
         return item
     audio, sample_rate = item
     return AudioPacket(audio=audio, sample_rate=sample_rate)
+
+
+def audio_packet_from_node_output(value: Any) -> AudioPacket | None:
+    """Build an ``AudioPacket`` from a graph node's audio output port value.
+
+    Accepts the two shapes that built-in and plugin nodes emit:
+      * ``(tensor, sample_rate)`` tuples (e.g. ``AudioSourceNode``).
+      * Objects with ``.waveform`` / ``.sample_rate`` / optional
+        ``.start_sample`` attributes (e.g. ACEStep ``StreamVAEDecode``,
+        whose ``start_sample`` is forwarded as PTS so ``AudioProcessingTrack``
+        can trim overlapping windows downstream).
+
+    Normalizes the tensor for ``AudioProcessingTrack`` consumption: moves
+    to CPU, drops a leading ``(1, C, T)`` batch dim, and upcasts
+    bfloat16/float16 to float32 so the subsequent ``.numpy()`` call works.
+    Returns ``None`` when no audio tensor can be extracted.
+    """
+    start_sample: int | None = None
+    if isinstance(value, tuple) and len(value) == 2:
+        audio_tensor, audio_sr = value
+    else:
+        audio_tensor = getattr(value, "waveform", None)
+        audio_sr = getattr(value, "sample_rate", 48000)
+        start_sample = getattr(value, "start_sample", None)
+
+    if audio_tensor is None:
+        return None
+
+    if isinstance(audio_tensor, torch.Tensor):
+        if audio_tensor.is_cuda:
+            audio_tensor = audio_tensor.detach().cpu()
+        if audio_tensor.dim() == 3 and audio_tensor.shape[0] == 1:
+            audio_tensor = audio_tensor.squeeze(0)
+        if audio_tensor.dtype in (torch.bfloat16, torch.float16):
+            audio_tensor = audio_tensor.float()
+
+    timestamp = (
+        MediaTimestamp(pts=int(start_sample), time_base=Fraction(1, int(audio_sr)))
+        if start_sample is not None and audio_sr
+        else MediaTimestamp()
+    )
+    return AudioPacket(
+        audio=audio_tensor, sample_rate=int(audio_sr), timestamp=timestamp
+    )
