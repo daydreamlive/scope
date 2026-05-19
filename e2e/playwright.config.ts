@@ -29,9 +29,12 @@ export default defineConfig({
     // Longer timeout for cloud operations
     actionTimeout: 30000,
     navigationTimeout: 60000,
+    // Grant camera/mic so getUserMedia() succeeds without a UI prompt
+    // (the browser launch flags below provide a synthetic feed).
+    permissions: ["camera", "microphone"],
   },
   // Global timeout per test
-  timeout: 180000, // 3 minutes for cloud streaming tests
+  timeout: 300000, // 5 minutes (cold-start fal containers can run long)
   expect: {
     timeout: 30000,
   },
@@ -40,6 +43,16 @@ export default defineConfig({
       name: "chromium",
       use: {
         ...devices["Desktop Chrome"],
+        launchOptions: {
+          // Feed getUserMedia a synthetic video source so a real WebRTC
+          // peer connection can complete end-to-end — without these
+          // flags, headless Chromium has no camera and ICE stalls.
+          args: [
+            "--use-fake-device-for-media-stream",
+            "--use-fake-ui-for-media-stream",
+            "--auto-select-desktop-capture-source=fake",
+          ],
+        },
       },
     },
   ],
