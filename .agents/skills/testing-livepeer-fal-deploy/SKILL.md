@@ -1,6 +1,6 @@
 ---
 name: testing-livepeer-fal-deploy
-description: End-to-end test harness for Scope's Livepeer cloud path against a deployed fal.ai app — the only supported cloud path going forward (the old cloud-relay / direct mode using `fal_app.py` + `CloudConnectionManager` is being deprecated). Primary path is a Playwright browser test that drives the full UI flow (camera → local scope WebRTC → livepeer trickle → fal runner → back), producing every session-lifecycle Kafka event. Secondary path is `test-cloud-connect.sh` — a bash/curl smoke test for the `/api/v1/cloud/connect` path only. TRIGGER any time a user says "test cloud", "test the fal deploy", "test cloud streaming", "run the e2e test", "run playwright", "verify cloud connect", "verify kafka events", "diagnose fal", "debug fal deploy", "did my stream work", "deploy-staging.sh", OR pastes any of these errors — "All orchestrators failed (N tried)", "ACCESS_DENIED", "did not receive ready message from websocket", "discover_orchestrators requires discovery_url", "cold start" — OR has just changed `src/scope/cloud/livepeer_fal_app.py` / `src/scope/cloud/livepeer_app.py` / `src/scope/server/livepeer.py` / `src/scope/server/livepeer_client.py`. Use `testing-livepeer` instead for a fully-local livepeer stack (prebuilt go-livepeer binary, no fal involvement).
+description: End-to-end test harness for Scope's Livepeer cloud path against a deployed fal.ai app — the only supported cloud path going forward (the old cloud-relay / direct mode using `fal_app.py` + `CloudConnectionManager` is being deprecated). Primary path is a Playwright browser test that drives the full UI flow (camera → local scope WebRTC → livepeer trickle → fal runner → back), producing every session-lifecycle Kafka event. Secondary path is `test-cloud-connect.sh` — a bash/curl smoke test for the `/api/v1/cloud/connect` path only. Has two modes: "deploy then test" (default — runs `deploy-staging.sh` first) and "test existing deploy" (skips deploy, points at whatever is already live, e.g. `scope-livepeer--prod`). TRIGGER any time a user says "test cloud", "test the fal deploy", "test cloud streaming", "run the e2e test", "run playwright", "verify cloud connect", "verify kafka events", "diagnose fal", "debug fal deploy", "did my stream work", "deploy-staging.sh", "test against prod", "test prod cloud", "test the prod deploy", "don't deploy", "skip deploy", "no deploy", "target the existing deploy", "target prod", "scope-livepeer--prod", OR pastes any of these errors — "All orchestrators failed (N tried)", "ACCESS_DENIED", "did not receive ready message from websocket", "discover_orchestrators requires discovery_url", "cold start" — OR has just changed `src/scope/cloud/livepeer_fal_app.py` / `src/scope/cloud/livepeer_app.py` / `src/scope/server/livepeer.py` / `src/scope/server/livepeer_client.py`. Use `testing-livepeer` instead for a fully-local livepeer stack (prebuilt go-livepeer binary, no fal involvement).
 ---
 
 # Testing Livepeer fal Deploy
@@ -78,10 +78,23 @@ Do **not** use this skill for local-only livepeer testing — that's
 
 ## Running the Playwright test (primary)
 
-When the user says "test cloud" (or any trigger in the description),
-**always deploy their current working tree before running Playwright**.
-Otherwise the test runs against whatever stale code was last deployed
-and can false-positive on their change.
+There are two modes. Pick by what the user said:
+
+- **Deploy-then-test (default)** — user said "test cloud" / "test the
+  fal deploy" / changed cloud code and wants to verify it. Run all
+  steps below including Step 3 (deploy).
+- **Test-existing-deploy (no deploy)** — user said "test against
+  prod", "don't deploy", "no deploy", "target the existing deploy",
+  "scope-livepeer--prod", or otherwise made clear they want to test
+  whatever is *already live*. **Skip Step 3 entirely.** See
+  ["Variant: target an existing deploy"](#variant-target-an-existing-deploy-no-deploy)
+  below before running.
+
+When the user says "test cloud" (or any trigger in the description)
+without indicating they want to skip deploy, **always deploy their
+current working tree before running Playwright**. Otherwise the test
+runs against whatever stale code was last deployed and can
+false-positive on their change.
 
 ### Step 0 — Ask the user where to deploy
 
@@ -183,6 +196,51 @@ Stopping stream...              ✅
    false-positive on the local input preview.
 8. Stops the stream. Runner emits `session_closed` and eventually
    `websocket_disconnected` when the session is reaped.
+
+### Variant: target an existing deploy (no deploy)
+
+Use this when the user has made clear they do **not** want to deploy
+— typical phrasings: "test against prod", "don't deploy", "no
+deploy", "target the existing deploy", "test scope-livepeer--prod",
+"verify prod cloud". The point is to exercise whatever is already
+live (most often the prod fal app), not the user's working tree.
+
+**Run order — Step 3 is omitted:**
+
+1. Sanity-check `.env.local` (same as Step 1 above):
+   `SCOPE_CLOUD_API_KEY` and `SCOPE_USER_ID` must be set.
+2. Free port :8000 (same as Step 2 above).
+3. *(Skipped — do NOT run `deploy-staging.sh`.)*
+4. Start scope pointed at the existing deploy, then run Playwright:
+
+   ```bash
+   # Terminal 1 — scope (port 8000), pointed at the live app
+   SCOPE_CLOUD_APP_ID=daydream/<app>--<env>/ws ./run-app.sh
+
+   # Terminal 2 — test
+   cd e2e && npx playwright test
+   ```
+
+**Deriving `SCOPE_CLOUD_APP_ID` for common targets:**
+
+| Target | `SCOPE_FAL_APP_NAME` | `SCOPE_FAL_ENV` | `SCOPE_CLOUD_APP_ID` |
+|---|---|---|---|
+| prod | `scope-livepeer` | `prod` | `daydream/scope-livepeer--prod/ws` |
+| preview | `scope-livepeer` | `preview` | `daydream/scope-livepeer--preview/ws` |
+| main (default env) | `scope-livepeer` | `main` | `daydream/scope-livepeer/ws` (no suffix) |
+
+Same fal env-suffix rule as the deploy path: `main` has no suffix, all
+other envs include `--<env>`.
+
+**Before running, surface this caveat to the user:**
+
+> Heads up — this run tests whatever code is currently deployed to
+> `<app>--<env>`, not your local working tree. A green run is not
+> evidence your local diff works.
+
+Everything else (success output, the 8-step "what the test does"
+explanation, common failure signatures) is identical to the
+deploy-then-test mode.
 
 ## Running the quick HTTP smoke (secondary)
 
