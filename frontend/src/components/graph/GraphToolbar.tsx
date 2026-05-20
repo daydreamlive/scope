@@ -162,6 +162,8 @@ export function GraphToolbar({
           <TooltipTrigger asChild>
             <button
               data-tour="play-button"
+              data-testid="stream-run-stop"
+              data-streaming={isStreaming}
               onClick={isStreaming ? onStopStream : onStartStream}
               disabled={busy}
               className={

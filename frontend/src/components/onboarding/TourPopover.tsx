@@ -286,13 +286,20 @@ export function TourPopover({
               <div className="flex items-center gap-3">
                 {step.showSkip && (
                   <button
+                    data-testid="tour-skip"
                     onClick={onSkip}
                     className="text-[11px] text-[#888] hover:text-[#ccc] transition-colors"
                   >
                     Skip tour
                   </button>
                 )}
-                <Button onClick={onNext} size="sm" className="h-7 px-4 text-xs">
+                <Button
+                  data-testid="tour-next"
+                  data-tour-done={step.showDone ? "true" : "false"}
+                  onClick={onNext}
+                  size="sm"
+                  className="h-7 px-4 text-xs"
+                >
                   {step.showDone ? "Done" : "Next"}
                 </Button>
               </div>

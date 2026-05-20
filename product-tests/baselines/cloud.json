@@ -1,0 +1,11 @@
+{
+  "_doc": "Cloud baselines are longer than local (offer/answer + warm runner)",
+  "passthrough": {
+    "first_frame_time_ms": 60000,
+    "parameter_round_trip_ms_p95": 800
+  },
+  "mythical-creature": {
+    "first_frame_time_ms": 90000,
+    "parameter_round_trip_ms_p95": 800
+  }
+}

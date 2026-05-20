@@ -49,6 +49,7 @@ export function InferenceModeStep({ onSelect }: InferenceModeStepProps) {
         {MODES.map(({ mode, icon: Icon, title, description, detail }) => (
           <button
             key={mode}
+            data-testid={`inference-mode-${mode}`}
             onClick={() => setSelected(mode)}
             className={`flex-1 flex flex-col items-center gap-3 p-6 rounded-xl border-2 transition-all cursor-pointer text-center ${
               selected === mode
@@ -74,6 +75,7 @@ export function InferenceModeStep({ onSelect }: InferenceModeStepProps) {
 
       <div className="flex flex-col items-center gap-3">
         <Button
+          data-testid="inference-mode-continue"
           onClick={() => selected && onSelect(selected)}
           disabled={!selected}
           className="px-8"

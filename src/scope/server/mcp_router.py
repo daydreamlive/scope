@@ -281,6 +281,18 @@ async def start_stream(
                 pipeline_tuples.append((node.id, node.node_type_id, None))
         pipeline_id_list = [t[1] for t in pipeline_tuples]
 
+        # Validate against NodeRegistry — after the Pipeline/Node unification
+        # (#980), pipelines and plain custom nodes share one registry.
+        unknown = [p for p in pipeline_id_list if not NodeRegistry.is_registered(p)]
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Unknown node type(s): {unknown}. "
+                    f"Known: {NodeRegistry.list_node_types()}"
+                ),
+            )
+
         if pipeline_tuples:
             # Skip load for node-only graphs.
             await pipeline_manager.load_pipelines(pipeline_tuples)

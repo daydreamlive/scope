@@ -1,0 +1,15 @@
+{
+  "_doc": "Per-scenario SLO ceilings. first_frame_time_ms is the wall-clock from /health-healthy to first <video> frame rendered. Below these = pass; above = baseline drift.",
+  "passthrough": {
+    "first_frame_time_ms": 15000,
+    "parameter_round_trip_ms_p95": 500
+  },
+  "mythical-creature": {
+    "first_frame_time_ms": 45000,
+    "parameter_round_trip_ms_p95": 500
+  },
+  "camera-preview": {
+    "first_frame_time_ms": 10000,
+    "parameter_round_trip_ms_p95": 500
+  }
+}

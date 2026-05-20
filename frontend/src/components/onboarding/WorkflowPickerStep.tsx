@@ -82,6 +82,7 @@ export function WorkflowPickerStep({
           return (
             <button
               key={wf.id}
+              data-testid={`workflow-card-${wf.id}`}
               onClick={() => setSelected(wf.id)}
               className={`relative flex flex-col rounded-xl border-2 p-5 text-left transition-all cursor-pointer ${
                 isSelected
@@ -125,6 +126,7 @@ export function WorkflowPickerStep({
 
       {/* Primary action */}
       <Button
+        data-testid="workflow-get-started"
         onClick={() => selectedWorkflow && onSelectWorkflow(selectedWorkflow)}
         disabled={!selectedWorkflow}
         className="px-8"

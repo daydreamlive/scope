@@ -88,7 +88,62 @@ This documentation can be used to understand the architecture of the project:
 - Python extras: `uv sync --extra link` (Ableton Link) or `uv sync --extra midi` (MIDI clock).
 - On Linux, the ALSA library is required: install `libasound2` (Debian/Ubuntu), `alsa-lib` (Fedora/RHEL), or `alsa-lib` (Arch). Docker images do not include ALSA since MIDI requires local hardware access.
 
+## Cloud testing — use this skill
+
+**Livepeer cloud mode is the only supported cloud path going forward.**
+The older direct/cloud-relay mode (`fal_app.py` +
+`CloudConnectionManager` + `SCOPE_CLOUD_MODE=direct`) is being
+deprecated.
+
+**Whenever a user says "test cloud", "test the fal deploy", "verify
+cloud streaming", "run the e2e test", or pastes any cloud-connect
+error (`All orchestrators failed`, `ACCESS_DENIED`, `did not receive
+ready message`, `discover_orchestrators requires discovery_url`),
+route to the `testing-livepeer-fal-deploy` skill at
+`.agents/skills/testing-livepeer-fal-deploy/SKILL.md`.** Also
+route there for changes to `src/scope/cloud/livepeer_fal_app.py`,
+`src/scope/cloud/livepeer_app.py`, or the cloud-connect flow on the
+client side (`src/scope/server/livepeer.py`,
+`src/scope/server/livepeer_client.py`).
+
+The skill provides two paths:
+
+- **Cloud-streaming test**
+  (`product-tests/release/test_cloud_streaming.py`) — primary. Drives
+  the real Perform-mode UI with a synthetic camera and verifies the
+  full trickle round-trip. Produces every lifecycle Kafka event
+  (`websocket_connected`, `pipeline_loaded`, `session_created`,
+  `stream_started`, `stream_heartbeat`, `session_closed`,
+  `websocket_disconnected`). Run via
+  `uv run pytest product-tests/release/test_cloud_streaming.py -v -m cloud`.
+- **`test-cloud-connect.sh`** at the repo root — fast bash/curl smoke
+  test for `/api/v1/cloud/connect` only. Useful in `git bisect run`
+  or for "did the fal container come up?". Does not produce
+  pipeline/session/stream events.
+
+For a fully-local livepeer stack (prebuilt go-livepeer + local
+runner, no fal involved), use the separate `testing-livepeer` skill
+instead.
+
+> **Note:** This skill is for **ad-hoc** cloud verification ("did
+> my fal deploy work?"). For automated CI gating + per-PR product
+> tests + regression tests, see the `product-tests/` suite and the
+> "Regression Tests for Bugfix PRs" section under Contributing.
+> Both systems can coexist — they answer different questions.
+
+**Do NOT use the `Local Cloud Testing` or `MCP Server Testing with
+Local Cloud Dev` sections below for general cloud testing — those
+describe the deprecated direct-mode path and are kept only to
+unblock in-flight work on that legacy path until it's removed.**
+
 ## Local Cloud Testing
+
+> **DEPRECATED.** This section describes the old direct/cloud-relay
+> mode (`SCOPE_CLOUD_MODE=direct`, `fal_app.py`,
+> `CloudConnectionManager`) which is being removed. For all new
+> cloud testing, use the `testing-livepeer-fal-deploy` skill (see the
+> "Cloud testing — use this skill" section above). This section is
+> kept only for in-flight work on the legacy path.
 
 For local Livepeer cloud testing, follow `.agents/skills/testing-livepeer/SKILL.md`.
 
@@ -251,6 +306,54 @@ for name, color in [('test', (0,0,255)), ('test1', (0,255,0)), ('test2', (255,0,
 - All commits must be signed off (DCO): `git commit -s`
 - Pre-commit hooks run ruff (Python) and prettier/eslint (frontend)
 - Models stored in `~/.daydream-scope/models` (configurable via `DAYDREAM_SCOPE_MODELS_DIR`)
+
+### Regression Tests for Bugfix PRs
+
+**Bugfix PRs should include a regression test** in `product-tests/regression/`. Without one, the bug can quietly regress months later — the suite is the only thing that will catch it.
+
+**How:**
+
+1. **Auto-generate** — `/product-test-writer` skill takes a plain-English bug description (the same one you'd put in the PR body) and writes `product-tests/regression/pr_<NNN>_<slug>.py` using the `@scenario` decorator.
+
+2. **Manual** — copy the template:
+   ```bash
+   cp product-tests/_templates/regression.py.tpl product-tests/regression/pr_<NNN>_<slug>.py
+   ```
+   See `product-tests/WRITING_TESTS.md` for the `ctx` API.
+
+3. **Verify the test actually catches the bug.** Run it on the buggy commit (it should red), then on your fix commit (it should green):
+   ```bash
+   git checkout <bug-commit>
+   uv run pytest product-tests/regression/pr_<NNN>_<slug>.py -v   # red
+   git checkout <fix-commit>
+   uv run pytest product-tests/regression/pr_<NNN>_<slug>.py -v   # green
+   ```
+   A test that greens on both commits isn't testing the bug.
+
+**Example** (matches the canonical local-passthrough pattern used by every other `@scenario` in the suite):
+
+```python
+# product-tests/regression/pr_1234_parameter_spam_crash.py
+"""Regression for #1234: parameter spam crashed the session."""
+from harness.scenario import scenario
+
+@scenario(mode="local", workflow="local-passthrough", feature="params")
+def test_pr_1234_parameter_spam(ctx):
+    ctx.complete_onboarding()
+    ctx.run_and_wait_first_frame()
+    for _ in range(200):
+        ctx.set_parameter("__prompt", "test")
+    # @scenario teardown auto-asserts: zero retries, zero unexpected closes,
+    # zero UI errors. If the spam crashed the session, the unexpected-close
+    # gate fails the test.
+```
+
+**Why local-passthrough by default:** every existing `@scenario` uses it. It's CPU-only, no fal credentials required, runs on the PR ring. Switch to `mode="cloud"` only when the bug is specific to the cloud relay path.
+
+**Reference:**
+- Test cookbook: `product-tests/WRITING_TESTS.md`
+- Templates: `product-tests/_templates/`
+- Decorator + `ctx` API: `product-tests/harness/scenario.py`
 
 ## Style Guidelines
 

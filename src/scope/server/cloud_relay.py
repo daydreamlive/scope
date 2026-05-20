@@ -216,6 +216,9 @@ class CloudRelay:
                     )
                 )
             except queue.Full:
+                from .retry_counter import retry_counter
+
+                retry_counter.incr("frames_dropped_video")
                 try:
                     self._frame_queue.get_nowait()
                     self._frame_queue.put_nowait(
@@ -274,6 +277,9 @@ class CloudRelay:
             try:
                 self._audio_queue.put_nowait(packet)
             except queue.Full:
+                from .retry_counter import retry_counter
+
+                retry_counter.incr("frames_dropped_audio")
                 try:
                     self._audio_queue.get_nowait()
                     self._audio_queue.put_nowait(packet)
