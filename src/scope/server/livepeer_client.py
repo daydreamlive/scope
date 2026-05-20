@@ -236,10 +236,7 @@ class LivepeerClient:
             params=params or None,
         )
 
-        # start_scope is synchronous and may block on network I/O, so run it in
-        # a worker thread to avoid blocking the event loop.
-        self._job = await asyncio.to_thread(
-            start_scope,
+        self._job = await start_scope(
             # If unset, orchestrator is discovered via token signer/discovery fields.
             self._orchestrator_url,
             request,
@@ -247,17 +244,14 @@ class LivepeerClient:
             signer_url=signer_url,
             signer_headers=signer_headers,
             timeout=300.0,
-            use_tofu=bool(os.environ.get("LIVEPEER_DEV_MODE")),
         )
         self._connection_id = getattr(self._job, "manifest_id", None)
         set_connection_id(self._connection_id)
 
-        # start_scope runs in a worker thread without an event loop, so
-        # deferred async initialisers need to be kicked off now.
         if self._job.control_url:
             self._control_writer = JSONLWriter(self._job.control_url)
 
-        if self._job.signer_url:
+        if self._job.payment_session is not None:
             self._payment_task = asyncio.create_task(
                 self._payment_loop(self._job, self._job.payment_session)
             )
@@ -914,7 +908,7 @@ class LivepeerClient:
                 if not self._connected or self._job is not job:
                     break
                 try:
-                    await asyncio.to_thread(payment_session.send_payment)
+                    await payment_session.send_payment()
                 except SkipPaymentCycle as e:
                     logger.debug("Livepeer payment loop skipped cycle: %s", e)
                 except Exception as e:
