@@ -19,7 +19,7 @@ import queue
 import shutil
 import threading
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -1501,9 +1501,32 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         # Complete the handshake with the orchestrator
         await ws.send_json({"type": "started"})
 
-        # Keep the WebSocket open and route orchestrator responses used by control handlers.
+        # Keep the WebSocket open and route orchestrator responses used by control
+        # handlers. Also watch the control-channel task: if the trickle
+        # control/events channels are removed, the task exits and this websocket
+        # session should unwind instead of waiting forever for websocket traffic.
         while True:
-            raw_message = await ws.receive_text()
+            receive_task = asyncio.create_task(ws.receive_text())
+            done, pending = await asyncio.wait(
+                {receive_task, control_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if control_task in done:
+                if receive_task in pending:
+                    receive_task.cancel()
+                    try:
+                        await receive_task
+                    except asyncio.CancelledError:
+                        pass
+                logger.info("Control channel ended; closing websocket session")
+                with suppress(Exception):
+                    await ws.close(
+                        code=4000,
+                        reason="control channel ended",
+                    )
+                break
+
+            raw_message = receive_task.result()
             try:
                 message = json.loads(raw_message)
             except json.JSONDecodeError:

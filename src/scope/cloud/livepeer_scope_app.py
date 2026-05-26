@@ -366,6 +366,8 @@ async def scope_endpoint(request: Request) -> dict[str, Any]:
         "events_url": events["url"],
         "params": body.get("params") if isinstance(body.get("params"), dict) else {},
     }
+    bridge_session.channel_url_to_name[control["url"]] = control["name"]
+    bridge_session.channel_url_to_name[events["url"]] = events["name"]
     _sessions[session_id] = bridge_session
 
     try:
@@ -403,7 +405,15 @@ async def _bridge_loop(
                 if ws is None:
                     ws = await _connect_inner_once(session)
                 await _read_ws(session, ws)
+                session.stop_requested = True
+                break
             except reconnectable as exc:
+                # The inner runner uses close code 4000 when the Livepeer control
+                # channel has ended. That is an intentional session shutdown, not
+                # a transport failure to heal with another websocket connection.
+                if _is_control_channel_close(exc):
+                    session.stop_requested = True
+                    break
                 logger.warning(
                     "Inner Scope websocket disconnected, reconnecting: %s", exc
                 )
@@ -411,6 +421,7 @@ async def _bridge_loop(
                 raise
             except Exception:
                 logger.exception("Inner Scope bridge failed")
+                session.stop_requested = True
 
             with suppress(Exception):
                 if ws is not None:
@@ -676,6 +687,13 @@ def _reconnectable_exceptions() -> tuple[type[BaseException], ...]:
     from websockets.exceptions import ConnectionClosed, InvalidHandshake, InvalidStatus
 
     return (ConnectionClosed, InvalidStatus, InvalidHandshake, OSError)
+
+
+def _is_control_channel_close(exc: BaseException) -> bool:
+    for close in (getattr(exc, "rcvd", None), getattr(exc, "sent", None)):
+        if getattr(close, "code", None) == 4000:
+            return True
+    return False
 
 
 def _on_session_release(event: Any) -> None:

@@ -32,6 +32,10 @@ RUNNER_STATUS_RETRY_DELAY_SECONDS = 1.0
 ASSETS_DIR_PATH = "/tmp/.daydream-scope/assets"
 
 
+class RunnerSessionEnded(Exception):
+    """Raised when the inner runner intentionally ends the Livepeer session."""
+
+
 # ---------------------------------------------------------------------------
 # Kafka publisher — matches fal_app.py KafkaPublisher for event parity
 # ---------------------------------------------------------------------------
@@ -364,12 +368,22 @@ async def _proxy_ws(client_ws: WebSocket) -> None:
         # the client is gone (normal shutdown) so prioritize that.
         # Otherwise, re-raise for other types of unexpected errors.
         disconnect_exc: WebSocketDisconnect | None = None
+        session_ended_exc: RunnerSessionEnded | None = None
         unexpected_exc: Exception | None = None
         for task in (*done, *pending):
             try:
                 await task
-            except (asyncio.CancelledError, ConnectionClosed):
+            except asyncio.CancelledError:
                 pass
+            except ConnectionClosed as exc:
+                # Convert the runner's intentional control-channel shutdown into
+                # a local terminal signal so the fal proxy loop does not reconnect.
+                for close in (getattr(exc, "rcvd", None), getattr(exc, "sent", None)):
+                    if getattr(close, "code", None) == 4000:
+                        session_ended_exc = RunnerSessionEnded(
+                            "runner control channel ended"
+                        )
+                        break
             except WebSocketDisconnect as exc:
                 disconnect_exc = disconnect_exc or exc
             except Exception as exc:
@@ -377,6 +391,8 @@ async def _proxy_ws(client_ws: WebSocket) -> None:
 
         if disconnect_exc is not None:
             raise disconnect_exc
+        if session_ended_exc is not None:
+            raise session_ended_exc
         if unexpected_exc is not None:
             raise unexpected_exc
 
@@ -546,6 +562,8 @@ class LivepeerScopeApp(fal.App, keep_alive=300):
                 print(f"Connecting proxy to runner websocket at {RUNNER_LOCAL_WS_URL}")
                 try:
                     await _proxy_ws(client_ws)
+                except RunnerSessionEnded:
+                    break
                 except (
                     ConnectionClosed,
                     InvalidStatus,
