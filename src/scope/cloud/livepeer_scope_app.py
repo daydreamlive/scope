@@ -16,6 +16,7 @@ import re
 import subprocess
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse, urlunparse
 
@@ -47,6 +48,8 @@ DEFAULT_PRICE_PER_UNIT = 0
 DEFAULT_PIXELS_PER_UNIT = 1
 DEFAULT_PRICE_UNIT = "USD"
 CHANNEL_MIME_JSONL = "application/jsonl"
+DEFAULT_SCOPE_HOME_DIRNAME = ".daydream-scope"
+DEFAULT_SESSION_ASSETS_DIR = Path("/tmp/.daydream-scope/assets")
 
 _registration: LiveRunnerRegistration | None = None
 _inner_process: subprocess.Popen | None = None
@@ -186,6 +189,25 @@ async def _register_runner(
     )
 
 
+def _build_inner_scope_env() -> dict[str, str]:
+    env = os.environ.copy()
+
+    shared_dir = Path.home() / DEFAULT_SCOPE_HOME_DIRNAME / "models"
+    session_dir = DEFAULT_SESSION_ASSETS_DIR
+
+    # Shared / persistent data.
+    env.setdefault("DAYDREAM_SCOPE_MODELS_DIR", str(shared_dir))
+    env.setdefault("DAYDREAM_SCOPE_LORA_SHARED_DIR", str(shared_dir / "lora"))
+
+    # Session local data, removed after each session.
+    env.setdefault("DAYDREAM_SCOPE_ASSETS_DIR", str(session_dir))
+    env.setdefault("DAYDREAM_SCOPE_LORA_DIR", str(session_dir / "lora"))
+    env.setdefault("DAYDREAM_SCOPE_LOGS_DIR", str(session_dir / "logs"))
+    env.setdefault("DAYDREAM_SCOPE_PLUGINS_DIR", str(session_dir / "plugins"))
+
+    return env
+
+
 def _start_inner_scope(runner_settings: ScopeRunnerSettings) -> subprocess.Popen:
     command = [
         "livepeer-runner",
@@ -195,7 +217,7 @@ def _start_inner_scope(runner_settings: ScopeRunnerSettings) -> subprocess.Popen
         str(runner_settings.inner_port),
     ]
     logger.info("Starting inner Scope runner: %s", " ".join(command))
-    return subprocess.Popen(command)
+    return subprocess.Popen(command, env=_build_inner_scope_env())
 
 
 async def _wait_for_inner_scope(runner_settings: ScopeRunnerSettings) -> None:
