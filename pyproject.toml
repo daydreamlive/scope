@@ -83,6 +83,7 @@ midi = [
 daydream-scope = "scope.server.app:main"
 build = "scope.server.build:main"
 download_models = "scope.server.download_models:main"
+download_loras = "scope.server.download_loras:main"
 livepeer-runner = "scope.cloud.livepeer_app:main"
 livepeer-scope = "scope.cloud.livepeer_scope_app:main"
 

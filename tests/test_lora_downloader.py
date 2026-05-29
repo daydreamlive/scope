@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +13,108 @@ from scope.server.lora_downloader import (
     download_lora,
     resolve_civitai_metadata,
 )
+
+
+def test_download_loras_cli_url(capsys):
+    from scope.server import download_loras as cli
+    from scope.server.lora_downloader import LoRADownloadResult
+
+    async def fake_download_lora(request, lora_dir, civitai_token=None):
+        assert request.source == "url"
+        assert request.url == "https://example.com/lora.safetensors"
+        assert request.expected_sha256 is None
+        assert lora_dir == Path("/tmp/loras")
+        assert civitai_token is None
+        return LoRADownloadResult(
+            filename="lora.safetensors",
+            path="/tmp/loras/lora.safetensors",
+            sha256="abc123",
+            size_bytes=42,
+        )
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["download_loras", "--url", "https://example.com/lora.safetensors"],
+        ),
+        patch(
+            "scope.server.download_loras.get_lora_dir", return_value=Path("/tmp/loras")
+        ),
+        patch(
+            "scope.server.download_loras.download_lora", side_effect=fake_download_lora
+        ),
+    ):
+        cli.main()
+
+    captured = capsys.readouterr()
+    assert "Downloaded LoRA:" in captured.out
+    assert "Filename: lora.safetensors" in captured.out
+    assert "Path: /tmp/loras/lora.safetensors" in captured.out
+    assert "SHA256: abc123" in captured.out
+    assert "Size: 42 bytes" in captured.out
+
+
+def test_download_loras_cli_expected_sha256():
+    from scope.server import download_loras as cli
+    from scope.server.lora_downloader import LoRADownloadResult
+
+    async def fake_download_lora(request, lora_dir, civitai_token=None):
+        assert request.expected_sha256 == "expected"
+        return LoRADownloadResult(
+            filename="lora.safetensors",
+            path="/tmp/loras/lora.safetensors",
+            sha256="expected",
+            size_bytes=42,
+        )
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            [
+                "download_loras",
+                "--url",
+                "https://example.com/lora.safetensors",
+                "--expected-sha256",
+                "expected",
+            ],
+        ),
+        patch(
+            "scope.server.download_loras.get_lora_dir", return_value=Path("/tmp/loras")
+        ),
+        patch(
+            "scope.server.download_loras.download_lora", side_effect=fake_download_lora
+        ),
+    ):
+        cli.main()
+
+
+def test_download_loras_cli_error(capsys):
+    from scope.server import download_loras as cli
+
+    async def fake_download_lora(request, lora_dir, civitai_token=None):
+        raise ValueError("download failed")
+
+    with (
+        patch.object(
+            sys,
+            "argv",
+            ["download_loras", "--url", "https://example.com/lora.safetensors"],
+        ),
+        patch(
+            "scope.server.download_loras.get_lora_dir", return_value=Path("/tmp/loras")
+        ),
+        patch(
+            "scope.server.download_loras.download_lora", side_effect=fake_download_lora
+        ),
+        pytest.raises(SystemExit) as exc_info,
+    ):
+        cli.main()
+
+    assert exc_info.value.code == 1
+    captured = capsys.readouterr()
+    assert "ERROR: download failed" in captured.err
 
 
 def test_filename_from_url():
