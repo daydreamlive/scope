@@ -277,6 +277,13 @@ class MetricsReporter:
             return
 
         if status == 413:
+            if len(batch) <= 1:
+                event_id = batch[0].get("id") if batch else None
+                logger.error(
+                    "Metrics event too large to send (413) even as a single event; dropping id=%s",
+                    event_id,
+                )
+                return
             logger.warning("Metrics batch too large (413), halving batch size")
             self._requeue_batch(batch)
             half_batch = self._take_batch(max(1, len(batch) // 2))
