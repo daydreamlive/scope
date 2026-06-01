@@ -15,7 +15,9 @@ import json
 import logging
 import os
 import threading
-from typing import Any
+import time
+import uuid
+from typing import Any, Protocol, runtime_checkable
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +31,76 @@ KAFKA_SASL_PASSWORD = os.getenv("KAFKA_SASL_PASSWORD")
 def is_kafka_enabled() -> bool:
     """Check if Kafka is configured via environment variables."""
     return KAFKA_BOOTSTRAP_SERVERS is not None
+
+
+@runtime_checkable
+class TelemetrySink(Protocol):
+    """A destination for telemetry events.
+
+    Implementations must be safe to call from worker threads, must never raise
+    to the caller, and must never block (telemetry is best-effort and must not
+    stall the media or control paths).
+
+    Two implementations exist:
+    - ``KafkaSink`` (below): publishes events to Kafka. Used by the local SDK
+      client as the egress point.
+    - ``TrickleEventsSink`` (``scope.cloud.trickle_events_sink``): forwards
+      events over the trickle events channel. Installed on the cloud runner so
+      runner-side ``publish_event`` calls reach the client instead of a Kafka
+      broker the runner cannot see.
+    """
+
+    def emit(self, event: dict[str, Any]) -> None: ...
+
+
+def build_event_envelope(
+    event_type: str,
+    session_id: str | None = None,
+    connection_id: str | None = None,
+    pipeline_ids: list[str] | None = None,
+    user_id: str | None = None,
+    error: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
+    connection_info: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Build the structured event envelope.
+
+    Stamping happens here (once) so the same fully-formed envelope can be sent
+    to Kafka directly or forwarded verbatim over the trickle events channel and
+    re-published downstream without re-stamping its id/timestamp/origin fields.
+
+    The shape matches the Go ``kafka.go`` ``stream_trace`` format.
+    """
+    event_id = str(uuid.uuid4())
+    # Timestamp as milliseconds string (matching Go format)
+    timestamp_ms = str(int(time.time() * 1000))
+
+    data: dict[str, Any] = {
+        "type": event_type,
+        "client_source": "scope",
+        "timestamp": timestamp_ms,
+    }
+    if session_id:
+        data["session_id"] = session_id
+    if connection_id:
+        data["connection_id"] = connection_id
+    if pipeline_ids:
+        data["pipeline_ids"] = pipeline_ids
+    if user_id:
+        data["user_id"] = user_id
+    if error:
+        data["error"] = error
+    if connection_info:
+        data["connection_info"] = connection_info
+    if metadata:
+        data.update(metadata)
+
+    return {
+        "id": event_id,
+        "type": "stream_trace",
+        "timestamp": timestamp_ms,
+        "data": data,
+    }
 
 
 class KafkaPublisher:
@@ -147,50 +219,33 @@ class KafkaPublisher:
         if not self._started or not self._producer:
             return False
 
-        import time
-        import uuid
+        event = build_event_envelope(
+            event_type=event_type,
+            session_id=session_id,
+            connection_id=connection_id,
+            pipeline_ids=pipeline_ids,
+            user_id=user_id,
+            error=error,
+            metadata=metadata,
+            connection_info=connection_info,
+        )
+        return await self._send_prebuilt(event)
 
-        # Generate a unique ID for this event (used as Kafka key)
-        event_id = str(uuid.uuid4())
-        # Timestamp as milliseconds string (matching Go format)
-        timestamp_ms = str(int(time.time() * 1000))
+    async def _send_prebuilt(self, event: dict[str, Any]) -> bool:
+        """Send an already-built event envelope to Kafka verbatim.
 
-        # Build data payload
-        data: dict[str, Any] = {
-            "type": event_type,
-            "client_source": "scope",
-            "timestamp": timestamp_ms,
-        }
-        if session_id:
-            data["session_id"] = session_id
-        if connection_id:
-            data["connection_id"] = connection_id
-        if pipeline_ids:
-            data["pipeline_ids"] = pipeline_ids
-        if user_id:
-            data["user_id"] = user_id
-        if error:
-            data["error"] = error
-        if connection_info:
-            data["connection_info"] = connection_info
-        if metadata:
-            data.update(metadata)
+        Does not re-stamp the id/timestamp so a runner-built envelope relayed
+        over trickle keeps its origin identity when published by the client.
+        """
+        if not self._started or not self._producer:
+            return False
 
-        # Event structure matching Go kafka.go format
-        event = {
-            "id": event_id,
-            "type": "stream_trace",
-            "timestamp": timestamp_ms,
-            "data": data,
-        }
-
+        event_id = event.get("id")
+        event_type = event.get("data", {}).get("type")
         try:
             # Use event ID as key (matching Go format)
-            key = event_id
-            await self._producer.send_and_wait(KAFKA_TOPIC, value=event, key=key)
-            logger.info(
-                f"Published Kafka event: {event_type} (id={event_id}, session={session_id})"
-            )
+            await self._producer.send_and_wait(KAFKA_TOPIC, value=event, key=event_id)
+            logger.info(f"Published Kafka event: {event_type} (id={event_id})")
             return True
         except Exception as e:
             logger.error(f"Failed to publish Kafka event {event_type}: {e}")
@@ -248,6 +303,28 @@ class KafkaPublisher:
             except Exception as e:
                 logger.error(f"Failed to schedule Kafka event publish: {e}")
 
+    def publish_prebuilt(self, event: dict[str, Any]) -> None:
+        """Publish an already-built event envelope from a sync context.
+
+        Thread-safe; schedules the verbatim send on the producer's event loop.
+        Used by the client to re-publish telemetry relayed over trickle without
+        re-stamping the runner's original id/timestamp.
+        """
+        if not self._started or not self._event_loop:
+            return
+
+        with self._lock:
+            if not self._event_loop or not self._event_loop.is_running():
+                return
+
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    self._send_prebuilt(event),
+                    self._event_loop,
+                )
+            except Exception as e:
+                logger.error(f"Failed to schedule Kafka event publish: {e}")
+
     @property
     def is_running(self) -> bool:
         """Check if the publisher is running."""
@@ -277,6 +354,77 @@ def set_kafka_publisher(publisher: KafkaPublisher | None):
     _publisher = publisher
 
 
+class KafkaSink:
+    """Telemetry sink that publishes events to Kafka.
+
+    Used as the egress sink on the local SDK client (and any deployment with a
+    reachable Kafka broker). Wraps a started ``KafkaPublisher``.
+    """
+
+    def __init__(self, publisher: KafkaPublisher):
+        self._publisher = publisher
+
+    def emit(self, event: dict[str, Any]) -> None:
+        self._publisher.publish_prebuilt(event)
+
+
+class LogSink:
+    """Telemetry sink that logs events instead of shipping them anywhere.
+
+    For local verification of the relay path without a Kafka broker. Enabled on
+    the client by setting ``SCOPE_TELEMETRY_LOG_SINK``.
+    """
+
+    def emit(self, event: dict[str, Any]) -> None:
+        data = event.get("data", {}) if isinstance(event, dict) else {}
+        logger.info(
+            "TELEMETRY type=%s id=%s session=%s connection=%s relayed_via=%s",
+            data.get("type"),
+            event.get("id") if isinstance(event, dict) else None,
+            data.get("session_id"),
+            data.get("connection_id"),
+            data.get("relayed_via"),
+        )
+
+
+# Active telemetry sink. When set, publish_event / publish_raw_event route here
+# instead of the direct Kafka path. The cloud runner installs a TrickleEventsSink
+# so its events flow over the trickle events channel; the client installs a
+# KafkaSink (or another egress sink) as the publishing endpoint. When unset,
+# behavior falls back to the legacy direct-Kafka global publisher.
+_telemetry_sink: "TelemetrySink | None" = None
+
+
+def get_telemetry_sink() -> "TelemetrySink | None":
+    """Get the active telemetry sink, if any."""
+    return _telemetry_sink
+
+
+def set_telemetry_sink(sink: "TelemetrySink | None") -> None:
+    """Set (or clear) the active telemetry sink."""
+    global _telemetry_sink
+    _telemetry_sink = sink
+
+
+def install_default_egress_sink() -> bool:
+    """Install the default telemetry egress sink for the local SDK client.
+
+    This is the single seam where the egress backend is chosen. Today it selects
+    Kafka when configured; a future HTTP/other sink can be swapped in here
+    without touching the runner-relay or client-dispatch paths. Returns True if
+    a sink was installed.
+    """
+    if os.getenv("SCOPE_TELEMETRY_LOG_SINK"):
+        set_telemetry_sink(LogSink())
+        logger.info("Telemetry LogSink installed (SCOPE_TELEMETRY_LOG_SINK)")
+        return True
+    publisher = get_kafka_publisher()
+    if publisher and publisher.is_running:
+        set_telemetry_sink(KafkaSink(publisher))
+        return True
+    return False
+
+
 def publish_event(
     event_type: str,
     session_id: str | None = None,
@@ -302,6 +450,28 @@ def publish_event(
         metadata: Optional additional metadata
         connection_info: Optional connection metadata (e.g., gpu_type, region)
     """
+    sink = get_telemetry_sink()
+    if sink is not None:
+        # Stamp the envelope once, then hand it to the active sink (trickle on
+        # the runner, Kafka/other on the client).
+        try:
+            sink.emit(
+                build_event_envelope(
+                    event_type=event_type,
+                    session_id=session_id,
+                    connection_id=connection_id,
+                    pipeline_ids=pipeline_ids,
+                    user_id=user_id,
+                    error=error,
+                    metadata=metadata,
+                    connection_info=connection_info,
+                )
+            )
+        except Exception:
+            logger.debug("Telemetry sink emit failed", exc_info=True)
+        return
+
+    # Legacy path: publish directly to the global Kafka producer.
     publisher = get_kafka_publisher()
     if publisher and publisher.is_running:
         publisher.publish(
@@ -314,3 +484,23 @@ def publish_event(
             metadata=metadata,
             connection_info=connection_info,
         )
+
+
+def publish_raw_event(event: dict[str, Any]) -> None:
+    """Publish an already-built event envelope through the active sink.
+
+    Used by the client to re-publish telemetry relayed over trickle verbatim,
+    preserving the runner's original id/timestamp/session_id/connection_id.
+    Safe to call even if nothing is configured (no-op).
+    """
+    sink = get_telemetry_sink()
+    if sink is not None:
+        try:
+            sink.emit(event)
+        except Exception:
+            logger.debug("Telemetry sink emit failed", exc_info=True)
+        return
+
+    publisher = get_kafka_publisher()
+    if publisher and publisher.is_running:
+        publisher.publish_prebuilt(event)

@@ -119,6 +119,12 @@ class LivepeerConnection:
             await client.connect(initial_parameters=connect_params)
             self._client = client
             self._stats["connected_at"] = time.time()
+            # The client is the telemetry egress point: install the sink that
+            # publishes telemetry relayed from the cloud runner over trickle.
+            from .kafka_publisher import install_default_egress_sink
+
+            if install_default_egress_sink():
+                logger.info("Telemetry egress sink installed")
             logger.info("Livepeer connected")
         except Exception as e:
             self._connect_error = str(e)

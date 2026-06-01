@@ -18,6 +18,7 @@ import os
 import queue
 import shutil
 import threading
+import time
 import uuid
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -41,11 +42,12 @@ from livepeer_gateway.media_publish import (
 from pydantic import BaseModel
 
 import scope.server.app as scope_app_module
+from scope.cloud.trickle_events_sink import TrickleEventsSink
 from scope.core.outputs import HARDWARE_SINK_MODES
 from scope.server.app import app as scope_app
 from scope.server.app import lifespan as scope_lifespan
 from scope.server.frame_processor import FrameProcessor
-from scope.server.kafka_publisher import publish_event
+from scope.server.kafka_publisher import publish_event, set_telemetry_sink
 from scope.server.logs_config import (
     LOG_FORMAT,
     ScopeLogContextFilter,
@@ -57,6 +59,8 @@ logger = logging.getLogger(__name__)
 scope_client: httpx.AsyncClient | None = None
 _connection_active = False
 _connection_count = 0
+# Monotonic anchor for measuring runner cold-start (boot -> runner_ready).
+_runner_start_monotonic = time.monotonic()
 
 STREAM_TASK_SHUTDOWN_GRACE_S = 1.0
 STREAM_TASK_CANCEL_TIMEOUT_S = 1.0
@@ -151,6 +155,31 @@ def _build_connection_info() -> dict[str, Any]:
         "fal_runner_id": os.getenv("FAL_JOB_ID", os.getenv("FAL_RUNNER_ID", "unknown")),
         "fal_log_labels": fal_log_labels,
     }
+
+
+def _publish_media_loop_error(
+    session: LivepeerSession, error_type: str, exc: Exception
+) -> None:
+    """Emit a structured error telemetry event for a failed media loop.
+
+    These loops previously only logged on failure; surfacing them as telemetry
+    lets the client (the egress point) see runner-side media failures that have
+    no reachable Kafka of their own.
+    """
+    publish_event(
+        event_type="error",
+        session_id=session.session_id,
+        connection_id=session.manifest_id,
+        user_id=session.user_id,
+        error={
+            "error_type": error_type,
+            "message": str(exc),
+            "exception_type": type(exc).__name__,
+            "recoverable": False,
+        },
+        connection_info=session.connection_info,
+        metadata={"mode": "livepeer"},
+    )
 
 
 async def _shutdown_task(
@@ -423,6 +452,7 @@ async def _media_input_loop(
         raise
     except Exception as exc:
         logger.error("Media input loop failed: %s", exc)
+        _publish_media_loop_error(session, "media_input_loop_failed", exc)
     finally:
         try:
             await media_output.close()
@@ -551,6 +581,7 @@ async def _media_output_loop(
         raise
     except Exception as exc:
         logger.error("Media output loop failed: %s", exc)
+        _publish_media_loop_error(session, "media_output_loop_failed", exc)
     finally:
         try:
             await publisher.close()
@@ -670,6 +701,7 @@ async def _media_audio_output_loop(
         raise
     except Exception as exc:
         logger.error("Media audio output loop failed: %s", exc)
+        _publish_media_loop_error(session, "media_audio_output_loop_failed", exc)
     finally:
         try:
             await publisher.close()
@@ -1277,12 +1309,35 @@ async def _subscribe_control(
 
     notif_task = asyncio.create_task(_forward_notifications_to_events())
 
+    # Route runner-side telemetry (publish_event calls from the embedded Scope
+    # app) onto the events channel instead of a Kafka broker the runner cannot
+    # reach. The client re-publishes whatever arrives.
+    runner_loop = asyncio.get_running_loop()
+    telemetry_sink = TrickleEventsSink(runner_loop)
+    set_telemetry_sink(telemetry_sink)
+    telemetry_task = asyncio.create_task(
+        telemetry_sink.drain_to(events_writer, stop_event)
+    )
+
     try:
         await events_writer.write(
             {
                 "type": "runner_ready",
                 "runner_job_id": os.getenv("FAL_JOB_ID") or os.getenv("FAL_RUNNER_ID"),
             }
+        )
+        # Emit cold-start timing as telemetry (distinct from the control-protocol
+        # runner_ready above, which the client consumes to unblock startup).
+        publish_event(
+            event_type="runner_ready",
+            session_id=session.session_id,
+            connection_id=session.manifest_id,
+            user_id=session.user_id,
+            connection_info=session.connection_info,
+            metadata={
+                "mode": "livepeer",
+                "startup_ms": int((time.monotonic() - _runner_start_monotonic) * 1000),
+            },
         )
         async for message in JSONLReader(control_url)(
             max_event_bytes=MAX_CONTROL_EVENT_BYTES
@@ -1318,6 +1373,15 @@ async def _subscribe_control(
         except asyncio.CancelledError:
             pass
         session.notification_queue = None
+        # Stop accepting telemetry before draining so late publish_event calls
+        # during shutdown no-op instead of enqueueing onto a closing queue.
+        set_telemetry_sink(None)
+        if not telemetry_sink.request_stop():
+            telemetry_task.cancel()
+        try:
+            await telemetry_task
+        except asyncio.CancelledError:
+            pass
         await _stop_stream(session)
         try:
             await events_writer.close()
