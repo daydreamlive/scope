@@ -409,14 +409,23 @@ def set_telemetry_sink(sink: "TelemetrySink | None") -> None:
 def install_default_egress_sink() -> bool:
     """Install the default telemetry egress sink for the local SDK client.
 
-    This is the single seam where the egress backend is chosen. Today it selects
-    Kafka when configured; a future HTTP/other sink can be swapped in here
-    without touching the runner-relay or client-dispatch paths. Returns True if
-    a sink was installed.
+    This is the single seam where the egress backend is chosen. Priority order:
+    1. LogSink (explicit debug override via SCOPE_TELEMETRY_LOG_SINK)
+    2. MetricsReporter (HTTP -> Daydream /v1/metrics, when SCOPE_CLOUD_API_KEY set)
+    3. KafkaSink (direct Kafka, when KAFKA_BOOTSTRAP_SERVERS set)
+
+    Returns True if a sink was installed.
     """
     if os.getenv("SCOPE_TELEMETRY_LOG_SINK"):
         set_telemetry_sink(LogSink())
         logger.info("Telemetry LogSink installed (SCOPE_TELEMETRY_LOG_SINK)")
+        return True
+    from .metrics_reporter import get_metrics_reporter
+
+    reporter = get_metrics_reporter()
+    if reporter and reporter.is_running:
+        set_telemetry_sink(reporter)
+        logger.info("Telemetry MetricsReporter sink installed (HTTP egress)")
         return True
     publisher = get_kafka_publisher()
     if publisher and publisher.is_running:
