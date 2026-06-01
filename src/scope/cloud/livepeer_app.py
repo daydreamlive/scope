@@ -45,7 +45,7 @@ from scope.core.outputs import HARDWARE_SINK_MODES
 from scope.server.app import app as scope_app
 from scope.server.app import lifespan as scope_lifespan
 from scope.server.frame_processor import FrameProcessor
-from scope.server.kafka_publisher import publish_event
+from scope.server.kafka_publisher import publish_event, set_event_sink
 from scope.server.logs_config import (
     LOG_FORMAT,
     ScopeLogContextFilter,
@@ -1277,6 +1277,28 @@ async def _subscribe_control(
 
     notif_task = asyncio.create_task(_forward_notifications_to_events())
 
+    # Forward stream_trace envelopes over the trickle events channel so the
+    # Scope client can relay them to the Daydream /v1/metrics endpoint.
+    runner_loop = asyncio.get_running_loop()
+
+    def _trickle_event_sink(envelope: dict) -> None:
+        """Sync callback: schedule an async write on the runner loop."""
+
+        async def _write() -> None:
+            try:
+                await events_writer.write({"type": "network_event", "event": envelope})
+            except Exception:
+                logger.debug(
+                    "Failed to forward network_event to events channel", exc_info=True
+                )
+
+        try:
+            runner_loop.call_soon_threadsafe(lambda: runner_loop.create_task(_write()))
+        except RuntimeError:
+            pass
+
+    set_event_sink(_trickle_event_sink)
+
     try:
         await events_writer.write(
             {
@@ -1318,6 +1340,7 @@ async def _subscribe_control(
         except asyncio.CancelledError:
             pass
         session.notification_queue = None
+        set_event_sink(None)
         await _stop_stream(session)
         try:
             await events_writer.close()

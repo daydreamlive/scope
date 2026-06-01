@@ -15,6 +15,7 @@ import json
 import logging
 import os
 import threading
+from collections.abc import Callable
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -184,6 +185,9 @@ class KafkaPublisher:
             "data": data,
         }
 
+        # Forward to metrics reporter / trickle sink (parallel to Kafka)
+        _dispatch_to_sink(event)
+
         try:
             # Use event ID as key (matching Go format)
             key = event_id
@@ -275,6 +279,38 @@ def set_kafka_publisher(publisher: KafkaPublisher | None):
     """
     global _publisher
     _publisher = publisher
+
+
+# Event sink: receives built envelopes for forwarding to metrics reporter
+# or trickle channel. Set via set_event_sink() so the runner can redirect
+# envelopes without importing server code.
+_event_sink: Callable[[dict[str, Any]], None] | None = None
+
+
+def get_event_sink() -> Callable[[dict[str, Any]], None] | None:
+    """Get the registered event sink callback."""
+    return _event_sink
+
+
+def set_event_sink(sink: Callable[[dict[str, Any]], None] | None) -> None:
+    """Register a callback that receives every built stream_trace envelope.
+
+    In local mode this feeds the MetricsReporter directly. On the runner it
+    writes ``{type: "network_event", event: <envelope>}`` to the trickle
+    events channel.
+    """
+    global _event_sink
+    _event_sink = sink
+
+
+def _dispatch_to_sink(envelope: dict[str, Any]) -> None:
+    """Forward envelope to the registered sink, if any. Never raises."""
+    sink = _event_sink
+    if sink is not None:
+        try:
+            sink(envelope)
+        except Exception as exc:
+            logger.debug("Event sink dispatch failed: %s", exc)
 
 
 def publish_event(

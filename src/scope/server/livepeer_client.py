@@ -860,6 +860,10 @@ class LivepeerClient:
                     _forward_runner_notification(event.get("payload"))
                     continue
 
+                if msg_type == "network_event":
+                    _forward_network_event(event.get("event"))
+                    continue
+
                 logger.debug(f"Event: {event}")
         except asyncio.CancelledError:
             pass
@@ -1279,3 +1283,17 @@ def _forward_runner_notification(payload: Any) -> None:
         manager.broadcast_notification(payload)
     except Exception:
         logger.debug("Failed to re-broadcast runner notification", exc_info=True)
+
+
+def _forward_network_event(envelope: Any) -> None:
+    """Forward a runner-originated network_event to the metrics reporter."""
+    if not isinstance(envelope, dict):
+        return
+    from .metrics_reporter import report_event
+
+    try:
+        report_event(envelope)
+    except Exception:
+        logger.debug(
+            "Failed to forward network_event to metrics reporter", exc_info=True
+        )
