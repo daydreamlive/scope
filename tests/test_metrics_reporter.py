@@ -238,6 +238,35 @@ class TestResponseHandling:
         assert reporter.buffered_count == 1
 
     @pytest.mark.anyio
+    async def test_413_single_event_drops(self):
+        """A single oversized event on 413 is dropped (not retried infinitely)."""
+        reporter = MetricsReporter(api_key="key")
+        reporter._started = True
+
+        batch = [map_envelope_to_event(_make_envelope(event_id="oversized"))]
+        await reporter._handle_response(_make_response(413), batch)
+
+        assert reporter.buffered_count == 0
+
+    @pytest.mark.anyio
+    async def test_413_multi_event_halves_and_retries(self):
+        """A multi-event 413 requeues and retries with half batch."""
+        reporter = MetricsReporter(api_key="key")
+        reporter._started = True
+
+        mock_client = AsyncMock()
+        mock_client.post = AsyncMock(return_value=_make_response(200))
+        reporter._client = mock_client
+
+        batch = [
+            map_envelope_to_event(_make_envelope(event_id=f"e-{i}")) for i in range(4)
+        ]
+        await reporter._handle_response(_make_response(413), batch)
+
+        # Half batch was retried and accepted (200), rest requeued
+        assert reporter.buffered_count == 2
+
+    @pytest.mark.anyio
     async def test_429_requeues_batch(self):
         reporter = MetricsReporter(api_key="key")
         reporter._started = True

@@ -119,7 +119,7 @@
 <body>
 
 <h1>Metrics Reporting Architecture</h1>
-<p>How Daydream Scope reports telemetry from the cloud runner, through the local SDK client, to the remote <code>api.daydream.live/v1/metrics</code> endpoint for publishing into Kafka.</p>
+<p>How Daydream Scope reports telemetry from the cloud runner, through the local SDK client, to the remote <code>api.daydream.monster/v1/metrics</code> endpoint (configurable via <code>DAYDREAM_METRICS_URL</code>) for publishing into Kafka.</p>
 
 <div class="diagram-container">
   <img src="scope_metrics_data_flow.png"
@@ -230,7 +230,7 @@
 <h2>4. MetricsReporter (HTTP Egress)</h2>
 <p>The <code>MetricsReporter</code> implements the <code>TelemetrySink</code> protocol and buffers events for reliable delivery to <code>POST /v1/metrics</code>:</p>
 
-<pre><code>POST https://api.daydream.live/v1/metrics
+<pre><code>POST https://api.daydream.monster/v1/metrics
 Authorization: Bearer &lt;DAYDREAM_API_KEY&gt;
 Content-Type: application/json
 
