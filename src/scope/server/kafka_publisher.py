@@ -241,7 +241,11 @@ class KafkaPublisher:
             return False
 
         event_id = event.get("id")
-        event_type = event.get("data", {}).get("type")
+        if event_id is not None and not isinstance(event_id, str):
+            event_id = str(event_id)
+
+        data = event.get("data")
+        event_type = data.get("type") if isinstance(data, dict) else None
         try:
             # Use event ID as key (matching Go format)
             await self._producer.send_and_wait(KAFKA_TOPIC, value=event, key=event_id)
