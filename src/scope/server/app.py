@@ -463,7 +463,10 @@ async def lifespan(app: FastAPI):
             kafka_publisher = None
             logger.warning("Kafka publisher failed to start")
 
-    # Initialize metrics reporter (forwards telemetry to Daydream /v1/metrics)
+    # Initialize metrics reporter (forwards telemetry to Daydream /v1/metrics).
+    # Only active when the user has opted in to cloud features by setting
+    # SCOPE_CLOUD_API_KEY (their Daydream platform API key). In local/standalone
+    # mode this block is skipped entirely — no telemetry leaves the machine.
     if is_metrics_reporter_enabled():
         api_key = os.getenv("SCOPE_CLOUD_API_KEY", "")
         if api_key:

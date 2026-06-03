@@ -14,7 +14,6 @@ from scope.server.metrics_reporter import (
     MetricsReporter,
     get_metrics_reporter,
     map_envelope_to_event,
-    report_event,
     set_metrics_reporter,
 )
 
@@ -95,14 +94,6 @@ class TestGlobalAccessors:
             reporter = MetricsReporter(api_key="test")
             set_metrics_reporter(reporter)
             assert get_metrics_reporter() is reporter
-        finally:
-            set_metrics_reporter(original)
-
-    def test_report_event_noop_when_no_reporter(self):
-        original = get_metrics_reporter()
-        try:
-            set_metrics_reporter(None)
-            report_event(_make_envelope())
         finally:
             set_metrics_reporter(original)
 
@@ -311,19 +302,6 @@ class TestResponseHandling:
             await reporter._handle_response(_make_response(500), batch)
 
         assert reporter._backoff_s == 60.0
-
-    @pytest.mark.anyio
-    async def test_update_api_key_unpauses(self):
-        reporter = MetricsReporter(api_key="old-key")
-        reporter._started = True
-        reporter._paused = True
-        reporter._backoff_s = 30.0
-
-        reporter.update_api_key("new-key")
-
-        assert reporter._paused is False
-        assert reporter._backoff_s == INITIAL_BACKOFF_S
-        assert reporter._api_key == "new-key"
 
 
 # ---------------------------------------------------------------------------

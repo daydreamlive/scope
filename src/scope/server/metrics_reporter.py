@@ -173,13 +173,6 @@ class MetricsReporter:
         with self._lock:
             self._buffer.append(event)
 
-    def enqueue_raw_event(self, event: dict[str, Any]) -> None:
-        """Thread-safe: add an already-mapped /v1/metrics event to the buffer."""
-        if not self._started or self._paused:
-            return
-        with self._lock:
-            self._buffer.append(event)
-
     @property
     def is_running(self) -> bool:
         return self._started
@@ -187,13 +180,6 @@ class MetricsReporter:
     @property
     def buffered_count(self) -> int:
         return len(self._buffer)
-
-    def update_api_key(self, api_key: str) -> None:
-        """Update the Bearer token (e.g., after key refresh) and unpause."""
-        self._api_key = api_key
-        self._paused = False
-        self._backoff_s = INITIAL_BACKOFF_S
-        logger.info("Metrics reporter API key updated, unpaused")
 
     # -- internal ---------------------------------------------------------------
 
@@ -379,10 +365,3 @@ def set_metrics_reporter(reporter: MetricsReporter | None) -> None:
     """Set the global MetricsReporter instance."""
     global _reporter
     _reporter = reporter
-
-
-def report_event(envelope: dict[str, Any]) -> None:
-    """Convenience: enqueue an envelope for reporting. No-op if disabled."""
-    reporter = _reporter
-    if reporter and reporter.is_running:
-        reporter.enqueue(envelope)

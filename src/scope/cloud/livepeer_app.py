@@ -165,6 +165,10 @@ def _publish_media_loop_error(
     These loops previously only logged on failure; surfacing them as telemetry
     lets the client (the egress point) see runner-side media failures that have
     no reachable Kafka of their own.
+
+    NOTE: This only fires in cloud mode when the user has opted in by providing
+    their SCOPE_CLOUD_API_KEY.  In local/standalone mode, no telemetry leaves
+    the machine.
     """
     publish_event(
         event_type="error",
