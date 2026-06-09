@@ -420,8 +420,8 @@ async def scope_endpoint(request: Request) -> dict[str, Any]:
 
     bridge_session.job_info = {
         "manifest_id": session_id,
-        "control_url": control["url"],
-        "events_url": events["url"],
+        "control_url": control.get("internal_url") or control["url"],
+        "events_url": events.get("internal_url") or events["url"],
         "params": body.get("params") if isinstance(body.get("params"), dict) else {},
     }
     bridge_session.channel_url_to_name[control["url"]] = control["name"]
@@ -630,13 +630,12 @@ async def _handle_create_channels(
         if not isinstance(url, str) or not url:
             continue
         session.channel_url_to_name[url] = channel.get("name", channel_name)
-        response_channels.append(
-            {
-                "url": url,
-                "direction": direction,
-                "mime_type": channel.get("mime_type", mime_type),
-            }
-        )
+        response_channel = {
+            **channel,
+            "direction": direction,
+            "mime_type": channel.get("mime_type", mime_type),
+        }
+        response_channels.append(response_channel)
 
     await ws.send(
         json.dumps(

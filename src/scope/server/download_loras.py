@@ -13,7 +13,9 @@ from .models_config import get_lora_dir
 logger = logging.getLogger(__name__)
 
 
-async def download_loras(url: str, expected_sha256: str | None = None) -> None:
+async def download_loras(
+    url: str, expected_sha256: str | None = None, filename: str | None = None
+) -> None:
     """Download a LoRA from a direct URL into the configured LoRA directory."""
     lora_dir = get_lora_dir()
     logger.info(f"Downloading LoRA to: {lora_dir}")
@@ -21,6 +23,7 @@ async def download_loras(url: str, expected_sha256: str | None = None) -> None:
     request = LoRADownloadRequest(
         source="url",
         url=url,
+        filename=filename,
         expected_sha256=expected_sha256,
     )
     result = await download_lora(request, lora_dir)
@@ -46,6 +49,7 @@ def main() -> None:
 Examples:
   python download_loras.py --url https://example.com/style.safetensors
   python download_loras.py -u https://example.com/style.safetensors --expected-sha256 abc123
+  python download_loras.py -u https://example.com/download/123 --filename style.safetensors
         """,
     )
     parser.add_argument(
@@ -61,11 +65,23 @@ Examples:
         default=None,
         help="Expected SHA-256 hash for integrity verification.",
     )
+    parser.add_argument(
+        "--filename",
+        type=str,
+        default=None,
+        help="Filename to save the LoRA as. Useful for URLs that do not include a stable filename.",
+    )
 
     args = parser.parse_args()
 
     try:
-        asyncio.run(download_loras(args.url, expected_sha256=args.expected_sha256))
+        asyncio.run(
+            download_loras(
+                args.url,
+                expected_sha256=args.expected_sha256,
+                filename=args.filename,
+            )
+        )
     except KeyboardInterrupt:
         print("\nCancelled.")
         sys.exit(130)

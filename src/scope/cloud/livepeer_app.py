@@ -257,6 +257,14 @@ def _resolve_produces_video(
     return bool(status_info.get("produces_video", True))
 
 
+def _public_stream_channel(channel: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "url": channel["url"],
+        "direction": channel["direction"],
+        "mime_type": channel.get("mime_type", ""),
+    }
+
+
 async def _request_stream_channels(
     session: LivepeerSession,
     *,
@@ -294,13 +302,17 @@ async def _request_stream_channels(
         mime_type = channel.get("mime_type")
         if not isinstance(url, str) or not isinstance(ch_direction, str):
             continue
-        normalized.append(
-            {
-                "url": url,
-                "direction": ch_direction,
-                "mime_type": mime_type if isinstance(mime_type, str) else "",
-            }
-        )
+        internal_url = channel.get("internal_url")
+        internal_url = internal_url if isinstance(internal_url, str) else ""
+        normalized_channel = {
+            "url": url,
+            "direction": ch_direction,
+            "mime_type": mime_type if isinstance(mime_type, str) else "",
+            "io_url": internal_url or url,
+        }
+        if internal_url:
+            normalized_channel["internal_url"] = internal_url
+        normalized.append(normalized_channel)
     return normalized
 
 
@@ -987,14 +999,14 @@ async def _handle_control_message(
                     inbound_url: str | None = None
                     for channel in channels:
                         ch = {
-                            **channel,
+                            **_public_stream_channel(channel),
                             "role": "input",
                             "input_track_index": input_idx,
                             "source_node_id": source_node_id,
                         }
                         active_channels.append(ch)
                         if channel["direction"] == "in":
-                            inbound_url = channel["url"]
+                            inbound_url = channel["io_url"]
                     if inbound_url is None:
                         raise RuntimeError("response did not include input track URL")
                     input_subscribe_urls[input_idx] = inbound_url
@@ -1009,7 +1021,7 @@ async def _handle_control_message(
                 )
                 for channel in channels:
                     ch = {
-                        **channel,
+                        **_public_stream_channel(channel),
                         "role": "output",
                         "output_track_index": output_idx,
                         "sink_node_id": sink_node_id,
@@ -1017,7 +1029,7 @@ async def _handle_control_message(
                     }
                     active_channels.append(ch)
                     if channel["direction"] == "out":
-                        outbound_url = channel["url"]
+                        outbound_url = channel["io_url"]
                 if outbound_url is None:
                     raise RuntimeError("response did not include output track URL")
                 output_publish_urls[output_idx] = outbound_url
@@ -1029,13 +1041,13 @@ async def _handle_control_message(
                 )
                 for channel in channels:
                     ch = {
-                        **channel,
+                        **_public_stream_channel(channel),
                         "role": "output_audio",
                         "output_media_kind": "audio",
                     }
                     active_channels.append(ch)
                     if channel["direction"] == "out":
-                        audio_publish_url = channel["url"]
+                        audio_publish_url = channel["io_url"]
                 if audio_publish_url is None:
                     raise RuntimeError(
                         "response did not include audio output track URL"
