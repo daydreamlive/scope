@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import signal
 import subprocess
 from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
@@ -217,16 +218,35 @@ def _start_inner_scope(runner_settings: ScopeRunnerSettings) -> subprocess.Popen
         str(runner_settings.inner_port),
     ]
     logger.info("Starting inner Scope runner: %s", " ".join(command))
-    return subprocess.Popen(command, env=_build_inner_scope_env())
+    env = _build_inner_scope_env()
+    env.setdefault("SCOPE_HOST", runner_settings.inner_host)
+    env.setdefault("SCOPE_PORT", str(runner_settings.inner_port))
+    popen_kwargs: dict[str, Any] = {"env": env}
+    if os.name != "nt":
+        # Give the inner runner its own process group so Ctrl-C can clean up
+        # anything it spawns instead of leaving orphaned model/media workers.
+        popen_kwargs["start_new_session"] = True
+    return subprocess.Popen(command, **popen_kwargs)
 
 
-async def _wait_for_inner_scope(runner_settings: ScopeRunnerSettings) -> None:
+async def _wait_for_inner_scope(
+    runner_settings: ScopeRunnerSettings,
+    process: subprocess.Popen | None = None,
+) -> None:
     deadline = (
         asyncio.get_running_loop().time()
         + runner_settings.inner_startup_timeout_seconds
     )
     status_url = _inner_status_url(runner_settings.inner_ws_url)
     while True:
+        # If the child died, the status endpoint will never come up. Fail now
+        # instead of logging connection failures until the startup timeout.
+        if process is not None and process.poll() is not None:
+            raise RuntimeError(
+                "Inner Scope runner process exited during startup "
+                f"(pid={getattr(process, 'pid', None)} code={process.returncode})"
+            )
+
         try:
             async with aiohttp.ClientSession() as client:
                 async with client.get(
@@ -252,7 +272,7 @@ async def _wait_for_inner_scope(runner_settings: ScopeRunnerSettings) -> None:
                             text[:500],
                         )
         except Exception as exc:
-            logger.info("Inner Scope status check failed: %s", exc)
+            logger.debug("Inner Scope status check failed: %s", exc)
 
         if asyncio.get_running_loop().time() >= deadline:
             raise RuntimeError(
@@ -337,26 +357,55 @@ async def _stop_inner_scope() -> None:
     global _inner_process
     process = _inner_process
     _inner_process = None
-    if process is None:
+    if process is None or process.poll() is not None:
         return
-    process.terminate()
+
+    # Prefer stopping the process group created in _start_inner_scope; fall
+    # back to the direct child on Windows or if the process group is gone.
+    pgid = None
+    if os.name != "nt" and hasattr(os, "getpgid") and hasattr(os, "killpg"):
+        with suppress(ProcessLookupError):
+            pgid = os.getpgid(process.pid)
+
+    if pgid is None:
+        process.terminate()
+    else:
+        os.killpg(pgid, signal.SIGTERM)
     try:
-        await asyncio.wait_for(asyncio.to_thread(process.wait), timeout=10.0)
+        await asyncio.wait_for(
+            asyncio.to_thread(process.wait),
+            timeout=10.0,
+        )
     except TimeoutError:
-        process.kill()
+        # Some media/model stacks ignore SIGTERM during shutdown; do not leave
+        # the terminal stuck forever waiting for the inner runner.
+        if pgid is None:
+            process.kill()
+        else:
+            os.killpg(pgid, signal.SIGKILL)
         await asyncio.to_thread(process.wait)
 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    await _start_livepeer_scope()
+    try:
+        yield
+    finally:
+        await _shutdown_livepeer_scope()
+
+
+async def _start_livepeer_scope() -> None:
     global _registration
     global _inner_process
 
     _inner_process = _start_inner_scope(settings)
     try:
-        await _wait_for_inner_scope(settings)
+        await _wait_for_inner_scope(settings, _inner_process)
         _registration = await _register_runner(settings)
-    except Exception:
+    except BaseException:
+        # Lifespan startup can be cancelled by Ctrl-C before normal shutdown
+        # runs, so clean up the child here too.
         await _stop_inner_scope()
         raise
     logger.info(
@@ -364,14 +413,49 @@ async def lifespan(_app: FastAPI):
         LIVEPEER_APP_NAME,
         settings.resolved_runner_url(),
     )
+
+
+async def _shutdown_livepeer_scope() -> None:
+    global _registration
+
+    await _cleanup_all_sessions(notify_orchestrator=True)
+    if _registration is not None:
+        await _registration.close()
+        _registration = None
+    await _stop_inner_scope()
+
+
+async def _run_livepeer_scope_server(host: str, port: int) -> int:
+    config = uvicorn.Config(app, host=host, port=port, log_config=None, lifespan="off")
+    server = uvicorn.Server(config)
+    server_task = asyncio.create_task(server.serve())
+
     try:
-        yield
-    finally:
-        await _cleanup_all_sessions(notify_orchestrator=True)
-        if _registration is not None:
-            await _registration.close()
-            _registration = None
-        await _stop_inner_scope()
+        while not server.started and not server.should_exit:
+            await asyncio.sleep(0.05)
+
+        if server.should_exit:
+            await server_task
+            return 1
+
+        try:
+            await _start_livepeer_scope()
+        except Exception as exc:
+            logger.error("Livepeer Scope startup failed: %s", exc)
+            server.should_exit = True
+            await server_task
+            return 1
+
+        try:
+            await server_task
+        finally:
+            await _shutdown_livepeer_scope()
+        return 0
+    except BaseException:
+        server.should_exit = True
+        with suppress(Exception):
+            await _shutdown_livepeer_scope()
+        raise
 
 
 app = FastAPI(
@@ -838,12 +922,12 @@ def main(
         pixels_per_unit=pixels_per_unit,
         price_unit=price_unit,
     )
-    uvicorn.run(
-        "scope.cloud.livepeer_scope_app:app",
-        host=host,
-        port=port,
-        log_config=None,
-    )
+    try:
+        exit_code = asyncio.run(_run_livepeer_scope_server(host, port))
+    except KeyboardInterrupt:
+        raise SystemExit(130) from None
+    if exit_code:
+        raise SystemExit(exit_code)
 
 
 settings = _settings_from_env()
