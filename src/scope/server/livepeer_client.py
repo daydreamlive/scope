@@ -63,7 +63,7 @@ PAYMENT_SEND_INTERVAL_S = 10.0
 # embedded assets (base64-encoded images/video) into a single response and
 # easily blow past the 1 MiB library default, which would tear down the
 # events loop mid-import.
-MAX_EVENT_BYTES = 128 * 1024 * 1024
+MAX_EVENT_BYTES = 5 * 1024 * 1024
 
 
 @dataclass(slots=True)
@@ -854,6 +854,10 @@ class LivepeerClient:
                     _forward_runner_notification(event.get("payload"))
                     continue
 
+                if msg_type == "telemetry":
+                    _handle_cloud_telemetry(event.get("event"))
+                    continue
+
                 logger.debug(f"Event: {event}")
         except asyncio.CancelledError:
             pass
@@ -1273,3 +1277,28 @@ def _forward_runner_notification(payload: Any) -> None:
         manager.broadcast_notification(payload)
     except Exception:
         logger.debug("Failed to re-broadcast runner notification", exc_info=True)
+
+
+def _handle_cloud_telemetry(event: Any) -> None:
+    """Re-publish a runner-side telemetry event through the local egress sink.
+
+    The runner forwards each already-built event envelope over the trickle
+    events channel; the client is the egress point that publishes it (to Kafka
+    or another configured backend). The envelope is published verbatim so the
+    runner's original id/timestamp/session_id/connection_id are preserved; we
+    only annotate that it was relayed and when it arrived.
+    """
+    if not isinstance(event, dict):
+        return
+
+    data = event.get("data")
+    if isinstance(data, dict):
+        data["relayed_via"] = "trickle"
+        data["relay_received_timestamp"] = str(int(time.time() * 1000))
+
+    try:
+        from .kafka_publisher import publish_raw_event
+
+        publish_raw_event(event)
+    except Exception:
+        logger.debug("Failed to relay cloud telemetry event", exc_info=True)
