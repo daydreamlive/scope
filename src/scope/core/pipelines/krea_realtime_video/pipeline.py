@@ -137,14 +137,27 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
             )
 
             print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
+
+            if compile:
+                # Float8DynamicActivationFloat8WeightConfig is incompatible with
+                # torch.compile(fullgraph=False): AOT autograd's gen_alias_from_base
+                # calls aten.as_strided on Float8Tensor outputs, which is not
+                # implemented. Skip block compilation when FP8 is active.
+                # See: https://github.com/daydreamlive/scope/issues/669
+                logger.warning(
+                    "Skipping torch.compile for attention blocks: "
+                    "Float8DynamicActivationFloat8WeightConfig is not compatible "
+                    "with fullgraph=False compilation (aten.as_strided unsupported "
+                    "on Float8Tensor). FP8 quantization is still active."
+                )
         else:
             generator = generator.to(device=device, dtype=dtype)
 
-        if compile:
-            # Only compile the attention blocks
-            for block in generator.model.blocks:
-                # Disable fullgraph right now due to issues with RoPE
-                block.compile(fullgraph=False)
+            if compile:
+                # Only compile the attention blocks
+                for block in generator.model.blocks:
+                    # Disable fullgraph right now due to issues with RoPE
+                    block.compile(fullgraph=False)
 
         # Load VAE using create_vae factory (supports multiple VAE types)
         # Note: VAE is shared across all Wan model sizes, stored in Wan2.1-T2V-1.3B
@@ -189,7 +202,16 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         # does not work properly
         self.state.set("current_start_frame", 0)
         self.state.set("manage_cache", True)
-        self.state.set("kv_cache_attention_bias", DEFAULT_KV_CACHE_ATTENTION_BIAS)
+        # When compile=False the flex_attention path (and its torch.compile call)
+        # must be bypassed entirely.  KV_CACHE_ATTENTION_BIAS_DISABLED (1.0) is
+        # the sentinel that makes causal_model.py skip flex_attention and take the
+        # standard attention path, so use it whenever compilation is disabled.
+        from .modules.causal_model import KV_CACHE_ATTENTION_BIAS_DISABLED
+
+        initial_kv_bias = (
+            DEFAULT_KV_CACHE_ATTENTION_BIAS if compile else KV_CACHE_ATTENTION_BIAS_DISABLED
+        )
+        self.state.set("kv_cache_attention_bias", initial_kv_bias)
 
         self.state.set("height", config.height)
         self.state.set("width", config.width)
@@ -198,25 +220,34 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
         # Warm-up: Run enough iterations to fill the KV cache completely.
         # This ensures torch.compile compiles the flex_attention kernel at the
         # steady-state cache size, avoiding recompilation during actual streaming.
+        # Skipped when compile=False because there is no compiled kernel to prime
+        # and the warmup loop would otherwise enter the flex_attention code path
+        # (via DEFAULT_KV_CACHE_ATTENTION_BIAS) and trigger torch._dynamo tracing
+        # even though block.compile() was never called.
         #
         # Cache fills at: num_frame_per_block frames per iteration
         # Cache capacity: local_attn_size frames
         # Iterations needed: ceil(local_attn_size / num_frame_per_block) + 1
         #   (+1 to exercise the "cache full with eviction" path)
-        local_attn_size = getattr(model_config, "local_attn_size", 6)
-        num_frame_per_block = getattr(model_config, "num_frame_per_block", 3)
-        warmup_runs = (local_attn_size // num_frame_per_block) + 1
+        if compile:
+            local_attn_size = getattr(model_config, "local_attn_size", 6)
+            num_frame_per_block = getattr(model_config, "num_frame_per_block", 3)
+            warmup_runs = (
+                (local_attn_size + num_frame_per_block - 1) // num_frame_per_block
+            ) + 1
 
-        if stage_callback:
-            stage_callback("Warming up model...")
-        start = time.time()
-        for i in range(warmup_runs):
-            self._generate(
-                prompts=WARMUP_PROMPT,
-                init_cache=(i == 0),  # Only init on first run, then accumulate
-            )
+            if stage_callback:
+                stage_callback("Warming up model...")
+            start = time.time()
+            for i in range(warmup_runs):
+                self._generate(
+                    prompts=WARMUP_PROMPT,
+                    init_cache=(i == 0),  # Only init on first run, then accumulate
+                )
 
-        print(f"Warmed up ({warmup_runs} runs) in {time.time() - start:.2f}s")
+            print(f"Warmed up ({warmup_runs} runs) in {time.time() - start:.2f}s")
+        else:
+            logger.info("torch.compile disabled — skipping warmup (no compiled kernel to prime)")
 
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection
