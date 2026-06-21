@@ -76,6 +76,7 @@ import { openExternalUrl } from "../../lib/openExternal";
 import { buildPaneMenuItems, buildNodeMenuItems } from "./contextMenuItems";
 import { OscConfigDialog } from "./OscConfigDialog";
 import type { FlowNodeData } from "../../lib/graphUtils";
+import { validateGraphForStream } from "../../lib/graphUtils";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -196,6 +197,8 @@ function getHandleMenuLabel(handleId: string) {
 
 export interface GraphEditorHandle {
   refreshGraph: () => void;
+  /** Validate the current graph before streaming. Returns an error string or null if valid. */
+  validateForStream: () => string | null;
   getCurrentGraphConfig: () => import("../../lib/api").GraphConfig;
   getGraphNodePrompts: () => Array<{ nodeId: string; text: string }>;
   getGraphVaceSettings: () => Array<{
@@ -438,6 +441,7 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       ref,
       () => ({
         refreshGraph,
+        validateForStream: () => validateGraphForStream(nodes, edges),
         getCurrentGraphConfig,
         getGraphNodePrompts,
         getGraphVaceSettings,
@@ -456,6 +460,8 @@ export const GraphEditor = forwardRef<GraphEditorHandle, GraphEditorProps>(
       }),
       [
         refreshGraph,
+        nodes,
+        edges,
         getCurrentGraphConfig,
         getGraphNodePrompts,
         getGraphVaceSettings,
