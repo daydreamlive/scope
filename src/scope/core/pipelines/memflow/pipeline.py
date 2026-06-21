@@ -41,6 +41,7 @@ class MemFlowPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         self,
         config,
         quantization: Quantization | None = None,
+        compile_vae: bool = False,
         device: torch.device | None = None,
         dtype: torch.dtype = torch.bfloat16,
         stage_callback=None,
@@ -194,6 +195,13 @@ class MemFlowPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeline):
         self.state.set("height", config.height)
         self.state.set("width", config.width)
         self.state.set("base_seed", getattr(config, "base_seed", 42))
+
+        if compile_vae:
+            if stage_callback:
+                stage_callback(
+                    "Compiling VAE decoder (this may take several minutes)..."
+                )
+            self.components.vae.compile_decoder(config.height, config.width)
 
         self.first_call = True
         self.last_mode = None  # Track mode for transition detection

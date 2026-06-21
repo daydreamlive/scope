@@ -4,12 +4,15 @@ This module provides a unified VAE wrapper that supports both the full WanVAE
 and the 75% pruned LightVAE through a single interface with a `use_lightvae` parameter.
 """
 
+import logging
 import os
 
 import torch
 
 from .constants import WAN_VAE_LATENT_MEAN, WAN_VAE_LATENT_STD
 from .modules.vae import _video_vae, count_conv3d
+
+logger = logging.getLogger(__name__)
 
 # Default filenames for VAE checkpoints
 DEFAULT_VAE_FILENAME = "Wan2.1_VAE.pth"
@@ -144,25 +147,29 @@ class WanVAEWrapper(torch.nn.Module):
     def _encode_with_cache(
         self, x: torch.Tensor, scale: list, feat_cache: list
     ) -> torch.Tensor:
-        """Encode using an explicit cache without affecting internal streaming state.
+        """Encode using a temporary cache without affecting internal streaming state.
 
-        This follows the approach from the spike branch where the cache is passed
-        explicitly, allowing one-time encodes for operations like first-frame
-        re-encoding without clearing the streaming cache.
+        Always uses the eager feat_cache path on the uncompiled encoder.
+        This is a one-off operation (reference images, etc.) where compilation
+        overhead would be wasted, and the variable frame shapes would cause
+        recompilation of the steady-state-only compiled graph.
         """
         t = x.shape[2]
-        iter_ = 1 + (t - 1) // 4
 
+        # Bypass torch.compile to avoid recompilation from non-steady-state shapes
+        enc = getattr(self.model.encoder, "_orig_mod", self.model.encoder)
+
+        iter_ = 1 + (t - 1) // 4
         for i in range(iter_):
             conv_idx = [0]
             if i == 0:
-                out = self.model.encoder(
+                out = enc(
                     x[:, :, :1, :, :],
                     feat_cache=feat_cache,
                     feat_idx=conv_idx,
                 )
             else:
-                out_ = self.model.encoder(
+                out_ = enc(
                     x[:, :, 1 + 4 * (i - 1) : 1 + 4 * i, :, :],
                     feat_cache=feat_cache,
                     feat_idx=conv_idx,
@@ -170,7 +177,6 @@ class WanVAEWrapper(torch.nn.Module):
                 out = torch.cat([out, out_], 2)
 
         mu, _ = self.model.conv1(out).chunk(2, dim=1)
-        # Apply normalization
         return self._apply_encoding_normalization(mu, scale)
 
     def decode_to_pixel(
@@ -205,3 +211,109 @@ class WanVAEWrapper(torch.nn.Module):
     def clear_cache(self):
         """Clear encoder/decoder cache for next sequence."""
         self.model.first_batch = True
+
+    def compile_decoder(self, height: int, width: int, num_frames: int = 12):
+        """Apply torch.compile to the decoder and conv2, then warmup.
+
+        Compiles the steady-state streaming decode path (cache_bufs) for ~1.4x
+        speedup. First-time compilation takes several minutes (triton kernel
+        generation); subsequent runs use the cached kernels.
+
+        Args:
+            height: Output video height in pixels (needed for warmup latent shape).
+            width: Output video width in pixels (needed for warmup latent shape).
+            num_frames: Pixel frames per chunk (default 12). Used to derive
+                the latent frame count for warmup shapes.
+        """
+        import time
+
+        # Derive latent frame count: first chunk produces (num_frames/4) latent
+        # frames after temporal downsampling (stride 2 twice).
+        latent_frames = num_frames // 4
+        latents = torch.zeros(
+            1,
+            latent_frames,
+            self.z_dim,
+            height // 8,
+            width // 8,
+            device="cuda",
+            dtype=torch.bfloat16,
+        )
+
+        # Run first_batch pass EAGERLY (before compile) to allocate decoder
+        # cache buffers. The cache path uses @torch.compiler.disable which
+        # causes graph breaks; running it before compile prevents those breaks
+        # from polluting dynamo's recompile counters.
+        # Use no_grad to match generation context (avoids grad_mode guard failure).
+        self.model.first_batch = True
+        with torch.no_grad():
+            self.decode_to_pixel(latents, use_cache=True)
+
+        # Now compile. With cache buffers pre-allocated, stream_decode's
+        # first_batch path will use cache_bufs (no graph breaks).
+        logger.info("Compiling VAE decoder with torch.compile...")
+        start = time.time()
+
+        self.model.decoder = torch.compile(
+            self.model.decoder, mode="max-autotune-no-cudagraphs", fullgraph=False
+        )
+        self.model.conv2 = torch.compile(
+            self.model.conv2, mode="max-autotune-no-cudagraphs", fullgraph=False
+        )
+
+        # Warmup the compiled cache_bufs path under no_grad to match generation.
+        with torch.no_grad():
+            for _ in range(9):
+                self.decode_to_pixel(latents, use_cache=True)
+
+        # Reset for real generation
+        self.model.first_batch = True
+
+        logger.info(f"VAE decoder compilation completed in {time.time() - start:.2f}s")
+
+    def compile_encoder(self, height: int, width: int, num_frames: int = 12):
+        """Apply torch.compile to the encoder, then warmup.
+
+        Compiles only the steady-state streaming encode path (4-frame chunks
+        via cache_bufs). First batch always runs eagerly via _orig_mod bypass,
+        so only the single steady-state shape (4 pixel frames) needs tracing.
+
+        Args:
+            height: Input video height in pixels (needed for warmup shape).
+            width: Input video width in pixels (needed for warmup shape).
+            num_frames: Pixel frames per chunk (default 12). Warmup traces
+                the 4-frame steady-state shape.
+        """
+        import time
+
+        pixels = torch.zeros(
+            1, 3, num_frames, height, width, device="cuda", dtype=torch.bfloat16
+        )
+
+        # Eager first_batch pass to allocate encoder cache buffers.
+        # stream_encode's first_batch always uses the eager cache= path
+        # (bypassing torch.compile), so this just populates CacheState.
+        # Use no_grad to match generation context (avoids grad_mode guard failure).
+        self.model.first_batch = True
+        with torch.no_grad():
+            self.encode_to_latent(pixels, use_cache=True)
+
+        logger.info("Compiling VAE encoder with torch.compile...")
+        start = time.time()
+
+        self.model.encoder = torch.compile(
+            self.model.encoder, mode="max-autotune-no-cudagraphs", fullgraph=False
+        )
+
+        # Warmup only the steady-state path (4-frame chunks via cache_bufs).
+        # first_batch doesn't auto-clear in stream_encode, so set it explicitly.
+        # Use no_grad to match generation context (avoids grad_mode guard failure).
+        self.model.first_batch = False
+        with torch.no_grad():
+            for _ in range(9):
+                self.encode_to_latent(pixels, use_cache=True)
+
+        # Reset for real generation
+        self.model.first_batch = True
+
+        logger.info(f"VAE encoder compilation completed in {time.time() - start:.2f}s")

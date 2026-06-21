@@ -53,9 +53,9 @@ CONFIG = {
     # When extension + depth: anchor frames at first/last, follow depth structure in between
     # When extension + r2v: anchor frames + style conditioning from reference images
     "use_r2v": False,  # Reference-to-Video: condition on reference images
-    "use_depth": True,  # Depth guidance: structural control via depth maps
+    "use_depth": False,  # Depth guidance: structural control via depth maps
     "use_inpainting": True,  # Inpainting: masked video-to-video generation
-    "use_extension": True,  # Extension mode: temporal generation (firstframe/lastframe/firstlastframe)
+    "use_extension": False,  # Extension mode: temporal generation (firstframe/lastframe/firstlastframe)
     # ===== INPUT PATHS =====
     # R2V: List of reference image paths (condition entire video, don't appear in output)
     "ref_images": [
@@ -76,7 +76,7 @@ CONFIG = {
     "prompt_depth": "a cat walking towards the camera",  # Default prompt for depth mode
     "prompt_inpainting": "a fireball",  # Default prompt for inpainting mode
     "prompt_extension": "",  # Default prompt for extension mode
-    "num_chunks": 7,  # Number of generation chunks
+    "num_chunks": 3,  # Number of generation chunks
     "frames_per_chunk": 12,  # Frames per chunk (12 = 3 latent * 4 temporal upsample)
     "height": 512,
     "width": 512,
@@ -86,7 +86,9 @@ CONFIG = {
     "mask_value": 127,  # Gray value for masked regions (0-255)
     # ===== OUTPUT =====
     "output_dir": "vace_tests/unified",  # path/to/output_dir
-    "vae_type": "tae",
+    "vae_type": "wan",
+    # ===== COMPILATION =====
+    "compile_vae": True,  # Compile VAE encoder+decoder with torch.compile
 }
 
 # ========================= END CONFIGURATION =========================
@@ -471,6 +473,7 @@ def main():
     print(f"  Depth Guidance: {use_depth}")
     print(f"  Inpainting: {use_inpainting}")
     print(f"  Extension: {use_extension}")
+    print(f"  Compile VAE: {config.get('compile_vae', False)}")
     if use_extension:
         print(f"    Mode: {config['extension_mode']}")
     print(f"  Prompt: '{prompt}'")
@@ -529,8 +532,14 @@ def main():
         )
         pipeline_config.model_config.base_model_kwargs["vace_in_dim"] = 96
 
-    pipeline = LongLivePipeline(pipeline_config, device=device, dtype=torch.bfloat16)
-    print("Pipeline ready\n")
+    compile_vae = config.get("compile_vae", False)
+    pipeline = LongLivePipeline(
+        pipeline_config,
+        compile_vae=compile_vae,
+        device=device,
+        dtype=torch.bfloat16,
+    )
+    print(f"Pipeline ready (compile_vae={compile_vae})\n")
 
     # Prepare inputs
     total_frames = config["num_chunks"] * config["frames_per_chunk"]
