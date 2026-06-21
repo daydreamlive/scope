@@ -137,14 +137,27 @@ class KreaRealtimeVideoPipeline(Pipeline, LoRAEnabledPipeline, VACEEnabledPipeli
             )
 
             print(f"Quantized diffusion model to fp8 in {time.time() - start:.3f}s")
+
+            if compile:
+                # Float8DynamicActivationFloat8WeightConfig is incompatible with
+                # torch.compile(fullgraph=False): AOT autograd's gen_alias_from_base
+                # calls aten.as_strided on Float8Tensor outputs, which is not
+                # implemented. Skip block compilation when FP8 is active.
+                # See: https://github.com/daydreamlive/scope/issues/669
+                logger.warning(
+                    "Skipping torch.compile for attention blocks: "
+                    "Float8DynamicActivationFloat8WeightConfig is not compatible "
+                    "with fullgraph=False compilation (aten.as_strided unsupported "
+                    "on Float8Tensor). FP8 quantization is still active."
+                )
         else:
             generator = generator.to(device=device, dtype=dtype)
 
-        if compile:
-            # Only compile the attention blocks
-            for block in generator.model.blocks:
-                # Disable fullgraph right now due to issues with RoPE
-                block.compile(fullgraph=False)
+            if compile:
+                # Only compile the attention blocks
+                for block in generator.model.blocks:
+                    # Disable fullgraph right now due to issues with RoPE
+                    block.compile(fullgraph=False)
 
         # Load VAE using create_vae factory (supports multiple VAE types)
         # Note: VAE is shared across all Wan model sizes, stored in Wan2.1-T2V-1.3B
