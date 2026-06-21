@@ -12,6 +12,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 
+from scope.core.pipelines.utils import compile_with_inductor_fallback
 from scope.core.pipelines.wan2_1.modules.attention import attention
 from .model import (
     WAN_CROSSATTENTION_CLASSES,
@@ -23,7 +24,9 @@ from .model import (
     sinusoidal_embedding_1d,
 )
 
-flex_attention = torch.compile(
+# Wrapped with compile_with_inductor_fallback to handle SubprocException from the inductor subprocess
+# worker pool (e.g. FD/memory exhaustion on fal.ai workers) — falls back to eager execution automatically.
+flex_attention = compile_with_inductor_fallback(
     flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
 )
 

@@ -1,4 +1,5 @@
 # Modified from https://github.com/chenfengxu714/StreamdiffusionV2
+from scope.core.pipelines.utils import compile_with_inductor_fallback
 from scope.core.pipelines.wan2_1.modules.attention import attention
 from .model import (
     WanRMSNorm,
@@ -22,7 +23,11 @@ import math
 # see https://github.com/pytorch/pytorch/issues/133254
 # change to default for other models
 # Changed from max-autotune to max-autotune-no-cudagraphs because max-autotune did not play well with VACE code.
-flex_attention = torch.compile(flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs")
+# Wrapped with compile_with_inductor_fallback to handle SubprocException from the inductor subprocess
+# worker pool (e.g. FD/memory exhaustion on fal.ai workers) — falls back to eager execution automatically.
+flex_attention = compile_with_inductor_fallback(
+    flex_attention, dynamic=False, mode="max-autotune-no-cudagraphs"
+)
 
 
 def causal_rope_apply(x, grid_sizes, freqs, start_frame=0):
