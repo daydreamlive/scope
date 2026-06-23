@@ -11,10 +11,40 @@ For conditioning modes (following original VACE architecture):
 - Standard path: vace_encode_frames -> vace_encode_masks -> vace_latent
 """
 
+import logging
+
 import torch
 import torch.nn.functional as F
 import torchvision.transforms.functional as TF
 from PIL import Image
+
+logger = logging.getLogger(__name__)
+
+# WAN VAE encoder has 3 spatial downsample stages, each using
+# ZeroPad2d(0,1,0,1) + Conv2d(kernel=3, stride=2, padding=0).
+# Tracing the minimum H through all three stages:
+#   DS1: pad→H+1, conv→floor((H-1)/2)
+#   DS2: needs floor((H-1)/2)+1 ≥ 2  →  H ≥ 4
+#   DS3: needs floor from DS2 ≥ 2    →  H ≥ 8
+# Any input with H or W < 8 will crash at a later downsample stage.
+MIN_VAE_SPATIAL_SIZE = 8
+
+
+def _check_spatial_size(tensor: torch.Tensor, label: str) -> None:
+    """Raise a descriptive ValueError when spatial dims are too small for the WAN VAE encoder.
+
+    The encoder contains 3 spatial downsample stages using ZeroPad2d(0,1,0,1) +
+    Conv2d(kernel=3, stride=2, padding=0).  Any input with H or W < MIN_VAE_SPATIAL_SIZE
+    will fail at a later stage with PyTorch's opaque "Kernel size can't be greater than
+    actual input size" message.  This helper surfaces the root cause early.
+    """
+    h, w = tensor.shape[-2], tensor.shape[-1]
+    if h < MIN_VAE_SPATIAL_SIZE or w < MIN_VAE_SPATIAL_SIZE:
+        raise ValueError(
+            f"vace_encode_frames: {label} spatial dims ({h}×{w}) are below the "
+            f"minimum {MIN_VAE_SPATIAL_SIZE}px required by the WAN VAE Conv2d encoder. "
+            "Ensure the pipeline resolution is at least 8×8 pixels (see issue #713)."
+        )
 
 
 def vace_encode_frames(
@@ -72,6 +102,7 @@ def vace_encode_frames(
         # Stack list of [C, F, H, W] -> [B, C, F, H, W]
         frames_stacked = torch.stack(frames, dim=0)
         frames_stacked = frames_stacked.to(dtype=vae_dtype)
+        _check_spatial_size(frames_stacked, "frames")
         # Use provided cache setting (use_cache=False for reference-only mode with dummy frames)
         latents_out = vae.encode_to_latent(frames_stacked, use_cache=use_cache)
         # Convert [B, F, C, H, W] -> list of [C, F, H, W] (transpose to channel-first)
@@ -85,6 +116,8 @@ def vace_encode_frames(
 
         inactive_stacked = torch.stack(inactive, dim=0).to(dtype=vae_dtype)
         reactive_stacked = torch.stack(reactive, dim=0).to(dtype=vae_dtype)
+        _check_spatial_size(inactive_stacked, "frames (inactive stream)")
+        _check_spatial_size(reactive_stacked, "frames (reactive stream)")
 
         # Auto-detect mode based on mask content and handle caching appropriately:
         # - Conditioning mode (mask all 1s): inactive=zeros, reactive=content → both use cache
@@ -114,24 +147,41 @@ def vace_encode_frames(
     cat_latents = []
     for latent, refs in zip(latents, ref_images, strict=False):
         if refs is not None:
-            # Stack refs: list of [C, 1, H, W] -> [1, C, num_refs, H, W]
+            # Stack refs: list of [C, 1, H, W] -> [num_refs, C, 1, H, W]
             refs_stacked = torch.stack(refs, dim=0)
             # Convert to VAE dtype (e.g., bfloat16)
             refs_stacked = refs_stacked.to(dtype=vae_dtype)
-            # Encode: [1, C, num_refs, H, W] -> [1, num_refs, C, H, W]
-            # Reference images are static, so cache doesn't matter, but use False to avoid affecting video cache
-            ref_latent_out = vae.encode_to_latent(refs_stacked, use_cache=False)
-            # Get first batch element and transpose: [num_refs, C, H, W] -> [C, num_refs, H, W]
-            ref_latent_batch = ref_latent_out[0].permute(1, 0, 2, 3)
 
-            if masks is not None:
-                # Pad reference latents with zeros for mask channel
-                zeros = torch.zeros_like(ref_latent_batch)
-                ref_latent_batch = torch.cat((ref_latent_batch, zeros), dim=0)
+            # Guard: skip ref encoding when spatial dims are below the minimum required
+            # by the WAN VAE's 3-stage spatial downsample pipeline.  A frame smaller
+            # than MIN_VAE_SPATIAL_SIZE in either dimension will crash at the second or
+            # third downsample stage with "Kernel size can't be greater than actual input
+            # size".  Ref images are supplementary, so we skip rather than abort the run.
+            ref_h, ref_w = refs_stacked.shape[-2:]
+            if ref_h < MIN_VAE_SPATIAL_SIZE or ref_w < MIN_VAE_SPATIAL_SIZE:
+                logger.warning(
+                    "vace_encode_frames: skipping ref image encode — spatial dims "
+                    f"({ref_h}×{ref_w}) are below the minimum {MIN_VAE_SPATIAL_SIZE}px "
+                    "required by the WAN VAE Conv2d encoder (issue #713). "
+                    "This chunk will proceed without reference image conditioning."
+                )
+            else:
+                # Encode: [num_refs, C, 1, H, W] -> [num_refs, 1, C, lat_H, lat_W]
+                # Reference images are static, so cache doesn't matter; use False to
+                # avoid polluting the streaming video encode cache.
+                ref_latent_out = vae.encode_to_latent(refs_stacked, use_cache=False)
+                # Get first batch element and transpose: [1, C, lat_H, lat_W] -> [C, 1, lat_H, lat_W]
+                # then reshape to [C, num_refs, lat_H, lat_W]
+                ref_latent_batch = ref_latent_out[0].permute(1, 0, 2, 3)
 
-            # Concatenate: [ref_frames, video_frames] along frame dim (dim=1)
-            # ref_latent_batch: [C, num_refs, H, W], latent: [C, F, H, W]
-            latent = torch.cat([ref_latent_batch, latent], dim=1)
+                if masks is not None:
+                    # Pad reference latents with zeros for mask channel
+                    zeros = torch.zeros_like(ref_latent_batch)
+                    ref_latent_batch = torch.cat((ref_latent_batch, zeros), dim=0)
+
+                # Concatenate: [ref_frames, video_frames] along frame dim (dim=1)
+                # ref_latent_batch: [C, num_refs, H, W], latent: [C, F, H, W]
+                latent = torch.cat([ref_latent_batch, latent], dim=1)
 
         # Pad latents to 96 channels for VACE compatibility (if requested)
         # VACE was trained with 96 channels (16 base * 6 for masked video generation)
