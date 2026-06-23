@@ -107,6 +107,12 @@ class CleanKVCacheBlock(ModularPipelineBlocks):
         generator_param = next(components.generator.parameters())
 
         _, num_frames, _, _, _ = block_state.latents.shape
+
+        # Guard: skip cache cleaning when there are zero frames to avoid
+        # KV cache tensor dimension mismatches (e.g. expand size 0 vs existing cache size)
+        if num_frames == 0:
+            self.set_block_state(state, block_state)
+            return components, state
         current_end_frame = block_state.current_start_frame + num_frames
 
         # This is defined to give us timestep = 0 while matching shape expected by the generator.
