@@ -10,12 +10,69 @@ and may not be compatible with other model architectures without modification.
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Iterable
+from pathlib import Path
 from typing import Any
 
 from .manager import LoRAManager
 
 logger = logging.getLogger(__name__)
+
+# How long (seconds) to wait for a LoRA file that appears to be downloading.
+# Civitai downloads typically complete within 60–90 s on fal workers.
+_LORA_WAIT_TIMEOUT_S = 120
+# Poll interval while waiting for a LoRA file to appear.
+_LORA_WAIT_POLL_S = 2.0
+
+
+def _wait_for_lora_files(
+    lora_configs: list[dict[str, Any]],
+    timeout_s: float = _LORA_WAIT_TIMEOUT_S,
+    poll_s: float = _LORA_WAIT_POLL_S,
+) -> None:
+    """Block until every LoRA file in *lora_configs* exists on disk (or timeout).
+
+    This prevents a race condition where the pipeline ``__init__`` attempts to
+    load a LoRA that is still being downloaded from Civitai / HuggingFace.  On
+    session reinitialisation the download and the pipeline load are initiated
+    concurrently; waiting here resolves the race without requiring changes to
+    the download path.
+
+    Files that already exist are skipped immediately.  After *timeout_s* seconds
+    a warning is logged and we proceed — the strategy loader will raise its own
+    ``FileNotFoundError`` if the file is genuinely missing.
+    """
+    pending = [
+        cfg["path"]
+        for cfg in lora_configs
+        if cfg.get("path") and not Path(cfg["path"]).exists()
+    ]
+    if not pending:
+        return
+
+    logger.info(
+        "_wait_for_lora_files: %d LoRA file(s) not yet on disk, waiting up to %ss: %s",
+        len(pending),
+        timeout_s,
+        [Path(p).name for p in pending],
+    )
+
+    deadline = time.monotonic() + timeout_s
+    while pending and time.monotonic() < deadline:
+        time.sleep(poll_s)
+        pending = [p for p in pending if not Path(p).exists()]
+
+    if pending:
+        logger.warning(
+            "_wait_for_lora_files: timed out after %ss; %d file(s) still missing: %s. "
+            "Proceeding — the LoRA loader will raise if files remain absent.",
+            timeout_s,
+            len(pending),
+            [Path(p).name for p in pending],
+        )
+    else:
+        logger.info("_wait_for_lora_files: all LoRA files are now present")
 
 PERMANENT_MERGE_MODE = "permanent_merge"
 RUNTIME_PEFT_MODE = "runtime_peft"
@@ -96,6 +153,13 @@ class LoRAEnabledPipeline:
             # No LoRA requested
             self.loaded_lora_adapters = []
             return model
+
+        # Wait for any LoRA files that are still being downloaded (e.g. Civitai
+        # assets fetched concurrently during session reinitialisation).  Without
+        # this gate, pipeline __init__ can race the download and raise
+        # FileNotFoundError on the first load attempt even though the file will
+        # be present seconds later.  See daydreamlive/scope#937.
+        _wait_for_lora_files(list(lora_configs))
 
         # Delegate to strategy managers via LoRAManager
         self.loaded_lora_adapters = LoRAManager.load_adapters_from_list(
