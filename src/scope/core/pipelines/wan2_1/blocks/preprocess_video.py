@@ -113,17 +113,35 @@ class PreprocessVideoBlock(ModularPipelineBlocks):
                 target_num_frames=target_num_frames,
             )
 
-        if block_state.vace_input_masks is not None and isinstance(
-            block_state.vace_input_masks, list
-        ):
-            block_state.vace_input_masks = preprocess_masks(
-                block_state.vace_input_masks,
-                device=components.config.device,
-                dtype=components.config.dtype,
-                height=block_state.height,
-                width=block_state.width,
-                target_num_frames=target_num_frames,
-            )
+        if block_state.vace_input_masks is not None:
+            if isinstance(block_state.vace_input_masks, list):
+                block_state.vace_input_masks = preprocess_masks(
+                    block_state.vace_input_masks,
+                    device=components.config.device,
+                    dtype=components.config.dtype,
+                    height=block_state.height,
+                    width=block_state.width,
+                    target_num_frames=target_num_frames,
+                )
+            else:
+                # Masks arriving as a pre-batched tensor [B, 1, F, H, W] (e.g. from
+                # Perform Mode parameter path) bypass preprocess_masks entirely.
+                # Resample the temporal dimension here so it matches target_num_frames
+                # (the first chunk requires +1 frame compared to the base chunk size).
+                masks = block_state.vace_input_masks
+                mask_frames = masks.shape[2]
+                if mask_frames != target_num_frames:
+                    indices = (
+                        torch.linspace(
+                            0,
+                            mask_frames - 1,
+                            target_num_frames,
+                            device=masks.device,
+                        )
+                        .round()
+                        .long()
+                    )
+                    block_state.vace_input_masks = masks[:, :, indices]
 
         self.set_block_state(state, block_state)
         return components, state
