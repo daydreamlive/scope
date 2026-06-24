@@ -708,6 +708,32 @@ class VaceEncodingBlock(ModularPipelineBlocks):
 
         batch_size, channels, num_frames, height, width = input_frames_data.shape
 
+        # Guard against temporal underflow: the WAN VAE encoder has a 3x1x1 temporal
+        # convolution kernel.  After downsampling by vae_temporal_downsample_factor (4),
+        # the latent temporal dimension must be ≥ 3.  That means the pixel-space input
+        # needs at least num_frame_per_block * vae_temporal_downsample_factor frames.
+        # When the input chunk is shorter (e.g. the very first tiny chunk in
+        # StreamDiffusionV2 or a user-supplied clip with < 12 frames) we pad the
+        # input by repeating the last frame rather than hard-failing with a PyTorch
+        # convolution error.
+        min_frames = (
+            components.config.num_frame_per_block
+            * components.config.vae_temporal_downsample_factor
+        )
+        if num_frames < min_frames:
+            logger.warning(
+                f"VaceEncodingBlock._encode_with_conditioning: vace_input_frames has only "
+                f"{num_frames} frames but the WAN VAE temporal kernel requires at least "
+                f"{min_frames} (num_frame_per_block={components.config.num_frame_per_block} × "
+                f"vae_temporal_downsample_factor={components.config.vae_temporal_downsample_factor}). "
+                f"Padding to {min_frames} frames by repeating the last frame."
+            )
+            pad_amount = min_frames - num_frames
+            last_frame = input_frames_data[:, :, -1:, :, :]  # [B, C, 1, H, W]
+            padding = last_frame.expand(-1, -1, pad_amount, -1, -1)
+            input_frames_data = torch.cat([input_frames_data, padding], dim=2)
+            num_frames = min_frames
+
         # Validate resolution
         if height != block_state.height or width != block_state.width:
             raise ValueError(
@@ -767,6 +793,15 @@ class VaceEncodingBlock(ModularPipelineBlocks):
                 raise ValueError(
                     f"VaceEncodingBlock._encode_with_conditioning: vace_input_masks must have 1 channel, got {mask_channels}"
                 )
+
+            # Pad masks to match padded frames length if needed (mirrors frame padding above)
+            if mask_frames < num_frames:
+                pad_amount = num_frames - mask_frames
+                last_mask = input_masks_data[:, :, -1:, :, :]
+                mask_padding = last_mask.expand(-1, -1, pad_amount, -1, -1)
+                input_masks_data = torch.cat([input_masks_data, mask_padding], dim=2)
+                mask_frames = num_frames
+
             if (
                 mask_frames != num_frames
                 or mask_height != height
