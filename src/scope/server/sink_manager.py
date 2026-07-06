@@ -183,6 +183,12 @@ class SinkManager:
                 if enabled:
                     logger.warning(f"Output sink '{sink_type}' not available")
                 continue
+            if not sink_cls.is_available():
+                if enabled:
+                    logger.warning(
+                        f"Output sink '{sink_type}' is not available on this platform"
+                    )
+                continue
             self._update_sink(
                 sink_type=sink_type,
                 enabled=enabled,
@@ -357,7 +363,7 @@ class SinkManager:
                 continue
 
             sink_class = sink_classes.get(node.sink_mode)
-            if sink_class is None:
+            if sink_class is None or not sink_class.is_available():
                 logger.warning(
                     f"Output sink '{node.sink_mode}' not available for node {node_id}"
                 )
