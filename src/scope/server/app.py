@@ -3327,6 +3327,7 @@ async def uninstall_plugin(
     plugin), in which case it is uninstalled from the local venv.
     """
     from scope.core.plugins import (
+        PluginBundledError,
         PluginInstallError,
         PluginNotFoundError,
         get_plugin_manager,
@@ -3370,6 +3371,12 @@ async def uninstall_plugin(
         raise HTTPException(
             status_code=404,
             detail=f"Plugin '{name}' not found",
+        ) from e
+    except PluginBundledError as e:
+        logger.warning(f"Plugin uninstall rejected (bundled plugin): {name} - {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=str(e),
         ) from e
     except PluginInstallError as e:
         logger.error(f"Plugin uninstall failed: {name} - {e}")
