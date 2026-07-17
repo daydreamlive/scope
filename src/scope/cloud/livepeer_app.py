@@ -18,8 +18,9 @@ import os
 import queue
 import shutil
 import threading
+import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -41,11 +42,12 @@ from livepeer_gateway.media_publish import (
 from pydantic import BaseModel
 
 import scope.server.app as scope_app_module
+from scope.cloud.trickle_events_sink import TrickleEventsSink
 from scope.core.outputs import HARDWARE_SINK_MODES
 from scope.server.app import app as scope_app
 from scope.server.app import lifespan as scope_lifespan
 from scope.server.frame_processor import FrameProcessor
-from scope.server.kafka_publisher import publish_event
+from scope.server.kafka_publisher import publish_event, set_telemetry_sink
 from scope.server.logs_config import (
     LOG_FORMAT,
     ScopeLogContextFilter,
@@ -57,6 +59,8 @@ logger = logging.getLogger(__name__)
 scope_client: httpx.AsyncClient | None = None
 _connection_active = False
 _connection_count = 0
+# Monotonic anchor for measuring runner cold-start (boot -> runner_ready).
+_runner_start_monotonic = time.monotonic()
 
 STREAM_TASK_SHUTDOWN_GRACE_S = 1.0
 STREAM_TASK_CANCEL_TIMEOUT_S = 1.0
@@ -151,6 +155,35 @@ def _build_connection_info() -> dict[str, Any]:
         "fal_runner_id": os.getenv("FAL_JOB_ID", os.getenv("FAL_RUNNER_ID", "unknown")),
         "fal_log_labels": fal_log_labels,
     }
+
+
+def _publish_media_loop_error(
+    session: LivepeerSession, error_type: str, exc: Exception
+) -> None:
+    """Emit a structured error telemetry event for a failed media loop.
+
+    These loops previously only logged on failure; surfacing them as telemetry
+    lets the client (the egress point) see runner-side media failures that have
+    no reachable Kafka of their own.
+
+    NOTE: This only fires in cloud mode when the user has opted in by providing
+    their SCOPE_CLOUD_API_KEY.  In local/standalone mode, no telemetry leaves
+    the machine.
+    """
+    publish_event(
+        event_type="error",
+        session_id=session.session_id,
+        connection_id=session.manifest_id,
+        user_id=session.user_id,
+        error={
+            "error_type": error_type,
+            "message": str(exc),
+            "exception_type": type(exc).__name__,
+            "recoverable": False,
+        },
+        connection_info=session.connection_info,
+        metadata={"mode": "livepeer"},
+    )
 
 
 async def _shutdown_task(
@@ -257,6 +290,14 @@ def _resolve_produces_video(
     return bool(status_info.get("produces_video", True))
 
 
+def _public_stream_channel(channel: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "url": channel["url"],
+        "direction": channel["direction"],
+        "mime_type": channel.get("mime_type", ""),
+    }
+
+
 async def _request_stream_channels(
     session: LivepeerSession,
     *,
@@ -294,13 +335,17 @@ async def _request_stream_channels(
         mime_type = channel.get("mime_type")
         if not isinstance(url, str) or not isinstance(ch_direction, str):
             continue
-        normalized.append(
-            {
-                "url": url,
-                "direction": ch_direction,
-                "mime_type": mime_type if isinstance(mime_type, str) else "",
-            }
-        )
+        internal_url = channel.get("internal_url")
+        internal_url = internal_url if isinstance(internal_url, str) else ""
+        normalized_channel = {
+            "url": url,
+            "direction": ch_direction,
+            "mime_type": mime_type if isinstance(mime_type, str) else "",
+            "io_url": internal_url or url,
+        }
+        if internal_url:
+            normalized_channel["internal_url"] = internal_url
+        normalized.append(normalized_channel)
     return normalized
 
 
@@ -423,6 +468,7 @@ async def _media_input_loop(
         raise
     except Exception as exc:
         logger.error("Media input loop failed: %s", exc)
+        _publish_media_loop_error(session, "media_input_loop_failed", exc)
     finally:
         try:
             await media_output.close()
@@ -551,6 +597,7 @@ async def _media_output_loop(
         raise
     except Exception as exc:
         logger.error("Media output loop failed: %s", exc)
+        _publish_media_loop_error(session, "media_output_loop_failed", exc)
     finally:
         try:
             await publisher.close()
@@ -670,6 +717,7 @@ async def _media_audio_output_loop(
         raise
     except Exception as exc:
         logger.error("Media audio output loop failed: %s", exc)
+        _publish_media_loop_error(session, "media_audio_output_loop_failed", exc)
     finally:
         try:
             await publisher.close()
@@ -987,14 +1035,14 @@ async def _handle_control_message(
                     inbound_url: str | None = None
                     for channel in channels:
                         ch = {
-                            **channel,
+                            **_public_stream_channel(channel),
                             "role": "input",
                             "input_track_index": input_idx,
                             "source_node_id": source_node_id,
                         }
                         active_channels.append(ch)
                         if channel["direction"] == "in":
-                            inbound_url = channel["url"]
+                            inbound_url = channel["io_url"]
                     if inbound_url is None:
                         raise RuntimeError("response did not include input track URL")
                     input_subscribe_urls[input_idx] = inbound_url
@@ -1009,7 +1057,7 @@ async def _handle_control_message(
                 )
                 for channel in channels:
                     ch = {
-                        **channel,
+                        **_public_stream_channel(channel),
                         "role": "output",
                         "output_track_index": output_idx,
                         "sink_node_id": sink_node_id,
@@ -1017,7 +1065,7 @@ async def _handle_control_message(
                     }
                     active_channels.append(ch)
                     if channel["direction"] == "out":
-                        outbound_url = channel["url"]
+                        outbound_url = channel["io_url"]
                 if outbound_url is None:
                     raise RuntimeError("response did not include output track URL")
                 output_publish_urls[output_idx] = outbound_url
@@ -1029,13 +1077,13 @@ async def _handle_control_message(
                 )
                 for channel in channels:
                     ch = {
-                        **channel,
+                        **_public_stream_channel(channel),
                         "role": "output_audio",
                         "output_media_kind": "audio",
                     }
                     active_channels.append(ch)
                     if channel["direction"] == "out":
-                        audio_publish_url = channel["url"]
+                        audio_publish_url = channel["io_url"]
                 if audio_publish_url is None:
                     raise RuntimeError(
                         "response did not include audio output track URL"
@@ -1277,12 +1325,35 @@ async def _subscribe_control(
 
     notif_task = asyncio.create_task(_forward_notifications_to_events())
 
+    # Route runner-side telemetry (publish_event calls from the embedded Scope
+    # app) onto the events channel instead of a Kafka broker the runner cannot
+    # reach. The client re-publishes whatever arrives.
+    runner_loop = asyncio.get_running_loop()
+    telemetry_sink = TrickleEventsSink(runner_loop)
+    set_telemetry_sink(telemetry_sink)
+    telemetry_task = asyncio.create_task(
+        telemetry_sink.drain_to(events_writer, stop_event)
+    )
+
     try:
         await events_writer.write(
             {
                 "type": "runner_ready",
                 "runner_job_id": os.getenv("FAL_JOB_ID") or os.getenv("FAL_RUNNER_ID"),
             }
+        )
+        # Emit cold-start timing as telemetry (distinct from the control-protocol
+        # runner_ready above, which the client consumes to unblock startup).
+        publish_event(
+            event_type="runner_ready",
+            session_id=session.session_id,
+            connection_id=session.manifest_id,
+            user_id=session.user_id,
+            connection_info=session.connection_info,
+            metadata={
+                "mode": "livepeer",
+                "startup_ms": int((time.monotonic() - _runner_start_monotonic) * 1000),
+            },
         )
         async for message in JSONLReader(control_url)(
             max_event_bytes=MAX_CONTROL_EVENT_BYTES
@@ -1318,6 +1389,15 @@ async def _subscribe_control(
         except asyncio.CancelledError:
             pass
         session.notification_queue = None
+        # Stop accepting telemetry before draining so late publish_event calls
+        # during shutdown no-op instead of enqueueing onto a closing queue.
+        set_telemetry_sink(None)
+        if not telemetry_sink.request_stop():
+            telemetry_task.cancel()
+        try:
+            await telemetry_task
+        except asyncio.CancelledError:
+            pass
         await _stop_stream(session)
         try:
             await events_writer.close()
@@ -1501,9 +1581,32 @@ async def websocket_endpoint(ws: WebSocket) -> None:
         # Complete the handshake with the orchestrator
         await ws.send_json({"type": "started"})
 
-        # Keep the WebSocket open and route orchestrator responses used by control handlers.
+        # Keep the WebSocket open and route orchestrator responses used by control
+        # handlers. Also watch the control-channel task: if the trickle
+        # control/events channels are removed, the task exits and this websocket
+        # session should unwind instead of waiting forever for websocket traffic.
         while True:
-            raw_message = await ws.receive_text()
+            receive_task = asyncio.create_task(ws.receive_text())
+            done, pending = await asyncio.wait(
+                {receive_task, control_task},
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if control_task in done:
+                if receive_task in pending:
+                    receive_task.cancel()
+                    try:
+                        await receive_task
+                    except asyncio.CancelledError:
+                        pass
+                logger.info("Control channel ended; closing websocket session")
+                with suppress(Exception):
+                    await ws.close(
+                        code=4000,
+                        reason="control channel ended",
+                    )
+                break
+
+            raw_message = receive_task.result()
             try:
                 message = json.loads(raw_message)
             except json.JSONDecodeError:

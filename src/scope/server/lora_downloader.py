@@ -24,6 +24,7 @@ class LoRADownloadRequest(BaseModel):
     model_id: str | None = None
     version_id: str | None = None
     url: str | None = None
+    filename: str | None = None
     subfolder: str | None = None
     expected_sha256: str | None = None
     civitai_token: str | None = None
@@ -167,6 +168,9 @@ async def download_lora(
 
     else:
         raise ValueError(f"Unknown source: {request.source}")
+
+    if request.filename:
+        filename = request.filename
 
     # Resolve filename from the actual download response if we don't have one yet
     if not filename:

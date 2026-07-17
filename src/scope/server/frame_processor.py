@@ -847,6 +847,16 @@ class FrameProcessor:
                     round(pipeline_fps, 1) if pipeline_fps else None
                 )
 
+            # Fold GPU memory into the heartbeat (most useful on the cloud runner
+            # where the pipeline executes) rather than adding a separate event.
+            if torch.cuda.is_available():
+                heartbeat_metadata["vram_allocated_mb"] = round(
+                    torch.cuda.memory_allocated() / (1024 * 1024), 1
+                )
+                heartbeat_metadata["vram_reserved_mb"] = round(
+                    torch.cuda.memory_reserved() / (1024 * 1024), 1
+                )
+
             publish_event(
                 event_type="stream_heartbeat",
                 session_id=self.session_id,

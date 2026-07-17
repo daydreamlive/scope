@@ -73,6 +73,7 @@ from .file_utils import (
 )
 from .kafka_publisher import (
     KafkaPublisher,
+    install_default_egress_sink,
     is_kafka_enabled,
     set_kafka_publisher,
 )
@@ -87,6 +88,11 @@ from .logs_config import (
 )
 from .lora_downloader import LoRADownloadRequest, LoRADownloadResult
 from .mcp_router import router as mcp_router
+from .metrics_reporter import (
+    MetricsReporter,
+    is_metrics_reporter_enabled,
+    set_metrics_reporter,
+)
 from .models_config import (
     ensure_models_dir,
     get_assets_dir,
@@ -344,6 +350,8 @@ server_start_time = time.time()
 livepeer = None
 # Global Kafka publisher instance (optional, initialized if credentials are present)
 kafka_publisher = None
+# Global metrics reporter instance (optional, forwards telemetry to Daydream /v1/metrics)
+metrics_reporter_instance = None
 # Global tempo sync manager instance
 tempo_sync = None
 # Global OSC server instance
@@ -392,6 +400,7 @@ async def lifespan(app: FastAPI):
         webrtc_manager, \
         pipeline_manager, \
         kafka_publisher, \
+        metrics_reporter_instance, \
         livepeer, \
         tempo_sync, \
         osc_server, \
@@ -453,6 +462,30 @@ async def lifespan(app: FastAPI):
         else:
             kafka_publisher = None
             logger.warning("Kafka publisher failed to start")
+
+    # Initialize metrics reporter (forwards telemetry to Daydream /v1/metrics).
+    # Only active when the user has opted in to cloud features by setting
+    # SCOPE_CLOUD_API_KEY (their Daydream platform API key). In local/standalone
+    # mode this block is skipped entirely — no telemetry leaves the machine.
+    if is_metrics_reporter_enabled():
+        api_key = os.getenv("SCOPE_CLOUD_API_KEY", "")
+        if api_key:
+            metrics_reporter_instance = MetricsReporter(api_key=api_key)
+            if await metrics_reporter_instance.start():
+                set_metrics_reporter(metrics_reporter_instance)
+                logger.info("Metrics reporter initialized")
+            else:
+                metrics_reporter_instance = None
+                logger.warning("Metrics reporter failed to start")
+        else:
+            logger.debug("Metrics reporter skipped: no SCOPE_CLOUD_API_KEY")
+
+    # Install the default telemetry egress sink for local mode so that
+    # publish_event() calls route through MetricsReporter (or Kafka) even
+    # without a cloud connection. In cloud mode livepeer.py re-calls this
+    # after connecting, which is fine (idempotent selection).
+    if install_default_egress_sink():
+        logger.info("Telemetry egress sink installed at startup")
 
     # Start OSC UDP server on the same port as the HTTP API
     from .osc_server import OSCServer
@@ -526,6 +559,12 @@ async def lifespan(app: FastAPI):
         logger.info("Shutting down Livepeer connection...")
         await livepeer.disconnect()
         logger.info("Livepeer connection shutdown complete")
+
+    if metrics_reporter_instance:
+        logger.info("Shutting down metrics reporter...")
+        await metrics_reporter_instance.stop()
+        set_metrics_reporter(None)
+        logger.info("Metrics reporter shutdown complete")
 
     if kafka_publisher:
         logger.info("Shutting down Kafka publisher...")
