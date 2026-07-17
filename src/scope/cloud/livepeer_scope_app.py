@@ -46,8 +46,6 @@ DEFAULT_RETRY_DELAY_SECONDS = 2.5
 DEFAULT_MAX_FAILURES_PER_WINDOW = 20
 DEFAULT_FAILURE_WINDOW_SECONDS = 60.0
 DEFAULT_PRICE_PER_UNIT = 0
-DEFAULT_PIXELS_PER_UNIT = 1
-DEFAULT_PRICE_UNIT = "USD"
 CHANNEL_MIME_JSONL = "application/jsonl"
 DEFAULT_SCOPE_HOME_DIRNAME = ".daydream-scope"
 DEFAULT_SESSION_ASSETS_DIR = Path("/tmp/.daydream-scope/assets")
@@ -73,8 +71,6 @@ class ScopeRunnerSettings:
     max_failures_per_window: int = DEFAULT_MAX_FAILURES_PER_WINDOW
     failure_window_seconds: float = DEFAULT_FAILURE_WINDOW_SECONDS
     price_per_unit: int = DEFAULT_PRICE_PER_UNIT
-    pixels_per_unit: int = DEFAULT_PIXELS_PER_UNIT
-    price_unit: str = DEFAULT_PRICE_UNIT
 
     def resolved_runner_url(self) -> str:
         if self.runner_url:
@@ -109,11 +105,6 @@ def _env_int(name: str, default: int) -> int:
         raise ValueError(f"{name} must be an integer") from exc
 
 
-def _validate_price_settings(price_per_unit: int, pixels_per_unit: int) -> None:
-    if pixels_per_unit <= 0:
-        raise ValueError("LIVEPEER_RUNNER_PIXELS_PER_UNIT must be positive")
-
-
 def _settings_from_env() -> ScopeRunnerSettings:
     port = int(os.getenv("LIVEPEER_RUNNER_PORT", str(DEFAULT_PORT)))
     inner_port = int(os.getenv("LIVEPEER_INNER_PORT", str(DEFAULT_INNER_PORT)))
@@ -123,11 +114,6 @@ def _settings_from_env() -> ScopeRunnerSettings:
         "LIVEPEER_RUNNER_PRICE_PER_UNIT",
         DEFAULT_PRICE_PER_UNIT,
     )
-    pixels_per_unit = _env_int(
-        "LIVEPEER_RUNNER_PIXELS_PER_UNIT",
-        DEFAULT_PIXELS_PER_UNIT,
-    )
-    _validate_price_settings(price_per_unit, pixels_per_unit)
     inner_ws_url = os.getenv(
         "LIVEPEER_INNER_WS_URL",
         f"ws://127.0.0.1:{inner_port}/ws",
@@ -145,8 +131,6 @@ def _settings_from_env() -> ScopeRunnerSettings:
         if "LIVEPEER_INNER_PORT" in os.environ
         else parsed_inner_port,
         price_per_unit=price_per_unit,
-        pixels_per_unit=pixels_per_unit,
-        price_unit=os.getenv("LIVEPEER_RUNNER_PRICE_UNIT", DEFAULT_PRICE_UNIT),
     )
 
 
@@ -878,21 +862,6 @@ def _on_session_release(event: Any) -> None:
     type=int,
     help="Runner price per unit advertised to the orchestrator",
 )
-@click.option(
-    "--pixels-per-unit",
-    envvar="LIVEPEER_RUNNER_PIXELS_PER_UNIT",
-    default=DEFAULT_PIXELS_PER_UNIT,
-    show_default=True,
-    type=int,
-    help="Pixels per advertised price unit",
-)
-@click.option(
-    "--price-unit",
-    envvar="LIVEPEER_RUNNER_PRICE_UNIT",
-    default=DEFAULT_PRICE_UNIT,
-    show_default=True,
-    help="Currency unit for advertised runner price",
-)
 def main(
     host: str,
     port: int,
@@ -901,13 +870,10 @@ def main(
     runner_url: str,
     inner_ws_url: str,
     price_per_unit: int,
-    pixels_per_unit: int,
-    price_unit: str,
 ) -> None:
     """Run the Livepeer Scope live-runner app."""
     global settings
     logging.basicConfig(level=logging.INFO)
-    _validate_price_settings(price_per_unit, pixels_per_unit)
     inner_host, inner_port = _inner_bind_from_ws_url(inner_ws_url)
     settings = ScopeRunnerSettings(
         host=host,
@@ -919,8 +885,6 @@ def main(
         inner_host=inner_host,
         inner_port=inner_port,
         price_per_unit=price_per_unit,
-        pixels_per_unit=pixels_per_unit,
-        price_unit=price_unit,
     )
     try:
         exit_code = asyncio.run(_run_livepeer_scope_server(host, port))
