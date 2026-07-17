@@ -45,7 +45,7 @@ INNER_WS_HANDSHAKE_TIMEOUT_SECONDS = 20.0
 DEFAULT_RETRY_DELAY_SECONDS = 2.5
 DEFAULT_MAX_FAILURES_PER_WINDOW = 20
 DEFAULT_FAILURE_WINDOW_SECONDS = 60.0
-DEFAULT_PRICE_PER_UNIT = 0
+DEFAULT_PRICE_PER_UNIT = "0"
 CHANNEL_MIME_JSONL = "application/jsonl"
 DEFAULT_SCOPE_HOME_DIRNAME = ".daydream-scope"
 DEFAULT_SESSION_ASSETS_DIR = Path("/tmp/.daydream-scope/assets")
@@ -70,7 +70,7 @@ class ScopeRunnerSettings:
     retry_delay_seconds: float = DEFAULT_RETRY_DELAY_SECONDS
     max_failures_per_window: int = DEFAULT_MAX_FAILURES_PER_WINDOW
     failure_window_seconds: float = DEFAULT_FAILURE_WINDOW_SECONDS
-    price_per_unit: int = DEFAULT_PRICE_PER_UNIT
+    price_per_unit: str = DEFAULT_PRICE_PER_UNIT
 
     def resolved_runner_url(self) -> str:
         if self.runner_url:
@@ -110,10 +110,7 @@ def _settings_from_env() -> ScopeRunnerSettings:
     inner_port = int(os.getenv("LIVEPEER_INNER_PORT", str(DEFAULT_INNER_PORT)))
     host = os.getenv("LIVEPEER_RUNNER_HOST", DEFAULT_HOST)
     runner_url = os.getenv("LIVEPEER_RUNNER_URL", "")
-    price_per_unit = _env_int(
-        "LIVEPEER_RUNNER_PRICE_PER_UNIT",
-        DEFAULT_PRICE_PER_UNIT,
-    )
+    price_per_unit = os.getenv("LIVEPEER_RUNNER_PRICE_PER_UNIT", DEFAULT_PRICE_PER_UNIT)
     inner_ws_url = os.getenv(
         "LIVEPEER_INNER_WS_URL",
         f"ws://127.0.0.1:{inner_port}/ws",
@@ -859,7 +856,7 @@ def _on_session_release(event: Any) -> None:
     envvar="LIVEPEER_RUNNER_PRICE_PER_UNIT",
     default=DEFAULT_PRICE_PER_UNIT,
     show_default=True,
-    type=int,
+    type=str,
     help="Runner price per unit advertised to the orchestrator",
 )
 def main(
@@ -869,7 +866,7 @@ def main(
     orch_secret: str,
     runner_url: str,
     inner_ws_url: str,
-    price_per_unit: int,
+    price_per_unit: str,
 ) -> None:
     """Run the Livepeer Scope live-runner app."""
     global settings
