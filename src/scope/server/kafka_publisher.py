@@ -46,6 +46,7 @@ class KafkaPublisher:
         self._started = False
         self._event_loop: asyncio.AbstractEventLoop | None = None
         self._lock = threading.Lock()
+        self._consecutive_failures: int = 0
 
     async def start(self) -> bool:
         """Start the Kafka producer.
@@ -65,6 +66,9 @@ class KafkaPublisher:
                 "bootstrap_servers": KAFKA_BOOTSTRAP_SERVERS,
                 "value_serializer": lambda v: json.dumps(v).encode("utf-8"),
                 "key_serializer": lambda k: k.encode("utf-8") if k else None,
+                "request_timeout_ms": 10000,     # 10s per-request timeout
+                "retry_backoff_ms": 500,         # 500ms backoff between retries
+                "connections_max_idle_ms": 60000,  # 60s idle connection timeout
             }
 
             # Add SASL authentication if configured
@@ -188,12 +192,19 @@ class KafkaPublisher:
             # Use event ID as key (matching Go format)
             key = event_id
             await self._producer.send_and_wait(KAFKA_TOPIC, value=event, key=key)
+            self._consecutive_failures = 0
             logger.info(
                 f"Published Kafka event: {event_type} (id={event_id}, session={session_id})"
             )
             return True
         except Exception as e:
             logger.error(f"Failed to publish Kafka event {event_type}: {e}")
+            self._consecutive_failures += 1
+            if self._consecutive_failures >= 5:
+                logger.warning(
+                    f"[KafkaPublisher] {self._consecutive_failures} consecutive send failures "
+                    "— broker may be unavailable or partition is rebalancing"
+                )
             return False
 
     def publish(
@@ -247,6 +258,11 @@ class KafkaPublisher:
                 logger.debug(f"Scheduled Kafka event: {event_type}")
             except Exception as e:
                 logger.error(f"Failed to schedule Kafka event publish: {e}")
+
+    @property
+    def consecutive_failures(self) -> int:
+        """Number of consecutive send failures since last success."""
+        return self._consecutive_failures
 
     @property
     def is_running(self) -> bool:
