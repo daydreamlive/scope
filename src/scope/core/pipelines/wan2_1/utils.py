@@ -131,3 +131,22 @@ def load_state_dict(weights_path: str) -> dict:
         )
 
     return state_dict
+
+
+def _is_float8_tensor(tensor: torch.Tensor) -> bool:
+    """Check if a tensor is a Float8Tensor (from torchao) that lacks as_strided support."""
+    return type(tensor).__name__ == "Float8Tensor"
+
+
+def safe_unflatten(tensor: torch.Tensor, dim: int, sizes) -> torch.Tensor:
+    """unflatten that works with Float8Tensor by casting to float if needed.
+
+    Float8Tensor (torchao) does not implement aten.as_strided which is used
+    internally by unflatten/view/reshape.  We cast to the tensor's nominal
+    dtype, perform the operation, and return the plain tensor.  The surrounding
+    code already expects real-valued tensors for subsequent math, so this is
+    safe.
+    """
+    if _is_float8_tensor(tensor):
+        tensor = tensor.to(torch.float32)
+    return tensor.unflatten(dim, sizes)
