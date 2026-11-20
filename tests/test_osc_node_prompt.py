@@ -14,7 +14,8 @@ def _server_with_known_path(path_info: dict) -> tuple[OSCServer, MagicMock]:
     server = OSCServer("127.0.0.1", 0)
     webrtc = MagicMock()
     server._webrtc_manager = webrtc
-    server._known_paths_cache = {"node1/prompt": path_info}
+    key = f"{path_info['node_id']}/{path_info['param']}"
+    server._known_paths_cache = {key: path_info}
     server._known_paths_cache_time = float("inf")
     return server, webrtc
 
