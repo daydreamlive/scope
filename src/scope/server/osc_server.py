@@ -187,9 +187,18 @@ class OSCServer:
 
         if self._webrtc_manager:
             if node_id and pipeline_id:
-                self._webrtc_manager.broadcast_parameter_update(
-                    {"node_id": node_id, param: value}
-                )
+                if param == "prompt":
+                    # Pipelines consume `prompts` (list of weighted items), not the
+                    # OSC-facing `prompt` string. Send the same shape the UI sends so
+                    # the backend's stored prompt is current and a later reset_cache
+                    # re-initialises with this prompt rather than a stale one.
+                    update = {
+                        "node_id": node_id,
+                        "prompts": [{"text": str(value), "weight": 100}],
+                    }
+                else:
+                    update = {"node_id": node_id, param: value}
+                self._webrtc_manager.broadcast_parameter_update(update)
             elif not node_id:
                 self._webrtc_manager.broadcast_parameter_update({key: value})
 
